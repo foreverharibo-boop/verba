@@ -16,12 +16,13 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.1';
+const EXTENSION_VERSION = '0.1.5';
 const STATE_KEY = 'verba_current_translation';
 const DEFAULT_SETTINGS = {
     profileId: '',
     autoInput: false,
     globalPrompt: '',
+    allDialoguePrompt: '',
     dialoguePrompt: '',
     bannedWords: '',
     maxTokens: 15000,
@@ -42,6 +43,8 @@ if (settings.maxTokens !== 15000) {
 
 const pendingOutputs = new Map();
 const pendingSentInputs = new WeakMap();
+const automaticTranslationTimers = new Map();
+const swipeTranslationJobs = new Map();
 let requestTail = Promise.resolve();
 let chatSaveTimer = null;
 let uiRefreshTimer = null;
@@ -281,7 +284,8 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
 async function translateOutputText(source, options = {}) {
     const segmented = segmentSource(source);
     if (!segmented.segments.length) return source;
-    const prompt = buildOutputPrompt(segmented, settings, options.oneTimeInstruction || '');
+    const speakerIdentity = options.speakerIdentity || {};
+    const prompt = buildOutputPrompt(segmented, settings, options.oneTimeInstruction || '', speakerIdentity);
     const translations = await requestSegments(prompt, segmented.segments, options);
 
     for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
@@ -289,7 +293,7 @@ async function translateOutputText(source, options = {}) {
             findBannedWords(translations.get(segment.id), settings.bannedWords).length,
         );
         if (!invalid.length) break;
-        const repairPrompt = buildBannedRepairPrompt(invalid, translations, settings);
+        const repairPrompt = buildBannedRepairPrompt(invalid, translations, settings, speakerIdentity);
         const repaired = await requestSegments(repairPrompt, invalid, options);
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
@@ -317,10 +321,28 @@ function currentSwipeId(message) {
     return Number.isInteger(value) ? value : null;
 }
 
+function messageVersionSignature(message) {
+    if (!message) return '';
+    return `${currentSwipeId(message) ?? 'none'}:${hashText(messageSource(message))}`;
+}
+
+function storedRecordSignature(record) {
+    if (!record || typeof record.sourceHash !== 'string') return '';
+    return `${record.swipeId ?? 'none'}:${record.sourceHash}`;
+}
+
 function messageSource(message) {
     const swipeId = currentSwipeId(message);
     const swipe = swipeId !== null && Array.isArray(message?.swipes) ? message.swipes[swipeId] : null;
     return typeof swipe === 'string' ? swipe : String(message?.mes || '');
+}
+
+function outputSpeakerIdentity(message) {
+    const context = liveContext();
+    return {
+        characterName: String(message?.name || context.name2 || '').trim(),
+        userName: String(context.name1 || '').trim(),
+    };
 }
 
 function currentRecord(message) {
@@ -411,6 +433,7 @@ async function translateMessage(messageId, options = {}) {
             const translation = await translateOutputText(source, {
                 signal: controller.signal,
                 oneTimeInstruction: options.oneTimeInstruction || '',
+                speakerIdentity: outputSpeakerIdentity(message),
             });
             if (controller.signal.aborted) return;
             const latestContext = liveContext();
@@ -953,6 +976,7 @@ async function retranslateSelection(snapshot) {
         end: snapshot.end,
         settings,
         oneTimeInstruction: instruction,
+        speakerIdentity: outputSpeakerIdentity(snapshot.message),
     });
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected }];
     const toast = showProgress('선택한 부분만 다시 번역 중입니다…');
@@ -1104,9 +1128,13 @@ function injectSettingsPanel() {
                 <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
                 <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
 
-                <label for="verba-dialogue-prompt">대사 전용 전역 프롬프트</label>
-                <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="따옴표 안의 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
-                <div class="verba-help">전체 프롬프트와 충돌하면 대사 안에서는 대사 전용 프롬프트를 우선해요.</div>
+                <label for="verba-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
+                <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="캐릭터·유저·NPC의 모든 대사에 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
+                <div class="verba-help">모든 화자의 직접 대사에 적용해요. 대사 한영병기 같은 공통 형식은 여기에 입력하세요.</div>
+
+                <label for="verba-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
+                <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
+                <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 추가 적용해요. 캐릭터 고유 말투는 여기에 입력하세요.</div>
 
                 <label for="verba-banned-words">번역 금지어</label>
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
@@ -1131,6 +1159,10 @@ function injectSettingsPanel() {
         settings.globalPrompt = event.target.value;
         saveSettings();
     });
+    panel.querySelector('#verba-all-dialogue-prompt').addEventListener('change', event => {
+        settings.allDialoguePrompt = event.target.value;
+        saveSettings();
+    });
     panel.querySelector('#verba-dialogue-prompt').addEventListener('change', event => {
         settings.dialoguePrompt = event.target.value;
         saveSettings();
@@ -1152,17 +1184,92 @@ function clearStaleCurrentTranslation(messageId) {
     }
 }
 
+function cancelScheduledAutomaticTranslation(messageId) {
+    const timer = automaticTranslationTimers.get(messageId);
+    if (timer) clearTimeout(timer);
+    automaticTranslationTimers.delete(messageId);
+}
+
+function scheduleAutomaticTranslation(messageId, delay = 100) {
+    const id = Number(messageId);
+    if (!Number.isInteger(id) || id < 0) return;
+    cancelScheduledAutomaticTranslation(id);
+    const timer = setTimeout(() => {
+        automaticTranslationTimers.delete(id);
+        if (swipeTranslationJobs.has(id)) return;
+        clearStaleCurrentTranslation(id);
+        translateMessage(id, { automatic: true });
+        refreshRetranslateButton();
+    }, delay);
+    automaticTranslationTimers.set(id, timer);
+}
+
+function scheduleSwipeTranslation(messageId, previousSignature = '') {
+    const id = Number(messageId);
+    if (!Number.isInteger(id) || id < 0) return;
+    cancelScheduledAutomaticTranslation(id);
+
+    const previousJob = swipeTranslationJobs.get(id);
+    if (previousJob?.timer) clearTimeout(previousJob.timer);
+
+    const job = {
+        startedAt: Date.now(),
+        previousSignature,
+        candidateSignature: '',
+        stableChecks: 0,
+        timer: null,
+    };
+    swipeTranslationJobs.set(id, job);
+
+    const check = () => {
+        if (swipeTranslationJobs.get(id) !== job) return;
+        const message = liveContext().chat?.[id];
+        const signature = messageVersionSignature(message);
+        const elapsed = Date.now() - job.startedAt;
+
+        // MESSAGE_SWIPED can fire before SillyTavern changes swipe_id. Never
+        // translate the owned, previous swipe while that transition is pending.
+        if (!message || (job.previousSignature && signature === job.previousSignature)) {
+            if (elapsed < 1800) {
+                job.timer = setTimeout(check, 90);
+            } else {
+                swipeTranslationJobs.delete(id);
+            }
+            return;
+        }
+
+        if (signature !== job.candidateSignature) {
+            job.candidateSignature = signature;
+            job.stableChecks = 0;
+            job.timer = setTimeout(check, 90);
+            return;
+        }
+
+        job.stableChecks += 1;
+        if (job.stableChecks < 1) {
+            job.timer = setTimeout(check, 90);
+            return;
+        }
+
+        swipeTranslationJobs.delete(id);
+        clearStaleCurrentTranslation(id);
+        translateMessage(id, { automatic: true });
+        refreshRetranslateButton();
+    };
+
+    job.timer = setTimeout(check, 120);
+}
+
 function handleSwipe(payload) {
     const id = normalizedMessageId(payload);
     if (id < 0) return;
+    const message = liveContext().chat?.[id];
+    const previousSignature = storedRecordSignature(message?.extra?.[STATE_KEY]);
     pendingOutputs.get(id)?.controller.abort();
     pendingOutputs.delete(id);
     selectionSnapshot = null;
     hideSelectionButton();
-    setTimeout(() => {
-        clearStaleCurrentTranslation(id);
-        translateMessage(id, { automatic: true });
-    }, 80);
+    scheduleSwipeTranslation(id, previousSignature);
 }
 
 function setupEvents() {
@@ -1181,11 +1288,7 @@ function setupEvents() {
     if (types.CHARACTER_MESSAGE_RENDERED) {
         source.on(types.CHARACTER_MESSAGE_RENDERED, payload => {
             const id = normalizedMessageId(payload);
-            setTimeout(() => {
-                clearStaleCurrentTranslation(id);
-                translateMessage(id, { automatic: true });
-                refreshRetranslateButton();
-            }, 80);
+            scheduleAutomaticTranslation(id, 120);
         });
     }
     if (types.MESSAGE_SWIPED) source.on(types.MESSAGE_SWIPED, handleSwipe);
@@ -1193,6 +1296,10 @@ function setupEvents() {
         source.on(types.CHAT_CHANGED, () => {
             for (const pending of pendingOutputs.values()) pending.controller.abort();
             pendingOutputs.clear();
+            for (const timer of automaticTranslationTimers.values()) clearTimeout(timer);
+            automaticTranslationTimers.clear();
+            for (const job of swipeTranslationJobs.values()) clearTimeout(job.timer);
+            swipeTranslationJobs.clear();
             selectionSnapshot = null;
             hideSelectionButton();
             document.querySelector('#verba-request-overlay')?.remove();
@@ -1207,10 +1314,7 @@ function setupEvents() {
     if (types.MESSAGE_EDITED) {
         source.on(types.MESSAGE_EDITED, payload => {
             const id = normalizedMessageId(payload);
-            setTimeout(() => {
-                clearStaleCurrentTranslation(id);
-                translateMessage(id, { automatic: true });
-            }, 50);
+            scheduleAutomaticTranslation(id, 80);
         });
     }
 }

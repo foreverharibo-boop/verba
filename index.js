@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS = {
     globalPrompt: '',
     dialoguePrompt: '',
     bannedWords: '',
-    maxTokens: 8192,
+    maxTokens: 15000,
     timeoutSeconds: 120,
 };
 
@@ -35,6 +35,10 @@ extension_settings[EXTENSION_KEY] = Object.assign(
     extension_settings[EXTENSION_KEY] || {},
 );
 const settings = extension_settings[EXTENSION_KEY];
+if (settings.maxTokens !== 15000) {
+    settings.maxTokens = 15000;
+    liveContext().saveSettingsDebounced?.();
+}
 
 const pendingOutputs = new Map();
 const pendingSentInputs = new WeakMap();
@@ -224,7 +228,7 @@ async function sendProfileRequest(prompt, options = {}) {
             const response = await service.sendRequest(
                 profileId,
                 [{ role: 'user', content: prompt }],
-                Math.min(32768, Math.max(512, Number(settings.maxTokens) || 8192)),
+                Math.min(32768, Math.max(512, Number(settings.maxTokens) || 15000)),
                 { signal: controller.signal },
             );
             if (!extractResponseText(response).trim()) throw new Error('AI가 빈 응답을 반환했습니다.');
@@ -471,7 +475,29 @@ function requestOneTimeInstruction(scope, preview = '') {
                     <button type="button" class="menu_button verba-submit">재번역 시작</button>
                 </div>
             </section>`;
-        document.body.append(overlay);
+        // SillyTavern themes and mobile drawers sometimes create their own stacking
+        // contexts. Mount the dialog at the document root and force its geometry so
+        // it stays centred in the viewport regardless of those parent styles.
+        document.documentElement.append(overlay);
+        const forcedOverlayStyles = {
+            position: 'fixed',
+            inset: '0',
+            width: '100vw',
+            height: '100dvh',
+            margin: '0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: 'none',
+            zIndex: '2147483646',
+        };
+        Object.entries(forcedOverlayStyles).forEach(([property, value]) => {
+            overlay.style.setProperty(property.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`), value, 'important');
+        });
+        const modal = overlay.querySelector('.verba-modal');
+        ['position', 'inset', 'margin', 'transform'].forEach((property, index) => {
+            modal.style.setProperty(property, ['relative', 'auto', 'auto', 'none'][index], 'important');
+        });
         let settled = false;
         const finish = value => {
             if (settled) return;
@@ -739,10 +765,29 @@ function showSelectionButton(snapshot) {
     button.type = 'button';
     button.className = 'menu_button verba-selection-retranslate';
     button.textContent = '선택 부분 재번역';
-    const left = Math.min(Math.max(8, snapshot.rect.left), Math.max(8, innerWidth - 170));
-    const above = snapshot.rect.top - 46;
-    button.style.left = `${left}px`;
-    button.style.top = `${above > 8 ? above : Math.min(innerHeight - 50, snapshot.rect.bottom + 8)}px`;
+    const viewport = globalThis.visualViewport;
+    const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportTop = viewport?.offsetTop || 0;
+    const viewportWidth = viewport?.width || innerWidth;
+    const viewportHeight = viewport?.height || innerHeight;
+    const buttonWidth = 160;
+    const buttonHeight = 40;
+    const centeredLeft = snapshot.rect.left + (snapshot.rect.width / 2) - (buttonWidth / 2);
+    const left = Math.min(
+        Math.max(viewportLeft + 8, centeredLeft),
+        viewportLeft + viewportWidth - buttonWidth - 8,
+    );
+    const immediatelyBelow = snapshot.rect.bottom + 8;
+    const top = Math.min(
+        Math.max(viewportTop + 8, immediatelyBelow),
+        viewportTop + viewportHeight - buttonHeight - 8,
+    );
+    button.style.setProperty('left', `${left}px`, 'important');
+    button.style.setProperty('top', `${top}px`, 'important');
+    button.style.setProperty('right', 'auto', 'important');
+    button.style.setProperty('bottom', 'auto', 'important');
+    button.style.setProperty('transform', 'none', 'important');
+    button.style.setProperty('z-index', '2147483646', 'important');
     button.addEventListener('pointerdown', event => event.preventDefault());
     button.addEventListener('click', event => {
         event.preventDefault();
@@ -959,7 +1004,6 @@ function injectSettingsPanel() {
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
                 <div class="verba-help">금지어가 나오면 해당 문단만 다시 요청하고 정상 문단은 유지해요.</div>
 
-                <div class="verba-privacy-note">이 번역기는 캐릭터 시트, 페르소나, 로어북, 시스템 프롬프트, 이전 채팅을 읽거나 번역 요청에 넣지 않습니다. 현재 번역할 원문과 위 설정만 전송합니다.</div>
             </div>
         </div>`;
     host.append(panel);

@@ -24,18 +24,12 @@
     margin-top: 3px;
 }
 
-.verba-note,
-.verba-privacy-note {
+.verba-note {
     padding: 9px 10px;
     border: 1px solid color-mix(in srgb, var(--verba-accent) 45%, transparent);
     border-radius: 10px;
     background: color-mix(in srgb, var(--verba-accent) 10%, transparent);
     line-height: 1.45;
-}
-
-.verba-privacy-note {
-    opacity: 0.82;
-    font-size: 0.9em;
 }
 
 .verba-help {
@@ -57,7 +51,12 @@
 }
 
 .verba-profile-row button {
-    flex: 0 0 auto;
+    flex: 0 0 86px;
+    width: 86px !important;
+    min-width: 86px;
+    white-space: nowrap !important;
+    word-break: keep-all !important;
+    writing-mode: horizontal-tb !important;
 }
 
 .verba-wide {
@@ -131,17 +130,26 @@
 }
 
 .verba-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 2147483000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    z-index: 2147483646 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    transform: none !important;
     padding: 14px;
     background: rgba(0, 0, 0, 0.52);
 }
 
 .verba-modal {
+    position: relative !important;
+    inset: auto !important;
+    margin: auto !important;
+    transform: none !important;
     width: min(540px, calc(100vw - 24px));
     max-height: min(82vh, 680px);
     overflow: auto;
@@ -213,7 +221,7 @@
 
 .verba-selection-retranslate {
     position: fixed !important;
-    z-index: 2147483100 !important;
+    z-index: 2147483646 !important;
     width: auto !important;
     min-width: 148px;
     min-height: 36px;

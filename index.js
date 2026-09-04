@@ -16,7 +16,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.0';
+const EXTENSION_VERSION = '0.1.1';
 const STATE_KEY = 'verba_current_translation';
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -460,6 +460,7 @@ function requestOneTimeInstruction(scope, preview = '') {
         const overlay = document.createElement('div');
         overlay.id = 'verba-request-overlay';
         overlay.className = 'verba-overlay';
+        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
         overlay.innerHTML = `
             <section class="verba-modal" role="dialog" aria-modal="true">
                 <header class="verba-modal-header">
@@ -498,10 +499,20 @@ function requestOneTimeInstruction(scope, preview = '') {
         ['position', 'inset', 'margin', 'transform'].forEach((property, index) => {
             modal.style.setProperty(property, ['relative', 'auto', 'auto', 'none'][index], 'important');
         });
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Older mobile browsers simply use the fixed-position fallback.
+        }
         let settled = false;
         const finish = value => {
             if (settled) return;
             settled = true;
+            try {
+                overlay.hidePopover?.();
+            } catch {
+                // It may already have left the top layer.
+            }
             overlay.remove();
             resolve(value);
         };
@@ -705,6 +716,88 @@ function occurrenceIndexes(value, needle) {
     return indexes;
 }
 
+function comparableTextWithMap(value) {
+    const raw = String(value || '');
+    let text = '';
+    const starts = [];
+    const ends = [];
+    let index = 0;
+    let pendingSpace = null;
+
+    const flushSpace = () => {
+        if (!pendingSpace || !text || text.endsWith(' ')) {
+            pendingSpace = null;
+            return;
+        }
+        text += ' ';
+        starts.push(pendingSpace.start);
+        ends.push(pendingSpace.end);
+        pendingSpace = null;
+    };
+
+    while (index < raw.length) {
+        const rest = raw.slice(index);
+        const htmlTag = rest.match(/^<[^>\n]{1,500}>/);
+        if (htmlTag) {
+            if (/^<\/?(?:br|p|div|li|blockquote|h[1-6])\b/i.test(htmlTag[0])) {
+                pendingSpace = pendingSpace || { start: index, end: index + htmlTag[0].length };
+                pendingSpace.end = index + htmlTag[0].length;
+            }
+            index += htmlTag[0].length;
+            continue;
+        }
+
+        const markdown = rest.match(/^(?:\*\*|__|~~|`{1,3})/);
+        if (markdown) {
+            index += markdown[0].length;
+            continue;
+        }
+
+        const character = raw[index];
+        if (/\s/u.test(character)) {
+            pendingSpace = pendingSpace || { start: index, end: index + 1 };
+            pendingSpace.end = index + 1;
+            index += 1;
+            continue;
+        }
+
+        flushSpace();
+        text += character;
+        starts.push(index);
+        ends.push(index + 1);
+        index += 1;
+    }
+
+    return { text: text.trim(), starts, ends };
+}
+
+function resolveStoredSelection(storedValue, visibleSelected, visibleBefore) {
+    const stored = String(storedValue || '');
+    const exactIndexes = occurrenceIndexes(stored, visibleSelected);
+    if (exactIndexes.length === 1) {
+        return {
+            start: exactIndexes[0],
+            end: exactIndexes[0] + visibleSelected.length,
+        };
+    }
+
+    const storedComparable = comparableTextWithMap(stored);
+    const selectedComparable = comparableTextWithMap(visibleSelected).text;
+    const beforeComparable = comparableTextWithMap(visibleBefore).text;
+    if (!selectedComparable) return null;
+
+    const candidateIndexes = occurrenceIndexes(storedComparable.text, selectedComparable);
+    if (!candidateIndexes.length) return null;
+    const ordinal = occurrenceIndexes(beforeComparable, selectedComparable).length;
+    const comparableStart = candidateIndexes[ordinal]
+        ?? (candidateIndexes.length === 1 ? candidateIndexes[0] : candidateIndexes.at(-1));
+    const comparableEnd = comparableStart + selectedComparable.length - 1;
+    const start = storedComparable.starts[comparableStart];
+    const end = storedComparable.ends[comparableEnd];
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) return null;
+    return { start, end };
+}
+
 function hideSelectionButton() {
     document.querySelector('#verba-selection-retranslate')?.remove();
 }
@@ -722,13 +815,13 @@ function resolveSelection() {
         : range.endContainer.parentElement;
     const messageElement = startElement?.closest?.('.mes[mesid]');
     const messageText = startElement?.closest?.('.mes_text');
-    if (!messageElement || !messageText || !messageElement.classList.contains('verba-translation-active')) return null;
+    if (!messageElement || !messageText) return null;
     if (endElement?.closest?.('.mes[mesid]') !== messageElement || endElement?.closest?.('.mes_text') !== messageText) return null;
 
     const messageId = Number(messageElement.getAttribute('mesid'));
     const message = liveContext().chat?.[messageId];
     const record = message && currentRecord(message);
-    if (!message || !record || message.extra?.display_text !== record.translation) return null;
+    if (!message || !record) return null;
 
     const raw = selection.toString();
     const leading = raw.match(/^\s*/)?.[0]?.length || 0;
@@ -739,10 +832,9 @@ function resolveSelection() {
     const visibleStart = textOffsetWithin(messageText, range.startContainer, range.startOffset);
     if (visibleStart < 0) return null;
     const before = String(messageText.textContent || '').slice(0, visibleStart + leading);
-    const ordinal = occurrenceIndexes(before, selected).length;
-    const storedIndexes = occurrenceIndexes(record.translation, selected);
-    const start = storedIndexes[ordinal] ?? (storedIndexes.length === 1 ? storedIndexes[0] : -1);
-    if (start < 0) return null;
+    const storedRange = resolveStoredSelection(record.translation, selected, before);
+    if (!storedRange) return null;
+    const storedSelected = record.translation.slice(storedRange.start, storedRange.end);
     return {
         messageId,
         message,
@@ -750,9 +842,9 @@ function resolveSelection() {
         sourceHash: hashText(messageSource(message)),
         swipeId: currentSwipeId(message),
         translation: record.translation,
-        selected,
-        start,
-        end: start + selected.length,
+        selected: storedSelected,
+        start: storedRange.start,
+        end: storedRange.end,
         rect: range.getBoundingClientRect(),
     };
 }
@@ -765,6 +857,7 @@ function showSelectionButton(snapshot) {
     button.type = 'button';
     button.className = 'menu_button verba-selection-retranslate';
     button.textContent = '선택 부분 재번역';
+    if ('showPopover' in HTMLElement.prototype) button.setAttribute('popover', 'manual');
     const viewport = globalThis.visualViewport;
     const viewportLeft = viewport?.offsetLeft || 0;
     const viewportTop = viewport?.offsetTop || 0;
@@ -788,6 +881,7 @@ function showSelectionButton(snapshot) {
     button.style.setProperty('bottom', 'auto', 'important');
     button.style.setProperty('transform', 'none', 'important');
     button.style.setProperty('z-index', '2147483646', 'important');
+    button.style.setProperty('margin', '0', 'important');
     button.addEventListener('pointerdown', event => event.preventDefault());
     button.addEventListener('click', event => {
         event.preventDefault();
@@ -795,6 +889,11 @@ function showSelectionButton(snapshot) {
         retranslateSelection(selectionSnapshot);
     });
     document.documentElement.append(button);
+    try {
+        button.showPopover?.();
+    } catch {
+        // Fixed positioning remains as a fallback.
+    }
 }
 
 function scheduleSelectionCapture(delay = 80) {
@@ -891,12 +990,21 @@ function setupSelection() {
         if (!event.target?.closest?.('#verba-selection-retranslate')) scheduleSelectionCapture(40);
     });
     document.addEventListener('touchend', event => {
-        if (!event.target?.closest?.('#verba-selection-retranslate')) scheduleSelectionCapture(140);
+        if (!event.target?.closest?.('#verba-selection-retranslate')) {
+            scheduleSelectionCapture(180);
+            setTimeout(() => scheduleSelectionCapture(0), 420);
+        }
     }, { passive: true });
+    document.addEventListener('pointerup', event => {
+        if (!event.target?.closest?.('#verba-selection-retranslate')) scheduleSelectionCapture(100);
+    });
+    document.addEventListener('contextmenu', event => {
+        if (event.target?.closest?.('.mes[mesid] .mes_text')) scheduleSelectionCapture(220);
+    });
     document.addEventListener('selectionchange', () => scheduleSelectionCapture(120));
     document.addEventListener('pointerdown', event => {
         if (event.target?.closest?.('#verba-selection-retranslate')) return;
-        if (event.target?.closest?.('.mes.verba-translation-active .mes_text')) return;
+        if (event.target?.closest?.('.mes[mesid] .mes_text')) return;
         selectionSnapshot = null;
         hideSelectionButton();
     });

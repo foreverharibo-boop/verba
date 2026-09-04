@@ -16,7 +16,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.5';
+const EXTENSION_VERSION = '0.1.6';
 const STATE_KEY = 'verba_current_translation';
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -354,6 +354,45 @@ function currentRecord(message) {
     return record;
 }
 
+function currentSwipeExtra(message) {
+    const swipeId = currentSwipeId(message);
+    if (swipeId === null || !Array.isArray(message?.swipe_info)) return null;
+    const swipeInfo = message.swipe_info[swipeId];
+    if (!swipeInfo || typeof swipeInfo !== 'object') return null;
+    if (!swipeInfo.extra || typeof swipeInfo.extra !== 'object') swipeInfo.extra = {};
+    return swipeInfo.extra;
+}
+
+function sameTranslationRecord(left, right) {
+    return Boolean(
+        left
+        && right
+        && left.swipeId === right.swipeId
+        && left.sourceHash === right.sourceHash
+        && left.translation === right.translation,
+    );
+}
+
+/**
+ * SillyTavern stores each swipe's `extra` independently. Mirror Verba's owned
+ * display state into the active swipe immediately so returning to that swipe
+ * can restore the translation without another API request.
+ */
+function syncOwnedTranslationToCurrentSwipe(message, record) {
+    const swipeExtra = currentSwipeExtra(message);
+    if (!swipeExtra) return false;
+    let changed = false;
+    if (!sameTranslationRecord(swipeExtra[STATE_KEY], record)) {
+        swipeExtra[STATE_KEY] = { ...record };
+        changed = true;
+    }
+    if (swipeExtra.display_text !== record.translation) {
+        swipeExtra.display_text = record.translation;
+        changed = true;
+    }
+    return changed;
+}
+
 function updateMessageBlock(messageId, message) {
     liveContext().updateMessageBlock?.(messageId, message);
     setTimeout(refreshTranslationClasses, 40);
@@ -364,26 +403,35 @@ function clearOwnedDisplay(message) {
     const record = message.extra[STATE_KEY];
     if (record && message.extra.display_text === record.translation) delete message.extra.display_text;
     delete message.extra[STATE_KEY];
+    const swipeExtra = currentSwipeExtra(message);
+    if (swipeExtra) {
+        if (record && swipeExtra.display_text === record.translation) delete swipeExtra.display_text;
+        delete swipeExtra[STATE_KEY];
+    }
     return Boolean(record);
 }
 
 function applyTranslation(messageId, message, source, translation, chatReference) {
     if (!message.extra || typeof message.extra !== 'object') message.extra = {};
-    message.extra[STATE_KEY] = {
+    const record = {
         swipeId: currentSwipeId(message),
         sourceHash: hashText(source),
         translation,
         updatedAt: new Date().toISOString(),
     };
+    message.extra[STATE_KEY] = record;
     message.extra.display_text = translation;
+    syncOwnedTranslationToCurrentSwipe(message, record);
     updateMessageBlock(messageId, message);
     scheduleChatSave(chatReference);
 }
 
 function restoreCurrentDisplay(messageId, message, record) {
-    if (message.extra.display_text === record.translation) return;
-    message.extra.display_text = record.translation;
-    updateMessageBlock(messageId, message);
+    const displayChanged = message.extra.display_text !== record.translation;
+    if (displayChanged) message.extra.display_text = record.translation;
+    const cacheChanged = syncOwnedTranslationToCurrentSwipe(message, record);
+    if (displayChanged) updateMessageBlock(messageId, message);
+    if (displayChanged || cacheChanged) scheduleChatSave(liveContext().chat);
 }
 
 async function translateMessage(messageId, options = {}) {

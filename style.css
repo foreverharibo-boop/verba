@@ -165,6 +165,14 @@
     opacity: 0.8 !important;
 }
 
+.mes.verba-swipe-hold-active .mes_text:not(.verba-swipe-hold-content) {
+    display: none !important;
+}
+
+.mes.verba-swipe-hold-active .verba-swipe-hold-content {
+    display: block !important;
+}
+
 .verba-bottom-error {
     width: min(560px, calc(100vw - 24px)) !important;
     max-height: min(32vh, 220px) !important;

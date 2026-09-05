@@ -18,7 +18,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.11';
+const EXTENSION_VERSION = '0.1.13';
 const STATE_KEY = 'verba_current_translation';
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -47,6 +47,8 @@ const pendingOutputs = new Map();
 const pendingSentInputs = new WeakMap();
 const automaticTranslationTimers = new Map();
 const swipeTranslationJobs = new Map();
+const renderedTranslationCache = new Map();
+const lastRenderedTranslationByMessage = new Map();
 const failedOutputSignatures = new Map();
 const serverRetryStates = new Map();
 let requestTail = Promise.resolve();
@@ -519,23 +521,27 @@ function currentRecord(message) {
     if (!source.trim()) return null;
     const swipeId = currentSwipeId(message);
     const sourceHash = hashText(source);
-    const isValid = record => Boolean(
-        record
-        && typeof record === 'object'
-        && record.swipeId === swipeId
-        && record.sourceHash === sourceHash
-        && String(record.translation || '').trim(),
-    );
+    const normalize = record => {
+        if (
+            !record
+            || typeof record !== 'object'
+            || record.sourceHash !== sourceHash
+            || !String(record.translation || '').trim()
+        ) return null;
 
-    const activeRecord = message?.extra?.[STATE_KEY];
-    if (isValid(activeRecord)) return activeRecord;
+        // Deleting a swipe shifts every following swipe index. The translation
+        // still belongs to this source, so repair its stored index instead of
+        // discarding the cache and translating it again.
+        return record.swipeId === swipeId ? record : { ...record, swipeId };
+    };
+
+    const activeRecord = normalize(message?.extra?.[STATE_KEY]);
+    if (activeRecord) return activeRecord;
 
     // Some SillyTavern swipe transitions replace message.extra a frame later.
     // Read the authoritative current swipe slot directly so a saved translation
     // is restored instead of being sent to the API again.
-    const savedRecord = currentSwipeExtra(message, false)?.[STATE_KEY];
-    if (!isValid(savedRecord)) return null;
-    return savedRecord;
+    return normalize(currentSwipeExtra(message, false)?.[STATE_KEY]);
 }
 
 function currentSwipeExtra(message, create = true) {
@@ -548,6 +554,29 @@ function currentSwipeExtra(message, create = true) {
         swipeInfo.extra = {};
     }
     return swipeInfo.extra;
+}
+
+function repairSwipeTranslationIndexes(message) {
+    if (!Array.isArray(message?.swipes) || !Array.isArray(message?.swipe_info)) return false;
+    let changed = false;
+    for (let index = 0; index < message.swipes.length; index += 1) {
+        const swipeInfo = message.swipe_info[index];
+        const extra = swipeInfo?.extra;
+        const record = extra?.[STATE_KEY];
+        if (!record || typeof record !== 'object' || !String(record.translation || '').trim()) continue;
+        const raw = message.swipes[index];
+        const source = typeof raw === 'string'
+            ? raw
+            : String(raw?.mes ?? raw?.text ?? raw?.content ?? raw?.message ?? '');
+        if (!source.trim() || record.sourceHash !== hashText(source) || record.swipeId === index) continue;
+        const repaired = { ...record, swipeId: index };
+        extra[STATE_KEY] = repaired;
+        if (currentSwipeId(message) === index && message.extra?.[STATE_KEY]?.sourceHash === record.sourceHash) {
+            message.extra[STATE_KEY] = { ...repaired };
+        }
+        changed = true;
+    }
+    return changed;
 }
 
 function sameTranslationRecord(left, right) {
@@ -585,6 +614,89 @@ function updateMessageBlock(messageId, message) {
     setTimeout(refreshTranslationClasses, 40);
 }
 
+function renderedTranslationKey(messageId, record) {
+    const signature = storedRecordSignature(record);
+    return signature ? `${Number(messageId)}:${signature}` : '';
+}
+
+function cacheRenderedTranslation(messageId, message, record) {
+    const key = renderedTranslationKey(messageId, record);
+    if (!key) return;
+    setTimeout(() => {
+        const current = liveContext().chat?.[messageId];
+        const currentRecordValue = current && currentRecord(current);
+        if (
+            current !== message
+            || !sameTranslationRecord(currentRecordValue, record)
+            || current.extra?.display_text !== record.translation
+        ) return;
+        const textElement = document.querySelector(`.mes[mesid="${Number(messageId)}"] .mes_text`);
+        if (!textElement || textElement.closest('.mes')?.classList.contains('verba-swipe-hold-active')) return;
+        const html = textElement.innerHTML;
+        if (!html.trim()) return;
+        renderedTranslationCache.set(key, html);
+        lastRenderedTranslationByMessage.set(Number(messageId), {
+            signature: storedRecordSignature(record),
+            record: { ...record },
+            html,
+        });
+    }, 80);
+}
+
+function captureSwipeHold(messageId, message) {
+    const id = Number(messageId);
+    const slot = currentSwipeSlot(message);
+    const ownedRecord = message?.extra?.[STATE_KEY];
+    const lastRendered = lastRenderedTranslationByMessage.get(id);
+    const matchedRecord = message && currentRecord(message);
+    const record = matchedRecord || (
+        ownedRecord && String(ownedRecord.translation || '').trim()
+            ? ownedRecord
+            : slot.hasIndexedSwipe && !slot.exists
+                ? lastRendered?.record
+                : null
+    );
+    if (!record) return null;
+    const signature = storedRecordSignature(record);
+    const key = renderedTranslationKey(id, record);
+    let html = renderedTranslationCache.get(key)
+        || (lastRendered?.record?.sourceHash === record.sourceHash ? lastRendered.html : '');
+    if (!html && message?.extra?.display_text === record.translation) {
+        html = document.querySelector(`.mes[mesid="${id}"] .mes_text`)?.innerHTML || '';
+    }
+    if (!html) return null;
+    return { signature, html };
+}
+
+function renderSwipeHold(messageId, job) {
+    if (!job?.hold?.html) return;
+    const messageElement = document.querySelector(`.mes[mesid="${Number(messageId)}"]`);
+    const textElement = messageElement?.querySelector('.mes_text:not(.verba-swipe-hold-content)');
+    if (!messageElement || !textElement) return;
+    let holdElement = messageElement.querySelector('.verba-swipe-hold-content');
+    if (!holdElement) {
+        holdElement = document.createElement('div');
+        holdElement.className = 'mes_text verba-swipe-hold-content';
+        textElement.insertAdjacentElement('afterend', holdElement);
+    }
+    if (holdElement.innerHTML !== job.hold.html) holdElement.innerHTML = job.hold.html;
+    messageElement.classList.add('verba-swipe-hold-active');
+}
+
+function releaseSwipeHold(messageId) {
+    const messageElement = document.querySelector(`.mes[mesid="${Number(messageId)}"]`);
+    messageElement?.classList.remove('verba-swipe-hold-active');
+    messageElement?.querySelectorAll('.verba-swipe-hold-content').forEach(element => element.remove());
+}
+
+function finishSwipeTranslationJob(messageId, job) {
+    const id = Number(messageId);
+    if (swipeTranslationJobs.get(id) !== job) return;
+    if (job.timer) clearTimeout(job.timer);
+    swipeTranslationJobs.delete(id);
+    releaseSwipeHold(id);
+}
+
 function clearOwnedDisplay(message) {
     if (!message?.extra) return false;
     const record = message.extra[STATE_KEY];
@@ -610,6 +722,7 @@ function applyTranslation(messageId, message, source, translation, chatReference
     message.extra.display_text = translation;
     syncOwnedTranslationToCurrentSwipe(message, record);
     updateMessageBlock(messageId, message);
+    cacheRenderedTranslation(messageId, message, record);
     scheduleChatSave(chatReference);
 }
 
@@ -621,6 +734,7 @@ function restoreCurrentDisplay(messageId, message, record) {
     if (displayChanged) message.extra.display_text = record.translation;
     const cacheChanged = syncOwnedTranslationToCurrentSwipe(message, record);
     if (displayChanged || recordChanged) updateMessageBlock(messageId, message);
+    cacheRenderedTranslation(messageId, message, record);
     if (displayChanged || recordChanged || cacheChanged) scheduleChatSave(liveContext().chat);
 }
 
@@ -1291,7 +1405,20 @@ function refreshTranslationClasses() {
         const id = Number(element.getAttribute('mesid'));
         const message = liveContext().chat?.[id];
         const record = message && currentRecord(message);
-        element.classList.toggle('verba-translation-active', Boolean(record && message.extra?.display_text === record.translation));
+        const active = Boolean(record && message.extra?.display_text === record.translation);
+        element.classList.toggle('verba-translation-active', active);
+        if (active && !element.classList.contains('verba-swipe-hold-active')) {
+            const html = element.querySelector('.mes_text')?.innerHTML || '';
+            const key = renderedTranslationKey(id, record);
+            if (key && html.trim()) {
+                renderedTranslationCache.set(key, html);
+                lastRenderedTranslationByMessage.set(id, {
+                    signature: storedRecordSignature(record),
+                    record: { ...record },
+                    html,
+                });
+            }
+        }
     });
 }
 
@@ -1457,6 +1584,8 @@ function scheduleAutomaticTranslation(messageId, delay = 100) {
     const timer = setTimeout(() => {
         automaticTranslationTimers.delete(id);
         if (swipeTranslationJobs.has(id)) return;
+        const message = liveContext().chat?.[id];
+        if (repairSwipeTranslationIndexes(message)) scheduleChatSave(liveContext().chat);
         clearStaleCurrentTranslation(id);
         translateMessage(id, { automatic: true });
         refreshRetranslateButton();
@@ -1464,38 +1593,60 @@ function scheduleAutomaticTranslation(messageId, delay = 100) {
     automaticTranslationTimers.set(id, timer);
 }
 
-function scheduleSwipeTranslation(messageId, previousSignature = '') {
+function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null) {
     const id = Number(messageId);
     if (!Number.isInteger(id) || id < 0) return;
     cancelScheduledAutomaticTranslation(id);
 
     const previousJob = swipeTranslationJobs.get(id);
     if (previousJob?.timer) clearTimeout(previousJob.timer);
+    if (previousJob) releaseSwipeHold(id);
 
     const job = {
         startedAt: Date.now(),
         previousSignature,
+        hold,
+        awaitingGeneratedSwipe: false,
+        rendered: false,
         candidateSignature: '',
         stableChecks: 0,
         timer: null,
+        check: null,
     };
     swipeTranslationJobs.set(id, job);
+    renderSwipeHold(id, job);
 
     const check = () => {
         if (swipeTranslationJobs.get(id) !== job) return;
         const message = liveContext().chat?.[id];
+        if (repairSwipeTranslationIndexes(message)) scheduleChatSave(liveContext().chat);
         const slot = currentSwipeSlot(message);
         const signature = messageVersionSignature(message);
         const elapsed = Date.now() - job.startedAt;
+        const maxWaitMs = 10 * 60 * 1000;
+        renderSwipeHold(id, job);
 
         // When generating a new swipe, SillyTavern advances swipe_id before the
         // new swipes[swipe_id] source exists. message.mes still contains the
         // previous swipe at that moment and must never be used as the new source.
         if (slot.hasIndexedSwipe && !slot.exists) {
-            if (elapsed < 1800) {
-                job.timer = setTimeout(check, 90);
+            job.awaitingGeneratedSwipe = true;
+            if (elapsed < maxWaitMs) {
+                job.timer = setTimeout(check, 180);
             } else {
-                swipeTranslationJobs.delete(id);
+                finishSwipeTranslationJob(id, job);
+            }
+            return;
+        }
+
+        // A newly-created swipe can receive partial streaming text long before
+        // CHARACTER_MESSAGE_RENDERED. Keep showing the previous translation
+        // and wait for SillyTavern's completed-render event before translating.
+        if (job.awaitingGeneratedSwipe && !job.rendered) {
+            if (elapsed < maxWaitMs) {
+                job.timer = setTimeout(check, 180);
+            } else {
+                finishSwipeTranslationJob(id, job);
             }
             return;
         }
@@ -1503,10 +1654,18 @@ function scheduleSwipeTranslation(messageId, previousSignature = '') {
         // MESSAGE_SWIPED can fire before SillyTavern changes swipe_id. Never
         // translate the owned, previous swipe while that transition is pending.
         if (!message || (job.previousSignature && signature === job.previousSignature)) {
-            if (elapsed < 1800) {
-                job.timer = setTimeout(check, 90);
+            const restoredRecord = message && currentRecord(message);
+            if (
+                elapsed >= 650
+                && restoredRecord
+                && storedRecordSignature(restoredRecord) === job.previousSignature
+            ) {
+                restoreCurrentDisplay(id, message, restoredRecord);
+                finishSwipeTranslationJob(id, job);
+            } else if (elapsed < maxWaitMs) {
+                job.timer = setTimeout(check, 180);
             } else {
-                swipeTranslationJobs.delete(id);
+                finishSwipeTranslationJob(id, job);
             }
             return;
         }
@@ -1514,22 +1673,25 @@ function scheduleSwipeTranslation(messageId, previousSignature = '') {
         if (signature !== job.candidateSignature) {
             job.candidateSignature = signature;
             job.stableChecks = 0;
-            job.timer = setTimeout(check, 90);
+            job.timer = setTimeout(check, 120);
             return;
         }
 
         job.stableChecks += 1;
         if (job.stableChecks < 1) {
-            job.timer = setTimeout(check, 90);
+            job.timer = setTimeout(check, 120);
             return;
         }
 
-        swipeTranslationJobs.delete(id);
         clearStaleCurrentTranslation(id);
-        translateMessage(id, { automatic: true });
-        refreshRetranslateButton();
+        renderSwipeHold(id, job);
+        Promise.resolve(translateMessage(id, { automatic: true })).finally(() => {
+            finishSwipeTranslationJob(id, job);
+            refreshRetranslateButton();
+        });
     };
 
+    job.check = check;
     job.timer = setTimeout(check, 120);
 }
 
@@ -1537,12 +1699,13 @@ function handleSwipe(payload) {
     const id = normalizedMessageId(payload);
     if (id < 0) return;
     const message = liveContext().chat?.[id];
-    const previousSignature = storedRecordSignature(message?.extra?.[STATE_KEY]);
+    const hold = captureSwipeHold(id, message);
+    const previousSignature = hold?.signature || storedRecordSignature(message?.extra?.[STATE_KEY]);
     pendingOutputs.get(id)?.controller.abort();
     pendingOutputs.delete(id);
     selectionSnapshot = null;
     hideSelectionButton();
-    scheduleSwipeTranslation(id, previousSignature);
+    scheduleSwipeTranslation(id, previousSignature, hold);
 }
 
 function setupEvents() {
@@ -1561,6 +1724,12 @@ function setupEvents() {
     if (types.CHARACTER_MESSAGE_RENDERED) {
         source.on(types.CHARACTER_MESSAGE_RENDERED, payload => {
             const id = normalizedMessageId(payload);
+            const swipeJob = swipeTranslationJobs.get(id);
+            if (swipeJob) {
+                swipeJob.rendered = true;
+                if (swipeJob.timer) clearTimeout(swipeJob.timer);
+                swipeJob.timer = setTimeout(swipeJob.check, 80);
+            }
             scheduleAutomaticTranslation(id, 120);
         });
     }
@@ -1574,6 +1743,12 @@ function setupEvents() {
             automaticTranslationTimers.clear();
             for (const job of swipeTranslationJobs.values()) clearTimeout(job.timer);
             swipeTranslationJobs.clear();
+            renderedTranslationCache.clear();
+            lastRenderedTranslationByMessage.clear();
+            document.querySelectorAll('.verba-swipe-hold-active').forEach(element => {
+                element.classList.remove('verba-swipe-hold-active');
+                element.querySelectorAll('.verba-swipe-hold-content').forEach(hold => hold.remove());
+            });
             selectionSnapshot = null;
             hideSelectionButton();
             document.querySelector('#verba-request-overlay')?.remove();

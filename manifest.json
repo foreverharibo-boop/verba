@@ -1,7 +1,7 @@
 {
   "name": "verba",
   "display_name": "베르바",
-  "version": "0.1.11",
+  "version": "0.1.13",
   "description": "대사 전용 프롬프트와 선택·전체 재번역을 지원하는 가벼운 자동번역기",
   "author": "담은",
   "js": "index.js",

@@ -18,7 +18,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.8';
+const EXTENSION_VERSION = '0.1.11';
 const STATE_KEY = 'verba_current_translation';
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -47,6 +47,8 @@ const pendingOutputs = new Map();
 const pendingSentInputs = new WeakMap();
 const automaticTranslationTimers = new Map();
 const swipeTranslationJobs = new Map();
+const failedOutputSignatures = new Map();
+const serverRetryStates = new Map();
 let requestTail = Promise.resolve();
 let chatSaveTimer = null;
 let uiRefreshTimer = null;
@@ -55,12 +57,18 @@ let bypassSendClick = false;
 let selectionBusy = false;
 let selectionSnapshot = null;
 let selectionTimer = null;
+let bottomErrorTimer = null;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
 }
 
 function notify(message, type = 'info') {
+    if (type === 'error') {
+        showBottomError(message);
+        console.error(`[베르바] ${message}`);
+        return;
+    }
     const toaster = globalThis.toastr;
     if (toaster && typeof toaster[type] === 'function') {
         toaster[type](message, '베르바');
@@ -68,6 +76,57 @@ function notify(message, type = 'info') {
     }
     const logger = type === 'error' ? console.error : type === 'warning' ? console.warn : console.log;
     logger(`[베르바] ${message}`);
+}
+
+function showBottomError(message) {
+    clearTimeout(bottomErrorTimer);
+    document.querySelector('#verba-bottom-error')?.remove();
+    const notice = document.createElement('div');
+    notice.id = 'verba-bottom-error';
+    notice.className = 'verba-bottom-notice verba-bottom-error';
+    notice.setAttribute('role', 'alert');
+    const text = document.createElement('span');
+    text.textContent = `베르바 · ${String(message || '오류가 발생했습니다.')}`;
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = '✕';
+    close.setAttribute('aria-label', '오류 알림 닫기');
+    close.addEventListener('click', () => {
+        clearTimeout(bottomErrorTimer);
+        notice.remove();
+    });
+    notice.append(text, close);
+    document.documentElement.append(notice);
+    bottomErrorTimer = setTimeout(() => notice.remove(), 12000);
+}
+
+function updateServerRetryIndicator() {
+    let indicator = document.querySelector('#verba-server-retry-indicator');
+    if (!serverRetryStates.size) {
+        indicator?.remove();
+        return;
+    }
+    const state = [...serverRetryStates.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (!indicator) {
+        indicator = document.createElement('button');
+        indicator.id = 'verba-server-retry-indicator';
+        indicator.className = 'verba-bottom-notice';
+        indicator.type = 'button';
+        indicator.setAttribute('role', 'status');
+        indicator.setAttribute('aria-live', 'polite');
+        indicator.addEventListener('click', () => {
+            indicator.disabled = true;
+            indicator.textContent = '베르바 · 서버 오류 재시도 취소 중…';
+            for (const retry of serverRetryStates.values()) retry.controller.abort();
+            notify('서버 오류 자동 재시도를 취소했어요.', 'info');
+        });
+        document.documentElement.append(indicator);
+    }
+    const timing = state.delayMs > 0 ? `${Math.ceil(state.delayMs / 1000)}초 후` : '요청 중';
+    indicator.disabled = false;
+    indicator.textContent = `베르바 · 서버 오류 · ${state.retryCount}/${state.maxRetries}회 ${timing} 재시도 · ✕`;
+    indicator.title = '눌러서 서버 오류 자동 재시도 취소';
+    indicator.setAttribute('aria-label', indicator.title);
 }
 
 function showProgress(message) {
@@ -294,24 +353,51 @@ async function sendProfileRequest(prompt, options = {}) {
 
 async function sendWithRetry(prompt, options = {}) {
     const delays = [3000, 5000, 8000, 12000, 18000];
+    const token = Symbol('verba-server-retry');
+    const outerSignal = options.signal || null;
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort();
+    if (outerSignal) {
+        if (outerSignal.aborted) forwardAbort();
+        else outerSignal.addEventListener('abort', forwardAbort, { once: true });
+    }
+    const requestOptions = { ...options, signal: controller.signal };
     let lastError;
-    for (let attempt = 0; attempt <= delays.length; attempt += 1) {
-        if (options.signal?.aborted) throw abortError();
-        try {
-            return await sendProfileRequest(prompt, options);
-        } catch (error) {
-            if (isAbort(error, options.signal)) throw error;
-            lastError = error;
-            if (!transientError(error) || attempt === delays.length) break;
-            const delay = retryAfterMs(error) || delays[attempt];
-            console.warn(`[베르바] 일시적 서버 오류 — ${attempt + 1}/${delays.length}회, ${Math.ceil(delay / 1000)}초 후 번역 재시도`, error);
-            await wait(delay, options.signal);
+    try {
+        for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+            if (controller.signal.aborted) throw abortError();
+            try {
+                return await sendProfileRequest(prompt, requestOptions);
+            } catch (error) {
+                if (isAbort(error, controller.signal)) throw error;
+                lastError = error;
+                if (!transientError(error) || attempt === delays.length) break;
+                const delay = retryAfterMs(error) || delays[attempt];
+                const state = {
+                    controller,
+                    retryCount: attempt + 1,
+                    maxRetries: delays.length,
+                    delayMs: delay,
+                    updatedAt: Date.now(),
+                };
+                serverRetryStates.set(token, state);
+                updateServerRetryIndicator();
+                console.warn(`[베르바] 일시적 서버 오류 — ${state.retryCount}/${state.maxRetries}회, ${Math.ceil(delay / 1000)}초 후 번역 재시도`, error);
+                await wait(delay, controller.signal);
+                state.delayMs = 0;
+                state.updatedAt = Date.now();
+                updateServerRetryIndicator();
+            }
         }
+        if (lastError && transientError(lastError)) {
+            throw new Error(`서버 오류 자동 재시도 ${delays.length}회를 모두 사용했습니다: ${errorText(lastError)}`, { cause: lastError });
+        }
+        throw lastError || new Error('번역 요청에 실패했습니다.');
+    } finally {
+        serverRetryStates.delete(token);
+        updateServerRetryIndicator();
+        outerSignal?.removeEventListener?.('abort', forwardAbort);
     }
-    if (lastError && transientError(lastError)) {
-        throw new Error(`서버 오류 자동 재시도 ${delays.length}회를 모두 사용했습니다: ${errorText(lastError)}`, { cause: lastError });
-    }
-    throw lastError || new Error('번역 요청에 실패했습니다.');
 }
 
 async function requestSegments(prompt, expectedSegments, options = {}) {
@@ -362,7 +448,10 @@ async function translateOutputText(source, options = {}) {
     }
     const untranslated = findUntranslatedSegments(segmented.segments, translations, settings);
     if (untranslated.length) {
-        throw new Error(`미번역 원문이 계속 남아 번역을 적용하지 않았습니다: ${untranslated.map(segment => segment.id).join(', ')}`);
+        if (untranslated.length === segmented.segments.length) {
+            throw new Error('전체 번역 결과가 외국어 원문으로 남아 번역을 적용하지 않았습니다.');
+        }
+        console.warn('[베르바] 일부 구간의 미번역 의심이 해소되지 않아 나머지 번역 결과를 우선 적용합니다.', untranslated);
     }
     const result = assembleTranslation(segmented, translations);
     if (!result.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
@@ -560,6 +649,7 @@ async function translateMessage(messageId, options = {}) {
 
     const record = currentRecord(message);
     if (!options.force && record) {
+        failedOutputSignatures.delete(id);
         restoreCurrentDisplay(id, message, record);
         return;
     }
@@ -597,9 +687,11 @@ async function translateMessage(messageId, options = {}) {
                 return;
             }
             applyTranslation(id, latest, source, translation, snapshot.chatReference);
+            failedOutputSignatures.delete(id);
             notify(options.force ? '전체 재번역을 적용했어요.' : '자동 번역을 적용했어요.', 'success');
         } catch (error) {
             if (!isAbort(error, controller.signal)) {
+                failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                 console.error('[베르바] 출력 번역 실패', error);
                 notify(`출력 번역 실패: ${errorText(error)}`, 'error');
             }
@@ -715,7 +807,9 @@ async function retranslateLatestOutput() {
         return;
     }
     const source = messageSource(target.message);
-    if (isPredominantlyKorean(source) && !currentRecord(target.message)) {
+    const failedSignature = failedOutputSignatures.get(target.id);
+    const isFailedOutput = failedSignature === messageVersionSignature(target.message);
+    if (isPredominantlyKorean(source) && !currentRecord(target.message) && !isFailedOutput) {
         notify('최근 아웃풋이 이미 한국어라 자동 재번역 대상이 아니에요.', 'info');
         return;
     }
@@ -763,8 +857,10 @@ async function translateInputAndSend(textarea, sendButton, source) {
         bypassSendClick = true;
         sendButton.click();
     } catch (error) {
-        console.error('[베르바] 인풋 번역 실패', error);
-        notify(`인풋 번역 실패로 전송하지 않았어요: ${errorText(error)}`, 'error');
+        if (!isAbort(error)) {
+            console.error('[베르바] 인풋 번역 실패', error);
+            notify(`인풋 번역 실패로 전송하지 않았어요: ${errorText(error)}`, 'error');
+        }
     } finally {
         clearProgress(toast);
         inputBusy = false;
@@ -802,8 +898,10 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         }
         setTextareaValue(textarea, translated);
     } catch (error) {
-        console.error('[베르바] 생성 전 인풋 번역 실패', error);
-        notify(`인풋 번역 실패로 생성을 중단했어요: ${errorText(error)}`, 'error');
+        if (!isAbort(error)) {
+            console.error('[베르바] 생성 전 인풋 번역 실패', error);
+            notify(`인풋 번역 실패로 생성을 중단했어요: ${errorText(error)}`, 'error');
+        }
         blockGenerationAndRestore(textarea, source);
     } finally {
         clearProgress(toast);
@@ -828,8 +926,10 @@ async function translateSentInputMessage(payload) {
             updateMessageBlock(id, message);
             scheduleChatSave(context.chat);
         } catch (error) {
-            console.error('[베르바] 전송된 인풋 번역 실패', error);
-            notify(`인풋 번역 실패로 뒤따르는 생성을 중단했어요: ${errorText(error)}`, 'error');
+            if (!isAbort(error)) {
+                console.error('[베르바] 전송된 인풋 번역 실패', error);
+                notify(`인풋 번역 실패로 뒤따르는 생성을 중단했어요: ${errorText(error)}`, 'error');
+            }
             try {
                 await liveContext().executeSlashCommandsWithOptions?.('/abort quiet=true verba-input-translation-failed');
             } catch {
@@ -1148,8 +1248,10 @@ async function retranslateSelection(snapshot) {
         globalThis.getSelection?.()?.removeAllRanges?.();
         notify('선택한 부분만 다시 번역했어요.', 'success');
     } catch (error) {
-        console.error('[베르바] 선택 부분 재번역 실패', error);
-        notify(`선택 부분 재번역 실패: ${errorText(error)}`, 'error');
+        if (!isAbort(error, controller.signal)) {
+            console.error('[베르바] 선택 부분 재번역 실패', error);
+            notify(`선택 부분 재번역 실패: ${errorText(error)}`, 'error');
+        }
     } finally {
         clearProgress(toast);
         selectionBusy = false;
@@ -1198,9 +1300,17 @@ function refreshRetranslateButton() {
     if (!button) return;
     const target = latestAssistantMessage();
     const busy = target ? pendingOutputs.has(target.id) : false;
+    const failed = target
+        ? failedOutputSignatures.get(target.id) === messageVersionSignature(target.message)
+        : false;
     button.disabled = !target || busy;
     button.classList.toggle('verba-busy', busy);
-    button.title = busy ? '최근 아웃풋 번역 중' : '최근 AI 아웃풋 전체 재번역';
+    button.classList.toggle('verba-retry-needed', failed && !busy);
+    button.title = busy
+        ? '최근 아웃풋 번역 중'
+        : failed
+            ? '번역 실패 — 눌러서 다시 번역'
+            : '최근 AI 아웃풋 전체 재번역';
 }
 
 function injectInputAction() {
@@ -1238,7 +1348,7 @@ async function testConnection(button) {
         const translated = await translateInputText('안녕하세요.');
         notify(`연결 성공: ${translated}`, 'success');
     } catch (error) {
-        notify(`연결 실패: ${errorText(error)}`, 'error');
+        if (!isAbort(error)) notify(`연결 실패: ${errorText(error)}`, 'error');
     } finally {
         button.disabled = false;
         button.textContent = oldText;
@@ -1459,6 +1569,7 @@ function setupEvents() {
         source.on(types.CHAT_CHANGED, () => {
             for (const pending of pendingOutputs.values()) pending.controller.abort();
             pendingOutputs.clear();
+            failedOutputSignatures.clear();
             for (const timer of automaticTranslationTimers.values()) clearTimeout(timer);
             automaticTranslationTimers.clear();
             for (const job of swipeTranslationJobs.values()) clearTimeout(job.timer);

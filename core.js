@@ -31,7 +31,7 @@ export function findBannedWords(text, configuredWords) {
     return parseBannedWords(configuredWords).filter(word => value.includes(word));
 }
 
-const BILINGUAL_PROMPT_PATTERN = /bilingual|dual[-\s]?language|both\s+(?:english|korean)\s+and\s+(?:english|korean)|(?:retain|preserve|include|show|keep)[^\n]{0,50}(?:english|original)|(?:english|original)[^\n]{0,50}(?:retain|preserve|include|show|keep)|한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문|원문)[^\n]{0,30}병기|병기[^\n]{0,30}(?:영어|영문|원문)|영어와\s*한국어|한국어와\s*영어/i;
+const BILINGUAL_PROMPT_PATTERN = /bilingual|dual[-\s]?language|both\s+(?:english|korean)\s+and\s+(?:english|korean)|(?:retain|preserve|include|show|keep)[^\n]{0,50}(?:english|original)|(?:english|original)[^\n]{0,50}(?:retain|preserve|include|show|keep)|(?:english|original)[^\n]{0,80}(?:first|followed|then|alongside|together|parenthes)|(?:first|followed|then|alongside|together|parenthes)[^\n]{0,80}(?:english|original)|한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문|원문)[^\n]{0,30}병기|병기[^\n]{0,30}(?:영어|영문|원문)|영어와\s*한국어|한국어와\s*영어|(?:영어|영문|원문)[^\n]{0,50}(?:먼저|뒤에|괄호|함께)|(?:먼저|뒤에|괄호|함께)[^\n]{0,50}(?:영어|영문|원문)/i;
 const NO_BILINGUAL_PROMPT_PATTERN = /(?:do\s+not|don't|never|without|avoid)[^\n]{0,35}(?:bilingual|english|original)|(?:bilingual|english|original)[^\n]{0,35}(?:forbidden|prohibited)|(?:병기|영어|영문|원문)[^\n]{0,25}(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)|(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)[^\n]{0,25}(?:병기|영어|영문|원문)/i;
 
 function validationText(value) {
@@ -78,6 +78,18 @@ function unchangedLatinPhrase(source, translation) {
     return '';
 }
 
+function looksLikeBilingualDialogue(segment, translation) {
+    if (segment?.type !== 'dialogue_candidate') return false;
+    const sourceWords = normalizedLatinWords(segment.text);
+    const targetWords = normalizedLatinWords(translation);
+    if (sourceWords.length < 2 || targetWords.length < sourceWords.length) return false;
+    const sourceRun = sourceWords.join(' ');
+    const targetRun = targetWords.join(' ');
+    const preservesWholeEnglishDialogue = ` ${targetRun} `.includes(` ${sourceRun} `);
+    const hasWrappedKorean = /[\(\[（【][\s\S]{0,2400}[가-힣]{2,}[\s\S]{0,2400}[\)\]）】]/u.test(String(translation || ''));
+    return preservesWholeEnglishDialogue && hasWrappedKorean;
+}
+
 /**
  * Finds only strong signs of accidentally untranslated source. Proper names,
  * short acronyms and dialogue intentionally made bilingual by a prompt are
@@ -88,7 +100,11 @@ export function findUntranslatedSegments(segments, translations, settings = {}) 
     const invalid = [];
     for (const segment of segments || []) {
         const translation = String(map.get(segment.id) || '');
-        if (!translation.trim() || allowsIntentionalForeignText(segment, settings)) continue;
+        if (
+            !translation.trim()
+            || allowsIntentionalForeignText(segment, settings)
+            || looksLikeBilingualDialogue(segment, translation)
+        ) continue;
 
         const sourceStats = analyzeLanguage(validationText(segment.text));
         const targetStats = analyzeLanguage(validationText(translation));

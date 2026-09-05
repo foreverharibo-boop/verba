@@ -31,6 +31,91 @@ export function findBannedWords(text, configuredWords) {
     return parseBannedWords(configuredWords).filter(word => value.includes(word));
 }
 
+const BILINGUAL_PROMPT_PATTERN = /bilingual|dual[-\s]?language|both\s+(?:english|korean)\s+and\s+(?:english|korean)|(?:retain|preserve|include|show|keep)[^\n]{0,50}(?:english|original)|(?:english|original)[^\n]{0,50}(?:retain|preserve|include|show|keep)|한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문|원문)[^\n]{0,30}병기|병기[^\n]{0,30}(?:영어|영문|원문)|영어와\s*한국어|한국어와\s*영어/i;
+const NO_BILINGUAL_PROMPT_PATTERN = /(?:do\s+not|don't|never|without|avoid)[^\n]{0,35}(?:bilingual|english|original)|(?:bilingual|english|original)[^\n]{0,35}(?:forbidden|prohibited)|(?:병기|영어|영문|원문)[^\n]{0,25}(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)|(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)[^\n]{0,25}(?:병기|영어|영문|원문)/i;
+
+function validationText(value) {
+    return String(value || '')
+        .replace(PROTECTED_PATTERN, ' ')
+        .replace(/@@VERBA_\d{4}@@/g, ' ')
+        .replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, ' ');
+}
+
+function allowsIntentionalForeignText(segment, settings = {}) {
+    const requestsBilingual = value => {
+        const prompt = String(value || '');
+        return !NO_BILINGUAL_PROMPT_PATTERN.test(prompt) && BILINGUAL_PROMPT_PATTERN.test(prompt);
+    };
+    if (requestsBilingual(settings.globalPrompt)) return true;
+    if (segment?.type !== 'dialogue_candidate') return false;
+    return requestsBilingual([
+        settings.allDialoguePrompt,
+        settings.dialoguePrompt,
+    ].filter(Boolean).join('\n'));
+}
+
+function normalizedLatinWords(value) {
+    return validationText(value)
+        .toLocaleLowerCase()
+        .replace(/[’‘]/g, "'")
+        .match(/[a-z]+(?:'[a-z]+)*/g) || [];
+}
+
+function unchangedLatinPhrase(source, translation) {
+    const sourceWords = normalizedLatinWords(source);
+    const targetWords = normalizedLatinWords(translation);
+    if (sourceWords.length < 3 || targetWords.length < 3) return '';
+    const target = ` ${targetWords.join(' ')} `;
+    const largestWindow = Math.min(8, sourceWords.length);
+    for (let size = largestWindow; size >= 3; size -= 1) {
+        for (let start = 0; start <= sourceWords.length - size; start += 1) {
+            const words = sourceWords.slice(start, start + size);
+            if (words.join('').length < 12) continue;
+            const phrase = words.join(' ');
+            if (target.includes(` ${phrase} `)) return phrase;
+        }
+    }
+    return '';
+}
+
+/**
+ * Finds only strong signs of accidentally untranslated source. Proper names,
+ * short acronyms and dialogue intentionally made bilingual by a prompt are
+ * excluded to avoid destructive false positives.
+ */
+export function findUntranslatedSegments(segments, translations, settings = {}) {
+    const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
+    const invalid = [];
+    for (const segment of segments || []) {
+        const translation = String(map.get(segment.id) || '');
+        if (!translation.trim() || allowsIntentionalForeignText(segment, settings)) continue;
+
+        const sourceStats = analyzeLanguage(validationText(segment.text));
+        const targetStats = analyzeLanguage(validationText(translation));
+        const sourceForeign = sourceStats.english + sourceStats.japanese + sourceStats.chinese;
+        const targetForeign = targetStats.english + targetStats.japanese + targetStats.chinese;
+        if (sourceForeign < 4 || targetForeign < 3) continue;
+
+        let reason = '';
+        const carriedPhrase = unchangedLatinPhrase(segment.text, translation);
+        if (carriedPhrase) {
+            reason = `원문의 긴 영문 구절이 그대로 남음: ${carriedPhrase}`;
+        } else if (/\b[a-z][A-Za-z'’-]{2,}(?=[가-힣])/g.test(validationText(translation))) {
+            reason = '한국어 조사·어미 앞에 일반 영단어가 번역되지 않고 남음';
+        } else if (targetStats.korean < 2 && targetForeign >= 8) {
+            reason = '번역 결과가 외국어 원문 중심으로 남음';
+        } else if (targetStats.english >= 36 && targetStats.english > targetStats.korean * 1.1) {
+            reason = '긴 영문이 한국어보다 많이 남음';
+        } else if (targetStats.japanese >= 4) {
+            reason = '일본어 원문이 번역되지 않고 남음';
+        } else if (targetStats.chinese >= 6 && targetStats.chinese > targetStats.korean * 0.5) {
+            reason = '중국어 원문이 번역되지 않고 남음';
+        }
+        if (reason) invalid.push({ ...segment, untranslatedReason: reason });
+    }
+    return invalid;
+}
+
 export function stripForLanguageDetection(value) {
     return String(value || '')
         .replace(PROTECTED_PATTERN, '')
@@ -361,6 +446,31 @@ Return exactly this schema:
 
 SEGMENTS TO REPAIR
 ${JSON.stringify(payload)}\n\nBANNED WORDS\n${bannedWords.join(', ')}`;
+}
+
+export function buildUntranslatedRepairPrompt(segments, currentTranslations, settings, speakerIdentity = {}) {
+    const payload = segments.map(segment => ({
+        id: segment.id,
+        type: segment.type,
+        source: segment.text,
+        current_translation: currentTranslations.get(segment.id) || '',
+        detected_problem: segment.untranslatedReason || 'foreign source text remains untranslated',
+    }));
+    return `${sharedOutputRules(settings, '', speakerIdentity)}
+
+TASK
+Repair only the supplied segments because foreign source text was accidentally left untranslated.
+- Return a complete corrected Korean translation for every supplied segment id.
+- Translate the accidentally retained foreign sentence or phrase naturally into Korean.
+- Keep already-correct Korean content, meaning, tone, intensity, speaker attribution, paragraph structure, and protected tokens intact.
+- Do not remove or translate proper names, acronyms, product names, or other terms that are naturally meant to stay in their original spelling.
+- Do not change or return any segment that was not supplied.
+
+Return exactly this schema:
+{"segments":[{"id":"seg_0000","translation":"수정된 한국어 번역"}]}
+
+SEGMENTS TO REPAIR
+${JSON.stringify(payload)}`;
 }
 
 export function dialogueSpans(value) {

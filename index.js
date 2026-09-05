@@ -5,8 +5,10 @@ import {
     buildInputPrompt,
     buildOutputPrompt,
     buildSelectionPrompt,
+    buildUntranslatedRepairPrompt,
     extractResponseText,
     findBannedWords,
+    findUntranslatedSegments,
     hasForeignText,
     hasKorean,
     hashText,
@@ -16,7 +18,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.6';
+const EXTENSION_VERSION = '0.1.8';
 const STATE_KEY = 'verba_current_translation';
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -100,6 +102,11 @@ function errorText(error) {
         if (current.status) parts.push(`상태 ${current.status}`);
         if (current.statusCode) parts.push(`상태 ${current.statusCode}`);
         if (current.code) parts.push(`코드 ${current.code}`);
+        if (current.details && !parts.includes(String(current.details))) parts.push(String(current.details));
+        if (current.response?.status) parts.push(`상태 ${current.response.status}`);
+        if (current.response?.statusText) parts.push(String(current.response.statusText));
+        if (current.response?.data?.error?.message) parts.push(String(current.response.data.error.message));
+        if (current.response?.data?.message) parts.push(String(current.response.data.message));
         current = current.cause;
     }
     return parts.join(' / ') || String(error);
@@ -107,10 +114,12 @@ function errorText(error) {
 
 function isAbort(error, signal) {
     if (signal?.aborted || error?.name === 'AbortError') return true;
+    if (error?.code === 'VERBA_TIMEOUT') return false;
     let current = error?.cause;
     const seen = new Set();
     while (current && !seen.has(current)) {
         seen.add(current);
+        if (current.code === 'VERBA_TIMEOUT') return false;
         if (current.name === 'AbortError') return true;
         current = current.cause;
     }
@@ -182,10 +191,41 @@ function enqueueRequest(task) {
 
 function transientError(error) {
     const text = errorText(error).toLowerCase();
-    if (/\b(?:400|401|403|404|413|422)\b|invalid api|authentication|permission|billing|credit|context length|model.*not found/.test(text)) {
+    if (/\b(?:400|401|403|404|413|422)\b|bad request|invalid request|invalid api|unauthori[sz]ed|forbidden|authentication|permission|billing|credit|payment|insufficient[_ -]?(?:quota|credit|funds?)|context length|maximum context|too (?:large|long)|model.*(?:not found|may not exist)|safety|blocked|content.?filter|권한|인증|결제|크레딧|잔액|컨텍스트.*초과/.test(text)) {
         return false;
     }
-    return /\b(?:408|425|429|500|502|503|504)\b|rate.?limit|overload|capacity|temporar|timeout|timed out|network|fetch failed|connection reset|empty response|빈 응답|시간 초과/.test(text);
+    return /\b(?:408|425|429|500|502|503|504)\b|resource exhausted|rate.?limit|too many requests|requests per minute|\brpm\b|\btpm\b|quota|overload|capacity|at capacity|server (?:is )?busy|temporar(?:y|ily) unavailable|try again later|internal server error|bad gateway|service unavailable|gateway timeout|upstream|timed? out|timeout|econnreset|econnrefused|connection reset|connection refused|network error|fetch failed|socket hang up|empty response|no response|빈 응답|응답 대기 시간.*초과|시간 초과|네트워크.*(?:오류|실패)|연결.*(?:재설정|실패)|서버.*(?:혼잡|과부하)|일시적.*(?:오류|실패)/.test(text);
+}
+
+function retryAfterHeader(headers) {
+    if (!headers) return null;
+    if (typeof headers.get === 'function') return headers.get('retry-after') ?? headers.get('Retry-After');
+    if (typeof headers === 'object') return headers['retry-after'] ?? headers['Retry-After'];
+    return null;
+}
+
+function retryAfterMs(error) {
+    const seen = new Set();
+    let current = error;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        const candidates = [
+            current.retryAfter,
+            current.retry_after,
+            retryAfterHeader(current.headers),
+            retryAfterHeader(current.response?.headers),
+        ];
+        for (const candidate of candidates) {
+            if (candidate === undefined || candidate === null || candidate === '') continue;
+            const numeric = Number(candidate);
+            const parsed = Number.isFinite(numeric) && numeric >= 0
+                ? Math.round(numeric * 1000)
+                : Math.max(0, Date.parse(String(candidate)) - Date.now());
+            if (Number.isFinite(parsed) && parsed > 0) return Math.min(120000, Math.max(1000, parsed));
+        }
+        current = current.cause;
+    }
+    return 0;
 }
 
 function abortError() {
@@ -238,7 +278,12 @@ async function sendProfileRequest(prompt, options = {}) {
             return response;
         });
     } catch (error) {
-        if (timedOut) throw new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`, { cause: error });
+        if (timedOut) {
+            const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
+            timeoutError.code = 'VERBA_TIMEOUT';
+            timeoutError.cause = error;
+            throw timeoutError;
+        }
         if (controller.signal.aborted) throw abortError();
         throw error;
     } finally {
@@ -248,7 +293,7 @@ async function sendProfileRequest(prompt, options = {}) {
 }
 
 async function sendWithRetry(prompt, options = {}) {
-    const delays = [1500, 3000, 5000];
+    const delays = [3000, 5000, 8000, 12000, 18000];
     let lastError;
     for (let attempt = 0; attempt <= delays.length; attempt += 1) {
         if (options.signal?.aborted) throw abortError();
@@ -258,8 +303,13 @@ async function sendWithRetry(prompt, options = {}) {
             if (isAbort(error, options.signal)) throw error;
             lastError = error;
             if (!transientError(error) || attempt === delays.length) break;
-            await wait(delays[attempt], options.signal);
+            const delay = retryAfterMs(error) || delays[attempt];
+            console.warn(`[베르바] 일시적 서버 오류 — ${attempt + 1}/${delays.length}회, ${Math.ceil(delay / 1000)}초 후 번역 재시도`, error);
+            await wait(delay, options.signal);
         }
+    }
+    if (lastError && transientError(lastError)) {
+        throw new Error(`서버 오류 자동 재시도 ${delays.length}회를 모두 사용했습니다: ${errorText(lastError)}`, { cause: lastError });
     }
     throw lastError || new Error('번역 요청에 실패했습니다.');
 }
@@ -298,9 +348,21 @@ async function translateOutputText(source, options = {}) {
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
 
+    for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+        const invalid = findUntranslatedSegments(segmented.segments, translations, settings);
+        if (!invalid.length) break;
+        const repairPrompt = buildUntranslatedRepairPrompt(invalid, translations, settings, speakerIdentity);
+        const repaired = await requestSegments(repairPrompt, invalid, options);
+        for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
+    }
+
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings.bannedWords));
     if (remaining.length) {
         throw new Error(`금지어가 계속 남아 번역을 적용하지 않았습니다: ${[...new Set(remaining)].join(', ')}`);
+    }
+    const untranslated = findUntranslatedSegments(segmented.segments, translations, settings);
+    if (untranslated.length) {
+        throw new Error(`미번역 원문이 계속 남아 번역을 적용하지 않았습니다: ${untranslated.map(segment => segment.id).join(', ')}`);
     }
     const result = assembleTranslation(segmented, translations);
     if (!result.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
@@ -317,8 +379,28 @@ async function translateInputText(source, options = {}) {
 }
 
 function currentSwipeId(message) {
+    if (message?.swipe_id === undefined || message?.swipe_id === null || message?.swipe_id === '') return null;
     const value = Number(message?.swipe_id);
-    return Number.isInteger(value) ? value : null;
+    return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function currentSwipeSlot(message) {
+    const swipeId = currentSwipeId(message);
+    const swipes = message?.swipes;
+    if (swipeId === null || !Array.isArray(swipes)) {
+        return {
+            hasIndexedSwipe: false,
+            exists: true,
+            source: String(message?.mes || ''),
+        };
+    }
+    const exists = Object.hasOwn(swipes, swipeId) && swipes[swipeId] !== undefined && swipes[swipeId] !== null;
+    if (!exists) return { hasIndexedSwipe: true, exists: false, source: '' };
+    const raw = swipes[swipeId];
+    const source = typeof raw === 'string'
+        ? raw
+        : String(raw?.mes ?? raw?.text ?? raw?.content ?? raw?.message ?? '');
+    return { hasIndexedSwipe: true, exists: Boolean(source.trim()), source };
 }
 
 function messageVersionSignature(message) {
@@ -332,9 +414,7 @@ function storedRecordSignature(record) {
 }
 
 function messageSource(message) {
-    const swipeId = currentSwipeId(message);
-    const swipe = swipeId !== null && Array.isArray(message?.swipes) ? message.swipes[swipeId] : null;
-    return typeof swipe === 'string' ? swipe : String(message?.mes || '');
+    return currentSwipeSlot(message).source;
 }
 
 function outputSpeakerIdentity(message) {
@@ -346,20 +426,38 @@ function outputSpeakerIdentity(message) {
 }
 
 function currentRecord(message) {
-    const record = message?.extra?.[STATE_KEY];
-    if (!record || typeof record !== 'object') return null;
     const source = messageSource(message);
-    if (record.swipeId !== currentSwipeId(message) || record.sourceHash !== hashText(source)) return null;
-    if (!String(record.translation || '').trim()) return null;
-    return record;
+    if (!source.trim()) return null;
+    const swipeId = currentSwipeId(message);
+    const sourceHash = hashText(source);
+    const isValid = record => Boolean(
+        record
+        && typeof record === 'object'
+        && record.swipeId === swipeId
+        && record.sourceHash === sourceHash
+        && String(record.translation || '').trim(),
+    );
+
+    const activeRecord = message?.extra?.[STATE_KEY];
+    if (isValid(activeRecord)) return activeRecord;
+
+    // Some SillyTavern swipe transitions replace message.extra a frame later.
+    // Read the authoritative current swipe slot directly so a saved translation
+    // is restored instead of being sent to the API again.
+    const savedRecord = currentSwipeExtra(message, false)?.[STATE_KEY];
+    if (!isValid(savedRecord)) return null;
+    return savedRecord;
 }
 
-function currentSwipeExtra(message) {
+function currentSwipeExtra(message, create = true) {
     const swipeId = currentSwipeId(message);
     if (swipeId === null || !Array.isArray(message?.swipe_info)) return null;
     const swipeInfo = message.swipe_info[swipeId];
     if (!swipeInfo || typeof swipeInfo !== 'object') return null;
-    if (!swipeInfo.extra || typeof swipeInfo.extra !== 'object') swipeInfo.extra = {};
+    if (!swipeInfo.extra || typeof swipeInfo.extra !== 'object') {
+        if (!create) return null;
+        swipeInfo.extra = {};
+    }
     return swipeInfo.extra;
 }
 
@@ -427,11 +525,14 @@ function applyTranslation(messageId, message, source, translation, chatReference
 }
 
 function restoreCurrentDisplay(messageId, message, record) {
+    if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+    const recordChanged = !sameTranslationRecord(message.extra[STATE_KEY], record);
+    if (recordChanged) message.extra[STATE_KEY] = { ...record };
     const displayChanged = message.extra.display_text !== record.translation;
     if (displayChanged) message.extra.display_text = record.translation;
     const cacheChanged = syncOwnedTranslationToCurrentSwipe(message, record);
-    if (displayChanged) updateMessageBlock(messageId, message);
-    if (displayChanged || cacheChanged) scheduleChatSave(liveContext().chat);
+    if (displayChanged || recordChanged) updateMessageBlock(messageId, message);
+    if (displayChanged || recordChanged || cacheChanged) scheduleChatSave(liveContext().chat);
 }
 
 async function translateMessage(messageId, options = {}) {
@@ -1166,6 +1267,7 @@ function injectSettingsPanel() {
                     <button type="button" id="verba-refresh-profiles" class="menu_button">새로고침</button>
                 </div>
                 <button type="button" id="verba-test-profile" class="menu_button verba-wide">연결 테스트</button>
+                <div class="verba-help">429·일시적 서버·네트워크 오류는 대기 간격을 늘리며 최대 5회 자동 재시도해요.</div>
 
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
@@ -1272,8 +1374,21 @@ function scheduleSwipeTranslation(messageId, previousSignature = '') {
     const check = () => {
         if (swipeTranslationJobs.get(id) !== job) return;
         const message = liveContext().chat?.[id];
+        const slot = currentSwipeSlot(message);
         const signature = messageVersionSignature(message);
         const elapsed = Date.now() - job.startedAt;
+
+        // When generating a new swipe, SillyTavern advances swipe_id before the
+        // new swipes[swipe_id] source exists. message.mes still contains the
+        // previous swipe at that moment and must never be used as the new source.
+        if (slot.hasIndexedSwipe && !slot.exists) {
+            if (elapsed < 1800) {
+                job.timer = setTimeout(check, 90);
+            } else {
+                swipeTranslationJobs.delete(id);
+            }
+            return;
+        }
 
         // MESSAGE_SWIPED can fire before SillyTavern changes swipe_id. Never
         // translate the owned, previous swipe while that transition is pending.

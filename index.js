@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.27';
+const EXTENSION_VERSION = '0.1.28';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -603,7 +603,13 @@ async function translateOutputText(source, options = {}) {
             findBannedWords(translations.get(segment.id), settings.bannedWords).length,
         );
         if (!invalid.length) break;
-        const repairPrompt = buildBannedRepairPrompt(invalid, translations, settings, speakerIdentity);
+        const repairPrompt = buildBannedRepairPrompt(
+            invalid,
+            translations,
+            settings,
+            speakerIdentity,
+            segmented.nameTokens,
+        );
         const repaired = await requestSegments(repairPrompt, invalid, options);
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
@@ -611,7 +617,13 @@ async function translateOutputText(source, options = {}) {
     for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
         const invalid = findUntranslatedSegments(segmented.segments, translations, settings);
         if (!invalid.length) break;
-        const repairPrompt = buildUntranslatedRepairPrompt(invalid, translations, settings, speakerIdentity);
+        const repairPrompt = buildUntranslatedRepairPrompt(
+            invalid,
+            translations,
+            settings,
+            speakerIdentity,
+            segmented.nameTokens,
+        );
         const repaired = await requestSegments(repairPrompt, invalid, options);
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }

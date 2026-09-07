@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.22';
+const EXTENSION_VERSION = '0.1.23';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -1174,6 +1174,20 @@ function sourceContainsExactName(source, sourceName) {
     }
 }
 
+function isNameReplacementMessage(message) {
+    if (!message || message.is_user) return false;
+    if (!message.is_system) return true;
+    const context = liveContext();
+    const messageName = String(message.name || '').trim();
+    const characterName = String(context.name2 || '').trim();
+    const hasCharacterTranslation = Boolean(
+        message.extra?.[STATE_KEY]
+        || String(message.extra?.display_text || '').trim()
+        || Array.isArray(message.swipes),
+    );
+    return hasCharacterTranslation || Boolean(messageName && characterName && messageName === characterName);
+}
+
 function validStoredTranslationRecord(extra, source) {
     const record = extra?.[STATE_KEY];
     if (
@@ -1261,7 +1275,7 @@ function collectHistoricalNameCandidates(sourceName, currentName) {
     };
 
     for (const message of chat) {
-        if (!message || message.is_user || message.is_system) continue;
+        if (!isNameReplacementMessage(message)) continue;
         if (Array.isArray(message.swipes)) {
             message.swipes.forEach((rawSource, swipeId) => {
                 const source = typeof rawSource === 'string'
@@ -1375,7 +1389,7 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
     let changedRecords = 0;
 
     chat.forEach((message, messageId) => {
-        if (!message || message.is_user || message.is_system) return;
+        if (!isNameReplacementMessage(message)) return;
         let messageChanged = false;
         let currentSwipeWasCounted = false;
         let currentRawSwipeWasCounted = false;

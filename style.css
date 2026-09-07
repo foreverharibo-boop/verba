@@ -127,6 +127,13 @@
     overflow: visible;
 }
 
+.verba-profile-toggle:hover,
+.verba-profile-toggle:focus,
+.verba-profile-toggle:focus-visible,
+.verba-profile-toggle:active {
+    background: transparent !important;
+}
+
 .verba-profile-toggle[hidden] {
     display: none !important;
 }

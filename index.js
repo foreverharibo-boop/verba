@@ -3,6 +3,7 @@ import {
     assembleTranslation,
     buildBannedRepairPrompt,
     buildInputPrompt,
+    buildNameHistoryFormsPrompt,
     buildNameMatchPrompt,
     buildOutputPrompt,
     buildSelectionPrompt,
@@ -21,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.19';
+const EXTENSION_VERSION = '0.1.20';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -1081,11 +1082,8 @@ function requestOneTimeInstruction(scope, preview = '') {
     });
 }
 
-function requestNameLockTarget(sourceName, currentName, knownOldNames = []) {
+function requestNameLockTarget(sourceName, currentName) {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
-    const initialOldNames = [...new Set(
-        [currentName, ...knownOldNames].map(value => String(value || '').trim()).filter(Boolean),
-    )];
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.id = 'verba-request-overlay';
@@ -1103,14 +1101,11 @@ function requestNameLockTarget(sourceName, currentName, knownOldNames = []) {
                 </div>
                 <label for="verba-name-lock-target">앞으로 사용할 표기</label>
                 <input id="verba-name-lock-target" class="text_pole" maxlength="120" value="${escapeHtml(currentName)}">
-                <label for="verba-name-lock-old-names">현재 채팅에서 함께 바꿀 기존 표기</label>
-                <input id="verba-name-lock-old-names" class="text_pole" maxlength="500" value="${escapeHtml(initialOldNames.join(', '))}" placeholder="예: 안드류, 엔드류, 앤드류">
-                <small>서로 다른 표기가 있다면 쉼표로 구분해 입력하세요.</small>
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-name-lock-history" checked>
                     <span>현재 채팅 전체의 이름 표기 모두 변경</span>
                 </label>
-                <small>현재 메시지뿐 아니라 이전 메시지와 다른 스와이프의 베르바 번역본도 변경합니다.</small>
+                <small>원문에서 같은 이름을 찾아 이전 메시지와 다른 스와이프에 서로 다르게 번역된 표기까지 자동으로 통일합니다.</small>
                 <div class="verba-modal-actions">
                     <button type="button" class="menu_button verba-cancel">취소</button>
                     <button type="button" class="menu_button verba-submit">이름 고정</button>
@@ -1135,7 +1130,6 @@ function requestNameLockTarget(sourceName, currentName, knownOldNames = []) {
             resolve(value);
         };
         const input = overlay.querySelector('#verba-name-lock-target');
-        const oldNamesInput = overlay.querySelector('#verba-name-lock-old-names');
         const history = overlay.querySelector('#verba-name-lock-history');
         const submit = () => {
             const value = String(input.value || '').trim();
@@ -1143,14 +1137,9 @@ function requestNameLockTarget(sourceName, currentName, knownOldNames = []) {
                 notify('고정할 이름 표기를 입력해 주세요.', 'warning');
                 return;
             }
-            const oldNames = String(oldNamesInput.value || '')
-                .split(/[,，\n]/)
-                .map(name => name.trim())
-                .filter(Boolean);
             finish({
                 targetName: value,
                 replaceHistory: Boolean(history.checked),
-                oldNames: [...new Set([currentName, ...oldNames])],
             });
         };
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
@@ -1173,15 +1162,148 @@ function requestNameLockTarget(sourceName, currentName, knownOldNames = []) {
     });
 }
 
-function replaceStoredNameInExtra(extra, source, oldNames, targetName) {
-    if (!extra || typeof extra !== 'object') return false;
-    const record = extra[STATE_KEY];
+function sourceContainsExactName(source, sourceName) {
+    const text = String(source || '');
+    const name = String(sourceName || '').trim();
+    if (!text || !name) return false;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+        return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(text);
+    } catch {
+        return text.toLocaleLowerCase().includes(name.toLocaleLowerCase());
+    }
+}
+
+function validStoredTranslationRecord(extra, source) {
+    const record = extra?.[STATE_KEY];
     if (
         !record
         || typeof record !== 'object'
         || record.sourceHash !== hashText(source)
         || !String(record.translation || '').trim()
-    ) return false;
+    ) return null;
+    return record;
+}
+
+function stripKoreanNameSuffixes(word) {
+    const suffixes = [
+        '으로부터', '에게서', '한테서', '에서부터', '이라고', '이라며', '이라는', '이라면',
+        '으로', '에게', '한테', '께서', '부터', '까지', '처럼', '보다', '라고', '라며', '라는', '라면',
+        '이랑', '하고', '에서', '께', '에', '와', '과', '랑', '은', '는', '이', '가', '을', '를', '의', '도', '만', '씨', '님',
+    ].sort((left, right) => right.length - left.length);
+    const forms = new Set([word]);
+    let current = word;
+    while (current.length > 1) {
+        const suffix = suffixes.find(item => current.endsWith(item) && current.length - item.length >= 2);
+        if (!suffix) break;
+        current = current.slice(0, -suffix.length);
+        forms.add(current);
+    }
+    return [...forms];
+}
+
+function stringDistance(left, right) {
+    const a = [...String(left || '')];
+    const b = [...String(right || '')];
+    const row = Array.from({ length: b.length + 1 }, (_, index) => index);
+    for (let i = 1; i <= a.length; i += 1) {
+        let previous = row[0];
+        row[0] = i;
+        for (let j = 1; j <= b.length; j += 1) {
+            const saved = row[j];
+            row[j] = Math.min(
+                row[j] + 1,
+                row[j - 1] + 1,
+                previous + (a[i - 1] === b[j - 1] ? 0 : 1),
+            );
+            previous = saved;
+        }
+    }
+    return row[b.length];
+}
+
+function collectHistoricalNameCandidates(sourceName, currentName) {
+    const chat = liveContext().chat;
+    if (!Array.isArray(chat)) return { candidates: [currentName], translations: [] };
+    const translations = [];
+    const seenRecords = new Set();
+    const addRecord = (extra, source) => {
+        if (!sourceContainsExactName(source, sourceName)) return;
+        const record = validStoredTranslationRecord(extra, source);
+        if (!record) return;
+        const translation = String(record.translation);
+        const key = `${record.sourceHash}\u0000${translation}`;
+        if (seenRecords.has(key)) return;
+        seenRecords.add(key);
+        translations.push(translation);
+    };
+
+    for (const message of chat) {
+        if (!message || message.is_user || message.is_system) continue;
+        if (Array.isArray(message.swipes) && Array.isArray(message.swipe_info)) {
+            message.swipes.forEach((rawSource, swipeId) => {
+                const source = typeof rawSource === 'string'
+                    ? rawSource
+                    : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');
+                addRecord(message.swipe_info?.[swipeId]?.extra, source);
+            });
+        }
+        addRecord(message.extra, messageSource(message));
+    }
+
+    const frequency = new Map();
+    const addCandidate = value => {
+        const candidate = String(value || '').trim();
+        if (!candidate || candidate.length > 120) return;
+        frequency.set(candidate, (frequency.get(candidate) || 0) + 1);
+    };
+    addCandidate(currentName);
+    for (const translation of translations) {
+        for (const match of translation.matchAll(/[\p{Script=Hangul}]{2,30}/gu)) {
+            for (const form of stripKoreanNameSuffixes(match[0])) addCandidate(form);
+        }
+        for (const match of translation.matchAll(/[A-Za-z][A-Za-z'’-]{1,40}/g)) addCandidate(match[0]);
+    }
+
+    const candidates = [...frequency.keys()].sort((left, right) => {
+        if (left === currentName) return -1;
+        if (right === currentName) return 1;
+        const distance = stringDistance(left, currentName) - stringDistance(right, currentName);
+        if (distance) return distance;
+        const count = (frequency.get(right) || 0) - (frequency.get(left) || 0);
+        return count || left.localeCompare(right, 'ko');
+    }).slice(0, 800);
+    return { candidates, translations };
+}
+
+async function detectHistoricalNameForms(sourceName, currentName, knownNames = [], options = {}) {
+    const collected = collectHistoricalNameCandidates(sourceName, currentName);
+    const forms = new Set(
+        [currentName, ...knownNames].map(value => String(value || '').trim()).filter(Boolean),
+    );
+    if (!collected.translations.length || !collected.candidates.length) return [...forms];
+    const prompt = buildNameHistoryFormsPrompt({
+        sourceName,
+        currentName,
+        candidates: collected.candidates,
+    });
+    const expected = [{ id: 'seg_0000', type: 'name_history', text: currentName }];
+    const result = await requestSegments(prompt, expected, options);
+    const detected = String(result.get('seg_0000') || '')
+        .split(/\|\|\||[,，;；\n]/)
+        .map(value => value.trim())
+        .filter(value => value && value !== 'NO_MATCH');
+    const allowed = new Set(collected.candidates);
+    for (const value of detected) {
+        if (allowed.has(value) && collected.translations.some(text => text.includes(value))) forms.add(value);
+    }
+    return [...forms];
+}
+
+function replaceStoredNameInExtra(extra, source, oldNames, targetName) {
+    if (!extra || typeof extra !== 'object') return false;
+    const record = validStoredTranslationRecord(extra, source);
+    if (!record) return false;
     const previousTranslation = String(record.translation);
     let nextTranslation = previousTranslation;
     for (const oldName of oldNames) {
@@ -1769,11 +1891,29 @@ async function lockSelectionName(snapshot) {
         toast = null;
         const previousTarget = normalizedCharacterNameLocks()
             .find(row => row.source.toLocaleLowerCase() === sourceName.toLocaleLowerCase())?.target || '';
-        const choice = await requestNameLockTarget(sourceName, currentName, [previousTarget]);
+        const choice = await requestNameLockTarget(sourceName, currentName);
         if (choice === null) return;
-        const { targetName, replaceHistory, oldNames } = choice;
+        const { targetName, replaceHistory } = choice;
         if (!selectionStillCurrent(snapshot)) throw new Error('이름을 입력하는 동안 번역문이 바뀌었습니다.');
 
+        let oldNames = [currentName, previousTarget].filter(Boolean);
+        if (replaceHistory) {
+            toast = showProgress('현재 채팅 전체에서 이전 이름 표기를 찾는 중입니다…');
+            try {
+                oldNames = await detectHistoricalNameForms(
+                    sourceName,
+                    currentName,
+                    [previousTarget],
+                    { signal: controller.signal },
+                );
+            } catch (error) {
+                if (isAbort(error, controller.signal)) throw error;
+                console.warn('[베르바] 이전 이름 표기 자동 탐색 실패 — 확인된 표기만 변경합니다.', error);
+            } finally {
+                clearProgress(toast);
+                toast = null;
+            }
+        }
         await saveCharacterNameLock(sourceName, targetName);
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
@@ -1788,7 +1928,7 @@ async function lockSelectionName(snapshot) {
         }
         globalThis.getSelection?.()?.removeAllRanges?.();
         const historyNotice = replaceHistory && historyResult.changedRecords
-            ? ` 이전 번역본 ${historyResult.changedRecords}개도 변경했어요.`
+            ? ` 현재 채팅의 저장 번역본 ${historyResult.changedRecords}개도 변경했어요.`
             : '';
         notify(`${sourceName}의 표기를 “${targetName}”로 이 캐릭터에 저장했어요.${historyNotice}`, 'success');
     } catch (error) {

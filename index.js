@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.21';
+const EXTENSION_VERSION = '0.1.22';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -1245,28 +1245,35 @@ function collectHistoricalNameCandidates(sourceName, currentName) {
     if (!Array.isArray(chat)) return { candidates: [currentName], translations: [] };
     const translations = [];
     const seenRecords = new Set();
+    const addTranslation = (translation, key) => {
+        const text = String(translation || '');
+        if (!text.trim() || seenRecords.has(key)) return;
+        seenRecords.add(key);
+        translations.push(text);
+    };
     const addRecord = (extra, source) => {
         if (!sourceContainsExactName(source, sourceName)) return;
         const stored = storedTranslationView(extra, source);
         if (!stored) return;
         const translation = stored.translation;
         const key = `${hashText(source)}\u0000${translation}`;
-        if (seenRecords.has(key)) return;
-        seenRecords.add(key);
-        translations.push(translation);
+        addTranslation(translation, key);
     };
 
     for (const message of chat) {
         if (!message || message.is_user || message.is_system) continue;
-        if (Array.isArray(message.swipes) && Array.isArray(message.swipe_info)) {
+        if (Array.isArray(message.swipes)) {
             message.swipes.forEach((rawSource, swipeId) => {
                 const source = typeof rawSource === 'string'
                     ? rawSource
                     : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');
                 addRecord(message.swipe_info?.[swipeId]?.extra, source);
+                if (isPredominantlyKorean(source)) addTranslation(source, `raw:${hashText(source)}`);
             });
         }
-        addRecord(message.extra, messageSource(message));
+        const activeSource = messageSource(message);
+        addRecord(message.extra, activeSource);
+        if (isPredominantlyKorean(activeSource)) addTranslation(activeSource, `raw:${hashText(activeSource)}`);
     }
 
     const frequency = new Map();
@@ -1341,6 +1348,24 @@ function replaceStoredNameInExtra(extra, source, oldNames, targetName, swipeId =
     return true;
 }
 
+function replaceNameInKoreanRawSource(rawSource, oldNames, targetName) {
+    const previous = typeof rawSource === 'string'
+        ? rawSource
+        : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');
+    if (!previous.trim() || !isPredominantlyKorean(previous)) return { changed: false, value: rawSource };
+    let next = previous;
+    for (const oldName of oldNames) {
+        if (oldName && oldName !== targetName) next = replaceOutsideProtected(next, oldName, targetName);
+    }
+    if (next === previous) return { changed: false, value: rawSource };
+    if (typeof rawSource === 'string') return { changed: true, value: next };
+    const value = { ...rawSource };
+    const key = ['mes', 'text', 'content', 'message'].find(name => Object.hasOwn(value, name));
+    if (key) value[key] = next;
+    else return { changed: false, value: rawSource };
+    return { changed: true, value };
+}
+
 function replaceNameAcrossChatTranslations(oldNames, targetName) {
     const context = liveContext();
     const chat = context.chat;
@@ -1353,7 +1378,8 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
         if (!message || message.is_user || message.is_system) return;
         let messageChanged = false;
         let currentSwipeWasCounted = false;
-        if (Array.isArray(message.swipes) && Array.isArray(message.swipe_info)) {
+        let currentRawSwipeWasCounted = false;
+        if (Array.isArray(message.swipes)) {
             message.swipes.forEach((rawSource, swipeId) => {
                 const source = typeof rawSource === 'string'
                     ? rawSource
@@ -1364,6 +1390,35 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
                 messageChanged = true;
                 if (swipeId === currentSwipeId(message)) currentSwipeWasCounted = true;
             });
+        }
+
+        if (Array.isArray(message.swipes)) {
+            message.swipes.forEach((rawSource, swipeId) => {
+                const replaced = replaceNameInKoreanRawSource(rawSource, candidates, targetName);
+                if (!replaced.changed) return;
+                message.swipes[swipeId] = replaced.value;
+                changedRecords += 1;
+                messageChanged = true;
+                if (swipeId === currentSwipeId(message)) {
+                    message.mes = typeof replaced.value === 'string'
+                        ? replaced.value
+                        : String(
+                            replaced.value?.mes
+                            ?? replaced.value?.text
+                            ?? replaced.value?.content
+                            ?? replaced.value?.message
+                            ?? '',
+                        );
+                    currentRawSwipeWasCounted = true;
+                }
+            });
+        }
+
+        const activeRawChanged = replaceNameInKoreanRawSource(message.mes, candidates, targetName);
+        if (activeRawChanged.changed) {
+            message.mes = activeRawChanged.value;
+            if (!currentRawSwipeWasCounted) changedRecords += 1;
+            messageChanged = true;
         }
 
         const activeSource = messageSource(message);
@@ -1381,12 +1436,14 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
 
         if (!messageChanged) return;
         changedMessageIds.add(messageId);
-        renderedTranslationCache.clear();
         lastRenderedTranslationByMessage.delete(messageId);
-        updateMessageBlock(messageId, message);
+        if (document.querySelector(`.mes[mesid="${messageId}"]`)) updateMessageBlock(messageId, message);
     });
 
-    if (changedMessageIds.size) scheduleChatSave(chat);
+    if (changedMessageIds.size) {
+        renderedTranslationCache.clear();
+        scheduleChatSave(chat);
+    }
     return { changedRecords, changedMessages: changedMessageIds.size };
 }
 

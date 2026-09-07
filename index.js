@@ -15,17 +15,22 @@ import {
     hashText,
     isPredominantlyKorean,
     parseSegmentResponse,
+    parseSelectionCandidateResponse,
     replaceOutsideProtected,
     segmentSource,
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.15';
+const EXTENSION_VERSION = '0.1.18';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
     profileId: '',
+    fallbackProfileId: '',
+    thirdProfileId: '',
+    activeProfileSlot: 'A',
     autoInput: false,
+    selectionCandidates: false,
     globalPrompt: '',
     allDialoguePrompt: '',
     dialoguePrompt: '',
@@ -290,17 +295,35 @@ function profileList() {
     }));
 }
 
-function refreshProfileSelect() {
-    const select = document.querySelector('#verba-profile');
+function fillProfileSelect(select, selectedId, placeholder) {
     if (!select) return;
     const profiles = profileList();
-    select.innerHTML = '<option value="">연결 프로필을 선택하세요</option>' + profiles
+    select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>` + profiles
         .map(profile => `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.name)}</option>`)
         .join('');
-    if (settings.profileId && !profiles.some(profile => profile.id === String(settings.profileId))) {
-        select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(settings.profileId)}">저장된 프로필을 찾을 수 없음</option>`);
+    if (selectedId && !profiles.some(profile => profile.id === String(selectedId))) {
+        select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(selectedId)}">저장된 프로필을 찾을 수 없음</option>`);
     }
-    select.value = String(settings.profileId || '');
+    select.value = String(selectedId || '');
+}
+
+function refreshProfileSelect() {
+    fillProfileSelect(
+        document.querySelector('#verba-profile'),
+        settings.profileId,
+        '연결 프로필을 선택하세요',
+    );
+    fillProfileSelect(
+        document.querySelector('#verba-fallback-profile'),
+        settings.fallbackProfileId,
+        '프로필 B를 사용하지 않음',
+    );
+    fillProfileSelect(
+        document.querySelector('#verba-third-profile'),
+        settings.thirdProfileId,
+        '프로필 C를 사용하지 않음',
+    );
+    refreshProfileToggleButton();
 }
 
 function enqueueRequest(task) {
@@ -368,7 +391,7 @@ function wait(ms, signal) {
 }
 
 async function sendProfileRequest(prompt, options = {}) {
-    const profileId = String(settings.profileId || '');
+    const profileId = String(options.profileId ?? settings.profileId ?? '');
     if (!profileId) throw new Error('번역기 전용 연결 프로필을 선택해 주세요.');
     const outerSignal = options.signal || null;
     if (outerSignal?.aborted) throw abortError();
@@ -412,6 +435,56 @@ async function sendProfileRequest(prompt, options = {}) {
     }
 }
 
+function fallbackEligibleError(error) {
+    const text = errorText(error).toLowerCase();
+    return !/\b(?:413|422)\b|context length|maximum context|too (?:large|long)|safety|blocked|content.?filter|컨텍스트.*초과/.test(text);
+}
+
+function activeProfileSlot() {
+    const configured = configuredProfiles();
+    const requested = String(settings.activeProfileSlot || 'A');
+    return configured.some(profile => profile.slot === requested) ? requested : 'A';
+}
+
+function configuredProfiles() {
+    const candidates = [
+        { slot: 'A', id: String(settings.profileId || '') },
+        { slot: 'B', id: String(settings.fallbackProfileId || '') },
+        { slot: 'C', id: String(settings.thirdProfileId || '') },
+    ];
+    const seen = new Set();
+    return candidates.filter(profile => {
+        if (!profile.id || seen.has(profile.id)) return false;
+        seen.add(profile.id);
+        return true;
+    });
+}
+
+function configuredProfileCycle() {
+    const configured = configuredProfiles();
+    const slot = activeProfileSlot();
+    const activeIndex = Math.max(0, configured.findIndex(profile => profile.slot === slot));
+    const ordered = configured.slice(activeIndex).concat(configured.slice(0, activeIndex));
+    return {
+        slot: ordered[0]?.slot || 'A',
+        active: ordered[0]?.id || '',
+        fallbacks: ordered.slice(1),
+    };
+}
+
+function profileDisplayName(profileId) {
+    return profileList().find(profile => profile.id === String(profileId))?.name || '보조 프로필';
+}
+
+let lastFallbackNoticeAt = 0;
+
+function notifyFallbackUsed(profileId) {
+    const now = Date.now();
+    if (now - lastFallbackNoticeAt < 8000) return;
+    lastFallbackNoticeAt = now;
+    notify(`현재 프로필 연결 실패로 다른 프로필 “${profileDisplayName(profileId)}”을 사용했어요.`, 'warning');
+}
+
 async function sendWithRetry(prompt, options = {}) {
     const delays = [3000, 5000, 8000, 12000, 18000];
     const token = Symbol('verba-server-retry');
@@ -427,13 +500,35 @@ async function sendWithRetry(prompt, options = {}) {
     try {
         for (let attempt = 0; attempt <= delays.length; attempt += 1) {
             if (controller.signal.aborted) throw abortError();
+            const profiles = configuredProfileCycle();
+            const primaryProfileId = profiles.active;
             try {
-                return await sendProfileRequest(prompt, requestOptions);
-            } catch (error) {
-                if (isAbort(error, controller.signal)) throw error;
-                lastError = error;
-                if (!transientError(error) || attempt === delays.length) break;
-                const delay = retryAfterMs(error) || delays[attempt];
+                return await sendProfileRequest(prompt, { ...requestOptions, profileId: primaryProfileId });
+            } catch (primaryError) {
+                if (isAbort(primaryError, controller.signal)) throw primaryError;
+                let cycleError = primaryError;
+                const errors = [primaryError];
+                if (profiles.fallbacks.length && fallbackEligibleError(primaryError)) {
+                    for (const fallback of profiles.fallbacks) {
+                        console.warn(`[베르바] 현재 선택 프로필 실패 — 프로필 ${fallback.slot} ${profileDisplayName(fallback.id)}(으)로 임시 전환`, errors.at(-1));
+                        try {
+                            const response = await sendProfileRequest(prompt, {
+                                ...requestOptions,
+                                profileId: fallback.id,
+                            });
+                            notifyFallbackUsed(fallback.id);
+                            return response;
+                        } catch (fallbackError) {
+                            if (isAbort(fallbackError, controller.signal)) throw fallbackError;
+                            console.warn(`[베르바] 연결 프로필 ${fallback.slot} 요청도 실패했습니다.`, fallbackError);
+                            errors.push(fallbackError);
+                        }
+                    }
+                    cycleError = [...errors].reverse().find(transientError) || errors.at(-1);
+                }
+                lastError = cycleError;
+                if (!transientError(cycleError) || attempt === delays.length) break;
+                const delay = retryAfterMs(cycleError) || delays[attempt];
                 const state = {
                     controller,
                     retryCount: attempt + 1,
@@ -443,7 +538,7 @@ async function sendWithRetry(prompt, options = {}) {
                 };
                 serverRetryStates.set(token, state);
                 updateServerRetryIndicator();
-                console.warn(`[베르바] 일시적 서버 오류 — ${state.retryCount}/${state.maxRetries}회, ${Math.ceil(delay / 1000)}초 후 번역 재시도`, error);
+                console.warn(`[베르바] 일시적 서버 오류 — ${state.retryCount}/${state.maxRetries}회, ${Math.ceil(delay / 1000)}초 후 번역 재시도`, cycleError);
                 await wait(delay, controller.signal);
                 state.delayMs = 0;
                 state.updatedAt = Date.now();
@@ -476,6 +571,23 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
         }
     }
     throw lastError || new Error('번역 결과를 해석하지 못했습니다.');
+}
+
+async function requestSelectionCandidates(prompt, options = {}) {
+    let lastError;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        const repair = attempt
+            ? '\n\nYour previous response was invalid. Return strict JSON only with exactly three distinct candidates.'
+            : '';
+        try {
+            const response = await sendWithRetry(prompt + repair, options);
+            return parseSelectionCandidateResponse(extractResponseText(response), 3);
+        } catch (error) {
+            if (isAbort(error, options.signal) || transientError(error)) throw error;
+            lastError = error;
+        }
+    }
+    throw lastError || new Error('선택 재번역 후보를 해석하지 못했습니다.');
 }
 
 async function translateOutputText(source, options = {}) {
@@ -910,7 +1022,7 @@ function requestOneTimeInstruction(scope, preview = '') {
                 <small>비워두면 현재 전역 설정대로 다시 번역해요.</small>
                 <div class="verba-modal-actions">
                     <button type="button" class="menu_button verba-cancel">취소</button>
-                    <button type="button" class="menu_button verba-submit">재번역 시작</button>
+                    <button type="button" class="menu_button verba-submit">${isSelection && settings.selectionCandidates ? '후보 만들기' : '재번역 시작'}</button>
                 </div>
             </section>`;
         // SillyTavern themes and mobile drawers sometimes create their own stacking
@@ -988,7 +1100,11 @@ function requestNameLockTarget(sourceName, currentName) {
                 </div>
                 <label for="verba-name-lock-target">앞으로 사용할 표기</label>
                 <input id="verba-name-lock-target" class="text_pole" maxlength="120" value="${escapeHtml(currentName)}">
-                <small>현재 번역을 바로 고치고, 이 캐릭터의 다른 채팅에서도 같은 표기를 사용합니다.</small>
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-name-lock-history" checked>
+                    <span>현재 채팅의 이전 번역 표기도 모두 변경</span>
+                </label>
+                <small>현재 번역을 바로 고치고, 이 캐릭터의 다른 채팅에서도 이후 번역에 같은 표기를 사용합니다.</small>
                 <div class="verba-modal-actions">
                     <button type="button" class="menu_button verba-cancel">취소</button>
                     <button type="button" class="menu_button verba-submit">이름 고정</button>
@@ -1013,13 +1129,14 @@ function requestNameLockTarget(sourceName, currentName) {
             resolve(value);
         };
         const input = overlay.querySelector('#verba-name-lock-target');
+        const history = overlay.querySelector('#verba-name-lock-history');
         const submit = () => {
             const value = String(input.value || '').trim();
             if (!value) {
                 notify('고정할 이름 표기를 입력해 주세요.', 'warning');
                 return;
             }
-            finish(value);
+            finish({ targetName: value, replaceHistory: Boolean(history.checked) });
         };
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(null));
@@ -1038,6 +1155,157 @@ function requestNameLockTarget(sourceName, currentName) {
             input.focus();
             input.select();
         });
+    });
+}
+
+function sourceContainsName(source, sourceName) {
+    const text = String(source || '');
+    const name = String(sourceName || '').trim();
+    if (!text || !name) return false;
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+        return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(text);
+    } catch {
+        return text.toLocaleLowerCase().includes(name.toLocaleLowerCase());
+    }
+}
+
+function replaceStoredNameInExtra(extra, source, oldNames, targetName) {
+    if (!extra || typeof extra !== 'object') return false;
+    const record = extra[STATE_KEY];
+    if (
+        !record
+        || typeof record !== 'object'
+        || record.sourceHash !== hashText(source)
+        || !String(record.translation || '').trim()
+    ) return false;
+    const previousTranslation = String(record.translation);
+    let nextTranslation = previousTranslation;
+    for (const oldName of oldNames) {
+        if (oldName && oldName !== targetName) {
+            nextTranslation = replaceOutsideProtected(nextTranslation, oldName, targetName);
+        }
+    }
+    if (nextTranslation === previousTranslation) return false;
+    extra[STATE_KEY] = {
+        ...record,
+        translation: nextTranslation,
+        updatedAt: new Date().toISOString(),
+    };
+    if (extra.display_text === previousTranslation) extra.display_text = nextTranslation;
+    return true;
+}
+
+function replaceNameInPreviousTranslations(sourceName, oldNames, targetName) {
+    const context = liveContext();
+    const chat = context.chat;
+    if (!Array.isArray(chat)) return { changedRecords: 0, changedMessages: 0 };
+    const candidates = [...new Set(oldNames.map(value => String(value || '').trim()).filter(Boolean))];
+    const changedMessageIds = new Set();
+    let changedRecords = 0;
+
+    chat.forEach((message, messageId) => {
+        if (!message || message.is_user || message.is_system) return;
+        let messageChanged = false;
+        let currentSwipeWasCounted = false;
+        if (Array.isArray(message.swipes) && Array.isArray(message.swipe_info)) {
+            message.swipes.forEach((rawSource, swipeId) => {
+                const source = typeof rawSource === 'string'
+                    ? rawSource
+                    : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');
+                if (!sourceContainsName(source, sourceName)) return;
+                const extra = message.swipe_info?.[swipeId]?.extra;
+                if (!replaceStoredNameInExtra(extra, source, candidates, targetName)) return;
+                changedRecords += 1;
+                messageChanged = true;
+                if (swipeId === currentSwipeId(message)) currentSwipeWasCounted = true;
+            });
+        }
+
+        const activeSource = messageSource(message);
+        if (sourceContainsName(activeSource, sourceName)) {
+            const activeChanged = replaceStoredNameInExtra(message.extra, activeSource, candidates, targetName);
+            if (activeChanged) {
+                if (!currentSwipeWasCounted) changedRecords += 1;
+                messageChanged = true;
+            }
+        }
+
+        if (!messageChanged) return;
+        changedMessageIds.add(messageId);
+        renderedTranslationCache.clear();
+        lastRenderedTranslationByMessage.delete(messageId);
+        updateMessageBlock(messageId, message);
+    });
+
+    if (changedMessageIds.size) scheduleChatSave(chat);
+    return { changedRecords, changedMessages: changedMessageIds.size };
+}
+
+function requestSelectionCandidateChoice(candidates, currentText) {
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
+    const choices = Array.isArray(candidates) ? candidates.filter(Boolean).slice(0, 3) : [];
+    if (!choices.length) return Promise.resolve(null);
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay';
+        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+        overlay.innerHTML = `
+            <section class="verba-modal verba-candidate-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
+                    <strong>선택 재번역 후보</strong>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
+                </header>
+                <div class="verba-target-preview"><b>현재 번역</b><span>${escapeHtml(currentText)}</span></div>
+                <small>사용할 후보를 누르면 선택한 부분만 교체됩니다.</small>
+                <div class="verba-candidate-list"></div>
+                <div class="verba-modal-actions">
+                    <button type="button" class="menu_button verba-cancel">기존 번역 유지</button>
+                </div>
+            </section>`;
+        const list = overlay.querySelector('.verba-candidate-list');
+        choices.forEach((choice, index) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'menu_button verba-candidate-option';
+            const number = document.createElement('b');
+            number.textContent = `후보 ${index + 1}`;
+            const text = document.createElement('span');
+            text.textContent = choice;
+            button.append(number, text);
+            list.append(button);
+        });
+        document.documentElement.append(overlay);
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed-position fallback.
+        }
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            try {
+                overlay.hidePopover?.();
+            } catch {
+                // It may already be closed.
+            }
+            overlay.remove();
+            resolve(value);
+        };
+        overlay.querySelectorAll('.verba-candidate-option').forEach((button, index) => {
+            button.addEventListener('click', () => finish(choices[index]));
+        });
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(null));
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) finish(null);
+        });
+        overlay.addEventListener('keydown', event => {
+            if (event.key === 'Escape') finish(null);
+        });
+        requestAnimationFrame(() => overlay.querySelector('.verba-candidate-option')?.focus());
     });
 }
 
@@ -1499,18 +1767,34 @@ async function lockSelectionName(snapshot) {
 
         clearProgress(toast);
         toast = null;
-        const targetName = await requestNameLockTarget(sourceName, currentName);
-        if (targetName === null) return;
+        const choice = await requestNameLockTarget(sourceName, currentName);
+        if (choice === null) return;
+        const { targetName, replaceHistory } = choice;
         if (!selectionStillCurrent(snapshot)) throw new Error('이름을 입력하는 동안 번역문이 바뀌었습니다.');
 
+        const previousTarget = normalizedCharacterNameLocks()
+            .find(row => row.source.toLocaleLowerCase() === sourceName.toLocaleLowerCase())?.target || '';
         await saveCharacterNameLock(sourceName, targetName);
-        const updated = replaceOutsideProtected(snapshot.translation, currentName, targetName);
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
         if (!message || message !== snapshot.message) throw new Error('현재 메시지가 바뀌었습니다.');
-        applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat);
+        let historyResult = { changedRecords: 0, changedMessages: 0 };
+        if (replaceHistory) {
+            historyResult = replaceNameInPreviousTranslations(
+                sourceName,
+                [currentName, previousTarget],
+                targetName,
+            );
+        }
+        if (!replaceHistory || !historyResult.changedMessages) {
+            const updated = replaceOutsideProtected(snapshot.translation, currentName, targetName);
+            applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat);
+        }
         globalThis.getSelection?.()?.removeAllRanges?.();
-        notify(`${sourceName}의 표기를 “${targetName}”로 이 캐릭터에 저장했어요.`, 'success');
+        const historyNotice = replaceHistory && historyResult.changedRecords
+            ? ` 이전 번역본 ${historyResult.changedRecords}개도 변경했어요.`
+            : '';
+        notify(`${sourceName}의 표기를 “${targetName}”로 이 캐릭터에 저장했어요.${historyNotice}`, 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
             console.error('[베르바] 이름 고정 실패', error);
@@ -1552,6 +1836,7 @@ async function retranslateSelection(snapshot) {
     }
 
     const controller = new AbortController();
+    const candidateMode = Boolean(settings.selectionCandidates);
     const prompt = buildSelectionPrompt({
         source: snapshot.source,
         translation: snapshot.translation,
@@ -1561,12 +1846,35 @@ async function retranslateSelection(snapshot) {
         settings,
         oneTimeInstruction: instruction,
         speakerIdentity: outputSpeakerIdentity(snapshot.message),
+        candidateCount: candidateMode ? 3 : 1,
     });
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected }];
-    const toast = showProgress('선택한 부분만 다시 번역 중입니다…');
+    let toast = showProgress(candidateMode
+        ? '선택한 부분의 번역 후보 3개를 만드는 중입니다…'
+        : '선택한 부분만 다시 번역 중입니다…');
     try {
-        const result = await requestSegments(prompt, expected, { signal: controller.signal });
-        const replacement = String(result.get('seg_0000') || '').trim();
+        let replacement = '';
+        if (candidateMode) {
+            const received = await requestSelectionCandidates(prompt, { signal: controller.signal });
+            const currentKey = snapshot.selected.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+            const candidates = received.filter(candidate => {
+                const text = String(candidate || '').trim();
+                if (!text || text.replace(/\s+/g, ' ').toLocaleLowerCase() === currentKey) return false;
+                if (findBannedWords(text, settings.bannedWords).length) return false;
+                return text.length <= Math.max(300, snapshot.selected.length * 7);
+            });
+            if (candidates.length < 2) {
+                throw new Error('사용할 수 있는 서로 다른 번역 후보가 두 개 이상 만들어지지 않았습니다.');
+            }
+            if (!selectionStillCurrent(snapshot)) throw new Error('후보 생성 중 원문이나 번역문이 바뀌었습니다.');
+            clearProgress(toast);
+            toast = null;
+            replacement = await requestSelectionCandidateChoice(candidates, snapshot.selected);
+            if (replacement === null) return;
+        } else {
+            const result = await requestSegments(prompt, expected, { signal: controller.signal });
+            replacement = String(result.get('seg_0000') || '').trim();
+        }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
         const banned = findBannedWords(replacement, settings.bannedWords);
         if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
@@ -1581,7 +1889,7 @@ async function retranslateSelection(snapshot) {
         const message = context.chat?.[snapshot.messageId];
         applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat);
         globalThis.getSelection?.()?.removeAllRanges?.();
-        notify('선택한 부분만 다시 번역했어요.', 'success');
+        notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
             console.error('[베르바] 선택 부분 재번역 실패', error);
@@ -1643,6 +1951,54 @@ function refreshTranslationClasses() {
     });
 }
 
+function createProfileToggleButton() {
+    const button = document.createElement('button');
+    button.id = 'verba-profile-toggle';
+    button.type = 'button';
+    button.className = 'verba-input-icon verba-profile-toggle';
+    const arrows = document.createElement('span');
+    arrows.className = 'verba-profile-arrows';
+    arrows.textContent = '⇄';
+    arrows.setAttribute('aria-hidden', 'true');
+    const badge = document.createElement('small');
+    badge.className = 'verba-profile-slot';
+    badge.textContent = 'A';
+    button.append(arrows, badge);
+    button.addEventListener('click', () => {
+        const configured = configuredProfiles();
+        if (configured.length < 2) {
+            notify('설정에서 서로 다른 연결 프로필을 두 개 이상 선택해 주세요.', 'warning');
+            return;
+        }
+        const currentIndex = configured.findIndex(profile => profile.slot === activeProfileSlot());
+        settings.activeProfileSlot = configured[(currentIndex + 1) % configured.length].slot;
+        saveSettings();
+        refreshProfileToggleButton();
+        const profiles = configuredProfileCycle();
+        notify(`번역 프로필 ${profiles.slot}: ${profileDisplayName(profiles.active)}`, 'success');
+    });
+    return button;
+}
+
+function refreshProfileToggleButton() {
+    const button = document.querySelector('#verba-profile-toggle');
+    if (!button) return;
+    const profiles = configuredProfileCycle();
+    const configured = configuredProfiles();
+    const canSwitch = configured.length >= 2;
+    button.hidden = !canSwitch;
+    button.querySelector('.verba-profile-slot').textContent = profiles.slot;
+    button.classList.toggle('verba-profile-b', profiles.slot === 'B');
+    button.classList.toggle('verba-profile-c', profiles.slot === 'C');
+    const currentIndex = configured.findIndex(profile => profile.slot === profiles.slot);
+    const nextSlot = canSwitch ? configured[(currentIndex + 1) % configured.length].slot : 'B';
+    const title = canSwitch
+        ? `현재 번역 프로필 ${profiles.slot}: ${profileDisplayName(profiles.active)} · 눌러 ${nextSlot}로 전환`
+        : '설정에서 연결 프로필을 두 개 이상 선택하면 빠르게 전환할 수 있어요.';
+    button.title = title;
+    button.setAttribute('aria-label', title);
+}
+
 function refreshRetranslateButton() {
     const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
@@ -1662,7 +2018,12 @@ function refreshRetranslateButton() {
 }
 
 function injectInputAction() {
-    if (document.querySelector('#verba-input-actions')) {
+    const existingActions = document.querySelector('#verba-input-actions');
+    if (existingActions) {
+        if (!document.querySelector('#verba-profile-toggle')) {
+            existingActions.prepend(createProfileToggleButton());
+        }
+        refreshProfileToggleButton();
         refreshRetranslateButton();
         return;
     }
@@ -1671,6 +2032,7 @@ function injectInputAction() {
     const actions = document.createElement('div');
     actions.id = 'verba-input-actions';
     actions.className = 'verba-input-actions';
+    const profileButton = createProfileToggleButton();
     const button = document.createElement('button');
     button.id = 'verba-retranslate-latest';
     button.type = 'button';
@@ -1679,8 +2041,9 @@ function injectInputAction() {
     button.title = '최근 AI 아웃풋 전체 재번역';
     button.setAttribute('aria-label', button.title);
     button.addEventListener('click', retranslateLatestOutput);
-    actions.append(button);
+    actions.append(profileButton, button);
     sendButton.before(actions);
+    refreshProfileToggleButton();
     refreshRetranslateButton();
 }
 
@@ -1719,19 +2082,31 @@ function injectSettingsPanel() {
             <div class="inline-drawer-content">
                 <div class="verba-note">AI 아웃풋은 항상 한국어로 자동 번역하며, 한국어 중심 출력은 API를 호출하지 않아요.</div>
 
-                <label for="verba-profile">번역기 전용 연결 프로필</label>
+                <label for="verba-profile">연결 프로필 A</label>
                 <div class="verba-profile-row">
                     <select id="verba-profile" class="text_pole"></select>
                     <button type="button" id="verba-refresh-profiles" class="menu_button">새로고침</button>
                 </div>
-                <button type="button" id="verba-test-profile" class="menu_button verba-wide">연결 테스트</button>
-                <div class="verba-help">429·일시적 서버·네트워크 오류는 대기 간격을 늘리며 최대 5회 자동 재시도해요.</div>
+
+                <label for="verba-fallback-profile">연결 프로필 B <small>(선택)</small></label>
+                <select id="verba-fallback-profile" class="text_pole"></select>
+
+                <label for="verba-third-profile">연결 프로필 C <small>(선택)</small></label>
+                <select id="verba-third-profile" class="text_pole"></select>
+                <button type="button" id="verba-test-profile" class="menu_button verba-wide">현재 프로필 연결 테스트</button>
+                <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 바꿀 수 있어요. 현재 프로필 요청이 실패하면 나머지 프로필을 차례로 임시 사용하며, 수동 선택 상태는 바뀌지 않습니다.</div>
 
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
                     <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
                 </label>
                 <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
+
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-selection-candidates" ${settings.selectionCandidates ? 'checked' : ''}>
+                    <span>선택 재번역 후보 3개 미리보기</span>
+                </label>
+                <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
                 <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
                 <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
@@ -1755,12 +2130,59 @@ function injectSettingsPanel() {
 
     panel.querySelector('#verba-profile').addEventListener('change', event => {
         settings.profileId = event.target.value;
+        if (!settings.profileId) {
+            settings.fallbackProfileId = '';
+            settings.thirdProfileId = '';
+            settings.activeProfileSlot = 'A';
+        } else {
+            if (settings.fallbackProfileId === settings.profileId) {
+                settings.fallbackProfileId = '';
+                if (settings.activeProfileSlot === 'B') settings.activeProfileSlot = 'A';
+            }
+            if (settings.thirdProfileId === settings.profileId) {
+                settings.thirdProfileId = '';
+                if (settings.activeProfileSlot === 'C') settings.activeProfileSlot = 'A';
+            }
+        }
+        refreshProfileSelect();
+        saveSettings();
+    });
+    panel.querySelector('#verba-fallback-profile').addEventListener('change', event => {
+        const value = event.target.value;
+        if (value && [settings.profileId, settings.thirdProfileId].map(String).includes(String(value))) {
+            settings.fallbackProfileId = '';
+            if (settings.activeProfileSlot === 'B') settings.activeProfileSlot = 'A';
+            event.target.value = '';
+            notify('프로필 A·B·C는 서로 다른 연결 프로필을 선택해 주세요.', 'warning');
+        } else {
+            settings.fallbackProfileId = value;
+            if (!value && settings.activeProfileSlot === 'B') settings.activeProfileSlot = 'A';
+        }
+        refreshProfileToggleButton();
+        saveSettings();
+    });
+    panel.querySelector('#verba-third-profile').addEventListener('change', event => {
+        const value = event.target.value;
+        if (value && [settings.profileId, settings.fallbackProfileId].map(String).includes(String(value))) {
+            settings.thirdProfileId = '';
+            if (settings.activeProfileSlot === 'C') settings.activeProfileSlot = 'A';
+            event.target.value = '';
+            notify('프로필 A·B·C는 서로 다른 연결 프로필을 선택해 주세요.', 'warning');
+        } else {
+            settings.thirdProfileId = value;
+            if (!value && settings.activeProfileSlot === 'C') settings.activeProfileSlot = 'A';
+        }
+        refreshProfileToggleButton();
         saveSettings();
     });
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
     panel.querySelector('#verba-auto-input').addEventListener('change', event => {
         settings.autoInput = event.target.checked;
+        saveSettings();
+    });
+    panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
+        settings.selectionCandidates = event.target.checked;
         saveSettings();
     });
     panel.querySelector('#verba-global-prompt').addEventListener('change', event => {

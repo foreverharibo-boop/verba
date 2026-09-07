@@ -121,6 +121,51 @@
     cursor: default;
 }
 
+.verba-profile-toggle {
+    position: relative;
+    font-size: 19px;
+    overflow: visible;
+}
+
+.verba-profile-toggle[hidden] {
+    display: none !important;
+}
+
+.verba-profile-arrows {
+    line-height: 1;
+    transform: translateX(-1px);
+}
+
+.verba-profile-slot {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    min-width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    border-radius: 999px;
+    background: var(--SmartThemeBlurTintColor, #25252a);
+    color: var(--verba-accent, #a98be8);
+    font-size: 9px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--verba-accent, #a98be8) 55%, transparent);
+}
+
+.verba-profile-toggle.verba-profile-b .verba-profile-slot {
+    background: var(--verba-accent, #a98be8);
+    color: var(--SmartThemeBlurTintColor, #25252a);
+}
+
+.verba-profile-toggle.verba-profile-c .verba-profile-slot {
+    background: #79b7e8;
+    color: var(--SmartThemeBlurTintColor, #25252a);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #79b7e8 70%, transparent);
+}
+
 .verba-input-icon.verba-busy {
     animation: verba-spin 1.1s linear infinite;
 }
@@ -345,6 +390,44 @@
     width: 100%;
 }
 
+.verba-candidate-modal {
+    width: min(620px, calc(100vw - 24px));
+}
+
+.verba-candidate-list {
+    display: grid;
+    gap: 8px;
+}
+
+.verba-candidate-option {
+    width: 100% !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-columns: 58px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 10px 11px !important;
+    text-align: left !important;
+    white-space: normal !important;
+    line-height: 1.45 !important;
+}
+
+.verba-candidate-option b {
+    color: var(--verba-accent, #a98be8);
+    white-space: nowrap;
+}
+
+.verba-candidate-option span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.verba-candidate-option:hover,
+.verba-candidate-option:focus-visible {
+    border-color: var(--verba-accent, #a98be8) !important;
+    background: color-mix(in srgb, var(--verba-accent, #a98be8) 16%, transparent) !important;
+}
+
 @media (max-width: 600px) {
     .verba-modal {
         width: calc(100vw - 18px);
@@ -362,5 +445,10 @@
 
     .verba-modal-actions > button {
         min-width: 86px;
+    }
+
+    .verba-candidate-option {
+        grid-template-columns: 52px minmax(0, 1fr);
+        padding: 9px !important;
     }
 }

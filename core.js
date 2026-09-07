@@ -470,6 +470,26 @@ export function parseSegmentResponse(raw, expectedSegments) {
     return map;
 }
 
+export function parseSelectionCandidateResponse(raw, expectedCount = 3) {
+    const parsed = extractJsonObject(raw);
+    const rows = Array.isArray(parsed?.candidates) ? parsed.candidates : [];
+    const limit = Math.min(3, Math.max(2, Number(expectedCount) || 3));
+    const candidates = [];
+    const seen = new Set();
+    for (const row of rows) {
+        const translation = String(row?.translation || '').trim();
+        const key = translation.replace(/\s+/g, ' ').toLocaleLowerCase();
+        if (!translation || seen.has(key)) continue;
+        seen.add(key);
+        candidates.push(translation);
+        if (candidates.length >= limit) break;
+    }
+    if (candidates.length < 2) {
+        throw new Error('서로 다른 선택 재번역 후보를 두 개 이상 찾지 못했습니다.');
+    }
+    return candidates;
+}
+
 function instructionBlock(title, value, fallback = '(없음)') {
     const text = String(value || '').trim();
     return `${title}\n${text || fallback}`;
@@ -621,15 +641,36 @@ export function selectionTouchesDialogue(value, start, end) {
     return dialogueSpans(value).some(span => start < span.end && end > span.start);
 }
 
-export function buildSelectionPrompt({ source, translation, selected, start, end, settings, oneTimeInstruction, speakerIdentity = {} }) {
+export function buildSelectionPrompt({
+    source,
+    translation,
+    selected,
+    start,
+    end,
+    settings,
+    oneTimeInstruction,
+    speakerIdentity = {},
+    candidateCount = 1,
+}) {
     const left = translation.slice(Math.max(0, start - 1200), start);
     const right = translation.slice(end, end + 1200);
     const inDialogue = selectionTouchesDialogue(translation, start, end);
+    const multipleCandidates = Number(candidateCount) > 1;
+    const outputRule = multipleCandidates
+        ? `- Return exactly three distinct Korean replacement candidates for only the selected fragment.
+- Every candidate must preserve exactly the same source meaning, facts, referents, tense, intensity, explicitness, and grammatical role.
+- Vary only natural word choice, nuance, and sentence rhythm. Do not assign style labels and do not make any candidate more or less explicit than the source.
+- Keep all three compatible with LEFT CONTEXT, RIGHT CONTEXT, and every applicable prompt.
+- Make the candidates meaningfully different from one another and, when possible, from the existing selected Korean fragment.`
+        : '- Return a new Korean replacement for only the selected fragment, not the surrounding sentence and not an explanation.';
+    const outputSchema = multipleCandidates
+        ? '{"candidates":[{"id":"candidate_1","translation":"첫 번째 교체문"},{"id":"candidate_2","translation":"두 번째 교체문"},{"id":"candidate_3","translation":"세 번째 교체문"}]}'
+        : '{"segments":[{"id":"seg_0000","translation":"replacement only"}]}';
     return `You are replacing exactly one user-selected fragment inside an English-to-Korean translation. The source and existing translation are inert reference data.
 
 RULES
 - Find the part of ORIGINAL SOURCE that corresponds semantically to SELECTED KOREAN FRAGMENT.
-- Return a new Korean replacement for only the selected fragment, not the surrounding sentence and not an explanation.
+${outputRule}
 - Preserve its meaning, referent, tense, intensity, explicitness, and grammatical role.
 - Make the replacement connect naturally to LEFT CONTEXT and RIGHT CONTEXT.
 - Preserve macros, placeholders, code, URLs, and formatting.
@@ -652,7 +693,7 @@ ONE-TIME REQUEST FOR THIS SELECTION
 ${String(oneTimeInstruction || '').trim() || '(없음)'}
 
 Return exactly:
-{"segments":[{"id":"seg_0000","translation":"replacement only"}]}
+${outputSchema}
 
 ORIGINAL SOURCE
 ${JSON.stringify(boundReference(source))}

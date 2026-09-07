@@ -3,6 +3,7 @@ import {
     assembleTranslation,
     buildBannedRepairPrompt,
     buildInputPrompt,
+    buildNameMatchPrompt,
     buildOutputPrompt,
     buildSelectionPrompt,
     buildUntranslatedRepairPrompt,
@@ -14,12 +15,14 @@ import {
     hashText,
     isPredominantlyKorean,
     parseSegmentResponse,
+    replaceOutsideProtected,
     segmentSource,
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.13';
+const EXTENSION_VERSION = '0.1.15';
 const STATE_KEY = 'verba_current_translation';
+const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
     profileId: '',
     autoInput: false,
@@ -189,6 +192,62 @@ function isAbort(error, signal) {
 
 function saveSettings() {
     liveContext().saveSettingsDebounced?.();
+}
+
+function currentCharacterReference() {
+    const context = liveContext();
+    if (context.characterId === undefined || context.characterId === null || context.characterId === '') return null;
+    const characterId = Number(context.characterId);
+    if (!Number.isInteger(characterId) || characterId < 0) return null;
+    const character = context.characters?.[characterId];
+    return character ? { context, characterId, character } : null;
+}
+
+function normalizedCharacterNameLocks(character = currentCharacterReference()?.character) {
+    const rows = character?.data?.extensions?.[CHARACTER_FIELD_KEY]?.nameLocks;
+    if (!Array.isArray(rows)) return [];
+    const result = [];
+    const seen = new Set();
+    for (const row of rows) {
+        const source = String(row?.source || '').trim();
+        const target = String(row?.target || '').trim();
+        if (!source || !target || source.length > 120 || target.length > 120) continue;
+        const key = source.toLocaleLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push({ source, target });
+    }
+    return result;
+}
+
+async function saveCharacterNameLock(source, target) {
+    const reference = currentCharacterReference();
+    if (!reference) throw new Error('개별 캐릭터 채팅에서만 이름을 고정할 수 있습니다.');
+    if (typeof reference.context.writeExtensionField !== 'function') {
+        throw new Error('현재 SillyTavern에서 캐릭터 확장 데이터 저장을 지원하지 않습니다.');
+    }
+    const sourceName = String(source || '').trim();
+    const targetName = String(target || '').trim();
+    if (!sourceName || !targetName) throw new Error('원문 이름과 고정 표기를 모두 입력해 주세요.');
+    if (sourceName.length > 120 || targetName.length > 120 || /[\r\n]/.test(sourceName + targetName)) {
+        throw new Error('이름은 줄바꿈 없이 120자 이내로 입력해 주세요.');
+    }
+
+    const existing = reference.character.data?.extensions?.[CHARACTER_FIELD_KEY];
+    const field = existing && typeof existing === 'object' && !Array.isArray(existing)
+        ? { ...existing }
+        : {};
+    const rows = normalizedCharacterNameLocks(reference.character)
+        .filter(row => row.source.toLocaleLowerCase() !== sourceName.toLocaleLowerCase());
+    rows.push({ source: sourceName, target: targetName });
+    field.nameLocks = rows;
+    await reference.context.writeExtensionField(reference.characterId, CHARACTER_FIELD_KEY, field);
+
+    if (!reference.character.data || typeof reference.character.data !== 'object') reference.character.data = {};
+    if (!reference.character.data.extensions || typeof reference.character.data.extensions !== 'object') {
+        reference.character.data.extensions = {};
+    }
+    reference.character.data.extensions[CHARACTER_FIELD_KEY] = field;
 }
 
 function scheduleChatSave(chatReference) {
@@ -420,8 +479,8 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
 }
 
 async function translateOutputText(source, options = {}) {
-    const segmented = segmentSource(source);
-    if (!segmented.segments.length) return source;
+    const segmented = segmentSource(source, normalizedCharacterNameLocks());
+    if (!segmented.segments.length) return assembleTranslation(segmented, new Map());
     const speakerIdentity = options.speakerIdentity || {};
     const prompt = buildOutputPrompt(segmented, settings, options.oneTimeInstruction || '', speakerIdentity);
     const translations = await requestSegments(prompt, segmented.segments, options);
@@ -910,6 +969,88 @@ function requestOneTimeInstruction(scope, preview = '') {
     });
 }
 
+function requestNameLockTarget(sourceName, currentName) {
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay';
+        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+        overlay.innerHTML = `
+            <section class="verba-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
+                    <strong>캐릭터 이름으로 고정</strong>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
+                </header>
+                <div class="verba-name-match">
+                    <span>원문에서 찾은 이름</span><b>${escapeHtml(sourceName)}</b>
+                    <span>현재 번역 표기</span><b>${escapeHtml(currentName)}</b>
+                </div>
+                <label for="verba-name-lock-target">앞으로 사용할 표기</label>
+                <input id="verba-name-lock-target" class="text_pole" maxlength="120" value="${escapeHtml(currentName)}">
+                <small>현재 번역을 바로 고치고, 이 캐릭터의 다른 채팅에서도 같은 표기를 사용합니다.</small>
+                <div class="verba-modal-actions">
+                    <button type="button" class="menu_button verba-cancel">취소</button>
+                    <button type="button" class="menu_button verba-submit">이름 고정</button>
+                </div>
+            </section>`;
+        document.documentElement.append(overlay);
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed-position fallback.
+        }
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            try {
+                overlay.hidePopover?.();
+            } catch {
+                // It may already be closed.
+            }
+            overlay.remove();
+            resolve(value);
+        };
+        const input = overlay.querySelector('#verba-name-lock-target');
+        const submit = () => {
+            const value = String(input.value || '').trim();
+            if (!value) {
+                notify('고정할 이름 표기를 입력해 주세요.', 'warning');
+                return;
+            }
+            finish(value);
+        };
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-submit').addEventListener('click', submit);
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) finish(null);
+        });
+        overlay.addEventListener('keydown', event => {
+            if (event.key === 'Escape') finish(null);
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                submit();
+            }
+        });
+        requestAnimationFrame(() => {
+            input.focus();
+            input.select();
+        });
+    });
+}
+
+function resolveExactSourceName(source, candidate) {
+    const raw = String(candidate || '').trim();
+    if (!raw || raw.length > 120 || /[\r\n]/.test(raw)) return '';
+    const text = String(source || '');
+    const exact = text.indexOf(raw);
+    if (exact >= 0) return text.slice(exact, exact + raw.length);
+    const foldedIndex = text.toLocaleLowerCase().indexOf(raw.toLocaleLowerCase());
+    return foldedIndex >= 0 ? text.slice(foldedIndex, foldedIndex + raw.length) : '';
+}
+
 async function retranslateLatestOutput() {
     const target = latestAssistantMessage();
     if (!target) {
@@ -1123,7 +1264,7 @@ function comparableTextWithMap(value) {
 
     while (index < raw.length) {
         const rest = raw.slice(index);
-        const htmlTag = rest.match(/^<[^>\n]{1,500}>/);
+        const htmlTag = rest.match(/^<\/?[A-Za-z][\w:-]*\b(?:[^>"']|"[^"]*"|'[^']*')*>/);
         if (htmlTag) {
             if (/^<\/?(?:br|p|div|li|blockquote|h[1-6])\b/i.test(htmlTag[0])) {
                 pendingSpace = pendingSpace || { start: index, end: index + htmlTag[0].length };
@@ -1185,7 +1326,7 @@ function resolveStoredSelection(storedValue, visibleSelected, visibleBefore) {
 }
 
 function hideSelectionButton() {
-    document.querySelector('#verba-selection-retranslate')?.remove();
+    document.querySelector('#verba-selection-actions')?.remove();
 }
 
 function resolveSelection() {
@@ -1238,19 +1379,28 @@ function resolveSelection() {
 function showSelectionButton(snapshot) {
     hideSelectionButton();
     selectionSnapshot = snapshot;
-    const button = document.createElement('button');
-    button.id = 'verba-selection-retranslate';
-    button.type = 'button';
-    button.className = 'menu_button verba-selection-retranslate';
-    button.textContent = '선택 부분 재번역';
-    if ('showPopover' in HTMLElement.prototype) button.setAttribute('popover', 'manual');
+    const actions = document.createElement('div');
+    actions.id = 'verba-selection-actions';
+    actions.className = 'verba-selection-actions';
+    if ('showPopover' in HTMLElement.prototype) actions.setAttribute('popover', 'manual');
+
+    const retranslateButton = document.createElement('button');
+    retranslateButton.type = 'button';
+    retranslateButton.className = 'menu_button verba-selection-action';
+    retranslateButton.textContent = '선택 부분 재번역';
+    const nameButton = document.createElement('button');
+    nameButton.type = 'button';
+    nameButton.className = 'menu_button verba-selection-action verba-name-lock-action';
+    nameButton.textContent = '이름으로 고정';
+    actions.append(retranslateButton, nameButton);
+
     const viewport = globalThis.visualViewport;
     const viewportLeft = viewport?.offsetLeft || 0;
     const viewportTop = viewport?.offsetTop || 0;
     const viewportWidth = viewport?.width || innerWidth;
     const viewportHeight = viewport?.height || innerHeight;
-    const buttonWidth = 160;
-    const buttonHeight = 40;
+    const buttonWidth = Math.min(330, viewportWidth - 16);
+    const buttonHeight = 42;
     const centeredLeft = snapshot.rect.left + (snapshot.rect.width / 2) - (buttonWidth / 2);
     const left = Math.min(
         Math.max(viewportLeft + 8, centeredLeft),
@@ -1261,22 +1411,27 @@ function showSelectionButton(snapshot) {
         Math.max(viewportTop + 8, immediatelyBelow),
         viewportTop + viewportHeight - buttonHeight - 8,
     );
-    button.style.setProperty('left', `${left}px`, 'important');
-    button.style.setProperty('top', `${top}px`, 'important');
-    button.style.setProperty('right', 'auto', 'important');
-    button.style.setProperty('bottom', 'auto', 'important');
-    button.style.setProperty('transform', 'none', 'important');
-    button.style.setProperty('z-index', '2147483646', 'important');
-    button.style.setProperty('margin', '0', 'important');
-    button.addEventListener('pointerdown', event => event.preventDefault());
-    button.addEventListener('click', event => {
+    actions.style.setProperty('left', `${left}px`, 'important');
+    actions.style.setProperty('top', `${top}px`, 'important');
+    actions.style.setProperty('right', 'auto', 'important');
+    actions.style.setProperty('bottom', 'auto', 'important');
+    actions.style.setProperty('transform', 'none', 'important');
+    actions.style.setProperty('z-index', '2147483646', 'important');
+    actions.style.setProperty('margin', '0', 'important');
+    actions.addEventListener('pointerdown', event => event.preventDefault());
+    retranslateButton.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
         retranslateSelection(selectionSnapshot);
     });
-    document.documentElement.append(button);
+    nameButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        lockSelectionName(selectionSnapshot);
+    });
+    document.documentElement.append(actions);
     try {
-        button.showPopover?.();
+        actions.showPopover?.();
     } catch {
         // Fixed positioning remains as a fallback.
     }
@@ -1301,6 +1456,72 @@ function selectionStillCurrent(snapshot) {
         && hashText(messageSource(message)) === snapshot.sourceHash
         && record.translation === snapshot.translation
     );
+}
+
+async function lockSelectionName(snapshot) {
+    if (!snapshot || selectionBusy) return;
+    if (!settings.profileId) {
+        notify('원문 이름을 찾으려면 먼저 번역기 전용 연결 프로필을 선택해 주세요.', 'warning');
+        return;
+    }
+    if (!currentCharacterReference()) {
+        notify('이름 고정은 개별 캐릭터 채팅에서 사용할 수 있어요.', 'warning');
+        return;
+    }
+    const currentName = String(snapshot.selected || '').trim();
+    if (!currentName || currentName.length > 120 || /[\r\n]/.test(currentName)) {
+        notify('번역문에서 이름 부분만 짧게 선택해 주세요.', 'warning');
+        return;
+    }
+    if (!selectionStillCurrent(snapshot)) {
+        notify('선택한 뒤 번역문이 바뀌었어요. 다시 선택해 주세요.', 'warning');
+        hideSelectionButton();
+        return;
+    }
+
+    selectionBusy = true;
+    hideSelectionButton();
+    const controller = new AbortController();
+    let toast = showProgress('선택한 이름에 대응하는 원문을 찾는 중입니다…');
+    try {
+        const prompt = buildNameMatchPrompt({
+            source: snapshot.source,
+            translation: snapshot.translation,
+            selected: currentName,
+            start: snapshot.start,
+            end: snapshot.end,
+        });
+        const expected = [{ id: 'seg_0000', type: 'name_match', text: currentName }];
+        const result = await requestSegments(prompt, expected, { signal: controller.signal });
+        const sourceName = resolveExactSourceName(snapshot.source, result.get('seg_0000'));
+        if (!sourceName) throw new Error('선택한 표기에 대응하는 원문 이름을 정확히 찾지 못했습니다.');
+        if (!selectionStillCurrent(snapshot)) throw new Error('확인 중 원문이나 번역문이 바뀌었습니다.');
+
+        clearProgress(toast);
+        toast = null;
+        const targetName = await requestNameLockTarget(sourceName, currentName);
+        if (targetName === null) return;
+        if (!selectionStillCurrent(snapshot)) throw new Error('이름을 입력하는 동안 번역문이 바뀌었습니다.');
+
+        await saveCharacterNameLock(sourceName, targetName);
+        const updated = replaceOutsideProtected(snapshot.translation, currentName, targetName);
+        const context = liveContext();
+        const message = context.chat?.[snapshot.messageId];
+        if (!message || message !== snapshot.message) throw new Error('현재 메시지가 바뀌었습니다.');
+        applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat);
+        globalThis.getSelection?.()?.removeAllRanges?.();
+        notify(`${sourceName}의 표기를 “${targetName}”로 이 캐릭터에 저장했어요.`, 'success');
+    } catch (error) {
+        if (!isAbort(error, controller.signal)) {
+            console.error('[베르바] 이름 고정 실패', error);
+            notify(`이름 고정 실패: ${errorText(error)}`, 'error');
+        }
+    } finally {
+        clearProgress(toast);
+        selectionBusy = false;
+        selectionSnapshot = null;
+        hideSelectionButton();
+    }
 }
 
 async function retranslateSelection(snapshot) {
@@ -1376,23 +1597,23 @@ async function retranslateSelection(snapshot) {
 
 function setupSelection() {
     document.addEventListener('mouseup', event => {
-        if (!event.target?.closest?.('#verba-selection-retranslate')) scheduleSelectionCapture(40);
+        if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(40);
     });
     document.addEventListener('touchend', event => {
-        if (!event.target?.closest?.('#verba-selection-retranslate')) {
+        if (!event.target?.closest?.('#verba-selection-actions')) {
             scheduleSelectionCapture(180);
             setTimeout(() => scheduleSelectionCapture(0), 420);
         }
     }, { passive: true });
     document.addEventListener('pointerup', event => {
-        if (!event.target?.closest?.('#verba-selection-retranslate')) scheduleSelectionCapture(100);
+        if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(100);
     });
     document.addEventListener('contextmenu', event => {
         if (event.target?.closest?.('.mes[mesid] .mes_text')) scheduleSelectionCapture(220);
     });
     document.addEventListener('selectionchange', () => scheduleSelectionCapture(120));
     document.addEventListener('pointerdown', event => {
-        if (event.target?.closest?.('#verba-selection-retranslate')) return;
+        if (event.target?.closest?.('#verba-selection-actions')) return;
         if (event.target?.closest?.('.mes[mesid] .mes_text')) return;
         selectionSnapshot = null;
         hideSelectionButton();

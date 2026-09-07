@@ -21,7 +21,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.18';
+const EXTENSION_VERSION = '0.1.19';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -1081,8 +1081,11 @@ function requestOneTimeInstruction(scope, preview = '') {
     });
 }
 
-function requestNameLockTarget(sourceName, currentName) {
+function requestNameLockTarget(sourceName, currentName, knownOldNames = []) {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
+    const initialOldNames = [...new Set(
+        [currentName, ...knownOldNames].map(value => String(value || '').trim()).filter(Boolean),
+    )];
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.id = 'verba-request-overlay';
@@ -1100,11 +1103,14 @@ function requestNameLockTarget(sourceName, currentName) {
                 </div>
                 <label for="verba-name-lock-target">앞으로 사용할 표기</label>
                 <input id="verba-name-lock-target" class="text_pole" maxlength="120" value="${escapeHtml(currentName)}">
+                <label for="verba-name-lock-old-names">현재 채팅에서 함께 바꿀 기존 표기</label>
+                <input id="verba-name-lock-old-names" class="text_pole" maxlength="500" value="${escapeHtml(initialOldNames.join(', '))}" placeholder="예: 안드류, 엔드류, 앤드류">
+                <small>서로 다른 표기가 있다면 쉼표로 구분해 입력하세요.</small>
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-name-lock-history" checked>
-                    <span>현재 채팅의 이전 번역 표기도 모두 변경</span>
+                    <span>현재 채팅 전체의 이름 표기 모두 변경</span>
                 </label>
-                <small>현재 번역을 바로 고치고, 이 캐릭터의 다른 채팅에서도 이후 번역에 같은 표기를 사용합니다.</small>
+                <small>현재 메시지뿐 아니라 이전 메시지와 다른 스와이프의 베르바 번역본도 변경합니다.</small>
                 <div class="verba-modal-actions">
                     <button type="button" class="menu_button verba-cancel">취소</button>
                     <button type="button" class="menu_button verba-submit">이름 고정</button>
@@ -1129,6 +1135,7 @@ function requestNameLockTarget(sourceName, currentName) {
             resolve(value);
         };
         const input = overlay.querySelector('#verba-name-lock-target');
+        const oldNamesInput = overlay.querySelector('#verba-name-lock-old-names');
         const history = overlay.querySelector('#verba-name-lock-history');
         const submit = () => {
             const value = String(input.value || '').trim();
@@ -1136,7 +1143,15 @@ function requestNameLockTarget(sourceName, currentName) {
                 notify('고정할 이름 표기를 입력해 주세요.', 'warning');
                 return;
             }
-            finish({ targetName: value, replaceHistory: Boolean(history.checked) });
+            const oldNames = String(oldNamesInput.value || '')
+                .split(/[,，\n]/)
+                .map(name => name.trim())
+                .filter(Boolean);
+            finish({
+                targetName: value,
+                replaceHistory: Boolean(history.checked),
+                oldNames: [...new Set([currentName, ...oldNames])],
+            });
         };
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(null));
@@ -1156,18 +1171,6 @@ function requestNameLockTarget(sourceName, currentName) {
             input.select();
         });
     });
-}
-
-function sourceContainsName(source, sourceName) {
-    const text = String(source || '');
-    const name = String(sourceName || '').trim();
-    if (!text || !name) return false;
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    try {
-        return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu').test(text);
-    } catch {
-        return text.toLocaleLowerCase().includes(name.toLocaleLowerCase());
-    }
 }
 
 function replaceStoredNameInExtra(extra, source, oldNames, targetName) {
@@ -1196,7 +1199,7 @@ function replaceStoredNameInExtra(extra, source, oldNames, targetName) {
     return true;
 }
 
-function replaceNameInPreviousTranslations(sourceName, oldNames, targetName) {
+function replaceNameAcrossChatTranslations(oldNames, targetName) {
     const context = liveContext();
     const chat = context.chat;
     if (!Array.isArray(chat)) return { changedRecords: 0, changedMessages: 0 };
@@ -1213,7 +1216,6 @@ function replaceNameInPreviousTranslations(sourceName, oldNames, targetName) {
                 const source = typeof rawSource === 'string'
                     ? rawSource
                     : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');
-                if (!sourceContainsName(source, sourceName)) return;
                 const extra = message.swipe_info?.[swipeId]?.extra;
                 if (!replaceStoredNameInExtra(extra, source, candidates, targetName)) return;
                 changedRecords += 1;
@@ -1223,12 +1225,10 @@ function replaceNameInPreviousTranslations(sourceName, oldNames, targetName) {
         }
 
         const activeSource = messageSource(message);
-        if (sourceContainsName(activeSource, sourceName)) {
-            const activeChanged = replaceStoredNameInExtra(message.extra, activeSource, candidates, targetName);
-            if (activeChanged) {
-                if (!currentSwipeWasCounted) changedRecords += 1;
-                messageChanged = true;
-            }
+        const activeChanged = replaceStoredNameInExtra(message.extra, activeSource, candidates, targetName);
+        if (activeChanged) {
+            if (!currentSwipeWasCounted) changedRecords += 1;
+            messageChanged = true;
         }
 
         if (!messageChanged) return;
@@ -1767,24 +1767,20 @@ async function lockSelectionName(snapshot) {
 
         clearProgress(toast);
         toast = null;
-        const choice = await requestNameLockTarget(sourceName, currentName);
-        if (choice === null) return;
-        const { targetName, replaceHistory } = choice;
-        if (!selectionStillCurrent(snapshot)) throw new Error('이름을 입력하는 동안 번역문이 바뀌었습니다.');
-
         const previousTarget = normalizedCharacterNameLocks()
             .find(row => row.source.toLocaleLowerCase() === sourceName.toLocaleLowerCase())?.target || '';
+        const choice = await requestNameLockTarget(sourceName, currentName, [previousTarget]);
+        if (choice === null) return;
+        const { targetName, replaceHistory, oldNames } = choice;
+        if (!selectionStillCurrent(snapshot)) throw new Error('이름을 입력하는 동안 번역문이 바뀌었습니다.');
+
         await saveCharacterNameLock(sourceName, targetName);
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
         if (!message || message !== snapshot.message) throw new Error('현재 메시지가 바뀌었습니다.');
         let historyResult = { changedRecords: 0, changedMessages: 0 };
         if (replaceHistory) {
-            historyResult = replaceNameInPreviousTranslations(
-                sourceName,
-                [currentName, previousTarget],
-                targetName,
-            );
+            historyResult = replaceNameAcrossChatTranslations(oldNames, targetName);
         }
         if (!replaceHistory || !historyResult.changedMessages) {
             const updated = replaceOutsideProtected(snapshot.translation, currentName, targetName);

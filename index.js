@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.23';
+const EXTENSION_VERSION = '0.1.24';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -713,7 +713,30 @@ function currentRecord(message) {
     // Some SillyTavern swipe transitions replace message.extra a frame later.
     // Read the authoritative current swipe slot directly so a saved translation
     // is restored instead of being sent to the API again.
-    return normalize(currentSwipeExtra(message, false)?.[STATE_KEY]);
+    const swipeExtra = currentSwipeExtra(message, false);
+    const swipeRecord = normalize(swipeExtra?.[STATE_KEY]);
+    if (swipeRecord) return swipeRecord;
+
+    // Older translation versions may have only SillyTavern's display_text and
+    // no Verba record. Treat the active display as a translation so selection
+    // actions remain available without mistaking a stale swipe display for it.
+    const displayExtra = swipeId !== null && Array.isArray(message?.swipe_info)
+        ? swipeExtra
+        : message?.extra;
+    const displayText = typeof displayExtra?.display_text === 'string' ? displayExtra.display_text : '';
+    const displayRecord = displayExtra?.[STATE_KEY];
+    if (
+        displayText.trim()
+        && displayText !== source
+        && (!displayRecord || String(displayRecord.translation || '') === displayText)
+    ) {
+        return {
+            swipeId,
+            sourceHash,
+            translation: displayText,
+        };
+    }
+    return null;
 }
 
 function currentSwipeExtra(message, create = true) {
@@ -1393,6 +1416,9 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
         let messageChanged = false;
         let currentSwipeWasCounted = false;
         let currentRawSwipeWasCounted = false;
+        const originalActiveSource = messageSource(message);
+        const activeStoredTranslation = storedTranslationView(message.extra, originalActiveSource)
+            || storedTranslationView(currentSwipeExtra(message, false), originalActiveSource);
         if (Array.isArray(message.swipes)) {
             message.swipes.forEach((rawSource, swipeId) => {
                 const source = typeof rawSource === 'string'
@@ -1408,6 +1434,14 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
 
         if (Array.isArray(message.swipes)) {
             message.swipes.forEach((rawSource, swipeId) => {
+                const source = typeof rawSource === 'string'
+                    ? rawSource
+                    : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');
+                const swipeStoredTranslation = storedTranslationView(message.swipe_info?.[swipeId]?.extra, source)
+                    || (swipeId === currentSwipeId(message)
+                        ? storedTranslationView(message.extra, source)
+                        : null);
+                if (swipeStoredTranslation) return;
                 const replaced = replaceNameInKoreanRawSource(rawSource, candidates, targetName);
                 if (!replaced.changed) return;
                 message.swipes[swipeId] = replaced.value;
@@ -1428,11 +1462,13 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
             });
         }
 
-        const activeRawChanged = replaceNameInKoreanRawSource(message.mes, candidates, targetName);
-        if (activeRawChanged.changed) {
-            message.mes = activeRawChanged.value;
-            if (!currentRawSwipeWasCounted) changedRecords += 1;
-            messageChanged = true;
+        if (!activeStoredTranslation) {
+            const activeRawChanged = replaceNameInKoreanRawSource(message.mes, candidates, targetName);
+            if (activeRawChanged.changed) {
+                message.mes = activeRawChanged.value;
+                if (!currentRawSwipeWasCounted) changedRecords += 1;
+                messageChanged = true;
+            }
         }
 
         const activeSource = messageSource(message);

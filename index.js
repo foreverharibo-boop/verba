@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.20';
+const EXTENSION_VERSION = '0.1.21';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -1185,6 +1185,24 @@ function validStoredTranslationRecord(extra, source) {
     return record;
 }
 
+function storedTranslationView(extra, source) {
+    if (!extra || typeof extra !== 'object') return null;
+    const record = validStoredTranslationRecord(extra, source);
+    if (record) {
+        return {
+            record,
+            translation: String(record.translation),
+        };
+    }
+
+    const displayText = typeof extra.display_text === 'string' ? extra.display_text : '';
+    if (!displayText.trim() || displayText === String(source || '')) return null;
+    return {
+        record: null,
+        translation: displayText,
+    };
+}
+
 function stripKoreanNameSuffixes(word) {
     const suffixes = [
         '으로부터', '에게서', '한테서', '에서부터', '이라고', '이라며', '이라는', '이라면',
@@ -1229,10 +1247,10 @@ function collectHistoricalNameCandidates(sourceName, currentName) {
     const seenRecords = new Set();
     const addRecord = (extra, source) => {
         if (!sourceContainsExactName(source, sourceName)) return;
-        const record = validStoredTranslationRecord(extra, source);
-        if (!record) return;
-        const translation = String(record.translation);
-        const key = `${record.sourceHash}\u0000${translation}`;
+        const stored = storedTranslationView(extra, source);
+        if (!stored) return;
+        const translation = stored.translation;
+        const key = `${hashText(source)}\u0000${translation}`;
         if (seenRecords.has(key)) return;
         seenRecords.add(key);
         translations.push(translation);
@@ -1300,11 +1318,11 @@ async function detectHistoricalNameForms(sourceName, currentName, knownNames = [
     return [...forms];
 }
 
-function replaceStoredNameInExtra(extra, source, oldNames, targetName) {
+function replaceStoredNameInExtra(extra, source, oldNames, targetName, swipeId = null) {
     if (!extra || typeof extra !== 'object') return false;
-    const record = validStoredTranslationRecord(extra, source);
-    if (!record) return false;
-    const previousTranslation = String(record.translation);
+    const stored = storedTranslationView(extra, source);
+    if (!stored) return false;
+    const previousTranslation = stored.translation;
     let nextTranslation = previousTranslation;
     for (const oldName of oldNames) {
         if (oldName && oldName !== targetName) {
@@ -1313,11 +1331,13 @@ function replaceStoredNameInExtra(extra, source, oldNames, targetName) {
     }
     if (nextTranslation === previousTranslation) return false;
     extra[STATE_KEY] = {
-        ...record,
+        ...(stored.record || {}),
+        swipeId: stored.record?.swipeId ?? swipeId,
+        sourceHash: hashText(source),
         translation: nextTranslation,
         updatedAt: new Date().toISOString(),
     };
-    if (extra.display_text === previousTranslation) extra.display_text = nextTranslation;
+    if (!stored.record || extra.display_text === previousTranslation) extra.display_text = nextTranslation;
     return true;
 }
 
@@ -1339,7 +1359,7 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
                     ? rawSource
                     : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');
                 const extra = message.swipe_info?.[swipeId]?.extra;
-                if (!replaceStoredNameInExtra(extra, source, candidates, targetName)) return;
+                if (!replaceStoredNameInExtra(extra, source, candidates, targetName, swipeId)) return;
                 changedRecords += 1;
                 messageChanged = true;
                 if (swipeId === currentSwipeId(message)) currentSwipeWasCounted = true;
@@ -1347,7 +1367,13 @@ function replaceNameAcrossChatTranslations(oldNames, targetName) {
         }
 
         const activeSource = messageSource(message);
-        const activeChanged = replaceStoredNameInExtra(message.extra, activeSource, candidates, targetName);
+        const activeChanged = replaceStoredNameInExtra(
+            message.extra,
+            activeSource,
+            candidates,
+            targetName,
+            currentSwipeId(message),
+        );
         if (activeChanged) {
             if (!currentSwipeWasCounted) changedRecords += 1;
             messageChanged = true;

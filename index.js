@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.25';
+const EXTENSION_VERSION = '0.1.26';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {

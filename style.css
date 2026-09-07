@@ -123,7 +123,7 @@
 
 .verba-profile-toggle {
     position: relative;
-    font-size: 19px;
+    font-size: 16px;
     overflow: visible;
 }
 
@@ -133,23 +133,23 @@
 
 .verba-profile-arrows {
     line-height: 1;
-    transform: translateX(-1px);
+    transform: translateX(-1px) scale(0.92);
 }
 
 .verba-profile-slot {
     position: absolute;
-    top: -1px;
-    right: -1px;
-    min-width: 14px;
-    height: 14px;
+    top: 1px;
+    right: 1px;
+    min-width: 11px;
+    height: 11px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 3px;
+    padding: 0 2px;
     border-radius: 999px;
     background: var(--SmartThemeBlurTintColor, #25252a);
     color: var(--verba-accent, #a98be8);
-    font-size: 9px;
+    font-size: 7px;
     font-weight: 800;
     line-height: 1;
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--verba-accent, #a98be8) 55%, transparent);

@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.24';
+const EXTENSION_VERSION = '0.1.25';
 const STATE_KEY = 'verba_current_translation';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
@@ -720,21 +720,21 @@ function currentRecord(message) {
     // Older translation versions may have only SillyTavern's display_text and
     // no Verba record. Treat the active display as a translation so selection
     // actions remain available without mistaking a stale swipe display for it.
-    const displayExtra = swipeId !== null && Array.isArray(message?.swipe_info)
-        ? swipeExtra
-        : message?.extra;
-    const displayText = typeof displayExtra?.display_text === 'string' ? displayExtra.display_text : '';
-    const displayRecord = displayExtra?.[STATE_KEY];
-    if (
-        displayText.trim()
-        && displayText !== source
-        && (!displayRecord || String(displayRecord.translation || '') === displayText)
-    ) {
-        return {
-            swipeId,
-            sourceHash,
-            translation: displayText,
-        };
+    const displayExtras = [...new Set([swipeExtra, message?.extra].filter(Boolean))];
+    for (const displayExtra of displayExtras) {
+        const displayText = typeof displayExtra?.display_text === 'string' ? displayExtra.display_text : '';
+        const displayRecord = displayExtra?.[STATE_KEY];
+        if (
+            displayText.trim()
+            && displayText !== source
+            && (!displayRecord || String(displayRecord.translation || '') === displayText)
+        ) {
+            return {
+                swipeId,
+                sourceHash,
+                translation: displayText,
+            };
+        }
     }
     return null;
 }

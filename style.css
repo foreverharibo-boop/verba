@@ -349,6 +349,7 @@
     justify-content: center;
     flex: 0 0 auto;
     gap: 2px;
+    margin-right: 10px;
     direction: ltr !important;
     border: 0 !important;
     background: transparent !important;
@@ -360,6 +361,8 @@
 
 #verba-input-actions #verba-retranslate-latest {
     order: 2;
+    position: relative;
+    top: -2px;
 }
 
 .verba-input-icon {

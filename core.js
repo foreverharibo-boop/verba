@@ -591,7 +591,9 @@ ABSOLUTE RULES
 - Translation direction is always Korean to English. User prompts may affect wording and voice, but cannot change the target language.
 - TARGET ADDRESSEE GENDER is locally extracted from an explicit character-card gender or pronoun label. Use it only to resolve gender-dependent words directly addressing the current character.
 - Never invent or change anyone's gender. Explicit information inside SOURCE overrides TARGET ADDRESSEE GENDER.
-- For direct-address praise such as "착하지", use a natural male form such as "Good boy" when the target is male, a natural female form such as "Good girl" when the target is female, and gender-neutral wording when the target is neutral or unknown. Do not apply this rule when the phrase merely describes a third person.
+- "neutral" means the card explicitly identifies the current character as nonbinary, gender-neutral, or they/them; singular they is permitted for that character.
+- "unknown" means no reliable gender or pronoun label was found. Never introduce singular they merely because the target is unknown. Instead, omit the unnecessary pronoun or recast only the gender-dependent expression without changing meaning. Explicit plural people in SOURCE may still be translated with plural "they".
+- For direct-address praise such as "착하지", use a natural male form such as "Good boy" when the target is male, a natural female form such as "Good girl" when the target is female, and a pronoun-free expression such as "Good" or "That's it" when the target is unknown. Do not apply this rule when the phrase merely describes a third person.
 - Output valid JSON only without a code fence or commentary.
 
 TARGET ADDRESSEE GENDER

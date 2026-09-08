@@ -19,11 +19,12 @@ import {
     parseSegmentResponse,
     parseSelectionCandidateResponse,
     replaceOutsideProtected,
+    restoreProtected,
     segmentSource,
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.37';
+const EXTENSION_VERSION = '0.2.0';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -34,6 +35,8 @@ const DEFAULT_SETTINGS = {
     activeProfileSlot: 'A',
     autoInput: false,
     selectionCandidates: false,
+    debugMode: false,
+    profileStats: null,
     globalPrompt: '',
     allDialoguePrompt: '',
     dialoguePrompt: '',
@@ -49,6 +52,8 @@ extension_settings[EXTENSION_KEY] = Object.assign(
     extension_settings[EXTENSION_KEY] || {},
 );
 const settings = extension_settings[EXTENSION_KEY];
+settings.debugMode = Boolean(settings.debugMode);
+settings.profileStats = normalizeProfileStats(settings.profileStats);
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
     liveContext().saveSettingsDebounced?.();
@@ -72,6 +77,8 @@ let selectionBusy = false;
 let selectionSnapshot = null;
 let selectionTimer = null;
 let bottomErrorTimer = null;
+const debugEvents = [];
+const DEBUG_EVENT_LIMIT = 40;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -109,7 +116,20 @@ function showBottomError(message) {
         clearTimeout(bottomErrorTimer);
         notice.remove();
     });
-    notice.append(text, close);
+    notice.append(text);
+    if (settings.debugMode) {
+        const debugButton = document.createElement('button');
+        debugButton.type = 'button';
+        debugButton.className = 'verba-debug-copy-error';
+        debugButton.textContent = '진단 복사';
+        debugButton.title = '번역 내용과 인증 정보를 제외한 진단 정보 복사';
+        debugButton.addEventListener('click', event => {
+            event.stopPropagation();
+            copyDebugReport();
+        });
+        notice.append(debugButton);
+    }
+    notice.append(close);
     document.documentElement.append(notice);
     bottomErrorTimer = setTimeout(() => notice.remove(), 12000);
 }
@@ -317,6 +337,172 @@ function escapeHtml(value) {
         .replaceAll("'", '&#039;');
 }
 
+function emptyProfileStat() {
+    return {
+        requests: 0,
+        successes: 0,
+        failures: 0,
+        totalMs: 0,
+        retries: 0,
+        fallbacks: 0,
+    };
+}
+
+function normalizeProfileStats(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    return Object.fromEntries(['A', 'B', 'C'].map(slot => {
+        const raw = source[slot] && typeof source[slot] === 'object' ? source[slot] : {};
+        const stat = emptyProfileStat();
+        for (const key of Object.keys(stat)) {
+            stat[key] = Math.max(0, Number(raw[key]) || 0);
+        }
+        return [slot, stat];
+    }));
+}
+
+function profileSlotForId(profileId) {
+    const id = String(profileId || '');
+    return configuredProfiles().find(profile => profile.id === id)?.slot || 'A';
+}
+
+function safeErrorDetails(error) {
+    const details = { name: String(error?.name || 'Error') };
+    const seen = new Set();
+    let current = error;
+    while (current && !seen.has(current)) {
+        seen.add(current);
+        if (details.code === undefined && current.code !== undefined) details.code = String(current.code).slice(0, 80);
+        if (details.status === undefined && current.status !== undefined) details.status = String(current.status).slice(0, 24);
+        if (details.status === undefined && current.statusCode !== undefined) details.status = String(current.statusCode).slice(0, 24);
+        if (details.status === undefined && current.response?.status !== undefined) details.status = String(current.response.status).slice(0, 24);
+        current = current.cause;
+    }
+    return details;
+}
+
+function recordDebugEvent(stage, details = {}) {
+    if (!settings.debugMode) return;
+    const allowed = ['status', 'slot', 'elapsedMs', 'retry', 'fallback', 'name', 'code', 'httpStatus'];
+    const event = {
+        time: new Date().toISOString(),
+        stage: String(stage || 'unknown').slice(0, 80),
+    };
+    for (const key of allowed) {
+        const value = details[key];
+        if (value === undefined || value === null || value === '') continue;
+        event[key] = typeof value === 'number' || typeof value === 'boolean'
+            ? value
+            : String(value).slice(0, 120);
+    }
+    debugEvents.push(event);
+    if (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.splice(0, debugEvents.length - DEBUG_EVENT_LIMIT);
+    renderDebugStatus();
+}
+
+function recordOperationError(stage, error) {
+    const safe = safeErrorDetails(error);
+    recordDebugEvent(stage, {
+        status: 'failure',
+        name: safe.name,
+        code: safe.code,
+        httpStatus: safe.status,
+    });
+}
+
+function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallback = false, error = null, stage = 'request' } = {}) {
+    const normalizedSlot = ['A', 'B', 'C'].includes(slot) ? slot : 'A';
+    settings.profileStats = normalizeProfileStats(settings.profileStats);
+    const stat = settings.profileStats[normalizedSlot];
+    stat.requests += 1;
+    stat.totalMs += Math.max(0, Math.round(Number(elapsedMs) || 0));
+    if (success) stat.successes += 1;
+    else stat.failures += 1;
+    if (retry) stat.retries += 1;
+    if (fallback) stat.fallbacks += 1;
+    saveSettings();
+    renderProfileStats();
+
+    const safeError = error ? safeErrorDetails(error) : {};
+    recordDebugEvent(stage, {
+        status: success ? 'success' : 'failure',
+        slot: normalizedSlot,
+        elapsedMs: Math.max(0, Math.round(Number(elapsedMs) || 0)),
+        retry: Boolean(retry),
+        fallback: Boolean(fallback),
+        name: safeError.name,
+        code: safeError.code,
+        httpStatus: safeError.status,
+    });
+}
+
+async function copyText(value) {
+    const text = String(value ?? '');
+    if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand?.('copy');
+    textarea.remove();
+    if (!copied) throw new Error('클립보드 복사를 지원하지 않는 환경입니다.');
+}
+
+function debugReportText() {
+    const context = liveContext();
+    return JSON.stringify({
+        app: 'Verba',
+        version: EXTENSION_VERSION,
+        generatedAt: new Date().toISOString(),
+        activeProfileSlot: activeProfileSlot(),
+        configuredSlots: configuredProfiles().map(profile => profile.slot),
+        chatLength: Array.isArray(context.chat) ? context.chat.length : 0,
+        profileStats: normalizeProfileStats(settings.profileStats),
+        events: [...debugEvents],
+        privacy: '프롬프트, 번역문, 원문, API 키 및 인증 정보는 포함하지 않음',
+    }, null, 2);
+}
+
+async function copyDebugReport() {
+    try {
+        await copyText(debugReportText());
+        notify('진단 정보를 복사했어요.', 'success');
+    } catch (error) {
+        notify(`진단 정보 복사 실패: ${errorText(error)}`, 'error');
+    }
+}
+
+function renderDebugStatus() {
+    const status = document.querySelector('#verba-debug-status');
+    if (!status) return;
+    status.textContent = settings.debugMode
+        ? `기록 중 · 최근 ${debugEvents.length}/${DEBUG_EVENT_LIMIT}개 이벤트`
+        : '꺼짐 · 번역 내용과 인증 정보는 기록하지 않음';
+}
+
+function renderProfileStats() {
+    const content = document.querySelector('#verba-profile-stats-content');
+    if (!content) return;
+    settings.profileStats = normalizeProfileStats(settings.profileStats);
+    content.innerHTML = ['A', 'B', 'C'].map(slot => {
+        const stat = settings.profileStats[slot];
+        const successRate = stat.requests ? Math.round((stat.successes / stat.requests) * 100) : 0;
+        const averageMs = stat.requests ? Math.round(stat.totalMs / stat.requests) : 0;
+        const profile = configuredProfiles().find(candidate => candidate.slot === slot);
+        const name = profile ? profileDisplayName(profile.id) : '미설정';
+        return `<div class="verba-stat-row">
+            <b>${slot}</b>
+            <span title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+            <small>요청 ${stat.requests} · 성공 ${successRate}% · 평균 ${averageMs.toLocaleString()}ms · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
+        </div>`;
+    }).join('');
+}
+
 function normalizedMessageId(payload) {
     const value = typeof payload === 'object' && payload !== null
         ? payload.messageId ?? payload.id ?? payload.mesId
@@ -363,6 +549,7 @@ function refreshProfileSelect() {
         '프로필 C를 사용하지 않음',
     );
     refreshProfileToggleButton();
+    renderProfileStats();
 }
 
 function enqueueRequest(task) {
@@ -432,6 +619,10 @@ function wait(ms, signal) {
 async function sendProfileRequest(prompt, options = {}) {
     const profileId = String(options.profileId ?? settings.profileId ?? '');
     if (!profileId) throw new Error('번역기 전용 연결 프로필을 선택해 주세요.');
+    const profileSlot = String(options.profileSlot || profileSlotForId(profileId));
+    const startedAt = performance.now();
+    let attemptSucceeded = false;
+    let attemptError = null;
     const outerSignal = options.signal || null;
     if (outerSignal?.aborted) throw abortError();
 
@@ -457,6 +648,7 @@ async function sendProfileRequest(prompt, options = {}) {
                 { signal: controller.signal },
             );
             if (!extractResponseText(response).trim()) throw new Error('AI가 빈 응답을 반환했습니다.');
+            attemptSucceeded = true;
             return response;
         });
     } catch (error) {
@@ -464,13 +656,26 @@ async function sendProfileRequest(prompt, options = {}) {
             const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
             timeoutError.code = 'VERBA_TIMEOUT';
             timeoutError.cause = error;
+            attemptError = timeoutError;
             throw timeoutError;
         }
-        if (controller.signal.aborted) throw abortError();
+        if (controller.signal.aborted) {
+            attemptError = abortError();
+            throw attemptError;
+        }
+        attemptError = error;
         throw error;
     } finally {
         clearTimeout(timer);
         outerSignal?.removeEventListener?.('abort', forwardAbort);
+        recordProfileAttempt(profileSlot, {
+            success: attemptSucceeded,
+            elapsedMs: performance.now() - startedAt,
+            retry: Number(options.retryAttempt) > 0,
+            fallback: Boolean(options.fallback),
+            error: attemptError,
+            stage: options.stage || 'request',
+        });
     }
 }
 
@@ -542,7 +747,13 @@ async function sendWithRetry(prompt, options = {}) {
             const profiles = configuredProfileCycle();
             const primaryProfileId = profiles.active;
             try {
-                return await sendProfileRequest(prompt, { ...requestOptions, profileId: primaryProfileId });
+                return await sendProfileRequest(prompt, {
+                    ...requestOptions,
+                    profileId: primaryProfileId,
+                    profileSlot: profiles.slot,
+                    retryAttempt: attempt,
+                    fallback: false,
+                });
             } catch (primaryError) {
                 if (isAbort(primaryError, controller.signal)) throw primaryError;
                 let cycleError = primaryError;
@@ -554,6 +765,9 @@ async function sendWithRetry(prompt, options = {}) {
                             const response = await sendProfileRequest(prompt, {
                                 ...requestOptions,
                                 profileId: fallback.id,
+                                profileSlot: fallback.slot,
+                                retryAttempt: attempt,
+                                fallback: true,
                             });
                             notifyFallbackUsed(fallback.id);
                             return response;
@@ -607,6 +821,14 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
         } catch (error) {
             if (isAbort(error, options.signal) || transientError(error)) throw error;
             lastError = error;
+            const safe = safeErrorDetails(error);
+            recordDebugEvent('segment-parse', {
+                status: 'failure',
+                retry: attempt > 0,
+                name: safe.name,
+                code: safe.code,
+                httpStatus: safe.status,
+            });
         }
     }
     throw lastError || new Error('번역 결과를 해석하지 못했습니다.');
@@ -624,17 +846,122 @@ async function requestSelectionCandidates(prompt, options = {}) {
         } catch (error) {
             if (isAbort(error, options.signal) || transientError(error)) throw error;
             lastError = error;
+            const safe = safeErrorDetails(error);
+            recordDebugEvent('candidate-parse', {
+                status: 'failure',
+                retry: attempt > 0,
+                name: safe.name,
+                code: safe.code,
+                httpStatus: safe.status,
+            });
         }
     }
     throw lastError || new Error('선택 재번역 후보를 해석하지 못했습니다.');
 }
 
+function restoredSegmentText(value, segmented, useSourceNames = false) {
+    const nameTokens = (segmented.nameTokens || []).map(entry => ({
+        token: entry.token,
+        value: useSourceNames ? entry.source : entry.value,
+    }));
+    const namesRestored = restoreProtected(value, nameTokens, { strict: false });
+    return restoreProtected(namesRestored, segmented.tokens, { strict: false });
+}
+
+function buildSourceMap(segmented, translations, completeTranslation) {
+    const entries = [];
+    let cursor = 0;
+    for (const segment of segmented.segments || []) {
+        const translated = restoredSegmentText(String(translations.get(segment.id) || ''), segmented, false);
+        const source = restoredSegmentText(segment.text, segmented, true);
+        if (!translated.trim() || !source.trim()) continue;
+        let start = completeTranslation.indexOf(translated, cursor);
+        if (start < 0) start = completeTranslation.indexOf(translated);
+        if (start < 0) continue;
+        const end = start + translated.length;
+        entries.push({ id: segment.id, source, start, end });
+        cursor = end;
+    }
+    return entries;
+}
+
+function normalizedSourceMap(value) {
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((entry, index) => {
+        const source = String(entry?.source || '').trim();
+        const start = Number(entry?.start);
+        const end = Number(entry?.end);
+        if (!source || !Number.isInteger(start) || !Number.isInteger(end) || end <= start) return [];
+        return [{
+            id: String(entry?.id || `seg_${index}`),
+            source,
+            start,
+            end,
+        }];
+    });
+}
+
+function sourceMapAfterSelection(sourceMap, start, end, replacement) {
+    const rows = normalizedSourceMap(sourceMap);
+    const delta = String(replacement).length - (end - start);
+    const overlapping = rows.filter(row => start < row.end && end > row.start);
+    if (overlapping.length !== 1 || start < overlapping[0].start || end > overlapping[0].end) {
+        return rows.flatMap(row => {
+            if (row.end <= start) return [row];
+            if (row.start >= end) return [{ ...row, start: row.start + delta, end: row.end + delta }];
+            return [];
+        });
+    }
+    const target = overlapping[0];
+    return rows.map(row => {
+        if (row.id === target.id && row.start === target.start && row.end === target.end) {
+            return { ...row, end: row.end + delta };
+        }
+        if (row.start >= end) return { ...row, start: row.start + delta, end: row.end + delta };
+        return row;
+    });
+}
+
+function refreshedSourceMap(sourceMap, translation) {
+    const rows = Array.isArray(sourceMap) ? sourceMap : [];
+    let cursor = 0;
+    return rows.flatMap(row => {
+        const translatedSegment = String(row?.translation || '');
+        const source = String(row?.source || '').trim();
+        if (!translatedSegment || !source) return [];
+        let start = String(translation).indexOf(translatedSegment, cursor);
+        if (start < 0) start = String(translation).indexOf(translatedSegment);
+        if (start < 0) return [];
+        const end = start + translatedSegment.length;
+        cursor = end;
+        return [{ id: String(row?.id || `seg_${cursor}`), source, start, end }];
+    });
+}
+
+function sourceMapAfterGlobalReplacements(sourceMap, previousTranslation, nextTranslation, replacements) {
+    const rows = normalizedSourceMap(sourceMap).map(row => {
+        let translated = String(previousTranslation).slice(row.start, row.end);
+        for (const replacement of replacements || []) {
+            const search = String(replacement?.search || '');
+            if (search) translated = replaceOutsideProtected(translated, search, replacement?.value || '');
+        }
+        return { ...row, translation: translated };
+    });
+    return refreshedSourceMap(rows, nextTranslation);
+}
+
 async function translateOutputText(source, options = {}) {
     const segmented = segmentSource(source, normalizedCharacterNameLocks());
-    if (!segmented.segments.length) return assembleTranslation(segmented, new Map());
+    if (!segmented.segments.length) {
+        const translation = assembleTranslation(segmented, new Map());
+        return { translation, sourceMap: [] };
+    }
     const speakerIdentity = options.speakerIdentity || {};
     const prompt = buildOutputPrompt(segmented, settings, options.oneTimeInstruction || '', speakerIdentity);
-    const translations = await requestSegments(prompt, segmented.segments, options);
+    const translations = await requestSegments(prompt, segmented.segments, {
+        ...options,
+        stage: options.stage || 'output-translation',
+    });
 
     for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
         const invalid = segmented.segments.filter(segment =>
@@ -648,7 +975,7 @@ async function translateOutputText(source, options = {}) {
             speakerIdentity,
             segmented.nameTokens,
         );
-        const repaired = await requestSegments(repairPrompt, invalid, options);
+        const repaired = await requestSegments(repairPrompt, invalid, { ...options, stage: 'banned-word-repair' });
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
 
@@ -662,7 +989,7 @@ async function translateOutputText(source, options = {}) {
             speakerIdentity,
             segmented.nameTokens,
         );
-        const repaired = await requestSegments(repairPrompt, invalid, options);
+        const repaired = await requestSegments(repairPrompt, invalid, { ...options, stage: 'untranslated-repair' });
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
 
@@ -679,14 +1006,17 @@ async function translateOutputText(source, options = {}) {
     }
     const result = assembleTranslation(segmented, translations);
     if (!result.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
-    return result;
+    return {
+        translation: result,
+        sourceMap: buildSourceMap(segmented, translations, result),
+    };
 }
 
 async function translateInputText(source, options = {}) {
     const expected = [{ id: 'seg_0000', type: 'user_input', text: source }];
     const targetGender = detectCharacterGender(currentCharacterReference()?.character);
     const prompt = buildInputPrompt(source, settings, targetGender);
-    const translations = await requestSegments(prompt, expected, options);
+    const translations = await requestSegments(prompt, expected, { ...options, stage: options.stage || 'input-translation' });
     const result = String(translations.get('seg_0000') || '').trim();
     if (!result) throw new Error('인풋 번역 결과가 비어 있습니다.');
     return result;
@@ -832,12 +1162,22 @@ function repairSwipeTranslationIndexes(message) {
 }
 
 function sameTranslationRecord(left, right) {
+    const leftMap = normalizedSourceMap(left?.sourceMap);
+    const rightMap = normalizedSourceMap(right?.sourceMap);
+    const sameMap = leftMap.length === rightMap.length && leftMap.every((row, index) => {
+        const other = rightMap[index];
+        return row.id === other?.id
+            && row.source === other?.source
+            && row.start === other?.start
+            && row.end === other?.end;
+    });
     return Boolean(
         left
         && right
         && left.swipeId === right.swipeId
         && left.sourceHash === right.sourceHash
-        && left.translation === right.translation,
+        && left.translation === right.translation
+        && sameMap
     );
 }
 
@@ -968,12 +1308,19 @@ function clearOwnedDisplay(message) {
     return Boolean(record);
 }
 
-function applyTranslation(messageId, message, source, translation, chatReference) {
+function applyTranslation(messageId, message, source, translation, chatReference, metadata = {}) {
     if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+    const previousRecord = currentRecord(message);
+    const sourceMap = metadata.sourceMap !== undefined
+        ? normalizedSourceMap(metadata.sourceMap)
+        : previousRecord?.translation === translation
+            ? normalizedSourceMap(previousRecord.sourceMap)
+            : [];
     const record = {
         swipeId: currentSwipeId(message),
         sourceHash: hashText(source),
         translation,
+        sourceMap,
         updatedAt: new Date().toISOString(),
     };
     message.extra[STATE_KEY] = record;
@@ -1103,10 +1450,11 @@ async function translateMessage(messageId, options = {}) {
     const toast = showProgress(options.force ? '아웃풋 전체를 다시 번역 중입니다…' : '아웃풋을 자동 번역 중입니다…');
     const work = (async () => {
         try {
-            const translation = await translateOutputText(source, {
+            const translated = await translateOutputText(source, {
                 signal: controller.signal,
                 oneTimeInstruction: options.oneTimeInstruction || '',
                 speakerIdentity: outputSpeakerIdentity(message),
+                stage: options.force ? 'output-retranslation' : 'output-translation',
             });
             if (controller.signal.aborted) return;
             const latestContext = liveContext();
@@ -1120,12 +1468,20 @@ async function translateMessage(messageId, options = {}) {
                 console.warn('[베르바] 메시지 또는 스와이프가 바뀌어 이전 결과를 폐기했습니다.');
                 return;
             }
-            applyTranslation(id, latest, source, translation, snapshot.chatReference);
+            applyTranslation(
+                id,
+                latest,
+                source,
+                translated.translation,
+                snapshot.chatReference,
+                { sourceMap: translated.sourceMap },
+            );
             failedOutputSignatures.delete(id);
             notify(options.force ? '전체 재번역을 적용했어요.' : '자동 번역을 적용했어요.', 'success');
         } catch (error) {
             if (!isAbort(error, controller.signal)) {
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
+                recordOperationError('output-failure', error);
                 console.error('[베르바] 출력 번역 실패', error);
                 notify(`출력 번역 실패: ${errorText(error)}`, 'error');
             }
@@ -1507,11 +1863,21 @@ function replaceStoredNameInExtra(extra, source, oldNames, targetName, swipeId =
         }
     }
     if (nextTranslation === previousTranslation) return false;
+    const replacements = oldNames
+        .filter(oldName => oldName && oldName !== targetName)
+        .map(oldName => ({ search: oldName, value: targetName }));
+    const nextSourceMap = sourceMapAfterGlobalReplacements(
+        stored.record?.sourceMap,
+        previousTranslation,
+        nextTranslation,
+        replacements,
+    );
     extra[STATE_KEY] = {
         ...(stored.record || {}),
         swipeId: stored.record?.swipeId ?? swipeId,
         sourceHash: hashText(source),
         translation: nextTranslation,
+        sourceMap: nextSourceMap,
         updatedAt: new Date().toISOString(),
     };
     if (!stored.record || extra.display_text === previousTranslation) extra.display_text = nextTranslation;
@@ -1798,6 +2164,7 @@ async function translateInputAndSend(textarea, sendButton, source) {
         sendButton.click();
     } catch (error) {
         if (!isAbort(error)) {
+            recordOperationError('input-failure', error);
             console.error('[베르바] 인풋 번역 실패', error);
             notify(`인풋 번역 실패로 전송하지 않았어요: ${errorText(error)}`, 'error');
         }
@@ -1842,6 +2209,7 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         setTextareaValue(textarea, translated);
     } catch (error) {
         if (!isAbort(error)) {
+            recordOperationError('input-before-generation-failure', error);
             console.error('[베르바] 생성 전 인풋 번역 실패', error);
             notify(`인풋 번역 실패로 생성을 중단했어요: ${errorText(error)}`, 'error');
         }
@@ -1874,6 +2242,7 @@ async function translateSentInputMessage(payload) {
             scheduleChatSave(context.chat);
         } catch (error) {
             if (!isAbort(error)) {
+                recordOperationError('sent-input-failure', error);
                 console.error('[베르바] 전송된 인풋 번역 실패', error);
                 notify(`인풋 번역 실패로 뒤따르는 생성을 중단했어요: ${errorText(error)}`, 'error');
             }
@@ -2023,6 +2392,66 @@ function hideSelectionButton() {
     document.querySelector('#verba-selection-actions')?.remove();
 }
 
+function showSelectionSource(snapshot) {
+    if (!snapshot) return;
+    const matches = normalizedSourceMap(snapshot.sourceMap)
+        .filter(row => snapshot.start < row.end && snapshot.end > row.start);
+    if (!matches.length) {
+        notify('이 번역에는 구간 원문 정보가 없어요. v0.2.0 이후 새로 번역한 메시지부터 사용할 수 있어요.', 'warning');
+        hideSelectionButton();
+        return;
+    }
+    if (document.querySelector('#verba-request-overlay')) return;
+    const source = matches.map(row => row.source).join('\n\n');
+    const overlay = document.createElement('div');
+    overlay.id = 'verba-request-overlay';
+    overlay.className = 'verba-overlay';
+    if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+    overlay.innerHTML = `
+        <section class="verba-modal verba-source-lens-modal" role="dialog" aria-modal="true">
+            <header class="verba-modal-header">
+                <strong>선택 구간의 원문</strong>
+                <button type="button" class="verba-close" aria-label="닫기">✕</button>
+            </header>
+            <div class="verba-target-preview"><b>선택한 번역</b><span>${escapeHtml(snapshot.selected)}</span></div>
+            <pre class="verba-source-lens-text"></pre>
+            <div class="verba-modal-actions">
+                <button type="button" class="menu_button verba-copy-source">원문 복사</button>
+            </div>
+        </section>`;
+    overlay.querySelector('.verba-source-lens-text').textContent = source;
+    const close = () => {
+        try {
+            overlay.hidePopover?.();
+        } catch {
+            // It may already be closed.
+        }
+        overlay.remove();
+    };
+    overlay.querySelector('.verba-close').addEventListener('click', close);
+    overlay.querySelector('.verba-copy-source').addEventListener('click', async () => {
+        try {
+            await copyText(source);
+            notify('선택 구간의 원문을 복사했어요.', 'success');
+        } catch (error) {
+            notify(`원문 복사 실패: ${errorText(error)}`, 'error');
+        }
+    });
+    overlay.addEventListener('click', event => {
+        if (event.target === overlay) close();
+    });
+    overlay.addEventListener('keydown', event => {
+        if (event.key === 'Escape') close();
+    });
+    document.documentElement.append(overlay);
+    try {
+        overlay.showPopover?.();
+    } catch {
+        // Fixed-position fallback.
+    }
+    hideSelectionButton();
+}
+
 function resolveSelection() {
     if (selectionBusy) return null;
     const selection = globalThis.getSelection?.();
@@ -2063,6 +2492,7 @@ function resolveSelection() {
         sourceHash: hashText(messageSource(message)),
         swipeId: currentSwipeId(message),
         translation: record.translation,
+        sourceMap: normalizedSourceMap(record.sourceMap),
         selected: storedSelected,
         start: storedRange.start,
         end: storedRange.end,
@@ -2086,14 +2516,18 @@ function showSelectionButton(snapshot) {
     nameButton.type = 'button';
     nameButton.className = 'menu_button verba-selection-action verba-name-lock-action';
     nameButton.textContent = '이름으로 고정';
-    actions.append(retranslateButton, nameButton);
+    const sourceButton = document.createElement('button');
+    sourceButton.type = 'button';
+    sourceButton.className = 'menu_button verba-selection-action verba-source-lens-action';
+    sourceButton.textContent = '원문 보기';
+    actions.append(retranslateButton, sourceButton, nameButton);
 
     const viewport = globalThis.visualViewport;
     const viewportLeft = viewport?.offsetLeft || 0;
     const viewportTop = viewport?.offsetTop || 0;
     const viewportWidth = viewport?.width || innerWidth;
     const viewportHeight = viewport?.height || innerHeight;
-    const buttonWidth = Math.min(330, viewportWidth - 16);
+    const buttonWidth = Math.min(420, viewportWidth - 16);
     const buttonHeight = 42;
     const centeredLeft = snapshot.rect.left + (snapshot.rect.width / 2) - (buttonWidth / 2);
     const left = Math.min(
@@ -2117,6 +2551,11 @@ function showSelectionButton(snapshot) {
         event.preventDefault();
         event.stopPropagation();
         retranslateSelection(selectionSnapshot);
+    });
+    sourceButton.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        showSelectionSource(selectionSnapshot);
     });
     nameButton.addEventListener('click', event => {
         event.preventDefault();
@@ -2186,7 +2625,7 @@ async function lockSelectionName(snapshot) {
             end: snapshot.end,
         });
         const expected = [{ id: 'seg_0000', type: 'name_match', text: currentName }];
-        const result = await requestSegments(prompt, expected, { signal: controller.signal });
+        const result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'name-match' });
         const sourceName = resolveExactSourceName(snapshot.source, result.get('seg_0000'));
         if (!sourceName) throw new Error('선택한 표기에 대응하는 원문 이름을 정확히 찾지 못했습니다.');
         if (!selectionStillCurrent(snapshot)) throw new Error('확인 중 원문이나 번역문이 바뀌었습니다.');
@@ -2229,7 +2668,13 @@ async function lockSelectionName(snapshot) {
         }
         if (!replaceHistory || !historyResult.changedMessages) {
             const updated = replaceOutsideProtected(snapshot.translation, currentName, targetName);
-            applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat);
+            const sourceMap = sourceMapAfterGlobalReplacements(
+                snapshot.sourceMap,
+                snapshot.translation,
+                updated,
+                [{ search: currentName, value: targetName }],
+            );
+            applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat, { sourceMap });
         }
         globalThis.getSelection?.()?.removeAllRanges?.();
         const historyNotice = replaceHistory && historyResult.changedRecords
@@ -2238,6 +2683,7 @@ async function lockSelectionName(snapshot) {
         notify(`${sourceName}의 표기를 “${targetName}”로 이 캐릭터에 저장했어요.${historyNotice}`, 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
+            recordOperationError('name-lock-failure', error);
             console.error('[베르바] 이름 고정 실패', error);
             notify(`이름 고정 실패: ${errorText(error)}`, 'error');
         }
@@ -2296,7 +2742,7 @@ async function retranslateSelection(snapshot) {
     try {
         let replacement = '';
         if (candidateMode) {
-            const received = await requestSelectionCandidates(prompt, { signal: controller.signal });
+            const received = await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' });
             const currentKey = snapshot.selected.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
@@ -2313,7 +2759,7 @@ async function retranslateSelection(snapshot) {
             replacement = await requestSelectionCandidateChoice(candidates, snapshot.selected);
             if (replacement === null) return;
         } else {
-            const result = await requestSegments(prompt, expected, { signal: controller.signal });
+            const result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'selection-retranslation' });
             replacement = String(result.get('seg_0000') || '').trim();
         }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
@@ -2328,11 +2774,18 @@ async function retranslateSelection(snapshot) {
             + snapshot.translation.slice(snapshot.end);
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
-        applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat);
+        const sourceMap = sourceMapAfterSelection(
+            snapshot.sourceMap,
+            snapshot.start,
+            snapshot.end,
+            replacement,
+        );
+        applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat, { sourceMap });
         globalThis.getSelection?.()?.removeAllRanges?.();
         notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
+            recordOperationError('selection-failure', error);
             console.error('[베르바] 선택 부분 재번역 실패', error);
             notify(`선택 부분 재번역 실패: ${errorText(error)}`, 'error');
         }
@@ -2370,6 +2823,95 @@ function setupSelection() {
     window.addEventListener('resize', hideSelectionButton);
 }
 
+function showMessageCopyMenu(messageId) {
+    const message = liveContext().chat?.[Number(messageId)];
+    const record = message && currentRecord(message);
+    if (!message || !record) {
+        notify('복사할 저장 번역본이 없어요.', 'warning');
+        return;
+    }
+    if (document.querySelector('#verba-request-overlay')) return;
+    const source = messageSource(message);
+    const translation = String(record.translation || '');
+    const overlay = document.createElement('div');
+    overlay.id = 'verba-request-overlay';
+    overlay.className = 'verba-overlay';
+    if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+    overlay.innerHTML = `
+        <section class="verba-modal verba-copy-modal" role="dialog" aria-modal="true">
+            <header class="verba-modal-header">
+                <strong>메시지 복사</strong>
+                <button type="button" class="verba-close" aria-label="닫기">✕</button>
+            </header>
+            <small>복사할 형식을 선택하세요.</small>
+            <div class="verba-copy-options">
+                <button type="button" class="menu_button" data-copy="translation">번역문만</button>
+                <button type="button" class="menu_button" data-copy="source">영어 원문만</button>
+                <button type="button" class="menu_button" data-copy="both">원문 + 번역문</button>
+            </div>
+        </section>`;
+    const close = () => {
+        try {
+            overlay.hidePopover?.();
+        } catch {
+            // It may already be closed.
+        }
+        overlay.remove();
+    };
+    overlay.querySelector('.verba-close').addEventListener('click', close);
+    overlay.querySelectorAll('[data-copy]').forEach(button => {
+        button.addEventListener('click', async () => {
+            const format = button.dataset.copy;
+            const value = format === 'source'
+                ? source
+                : format === 'both'
+                    ? `원문\n${source}\n\n번역문\n${translation}`
+                    : translation;
+            try {
+                await copyText(value);
+                close();
+                notify('메시지를 복사했어요.', 'success');
+            } catch (error) {
+                notify(`메시지 복사 실패: ${errorText(error)}`, 'error');
+            }
+        });
+    });
+    overlay.addEventListener('click', event => {
+        if (event.target === overlay) close();
+    });
+    overlay.addEventListener('keydown', event => {
+        if (event.key === 'Escape') close();
+    });
+    document.documentElement.append(overlay);
+    try {
+        overlay.showPopover?.();
+    } catch {
+        // Fixed-position fallback.
+    }
+}
+
+function ensureMessageCopyButton(element, messageId, record) {
+    const existing = element.querySelector('.verba-copy-menu-button');
+    if (!record) {
+        existing?.remove();
+        return;
+    }
+    if (existing) return;
+    const host = element.querySelector('.extraMesButtons, .mes_buttons');
+    if (!host) return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mes_button verba-copy-menu-button fa-solid fa-copy';
+    button.title = '베르바 원문·번역문 복사';
+    button.setAttribute('aria-label', button.title);
+    button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        showMessageCopyMenu(messageId);
+    });
+    host.append(button);
+}
+
 function refreshTranslationClasses() {
     document.querySelectorAll('.mes[mesid]').forEach(element => {
         const id = Number(element.getAttribute('mesid'));
@@ -2377,6 +2919,7 @@ function refreshTranslationClasses() {
         const record = message && currentRecord(message);
         const active = Boolean(record && message.extra?.display_text === record.translation);
         element.classList.toggle('verba-translation-active', active);
+        ensureMessageCopyButton(element, id, record);
         if (active && !element.classList.contains('verba-swipe-hold-active')) {
             const html = element.querySelector('.mes_text')?.innerHTML || '';
             const key = renderedTranslationKey(id, record);
@@ -2625,6 +3168,30 @@ function injectSettingsPanel() {
                 <button type="button" id="verba-test-profile" class="menu_button verba-wide">현재 프로필 연결 테스트</button>
                 <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 바꿀 수 있어요. 현재 프로필 요청이 실패하면 나머지 프로필을 차례로 임시 사용하며, 수동 선택 상태는 바뀌지 않습니다.</div>
 
+                <details id="verba-profile-stats" class="verba-tool-details">
+                    <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-profile-stats-content" class="verba-profile-stats-content"></div>
+                        <div class="verba-help">A/B/C별 실제 요청 수·성공률·평균 응답 시간·재시도·자동 대체 횟수만 기기에 저장합니다.</div>
+                        <button type="button" id="verba-reset-profile-stats" class="menu_button verba-wide">성능 기록 초기화</button>
+                    </div>
+                </details>
+
+                <details id="verba-debug-tools" class="verba-tool-details">
+                    <summary>디버그 도구 <small id="verba-debug-status"></small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
+                            <span>디버그 모드</span>
+                        </label>
+                        <div class="verba-help">오류 단계·프로필 슬롯·응답 시간·재시도 여부만 최근 ${DEBUG_EVENT_LIMIT}개까지 기록합니다. 프롬프트·원문·번역문·API 키·인증 정보는 기록하지 않습니다.</div>
+                        <div class="verba-tool-buttons">
+                            <button type="button" id="verba-copy-debug" class="menu_button">진단 정보 복사</button>
+                            <button type="button" id="verba-clear-debug" class="menu_button">기록 비우기</button>
+                        </div>
+                    </div>
+                </details>
+
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
                     <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
@@ -2662,6 +3229,8 @@ function injectSettingsPanel() {
     host.append(panel);
     refreshProfileSelect();
     renderNameLockManager();
+    renderProfileStats();
+    renderDebugStatus();
 
     panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();
@@ -2716,6 +3285,25 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
+    panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
+        if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
+        settings.profileStats = normalizeProfileStats(null);
+        saveSettings();
+        renderProfileStats();
+        notify('프로필 성능 기록을 초기화했어요.', 'success');
+    });
+    panel.querySelector('#verba-debug-mode').addEventListener('change', event => {
+        settings.debugMode = event.target.checked;
+        saveSettings();
+        renderDebugStatus();
+        notify(settings.debugMode ? '디버그 기록을 시작했어요.' : '디버그 기록을 중지했어요.', 'info');
+    });
+    panel.querySelector('#verba-copy-debug').addEventListener('click', copyDebugReport);
+    panel.querySelector('#verba-clear-debug').addEventListener('click', () => {
+        debugEvents.length = 0;
+        renderDebugStatus();
+        notify('디버그 기록을 비웠어요.', 'success');
+    });
     panel.querySelector('#verba-auto-input').addEventListener('change', event => {
         settings.autoInput = event.target.checked;
         saveSettings();

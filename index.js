@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.7';
+const EXTENSION_VERSION = '0.2.9';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -35,7 +35,6 @@ const DEFAULT_SETTINGS = {
     activeProfileSlot: 'A',
     autoInput: false,
     selectionCandidates: false,
-    debugMode: false,
     profileStats: null,
     globalPrompt: '',
     allDialoguePrompt: '',
@@ -52,8 +51,8 @@ extension_settings[EXTENSION_KEY] = Object.assign(
     extension_settings[EXTENSION_KEY] || {},
 );
 const settings = extension_settings[EXTENSION_KEY];
-settings.debugMode = Boolean(settings.debugMode);
 settings.profileStats = normalizeProfileStats(settings.profileStats);
+delete settings.debugMode;
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
     liveContext().saveSettingsDebounced?.();
@@ -77,10 +76,11 @@ let selectionBusy = false;
 let selectionSnapshot = null;
 let selectionTimer = null;
 let bottomErrorTimer = null;
-let inputCollisionFrame = null;
-let inputCollisionTimer = null;
-const debugEvents = [];
-const DEBUG_EVENT_LIMIT = 40;
+let messageCopyHoldTimer = null;
+let messageCopyPointerId = null;
+let messageCopyStart = null;
+let messageCopyHoldShown = false;
+let suppressMessageCopyClickUntil = 0;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -119,18 +119,6 @@ function showBottomError(message) {
         notice.remove();
     });
     notice.append(text);
-    if (settings.debugMode) {
-        const debugButton = document.createElement('button');
-        debugButton.type = 'button';
-        debugButton.className = 'verba-debug-copy-error';
-        debugButton.textContent = '진단 복사';
-        debugButton.title = '번역 내용과 인증 정보를 제외한 진단 정보 복사';
-        debugButton.addEventListener('click', event => {
-            event.stopPropagation();
-            copyDebugReport();
-        });
-        notice.append(debugButton);
-    }
     notice.append(close);
     document.documentElement.append(notice);
     bottomErrorTimer = setTimeout(() => notice.remove(), 12000);
@@ -367,51 +355,7 @@ function profileSlotForId(profileId) {
     return configuredProfiles().find(profile => profile.id === id)?.slot || 'A';
 }
 
-function safeErrorDetails(error) {
-    const details = { name: String(error?.name || 'Error') };
-    const seen = new Set();
-    let current = error;
-    while (current && !seen.has(current)) {
-        seen.add(current);
-        if (details.code === undefined && current.code !== undefined) details.code = String(current.code).slice(0, 80);
-        if (details.status === undefined && current.status !== undefined) details.status = String(current.status).slice(0, 24);
-        if (details.status === undefined && current.statusCode !== undefined) details.status = String(current.statusCode).slice(0, 24);
-        if (details.status === undefined && current.response?.status !== undefined) details.status = String(current.response.status).slice(0, 24);
-        current = current.cause;
-    }
-    return details;
-}
-
-function recordDebugEvent(stage, details = {}) {
-    if (!settings.debugMode) return;
-    const allowed = ['status', 'slot', 'elapsedMs', 'retry', 'fallback', 'name', 'code', 'httpStatus'];
-    const event = {
-        time: new Date().toISOString(),
-        stage: String(stage || 'unknown').slice(0, 80),
-    };
-    for (const key of allowed) {
-        const value = details[key];
-        if (value === undefined || value === null || value === '') continue;
-        event[key] = typeof value === 'number' || typeof value === 'boolean'
-            ? value
-            : String(value).slice(0, 120);
-    }
-    debugEvents.push(event);
-    if (debugEvents.length > DEBUG_EVENT_LIMIT) debugEvents.splice(0, debugEvents.length - DEBUG_EVENT_LIMIT);
-    renderDebugStatus();
-}
-
-function recordOperationError(stage, error) {
-    const safe = safeErrorDetails(error);
-    recordDebugEvent(stage, {
-        status: 'failure',
-        name: safe.name,
-        code: safe.code,
-        httpStatus: safe.status,
-    });
-}
-
-function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallback = false, error = null, stage = 'request' } = {}) {
+function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallback = false } = {}) {
     const normalizedSlot = ['A', 'B', 'C'].includes(slot) ? slot : 'A';
     settings.profileStats = normalizeProfileStats(settings.profileStats);
     const stat = settings.profileStats[normalizedSlot];
@@ -423,18 +367,6 @@ function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallbac
     if (fallback) stat.fallbacks += 1;
     saveSettings();
     renderProfileStats();
-
-    const safeError = error ? safeErrorDetails(error) : {};
-    recordDebugEvent(stage, {
-        status: success ? 'success' : 'failure',
-        slot: normalizedSlot,
-        elapsedMs: Math.max(0, Math.round(Number(elapsedMs) || 0)),
-        retry: Boolean(retry),
-        fallback: Boolean(fallback),
-        name: safeError.name,
-        code: safeError.code,
-        httpStatus: safeError.status,
-    });
 }
 
 async function copyText(value) {
@@ -482,38 +414,6 @@ async function copyText(value) {
                 : '클립보드 복사를 지원하지 않는 환경입니다.',
         );
     }
-}
-
-function debugReportText() {
-    const context = liveContext();
-    return JSON.stringify({
-        app: 'Verba',
-        version: EXTENSION_VERSION,
-        generatedAt: new Date().toISOString(),
-        activeProfileSlot: activeProfileSlot(),
-        configuredSlots: configuredProfiles().map(profile => profile.slot),
-        chatLength: Array.isArray(context.chat) ? context.chat.length : 0,
-        profileStats: normalizeProfileStats(settings.profileStats),
-        events: [...debugEvents],
-        privacy: '프롬프트, 번역문, 원문, API 키 및 인증 정보는 포함하지 않음',
-    }, null, 2);
-}
-
-async function copyDebugReport() {
-    try {
-        await copyText(debugReportText());
-        notify('진단 정보를 복사했어요.', 'success');
-    } catch (error) {
-        notify(`진단 정보 복사 실패: ${errorText(error)}`, 'error');
-    }
-}
-
-function renderDebugStatus() {
-    const status = document.querySelector('#verba-debug-status');
-    if (!status) return;
-    status.textContent = settings.debugMode
-        ? `기록 중 · 최근 ${debugEvents.length}/${DEBUG_EVENT_LIMIT}개 이벤트`
-        : '꺼짐 · 번역 내용과 인증 정보는 기록하지 않음';
 }
 
 function renderProfileStats() {
@@ -856,14 +756,6 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
         } catch (error) {
             if (isAbort(error, options.signal) || transientError(error)) throw error;
             lastError = error;
-            const safe = safeErrorDetails(error);
-            recordDebugEvent('segment-parse', {
-                status: 'failure',
-                retry: attempt > 0,
-                name: safe.name,
-                code: safe.code,
-                httpStatus: safe.status,
-            });
         }
     }
     throw lastError || new Error('번역 결과를 해석하지 못했습니다.');
@@ -881,14 +773,6 @@ async function requestSelectionCandidates(prompt, options = {}) {
         } catch (error) {
             if (isAbort(error, options.signal) || transientError(error)) throw error;
             lastError = error;
-            const safe = safeErrorDetails(error);
-            recordDebugEvent('candidate-parse', {
-                status: 'failure',
-                retry: attempt > 0,
-                name: safe.name,
-                code: safe.code,
-                httpStatus: safe.status,
-            });
         }
     }
     throw lastError || new Error('선택 재번역 후보를 해석하지 못했습니다.');
@@ -1516,7 +1400,6 @@ async function translateMessage(messageId, options = {}) {
         } catch (error) {
             if (!isAbort(error, controller.signal)) {
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
-                recordOperationError('output-failure', error);
                 console.error('[베르바] 출력 번역 실패', error);
                 notify(`출력 번역 실패: ${errorText(error)}`, 'error');
             }
@@ -2199,7 +2082,6 @@ async function translateInputAndSend(textarea, sendButton, source) {
         sendButton.click();
     } catch (error) {
         if (!isAbort(error)) {
-            recordOperationError('input-failure', error);
             console.error('[베르바] 인풋 번역 실패', error);
             notify(`인풋 번역 실패로 전송하지 않았어요: ${errorText(error)}`, 'error');
         }
@@ -2244,7 +2126,6 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         setTextareaValue(textarea, translated);
     } catch (error) {
         if (!isAbort(error)) {
-            recordOperationError('input-before-generation-failure', error);
             console.error('[베르바] 생성 전 인풋 번역 실패', error);
             notify(`인풋 번역 실패로 생성을 중단했어요: ${errorText(error)}`, 'error');
         }
@@ -2277,7 +2158,6 @@ async function translateSentInputMessage(payload) {
             scheduleChatSave(context.chat);
         } catch (error) {
             if (!isAbort(error)) {
-                recordOperationError('sent-input-failure', error);
                 console.error('[베르바] 전송된 인풋 번역 실패', error);
                 notify(`인풋 번역 실패로 뒤따르는 생성을 중단했어요: ${errorText(error)}`, 'error');
             }
@@ -2718,7 +2598,6 @@ async function lockSelectionName(snapshot) {
         notify(`${sourceName}의 표기를 “${targetName}”로 이 캐릭터에 저장했어요.${historyNotice}`, 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
-            recordOperationError('name-lock-failure', error);
             console.error('[베르바] 이름 고정 실패', error);
             notify(`이름 고정 실패: ${errorText(error)}`, 'error');
         }
@@ -2820,7 +2699,6 @@ async function retranslateSelection(snapshot) {
         notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
-            recordOperationError('selection-failure', error);
             console.error('[베르바] 선택 부분 재번역 실패', error);
             notify(`선택 부분 재번역 실패: ${errorText(error)}`, 'error');
         }
@@ -2846,6 +2724,11 @@ function setupSelection() {
         if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(100);
     });
     document.addEventListener('contextmenu', event => {
+        if (Date.now() < suppressMessageCopyClickUntil) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
         if (event.target?.closest?.('.mes[mesid] .mes_text')) scheduleSelectionCapture(220);
     });
     document.addEventListener('selectionchange', () => scheduleSelectionCapture(120));
@@ -2925,26 +2808,79 @@ function showMessageCopyMenu(messageId) {
     }
 }
 
-function ensureMessageCopyButton(element, messageId, record) {
-    const existing = element.querySelector('.verba-copy-menu-button');
-    if (!record) {
-        existing?.remove();
-        return;
-    }
-    if (existing) return;
-    const host = element.querySelector('.extraMesButtons, .mes_buttons');
-    if (!host) return;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'mes_button verba-copy-menu-button fa-solid fa-copy';
-    button.title = '베르바 원문·번역문 복사';
-    button.setAttribute('aria-label', button.title);
-    button.addEventListener('click', event => {
+function cancelMessageCopyHold() {
+    clearTimeout(messageCopyHoldTimer);
+    messageCopyHoldTimer = null;
+    messageCopyPointerId = null;
+    messageCopyStart = null;
+}
+
+function setupMessageCopyHold() {
+    document.addEventListener('pointerdown', event => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        const messageElement = event.target?.closest?.('.mes[mesid]');
+        const interactive = event.target?.closest?.(
+            'button, a, input, textarea, select, [contenteditable="true"], .mes_buttons, .extraMesButtons, #verba-selection-actions',
+        );
+        if (!messageElement || interactive || document.querySelector('#verba-request-overlay')) {
+            cancelMessageCopyHold();
+            return;
+        }
+        const messageId = Number(messageElement.getAttribute('mesid'));
+        const message = liveContext().chat?.[messageId];
+        if (!Number.isInteger(messageId) || !message || !currentRecord(message)) {
+            cancelMessageCopyHold();
+            return;
+        }
+
+        cancelMessageCopyHold();
+        messageCopyPointerId = event.pointerId;
+        messageCopyStart = { x: event.clientX, y: event.clientY };
+        messageCopyHoldShown = false;
+        messageCopyHoldTimer = setTimeout(() => {
+            messageCopyHoldTimer = null;
+            const latest = liveContext().chat?.[messageId];
+            if (!messageElement.isConnected || latest !== message || !currentRecord(latest)) return;
+            selectionSnapshot = null;
+            hideSelectionButton();
+            globalThis.getSelection?.()?.removeAllRanges?.();
+            messageCopyHoldShown = true;
+            showMessageCopyMenu(messageId);
+            try {
+                navigator.vibrate?.(20);
+            } catch {
+                // 진동을 지원하지 않는 환경에서는 메뉴만 표시한다.
+            }
+        }, 420);
+    }, { passive: true });
+
+    document.addEventListener('pointermove', event => {
+        if (event.pointerId !== messageCopyPointerId || !messageCopyStart) return;
+        if (Math.hypot(event.clientX - messageCopyStart.x, event.clientY - messageCopyStart.y) > 9) {
+            messageCopyHoldShown = false;
+            cancelMessageCopyHold();
+        }
+    }, { passive: true });
+
+    const finishHold = event => {
+        if (event.pointerId !== messageCopyPointerId) return;
+        const opened = messageCopyHoldShown;
+        cancelMessageCopyHold();
+        messageCopyHoldShown = false;
+        if (opened) suppressMessageCopyClickUntil = Date.now() + 180;
+    };
+    document.addEventListener('pointerup', finishHold, { passive: true });
+    document.addEventListener('pointercancel', finishHold, { passive: true });
+    document.addEventListener('scroll', () => {
+        messageCopyHoldShown = false;
+        cancelMessageCopyHold();
+    }, true);
+    document.addEventListener('click', event => {
+        if (Date.now() >= suppressMessageCopyClickUntil) return;
+        suppressMessageCopyClickUntil = 0;
         event.preventDefault();
-        event.stopPropagation();
-        showMessageCopyMenu(messageId);
-    });
-    host.append(button);
+        event.stopImmediatePropagation();
+    }, true);
 }
 
 function refreshTranslationClasses() {
@@ -2954,7 +2890,7 @@ function refreshTranslationClasses() {
         const record = message && currentRecord(message);
         const active = Boolean(record && message.extra?.display_text === record.translation);
         element.classList.toggle('verba-translation-active', active);
-        ensureMessageCopyButton(element, id, record);
+        element.querySelectorAll('.verba-copy-menu-button').forEach(button => button.remove());
         if (active && !element.classList.contains('verba-swipe-hold-active')) {
             const html = element.querySelector('.mes_text')?.innerHTML || '';
             const key = renderedTranslationKey(id, record);
@@ -3036,94 +2972,6 @@ function refreshRetranslateButton() {
             : '최근 AI 아웃풋 전체 재번역';
 }
 
-function resolveInputActionCollision() {
-    inputCollisionFrame = null;
-    const actions = document.querySelector('#verba-input-actions');
-    const sendButton = document.querySelector('#send_but');
-    const host = actions?.parentElement;
-    if (!actions || !sendButton || !host) return;
-
-    const currentShift = Math.abs(Number.parseFloat(
-        actions.style.getPropertyValue('--verba-collision-shift'),
-    ) || 0);
-    const actionRect = actions.getBoundingClientRect();
-    if (!actionRect.width || !actionRect.height) return;
-    const naturalLeft = actionRect.left + currentShift;
-    const clearance = 8;
-    const blockers = [];
-
-    const hostRect = host.getBoundingClientRect();
-    const input = document.querySelector('#send_textarea');
-    const inputRect = input?.getBoundingClientRect?.();
-    const inputSafetyGap = 6;
-    const controlStripWidth = Math.min(220, Math.max(120, hostRect.width * 0.35));
-    const fallbackMinimumLeft = Math.max(hostRect.left + 6, hostRect.right - controlStripWidth);
-    // Some themes stretch #send_textarea underneath every right-side icon. Only
-    // use its right edge when it genuinely ends before Verba's natural position;
-    // otherwise reserve a bounded right-side control strip instead.
-    const minimumLeft = inputRect?.width && inputRect?.height && inputRect.right < naturalLeft
-        ? inputRect.right + inputSafetyGap
-        : fallbackMinimumLeft;
-
-    const candidates = new Set([
-        sendButton,
-        ...document.querySelectorAll(
-            'button, [role="button"], [onclick], [tabindex], .menu_button, .interactable, [class*="button"], [class*="Button"]',
-        ),
-    ]);
-
-    // Extensions may render an icon as an absolutely-positioned div outside the
-    // send button's parent. Sample the visible control strip so those elements
-    // are discovered even when they have no conventional button class.
-    if (typeof document.elementsFromPoint === 'function') {
-        const sampleY = Math.min(innerHeight - 1, Math.max(0, actionRect.top + (actionRect.height / 2)));
-        const sampleEnd = Math.min(innerWidth - 1, Math.max(minimumLeft, hostRect.right));
-        for (let x = Math.max(0, minimumLeft); x <= sampleEnd; x += 6) {
-            document.elementsFromPoint(x, sampleY).forEach(element => candidates.add(element));
-        }
-    }
-
-    for (const candidate of candidates) {
-        if (!(candidate instanceof HTMLElement)) continue;
-        if (candidate === actions || actions.contains(candidate)) continue;
-        if (candidate.contains(actions)) continue;
-        const style = getComputedStyle(candidate);
-        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
-        const rect = candidate.getBoundingClientRect();
-        if (!rect.width || !rect.height || rect.width > 100 || rect.height > 100) continue;
-        const verticalOverlap = Math.min(actionRect.bottom, rect.bottom) - Math.max(actionRect.top, rect.top);
-        if (verticalOverlap < Math.min(8, actionRect.height / 3)) continue;
-        blockers.push({ left: rect.left, right: rect.right });
-    }
-
-    let targetLeft = naturalLeft;
-
-    // Start at the normal position and repeatedly move to the left edge of every
-    // overlapping control. This finds the nearest empty slot instead of avoiding
-    // one right-side button only to land on a different button to the left.
-    for (let attempt = 0; attempt <= blockers.length; attempt += 1) {
-        const overlapping = blockers.filter(rect => (
-            rect.left < targetLeft + actionRect.width + clearance
-            && rect.right + clearance > targetLeft
-        ));
-        if (!overlapping.length) break;
-        targetLeft = Math.min(...overlapping.map(rect => rect.left - clearance - actionRect.width));
-    }
-
-    // Never use the text-entry area as overflow space. If the available strip is
-    // too narrow, stop at its boundary instead of continuing into typed text.
-    targetLeft = Math.max(minimumLeft, Math.min(naturalLeft, targetLeft));
-    const safeShift = Math.max(0, Math.ceil(naturalLeft - targetLeft));
-    actions.style.setProperty('--verba-collision-shift', `${-safeShift}px`);
-}
-
-function scheduleInputActionCollisionCheck() {
-    if (inputCollisionFrame !== null) cancelAnimationFrame(inputCollisionFrame);
-    inputCollisionFrame = requestAnimationFrame(resolveInputActionCollision);
-    clearTimeout(inputCollisionTimer);
-    inputCollisionTimer = setTimeout(resolveInputActionCollision, 260);
-}
-
 function injectInputAction() {
     const existingActions = document.querySelector('#verba-input-actions');
     if (existingActions) {
@@ -3132,7 +2980,6 @@ function injectInputAction() {
         }
         refreshProfileToggleButton();
         refreshRetranslateButton();
-        scheduleInputActionCollisionCheck();
         return;
     }
     const sendButton = document.querySelector('#send_but');
@@ -3153,7 +3000,6 @@ function injectInputAction() {
     sendButton.before(actions);
     refreshProfileToggleButton();
     refreshRetranslateButton();
-    scheduleInputActionCollisionCheck();
 }
 
 async function testConnection(button) {
@@ -3302,21 +3148,6 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
-                <details id="verba-debug-tools" class="verba-tool-details">
-                    <summary>디버그 도구 <small id="verba-debug-status"></small></summary>
-                    <div class="verba-tool-details-content">
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
-                            <span>디버그 모드</span>
-                        </label>
-                        <div class="verba-help">오류 단계·프로필 슬롯·응답 시간·재시도 여부만 최근 ${DEBUG_EVENT_LIMIT}개까지 기록합니다. 프롬프트·원문·번역문·API 키·인증 정보는 기록하지 않습니다.</div>
-                        <div class="verba-tool-buttons">
-                            <button type="button" id="verba-copy-debug" class="menu_button">진단 정보 복사</button>
-                            <button type="button" id="verba-clear-debug" class="menu_button">기록 비우기</button>
-                        </div>
-                    </div>
-                </details>
-
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
                     <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
@@ -3355,7 +3186,6 @@ function injectSettingsPanel() {
     refreshProfileSelect();
     renderNameLockManager();
     renderProfileStats();
-    renderDebugStatus();
 
     panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();
@@ -3416,18 +3246,6 @@ function injectSettingsPanel() {
         saveSettings();
         renderProfileStats();
         notify('프로필 성능 기록을 초기화했어요.', 'success');
-    });
-    panel.querySelector('#verba-debug-mode').addEventListener('change', event => {
-        settings.debugMode = event.target.checked;
-        saveSettings();
-        renderDebugStatus();
-        notify(settings.debugMode ? '디버그 기록을 시작했어요.' : '디버그 기록을 중지했어요.', 'info');
-    });
-    panel.querySelector('#verba-copy-debug').addEventListener('click', copyDebugReport);
-    panel.querySelector('#verba-clear-debug').addEventListener('click', () => {
-        debugEvents.length = 0;
-        renderDebugStatus();
-        notify('디버그 기록을 비웠어요.', 'success');
     });
     panel.querySelector('#verba-auto-input').addEventListener('change', event => {
         settings.autoInput = event.target.checked;
@@ -3684,11 +3502,10 @@ function initialize() {
     injectInputAction();
     refreshTranslationClasses();
     setupAutoInput();
+    setupMessageCopyHold();
     setupSelection();
     setupEvents();
     setupObserver();
-    window.addEventListener('resize', scheduleInputActionCollisionCheck);
-    globalThis.visualViewport?.addEventListener?.('resize', scheduleInputActionCollisionCheck);
     globalThis.__verbaTranslatorVersion = EXTENSION_VERSION;
     console.log(`[베르바] v${EXTENSION_VERSION} 준비 완료`);
 }

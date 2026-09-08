@@ -24,10 +24,11 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.14';
+const EXTENSION_VERSION = '0.2.16';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
+const DEVELOPER_PASSWORD_HASH = '39fc1a167edd36664f4d0fdf869c6ec8d9681018ffff05ba2dc30fb9dce81e4b';
 const DEFAULT_SETTINGS = {
     profileId: '',
     fallbackProfileId: '',
@@ -42,6 +43,7 @@ const DEFAULT_SETTINGS = {
     bannedWords: '',
     maxTokens: 15000,
     timeoutSeconds: 120,
+    developerMode: false,
 };
 
 const baseContext = getContext();
@@ -52,6 +54,7 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 );
 const settings = extension_settings[EXTENSION_KEY];
 settings.profileStats = normalizeProfileStats(settings.profileStats);
+settings.developerMode = settings.developerMode === true;
 delete settings.debugMode;
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
@@ -81,6 +84,9 @@ let messageCopyPointerId = null;
 let messageCopyStart = null;
 let messageCopyHoldShown = false;
 let suppressMessageCopyClickUntil = 0;
+let developerTapCount = 0;
+let developerTapTimer = null;
+let developerModeBusy = false;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -218,6 +224,71 @@ function isAbort(error, signal) {
 
 function saveSettings() {
     liveContext().saveSettingsDebounced?.();
+}
+
+async function sha256Hex(value) {
+    const subtle = globalThis.crypto?.subtle;
+    if (!subtle) throw new Error('이 환경에서는 비밀번호 확인을 사용할 수 없습니다.');
+    const bytes = new TextEncoder().encode(String(value ?? ''));
+    const digest = await subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)]
+        .map(byte => byte.toString(16).padStart(2, '0'))
+        .join('');
+}
+
+function syncDeveloperModeUi() {
+    const enabled = settings.developerMode === true;
+    document.body?.classList.toggle('verba-developer-mode', enabled);
+    globalThis.__verbaDeveloperMode = enabled;
+    document.dispatchEvent(new CustomEvent('verba:developer-mode-changed', {
+        detail: { enabled },
+    }));
+}
+
+async function toggleDeveloperMode() {
+    if (developerModeBusy) return;
+    if (settings.developerMode) {
+        settings.developerMode = false;
+        saveSettings();
+        syncDeveloperModeUi();
+        notify('개발자 모드를 잠갔어요.', 'success');
+        return;
+    }
+
+    const password = globalThis.prompt?.('개발자 모드 비밀번호를 입력하세요.');
+    if (password === null || password === undefined) return;
+
+    developerModeBusy = true;
+    try {
+        const hash = await sha256Hex(password);
+        if (hash !== DEVELOPER_PASSWORD_HASH) {
+            notify('비밀번호가 맞지 않아요.', 'error');
+            return;
+        }
+        settings.developerMode = true;
+        saveSettings();
+        syncDeveloperModeUi();
+        notify('개발자 모드를 열었어요.', 'success');
+    } catch (error) {
+        notify(`개발자 모드 확인 실패: ${errorText(error)}`, 'error');
+    } finally {
+        developerModeBusy = false;
+    }
+}
+
+function registerDeveloperModeTap() {
+    developerTapCount += 1;
+    clearTimeout(developerTapTimer);
+    developerTapTimer = setTimeout(() => {
+        developerTapCount = 0;
+        developerTapTimer = null;
+    }, 5000);
+
+    if (developerTapCount < 7) return;
+    developerTapCount = 0;
+    clearTimeout(developerTapTimer);
+    developerTapTimer = null;
+    toggleDeveloperMode();
 }
 
 function currentCharacterReference() {
@@ -3218,6 +3289,9 @@ function injectSettingsPanel() {
     refreshProfileSelect();
     renderNameLockManager();
     renderProfileStats();
+    syncDeveloperModeUi();
+
+    panel.querySelector('.verba-drawer-header').addEventListener('click', registerDeveloperModeTap);
 
     panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();
@@ -3530,6 +3604,7 @@ function setupObserver() {
 }
 
 function initialize() {
+    syncDeveloperModeUi();
     injectSettingsPanel();
     injectInputAction();
     refreshTranslationClasses();

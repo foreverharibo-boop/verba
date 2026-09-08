@@ -286,6 +286,14 @@
     border-top: 1px solid color-mix(in srgb, var(--verba-border) 45%, transparent);
 }
 
+.verba-developer-only {
+    display: none !important;
+}
+
+body.verba-developer-mode .verba-developer-only {
+    display: block !important;
+}
+
 .verba-profile-stats-content {
     display: grid;
     gap: 6px;

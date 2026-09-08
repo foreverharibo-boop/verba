@@ -344,9 +344,22 @@
 
 .verba-input-actions {
     display: inline-flex;
+    flex-direction: row !important;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
+    gap: 2px;
+    direction: ltr !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+#verba-input-actions #verba-profile-toggle {
+    order: 1;
+}
+
+#verba-input-actions #verba-retranslate-latest {
+    order: 2;
 }
 
 .verba-input-icon {

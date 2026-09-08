@@ -23,7 +23,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.34';
+const EXTENSION_VERSION = '0.1.35';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -219,6 +219,21 @@ function currentCharacterReference() {
     return character ? { context, characterId, character } : null;
 }
 
+function allCharacterNameLockGroups() {
+    const context = liveContext();
+    const characters = Array.isArray(context.characters) ? context.characters : [];
+    return characters.flatMap((character, characterId) => {
+        if (!character) return [];
+        const rows = normalizedCharacterNameLocks(character);
+        if (!rows.length) return [];
+        return [{
+            reference: { context, characterId, character },
+            characterName: String(character.name ?? character.data?.name ?? `캐릭터 ${characterId + 1}`),
+            rows,
+        }];
+    });
+}
+
 function normalizedCharacterNameLocks(character = currentCharacterReference()?.character) {
     const rows = character?.data?.extensions?.[CHARACTER_FIELD_KEY]?.nameLocks;
     if (!Array.isArray(rows)) return [];
@@ -256,8 +271,7 @@ async function writeCharacterNameLocks(reference, rows) {
     reference.character.data.extensions[CHARACTER_FIELD_KEY] = field;
 }
 
-async function saveCharacterNameLock(source, target) {
-    const reference = currentCharacterReference();
+async function saveCharacterNameLock(source, target, reference = currentCharacterReference()) {
     if (!reference) throw new Error('개별 캐릭터 채팅에서만 이름을 고정할 수 있습니다.');
     const sourceName = String(source || '').trim();
     const targetName = String(target || '').trim();
@@ -272,8 +286,7 @@ async function saveCharacterNameLock(source, target) {
     await writeCharacterNameLocks(reference, rows);
 }
 
-async function deleteCharacterNameLock(source) {
-    const reference = currentCharacterReference();
+async function deleteCharacterNameLock(source, reference = currentCharacterReference()) {
     const sourceName = String(source || '').trim();
     if (!sourceName) throw new Error('삭제할 원문 이름이 없습니다.');
     const rows = normalizedCharacterNameLocks(reference?.character)
@@ -2496,81 +2509,86 @@ function renderNameLockManager() {
     const content = document.querySelector('#verba-name-lock-manager-content');
     if (!content) return;
 
-    const reference = currentCharacterReference();
-    if (!reference) {
-        content.innerHTML = '<div class="verba-name-lock-empty">개별 캐릭터 채팅을 연 뒤 사용할 수 있어요.</div>';
-        return;
-    }
-
-    const rows = normalizedCharacterNameLocks(reference.character);
-    const characterName = String(reference.character?.name || '현재 캐릭터');
+    const groups = allCharacterNameLockGroups();
     content.innerHTML = `
-        <div class="verba-help">${escapeHtml(characterName)} 카드에 저장된 이름만 관리합니다. 일반 단어나 문장은 저장하지 않아요.</div>
+        <div class="verba-help">모든 캐릭터 카드에 저장된 베르바 이름을 불러옵니다. 일반 단어나 문장은 표시하지 않아요.</div>
         <div class="verba-name-lock-list">
-            ${rows.length ? rows.map((row, index) => `
-                <div class="verba-name-lock-row" data-index="${index}">
-                    <div class="verba-name-lock-pair">
-                        <b title="${escapeHtml(row.source)}">${escapeHtml(row.source)}</b>
-                        <span aria-hidden="true">→</span>
-                        <input type="text" class="text_pole verba-name-lock-edit" maxlength="120" value="${escapeHtml(row.target)}" aria-label="${escapeHtml(row.source)}의 고정 표기">
-                    </div>
-                    <div class="verba-name-lock-row-actions">
-                        <button type="button" class="menu_button verba-name-lock-save">저장</button>
-                        <button type="button" class="menu_button verba-name-lock-delete">삭제</button>
-                    </div>
-                </div>`).join('') : '<div class="verba-name-lock-empty">아직 고정한 이름이 없어요.</div>'}
+            ${groups.length ? groups.map((group, groupIndex) => `
+                <section class="verba-name-lock-group" data-group-index="${groupIndex}">
+                    <header class="verba-name-lock-group-header">
+                        <b>${escapeHtml(group.characterName)}</b>
+                        <small>카드 ${group.reference.characterId + 1} · ${group.rows.length}개</small>
+                    </header>
+                    ${group.rows.map((row, rowIndex) => `
+                        <div class="verba-name-lock-row" data-row-index="${rowIndex}">
+                            <div class="verba-name-lock-pair">
+                                <b title="${escapeHtml(row.source)}">${escapeHtml(row.source)}</b>
+                                <span aria-hidden="true">→</span>
+                                <input type="text" class="text_pole verba-name-lock-edit" maxlength="120" value="${escapeHtml(row.target)}" aria-label="${escapeHtml(row.source)}의 고정 표기">
+                            </div>
+                            <div class="verba-name-lock-row-actions">
+                                <button type="button" class="menu_button verba-name-lock-save">저장</button>
+                                <button type="button" class="menu_button verba-name-lock-delete">삭제</button>
+                            </div>
+                        </div>`).join('')}
+                </section>`).join('') : '<div class="verba-name-lock-empty">아직 어떤 캐릭터에도 고정한 이름이 없어요.</div>'}
         </div>
-        <div class="verba-help">새 이름은 번역문에서 이름을 선택한 뒤 ‘이름으로 고정’으로 등록하세요. 표기를 수정하면 현재 채팅의 기존 저장 번역에서도 이전 표기가 함께 변경되며, 삭제해도 이미 번역된 메시지는 되돌아가지 않아요.</div>`;
+        <div class="verba-help">새 이름은 해당 캐릭터의 번역문에서 이름을 선택한 뒤 ‘이름으로 고정’으로 등록하세요. 현재 열린 캐릭터의 표기를 수정하면 현재 채팅의 기존 저장 번역도 함께 변경되며, 다른 캐릭터의 저장값은 카드에서만 수정됩니다.</div>`;
 
-    content.querySelectorAll('.verba-name-lock-row').forEach(rowElement => {
-        const index = Number(rowElement.dataset.index);
-        const row = rows[index];
-        if (!row) return;
-        const input = rowElement.querySelector('.verba-name-lock-edit');
-        const saveButton = rowElement.querySelector('.verba-name-lock-save');
-        const deleteButton = rowElement.querySelector('.verba-name-lock-delete');
+    content.querySelectorAll('.verba-name-lock-group').forEach(groupElement => {
+        const group = groups[Number(groupElement.dataset.groupIndex)];
+        if (!group) return;
+        groupElement.querySelectorAll('.verba-name-lock-row').forEach(rowElement => {
+            const row = group.rows[Number(rowElement.dataset.rowIndex)];
+            if (!row) return;
+            const input = rowElement.querySelector('.verba-name-lock-edit');
+            const saveButton = rowElement.querySelector('.verba-name-lock-save');
+            const deleteButton = rowElement.querySelector('.verba-name-lock-delete');
 
-        const save = async () => {
-            const targetName = String(input.value || '').trim();
-            saveButton.disabled = true;
-            deleteButton.disabled = true;
-            try {
-                await saveCharacterNameLock(row.source, targetName);
-                const historyResult = targetName !== row.target
-                    ? replaceNameAcrossChatTranslations([row.target], targetName)
-                    : { changedRecords: 0 };
-                renderNameLockManager();
-                const historyNotice = historyResult.changedRecords
-                    ? ` 현재 채팅의 저장 번역본 ${historyResult.changedRecords}개도 변경했어요.`
-                    : '';
-                notify(`${row.source}의 표기를 “${targetName}”로 수정했어요.${historyNotice}`, 'success');
-            } catch (error) {
-                notify(`이름 수정 실패: ${errorText(error)}`, 'error');
-            } finally {
-                if (saveButton.isConnected) saveButton.disabled = false;
-                if (deleteButton.isConnected) deleteButton.disabled = false;
-            }
-        };
-        saveButton.addEventListener('click', save);
-        input.addEventListener('keydown', event => {
-            if (event.key !== 'Enter') return;
-            event.preventDefault();
-            save();
-        });
-        deleteButton.addEventListener('click', async () => {
-            if (!globalThis.confirm?.(`“${row.source} → ${row.target}” 이름 고정을 삭제할까요?`)) return;
-            saveButton.disabled = true;
-            deleteButton.disabled = true;
-            try {
-                await deleteCharacterNameLock(row.source);
-                renderNameLockManager();
-                notify(`${row.source}의 이름 고정을 삭제했어요.`, 'success');
-            } catch (error) {
-                notify(`이름 삭제 실패: ${errorText(error)}`, 'error');
-            } finally {
-                if (saveButton.isConnected) saveButton.disabled = false;
-                if (deleteButton.isConnected) deleteButton.disabled = false;
-            }
+            const save = async () => {
+                const targetName = String(input.value || '').trim();
+                saveButton.disabled = true;
+                deleteButton.disabled = true;
+                try {
+                    await saveCharacterNameLock(row.source, targetName, group.reference);
+                    const activeReference = currentCharacterReference();
+                    const isCurrentCharacter = activeReference?.character === group.reference.character;
+                    const historyResult = isCurrentCharacter && targetName !== row.target
+                        ? replaceNameAcrossChatTranslations([row.target], targetName)
+                        : { changedRecords: 0 };
+                    renderNameLockManager();
+                    const historyNotice = historyResult.changedRecords
+                        ? ` 현재 채팅의 저장 번역본 ${historyResult.changedRecords}개도 변경했어요.`
+                        : '';
+                    notify(`${group.characterName} · ${row.source}의 표기를 “${targetName}”로 수정했어요.${historyNotice}`, 'success');
+                } catch (error) {
+                    notify(`이름 수정 실패: ${errorText(error)}`, 'error');
+                } finally {
+                    if (saveButton.isConnected) saveButton.disabled = false;
+                    if (deleteButton.isConnected) deleteButton.disabled = false;
+                }
+            };
+            saveButton.addEventListener('click', save);
+            input.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                save();
+            });
+            deleteButton.addEventListener('click', async () => {
+                if (!globalThis.confirm?.(`${group.characterName}의 “${row.source} → ${row.target}” 이름 고정을 삭제할까요?`)) return;
+                saveButton.disabled = true;
+                deleteButton.disabled = true;
+                try {
+                    await deleteCharacterNameLock(row.source, group.reference);
+                    renderNameLockManager();
+                    notify(`${group.characterName} · ${row.source}의 이름 고정을 삭제했어요.`, 'success');
+                } catch (error) {
+                    notify(`이름 삭제 실패: ${errorText(error)}`, 'error');
+                } finally {
+                    if (saveButton.isConnected) saveButton.disabled = false;
+                    if (deleteButton.isConnected) deleteButton.disabled = false;
+                }
+            });
         });
     });
 }

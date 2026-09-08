@@ -160,13 +160,45 @@
 .verba-name-lock-list {
     display: grid;
     gap: 6px;
+    max-height: min(52vh, 460px);
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.verba-name-lock-group {
+    display: grid;
+    gap: 6px;
+    padding: 7px;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 55%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--verba-surface) 72%, transparent);
+}
+
+.verba-name-lock-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 1px 2px 3px;
+}
+
+.verba-name-lock-group-header b {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.verba-name-lock-group-header small {
+    margin-left: auto;
+    flex: 0 0 auto;
+    opacity: 0.62;
 }
 
 .verba-name-lock-row {
     display: grid;
     gap: 6px;
     padding: 7px;
-    border: 1px solid color-mix(in srgb, var(--verba-border) 50%, transparent);
+    border: 1px solid color-mix(in srgb, var(--verba-border) 42%, transparent);
     border-radius: 8px;
     background: color-mix(in srgb, var(--verba-text) 7%, transparent);
 }

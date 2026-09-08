@@ -1,4 +1,4 @@
-const PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
+const PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
 const PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const VOID_HTML_TAGS = new Set([
@@ -294,11 +294,15 @@ function replaceOutsideTokens(value, source, createToken) {
 
 export function protectSource(value, configuredNameLocks = []) {
     const tokens = [];
-    let protectedText = String(value || '').replace(PROTECTED_PATTERN, match => {
+    const protectValue = match => {
         const token = tokenName(tokens.length);
         tokens.push({ token, value: match });
         return token;
-    });
+    };
+    // Hidden reasoning/control blocks and actual code are opaque, while normal
+    // HTML/custom tags are tokenized by themselves so their visible inner text
+    // can still be translated regardless of the tag name.
+    const protectedText = String(value || '').replace(PROTECTED_PATTERN, protectValue);
 
     const nameTokens = [];
     for (const lock of normalizeNameLocks(configuredNameLocks)) {

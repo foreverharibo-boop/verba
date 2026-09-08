@@ -449,6 +449,13 @@
     line-height: 1.35;
 }
 
+.verba-modal,
+.verba-modal *,
+.verba-selection-actions,
+.verba-selection-actions * {
+    text-shadow: none !important;
+}
+
 .verba-modal-header {
     display: flex;
     align-items: center;

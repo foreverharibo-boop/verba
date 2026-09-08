@@ -23,7 +23,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.36';
+const EXTENSION_VERSION = '0.1.37';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -1170,9 +1170,11 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
                 <textarea id="verba-request-text" class="text_pole" rows="5" maxlength="1200" placeholder="예: 더 직설적으로 번역해 줘 / 존댓말로 바꿔 줘"></textarea>
                 <small>비워두면 현재 전역 설정대로 다시 번역해요.</small>
                 <div class="verba-modal-actions">
-                    ${!isSelection && viewAction
-                        ? `<button type="button" class="menu_button verba-view-toggle">${escapeHtml(viewAction.label)}</button>`
-                        : '<button type="button" class="menu_button verba-cancel">취소</button>'}
+                    ${isSelection
+                        ? ''
+                        : viewAction
+                            ? `<button type="button" class="menu_button verba-view-toggle">${escapeHtml(viewAction.label)}</button>`
+                            : '<button type="button" class="menu_button verba-cancel">취소</button>'}
                     <button type="button" class="menu_button verba-submit">${isSelection && settings.selectionCandidates ? '후보 만들기' : '재번역 시작'}</button>
                 </div>
             </section>`;

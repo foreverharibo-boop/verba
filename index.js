@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.11';
+const EXTENSION_VERSION = '0.2.12';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -3003,22 +3003,7 @@ function refreshRetranslateButton() {
             : '최근 AI 아웃풋 전체 재번역';
 }
 
-function injectInputAction() {
-    const existingActions = document.querySelector('#verba-input-actions');
-    if (existingActions) {
-        if (!document.querySelector('#verba-profile-toggle')) {
-            existingActions.prepend(createProfileToggleButton());
-        }
-        refreshProfileToggleButton();
-        refreshRetranslateButton();
-        return;
-    }
-    const sendButton = document.querySelector('#send_but');
-    if (!sendButton) return;
-    const actions = document.createElement('div');
-    actions.id = 'verba-input-actions';
-    actions.className = 'verba-input-actions';
-    const profileButton = createProfileToggleButton();
+function createRetranslateButton() {
     const button = document.createElement('button');
     button.id = 'verba-retranslate-latest';
     button.type = 'button';
@@ -3027,8 +3012,24 @@ function injectInputAction() {
     button.title = '최근 AI 아웃풋 전체 재번역';
     button.setAttribute('aria-label', button.title);
     button.addEventListener('click', retranslateLatestOutput);
-    actions.append(profileButton, button);
-    sendButton.before(actions);
+    return button;
+}
+
+function injectInputAction() {
+    const sendButton = document.querySelector('#send_but');
+    if (!sendButton) return;
+    const legacyActions = document.querySelector('#verba-input-actions');
+    const profileButton = document.querySelector('#verba-profile-toggle') || createProfileToggleButton();
+    const button = document.querySelector('#verba-retranslate-latest') || createRetranslateButton();
+    const targetParent = sendButton.parentElement;
+    if (
+        legacyActions
+        || profileButton.parentElement !== targetParent
+        || button.parentElement !== targetParent
+    ) {
+        sendButton.before(profileButton, button);
+        legacyActions?.remove();
+    }
     refreshProfileToggleButton();
     refreshRetranslateButton();
 }

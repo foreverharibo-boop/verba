@@ -313,15 +313,7 @@
     line-height: 1.35;
 }
 
-.verba-input-actions {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    flex: 0 0 auto;
-}
-
-#verba-input-actions #verba-retranslate-latest {
+#verba-retranslate-latest {
     position: relative;
     top: -2px;
 }

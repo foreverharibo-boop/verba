@@ -3,6 +3,7 @@ import {
     assembleTranslation,
     buildBannedRepairPrompt,
     buildInputPrompt,
+    buildMultiSelectionPrompt,
     buildNameHistoryFormsPrompt,
     buildNameMatchPrompt,
     buildOutputPrompt,
@@ -24,7 +25,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.16';
+const EXTENSION_VERSION = '0.3.0';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -87,6 +88,7 @@ let suppressMessageCopyClickUntil = 0;
 let developerTapCount = 0;
 let developerTapTimer = null;
 let developerModeBusy = false;
+let multiSelectionState = null;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -239,6 +241,8 @@ async function sha256Hex(value) {
 function syncDeveloperModeUi() {
     const enabled = settings.developerMode === true;
     document.body?.classList.toggle('verba-developer-mode', enabled);
+    document.documentElement?.classList.toggle('verba-developer-mode', enabled);
+    if (!enabled) clearMultiSelection();
     globalThis.__verbaDeveloperMode = enabled;
     document.dispatchEvent(new CustomEvent('verba:developer-mode-changed', {
         detail: { enabled },
@@ -891,6 +895,49 @@ function normalizedSourceMap(value) {
     });
 }
 
+function normalizedLockedSegments(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    return value.flatMap((entry, index) => {
+        const id = String(entry?.id || `seg_${index}`);
+        const source = String(entry?.source || '').trim();
+        const translation = String(entry?.translation || '');
+        const key = `${id}\u0000${source}`;
+        if (!source || !translation || seen.has(key)) return [];
+        seen.add(key);
+        return [{ id, source, translation }];
+    });
+}
+
+function lockedSegmentKey(entry) {
+    return `${String(entry?.id || '')}\u0000${String(entry?.source || '').trim()}`;
+}
+
+function translationWithLockedSegments(translated, lockedSegments) {
+    const locks = normalizedLockedSegments(lockedSegments);
+    let translation = String(translated?.translation || '');
+    let sourceMap = normalizedSourceMap(translated?.sourceMap);
+    if (!locks.length || !sourceMap.length) return { translation, sourceMap, lockedSegments: locks };
+
+    const replacements = locks.flatMap(lock => {
+        const row = sourceMap.find(candidate => lockedSegmentKey(candidate) === lockedSegmentKey(lock));
+        return row ? [{ ...row, replacement: lock.translation }] : [];
+    }).sort((left, right) => right.start - left.start);
+
+    for (const replacement of replacements) {
+        translation = translation.slice(0, replacement.start)
+            + replacement.replacement
+            + translation.slice(replacement.end);
+        sourceMap = sourceMapAfterSelection(
+            sourceMap,
+            replacement.start,
+            replacement.end,
+            replacement.replacement,
+        );
+    }
+    return { translation, sourceMap, lockedSegments: locks };
+}
+
 function sourceMapAfterSelection(sourceMap, start, end, replacement) {
     const rows = normalizedSourceMap(sourceMap);
     const delta = String(replacement).length - (end - start);
@@ -1161,6 +1208,14 @@ function sameTranslationRecord(left, right) {
             && row.start === other?.start
             && row.end === other?.end;
     });
+    const leftLocks = normalizedLockedSegments(left?.lockedSegments);
+    const rightLocks = normalizedLockedSegments(right?.lockedSegments);
+    const sameLocks = leftLocks.length === rightLocks.length && leftLocks.every((lock, index) => {
+        const other = rightLocks[index];
+        return lock.id === other?.id
+            && lock.source === other?.source
+            && lock.translation === other?.translation;
+    });
     return Boolean(
         left
         && right
@@ -1168,6 +1223,7 @@ function sameTranslationRecord(left, right) {
         && left.sourceHash === right.sourceHash
         && left.translation === right.translation
         && sameMap
+        && sameLocks
     );
 }
 
@@ -1306,17 +1362,27 @@ function applyTranslation(messageId, message, source, translation, chatReference
         : previousRecord?.translation === translation
             ? normalizedSourceMap(previousRecord.sourceMap)
             : [];
+    const lockedSegments = metadata.lockedSegments !== undefined
+        ? normalizedLockedSegments(metadata.lockedSegments)
+        : previousRecord?.sourceHash === hashText(source)
+            ? normalizedLockedSegments(previousRecord.lockedSegments)
+            : [];
     const record = {
         swipeId: currentSwipeId(message),
         sourceHash: hashText(source),
         translation,
         sourceMap,
+        lockedSegments,
         updatedAt: new Date().toISOString(),
     };
     message.extra[STATE_KEY] = record;
     message.extra.display_text = translation;
     delete message.extra[SOURCE_VIEW_KEY];
     syncOwnedTranslationToCurrentSwipe(message, record);
+    if (
+        multiSelectionState?.messageId === Number(messageId)
+        && multiSelectionState.translation !== translation
+    ) clearMultiSelection();
     updateMessageBlock(messageId, message);
     cacheRenderedTranslation(messageId, message, record);
     scheduleChatSave(chatReference);
@@ -1436,8 +1502,13 @@ async function translateMessage(messageId, options = {}) {
         source,
         sourceHash: hashText(source),
         swipeId: currentSwipeId(message),
+        previousRecord: record ? {
+            ...record,
+            sourceMap: normalizedSourceMap(record.sourceMap),
+            lockedSegments: normalizedLockedSegments(record.lockedSegments),
+        } : null,
     };
-    const toast = showProgress(options.force ? '아웃풋 전체를 다시 번역 중입니다…' : '아웃풋을 자동 번역 중입니다…');
+    let toast = showProgress(options.force ? '아웃풋 전체를 다시 번역 중입니다…' : '아웃풋을 자동 번역 중입니다…');
     const work = (async () => {
         try {
             const translated = await translateOutputText(source, {
@@ -1458,13 +1529,44 @@ async function translateMessage(messageId, options = {}) {
                 console.warn('[베르바] 메시지 또는 스와이프가 바뀌어 이전 결과를 폐기했습니다.');
                 return;
             }
+            const finalTranslation = translationWithLockedSegments(
+                translated,
+                snapshot.previousRecord?.lockedSegments,
+            );
+            if (options.force && settings.developerMode && snapshot.previousRecord) {
+                clearProgress(toast);
+                toast = null;
+                const approved = await requestChangePreview({
+                    title: '전체 재번역 변경점 미리보기',
+                    before: snapshot.previousRecord.translation,
+                    after: finalTranslation.translation,
+                });
+                if (!approved) {
+                    notify('재번역 결과를 적용하지 않았어요.', 'info');
+                    return;
+                }
+                const previewContext = liveContext();
+                const previewLatest = previewContext.chat?.[id];
+                if (
+                    previewContext.chat !== snapshot.chatReference
+                    || previewLatest !== snapshot.message
+                    || currentSwipeId(previewLatest) !== snapshot.swipeId
+                    || hashText(messageSource(previewLatest)) !== snapshot.sourceHash
+                ) {
+                    notify('미리보는 동안 메시지 또는 스와이프가 바뀌어 결과를 적용하지 않았어요.', 'warning');
+                    return;
+                }
+            }
             applyTranslation(
                 id,
                 latest,
                 source,
-                translated.translation,
+                finalTranslation.translation,
                 snapshot.chatReference,
-                { sourceMap: translated.sourceMap },
+                {
+                    sourceMap: finalTranslation.sourceMap,
+                    lockedSegments: finalTranslation.lockedSegments,
+                },
             );
             failedOutputSignatures.delete(id);
             notify(options.force ? '전체 재번역을 적용했어요.' : '자동 번역을 적용했어요.', 'success');
@@ -1499,6 +1601,9 @@ function latestAssistantMessage() {
 function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     const isSelection = scope === 'selection';
+    const isMultiSelection = scope === 'multi';
+    const isPartialSelection = isSelection || isMultiSelection;
+    const showContextChoice = settings.developerMode && isPartialSelection;
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.id = 'verba-request-overlay';
@@ -1507,15 +1612,24 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
         overlay.innerHTML = `
             <section class="verba-modal" role="dialog" aria-modal="true">
                 <header class="verba-modal-header">
-                    <strong>${isSelection ? '선택 부분 재번역' : '최근 아웃풋 전체 재번역'}</strong>
+                    <strong>${isMultiSelection ? '여러 구간 묶음 재번역' : isSelection ? '선택 부분 재번역' : '최근 아웃풋 전체 재번역'}</strong>
                     <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
                 ${preview ? `<div class="verba-target-preview"><b>대상</b><span>${escapeHtml(preview)}</span></div>` : ''}
                 <label for="verba-request-text">이번 번역에만 적용할 요구사항</label>
                 <textarea id="verba-request-text" class="text_pole" rows="5" maxlength="1200" placeholder="예: 더 직설적으로 번역해 줘 / 존댓말로 바꿔 줘"></textarea>
                 <small>비워두면 현재 전역 설정대로 다시 번역해요.</small>
+                ${showContextChoice ? `
+                    <fieldset class="verba-context-choice">
+                        <legend>AI가 참고할 현재 메시지 문맥</legend>
+                        <label><input type="radio" name="verba-context-mode" value="narrow"> 선택 주변</label>
+                        <label><input type="radio" name="verba-context-mode" value="paragraph" checked> 현재 문단</label>
+                        <label><input type="radio" name="verba-context-mode" value="message"> 메시지 전체</label>
+                    </fieldset>
+                    <small>실제로 교체되는 범위는 선택한 부분뿐이에요.</small>
+                ` : ''}
                 <div class="verba-modal-actions">
-                    ${isSelection
+                    ${isPartialSelection
                         ? ''
                         : viewAction
                             ? `<button type="button" class="menu_button verba-view-toggle">${escapeHtml(viewAction.label)}</button>`
@@ -1564,7 +1678,17 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
             resolve(value);
         };
         const textarea = overlay.querySelector('#verba-request-text');
-        const submit = () => finish(String(textarea.value || '').trim());
+        const submit = () => {
+            const instruction = String(textarea.value || '').trim();
+            if (!showContextChoice) {
+                finish(instruction);
+                return;
+            }
+            finish({
+                instruction,
+                contextMode: overlay.querySelector('input[name="verba-context-mode"]:checked')?.value || 'paragraph',
+            });
+        };
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.querySelector('.verba-cancel')?.addEventListener('click', () => finish(null));
         overlay.querySelector('.verba-view-toggle')?.addEventListener('click', () => finish({
@@ -1580,6 +1704,101 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
             if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') submit();
         });
         requestAnimationFrame(() => textarea.focus());
+    });
+}
+
+function diffPreviewParts(before, after, replacements = null) {
+    const oldText = String(before || '');
+    const newText = String(after || '');
+    if (Array.isArray(replacements) && replacements.length) {
+        const parts = [];
+        let cursor = 0;
+        for (const row of [...replacements].sort((left, right) => left.start - right.start)) {
+            if (row.start > cursor) parts.push({ type: 'same', text: oldText.slice(cursor, row.start) });
+            parts.push({ type: 'removed', text: oldText.slice(row.start, row.end) });
+            parts.push({ type: 'added', text: String(row.replacement || '') });
+            cursor = row.end;
+        }
+        if (cursor < oldText.length) parts.push({ type: 'same', text: oldText.slice(cursor) });
+        return parts;
+    }
+
+    let prefix = 0;
+    const maxPrefix = Math.min(oldText.length, newText.length);
+    while (prefix < maxPrefix && oldText[prefix] === newText[prefix]) prefix += 1;
+    let suffix = 0;
+    const maxSuffix = Math.min(oldText.length - prefix, newText.length - prefix);
+    while (
+        suffix < maxSuffix
+        && oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]
+    ) suffix += 1;
+    return [
+        { type: 'same', text: oldText.slice(0, prefix) },
+        { type: 'removed', text: oldText.slice(prefix, oldText.length - suffix) },
+        { type: 'added', text: newText.slice(prefix, newText.length - suffix) },
+        { type: 'same', text: suffix ? oldText.slice(oldText.length - suffix) : '' },
+    ].filter(part => part.text);
+}
+
+function requestChangePreview({ title, before, after, replacements = null }) {
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(false);
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay';
+        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+        overlay.innerHTML = `
+            <section class="verba-modal verba-diff-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
+                    <strong>${escapeHtml(title || '적용 전 변경점 미리보기')}</strong>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
+                </header>
+                <div class="verba-diff-legend">
+                    <span class="verba-diff-same">유지</span>
+                    <span class="verba-diff-removed">삭제</span>
+                    <span class="verba-diff-added">추가</span>
+                </div>
+                <div class="verba-diff-content" aria-label="번역 변경점"></div>
+                <div class="verba-modal-actions">
+                    <button type="button" class="menu_button verba-cancel">적용 안 함</button>
+                    <button type="button" class="menu_button verba-submit">변경 적용</button>
+                </div>
+            </section>`;
+        const content = overlay.querySelector('.verba-diff-content');
+        for (const part of diffPreviewParts(before, after, replacements)) {
+            const span = document.createElement('span');
+            span.className = `verba-diff-${part.type}`;
+            span.textContent = part.text;
+            content.append(span);
+        }
+        document.documentElement.append(overlay);
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed-position fallback.
+        }
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            try {
+                overlay.hidePopover?.();
+            } catch {
+                // It may already have left the top layer.
+            }
+            overlay.remove();
+            resolve(value);
+        };
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(false));
+        overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(false));
+        overlay.querySelector('.verba-submit').addEventListener('click', () => finish(true));
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) finish(false);
+        });
+        overlay.addEventListener('keydown', event => {
+            if (event.key === 'Escape') finish(false);
+        });
+        requestAnimationFrame(() => overlay.querySelector('.verba-submit')?.focus());
     });
 }
 
@@ -1861,12 +2080,20 @@ function replaceStoredNameInExtra(extra, source, oldNames, targetName, swipeId =
         nextTranslation,
         replacements,
     );
+    const nextLockedSegments = normalizedLockedSegments(stored.record?.lockedSegments).map(lock => {
+        let translation = lock.translation;
+        for (const replacement of replacements) {
+            translation = replaceOutsideProtected(translation, replacement.search, replacement.value);
+        }
+        return { ...lock, translation };
+    });
     extra[STATE_KEY] = {
         ...(stored.record || {}),
         swipeId: stored.record?.swipeId ?? swipeId,
         sourceHash: hashText(source),
         translation: nextTranslation,
         sourceMap: nextSourceMap,
+        lockedSegments: nextLockedSegments,
         updatedAt: new Date().toISOString(),
     };
     if (!stored.record || extra.display_text === previousTranslation) extra.display_text = nextTranslation;
@@ -2507,6 +2734,27 @@ function showSelectionButton(snapshot) {
     sourceButton.className = 'menu_button verba-selection-action verba-source-lens-action';
     sourceButton.textContent = '원문 보기';
     actions.append(retranslateButton, sourceButton, nameButton);
+    if (settings.developerMode) {
+        const lockButton = document.createElement('button');
+        lockButton.type = 'button';
+        lockButton.className = 'menu_button verba-selection-action verba-segment-lock-action verba-developer-only';
+        lockButton.textContent = selectionIsLocked(snapshot) ? '잠금 해제' : '구간 잠금';
+        const bundleButton = document.createElement('button');
+        bundleButton.type = 'button';
+        bundleButton.className = 'menu_button verba-selection-action verba-bundle-add-action verba-developer-only';
+        bundleButton.textContent = '묶음 추가';
+        lockButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleSelectionLock(selectionSnapshot);
+        });
+        bundleButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            addSelectionToBundle(selectionSnapshot);
+        });
+        actions.append(lockButton, bundleButton);
+    }
 
     const viewport = globalThis.visualViewport;
     const viewportLeft = viewport?.offsetLeft || 0;
@@ -2514,7 +2762,7 @@ function showSelectionButton(snapshot) {
     const viewportWidth = viewport?.width || innerWidth;
     const viewportHeight = viewport?.height || innerHeight;
     const buttonWidth = Math.min(420, viewportWidth - 16);
-    const buttonHeight = 42;
+    const buttonHeight = settings.developerMode ? 84 : 42;
     const centeredLeft = snapshot.rect.left + (snapshot.rect.width / 2) - (buttonWidth / 2);
     const left = Math.min(
         Math.max(viewportLeft + 8, centeredLeft),
@@ -2575,6 +2823,281 @@ function selectionStillCurrent(snapshot) {
         && hashText(messageSource(message)) === snapshot.sourceHash
         && record.translation === snapshot.translation
     );
+}
+
+function selectionSourceRows(snapshot) {
+    return normalizedSourceMap(snapshot?.sourceMap)
+        .filter(row => snapshot.start < row.end && snapshot.end > row.start);
+}
+
+function selectionIsLocked(snapshot) {
+    if (!snapshot) return false;
+    const record = currentRecord(snapshot.message);
+    const rows = selectionSourceRows(snapshot);
+    if (!record || !rows.length) return false;
+    const lockedKeys = new Set(normalizedLockedSegments(record.lockedSegments).map(lockedSegmentKey));
+    return rows.every(row => lockedKeys.has(lockedSegmentKey(row)));
+}
+
+function selectionTouchesLocked(snapshot) {
+    if (!snapshot) return false;
+    const record = currentRecord(snapshot.message);
+    if (!record) return false;
+    const lockedKeys = new Set(normalizedLockedSegments(record.lockedSegments).map(lockedSegmentKey));
+    return selectionSourceRows(snapshot).some(row => lockedKeys.has(lockedSegmentKey(row)));
+}
+
+function toggleSelectionLock(snapshot) {
+    if (!settings.developerMode || !snapshot || selectionBusy) return;
+    if (!selectionStillCurrent(snapshot)) {
+        notify('선택한 뒤 번역문이 바뀌었어요. 다시 드래그해 주세요.', 'warning');
+        hideSelectionButton();
+        return;
+    }
+    const rows = selectionSourceRows(snapshot);
+    if (!rows.length) {
+        notify('이 번역에는 구간 정보가 없어 잠글 수 없어요. 새로 번역한 메시지에서 사용해 주세요.', 'warning');
+        hideSelectionButton();
+        return;
+    }
+    const record = currentRecord(snapshot.message);
+    const existing = normalizedLockedSegments(record.lockedSegments);
+    const targetKeys = new Set(rows.map(lockedSegmentKey));
+    const unlock = rows.every(row => existing.some(lock => lockedSegmentKey(lock) === lockedSegmentKey(row)));
+    const nextLocks = unlock
+        ? existing.filter(lock => !targetKeys.has(lockedSegmentKey(lock)))
+        : [
+            ...existing.filter(lock => !targetKeys.has(lockedSegmentKey(lock))),
+            ...rows.map(row => ({
+                id: row.id,
+                source: row.source,
+                translation: snapshot.translation.slice(row.start, row.end),
+            })),
+        ];
+    const context = liveContext();
+    const message = context.chat?.[snapshot.messageId];
+    if (message !== snapshot.message) {
+        notify('현재 메시지가 바뀌었어요.', 'warning');
+        return;
+    }
+    applyTranslation(snapshot.messageId, message, snapshot.source, snapshot.translation, context.chat, {
+        sourceMap: snapshot.sourceMap,
+        lockedSegments: nextLocks,
+    });
+    globalThis.getSelection?.()?.removeAllRanges?.();
+    selectionSnapshot = null;
+    hideSelectionButton();
+    notify(unlock ? '선택한 번역 구간의 잠금을 해제했어요.' : `번역 구간 ${rows.length}개를 잠갔어요.`, 'success');
+}
+
+function selectionSourceContext(snapshot, contextMode) {
+    if (contextMode === 'message') return snapshot.source;
+    const rows = normalizedSourceMap(snapshot.sourceMap);
+    const matchedIndexes = rows.flatMap((row, index) => (
+        snapshot.start < row.end && snapshot.end > row.start ? [index] : []
+    ));
+    if (!matchedIndexes.length) return snapshot.source;
+    let first = Math.min(...matchedIndexes);
+    let last = Math.max(...matchedIndexes);
+    if (contextMode === 'paragraph') {
+        first = Math.max(0, first - 1);
+        last = Math.min(rows.length - 1, last + 1);
+    }
+    return rows.slice(first, last + 1).map(row => row.source).join('\n\n');
+}
+
+function bundleStillCurrent(state = multiSelectionState) {
+    if (!state) return false;
+    const message = liveContext().chat?.[state.messageId];
+    const record = message && currentRecord(message);
+    return Boolean(
+        message === state.message
+        && record
+        && currentSwipeId(message) === state.swipeId
+        && hashText(messageSource(message)) === state.sourceHash
+        && record.translation === state.translation
+    );
+}
+
+function clearMultiSelection() {
+    multiSelectionState = null;
+    document.querySelector('#verba-multi-selection-tray')?.remove();
+}
+
+function renderMultiSelectionTray() {
+    document.querySelector('#verba-multi-selection-tray')?.remove();
+    if (!settings.developerMode || !multiSelectionState?.ranges?.length) return;
+    const tray = document.createElement('div');
+    tray.id = 'verba-multi-selection-tray';
+    tray.className = 'verba-multi-selection-tray verba-developer-only';
+    tray.innerHTML = `
+        <b>묶음 선택 ${multiSelectionState.ranges.length}개</b>
+        <button type="button" class="menu_button verba-bundle-run">한꺼번에 재번역</button>
+        <button type="button" class="menu_button verba-bundle-clear">초기화</button>`;
+    tray.querySelector('.verba-bundle-run').addEventListener('click', retranslateSelectionBundle);
+    tray.querySelector('.verba-bundle-clear').addEventListener('click', () => {
+        clearMultiSelection();
+        notify('묶음 선택을 비웠어요.', 'info');
+    });
+    document.documentElement.append(tray);
+}
+
+function addSelectionToBundle(snapshot) {
+    if (!settings.developerMode || !snapshot || selectionBusy) return;
+    if (!selectionStillCurrent(snapshot)) {
+        notify('선택한 뒤 번역문이 바뀌었어요. 다시 드래그해 주세요.', 'warning');
+        return;
+    }
+    if (selectionTouchesLocked(snapshot)) {
+        notify('잠긴 번역 구간은 묶음 재번역에 추가할 수 없어요.', 'warning');
+        return;
+    }
+    if (multiSelectionState && (
+        multiSelectionState.messageId !== snapshot.messageId
+        || multiSelectionState.message !== snapshot.message
+        || multiSelectionState.translation !== snapshot.translation
+    )) {
+        notify('묶음 재번역은 한 메시지 안에서만 가능해요. 기존 묶음을 먼저 초기화해 주세요.', 'warning');
+        return;
+    }
+    if (!multiSelectionState) {
+        multiSelectionState = {
+            messageId: snapshot.messageId,
+            message: snapshot.message,
+            source: snapshot.source,
+            sourceHash: snapshot.sourceHash,
+            swipeId: snapshot.swipeId,
+            translation: snapshot.translation,
+            sourceMap: normalizedSourceMap(snapshot.sourceMap),
+            ranges: [],
+        };
+    }
+    if (multiSelectionState.ranges.some(row => snapshot.start < row.end && snapshot.end > row.start)) {
+        notify('이미 묶음에 포함된 범위와 겹쳐요.', 'warning');
+        return;
+    }
+    if (multiSelectionState.ranges.length >= 12) {
+        notify('한 번에 최대 12개 구간까지 묶을 수 있어요.', 'warning');
+        return;
+    }
+    multiSelectionState.ranges.push({
+        selected: snapshot.selected,
+        start: snapshot.start,
+        end: snapshot.end,
+    });
+    multiSelectionState.ranges.sort((left, right) => left.start - right.start);
+    globalThis.getSelection?.()?.removeAllRanges?.();
+    selectionSnapshot = null;
+    hideSelectionButton();
+    renderMultiSelectionTray();
+    notify(`묶음에 ${multiSelectionState.ranges.length}개 구간을 담았어요.`, 'success');
+}
+
+async function retranslateSelectionBundle() {
+    const state = multiSelectionState;
+    if (!settings.developerMode || !state || selectionBusy) return;
+    if (!settings.profileId) {
+        notify('먼저 번역기 전용 연결 프로필을 선택해 주세요.', 'warning');
+        return;
+    }
+    if (!bundleStillCurrent(state)) {
+        clearMultiSelection();
+        notify('번역문이 바뀌어 묶음 선택을 초기화했어요.', 'warning');
+        return;
+    }
+    const currentRecordValue = currentRecord(state.message);
+    if (state.ranges.some(range => selectionTouchesLocked({ ...state, ...range, message: state.message }))) {
+        notify('묶음 안에 잠긴 번역 구간이 있어 재번역할 수 없어요.', 'warning');
+        return;
+    }
+
+    selectionBusy = true;
+    const request = await requestOneTimeInstruction('multi', `${state.ranges.length}개 선택 구간`);
+    if (request === null) {
+        selectionBusy = false;
+        return;
+    }
+    const instruction = typeof request === 'object' ? request.instruction : String(request || '');
+    const contextMode = typeof request === 'object' ? request.contextMode : 'paragraph';
+    if (!bundleStillCurrent(state)) {
+        selectionBusy = false;
+        clearMultiSelection();
+        notify('요구사항을 적는 동안 번역문이 바뀌었어요.', 'warning');
+        return;
+    }
+
+    const selections = state.ranges.map((range, index) => ({
+        ...range,
+        id: `multi_${String(index).padStart(4, '0')}`,
+        sourceContext: selectionSourceContext({ ...state, ...range }, contextMode),
+    }));
+    const expected = selections.map(row => ({ id: row.id, type: 'multi_selection', text: row.selected }));
+    const prompt = buildMultiSelectionPrompt({
+        source: state.source,
+        translation: state.translation,
+        selections,
+        settings,
+        oneTimeInstruction: instruction,
+        speakerIdentity: outputSpeakerIdentity(state.message),
+        contextMode,
+    });
+    const controller = new AbortController();
+    let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
+    try {
+        const result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'multi-selection-retranslation' });
+        const replacements = selections.map(row => {
+            const replacement = String(result.get(row.id) || '').trim();
+            if (!replacement) throw new Error('묶음 재번역 결과 중 비어 있는 구간이 있습니다.');
+            const banned = findBannedWords(replacement, settings.bannedWords);
+            if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
+            if (replacement.length > Math.max(300, row.selected.length * 7)) {
+                throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
+            }
+            return { start: row.start, end: row.end, replacement };
+        });
+        if (!bundleStillCurrent(state)) throw new Error('재번역 중 원문이나 번역문이 바뀌었습니다.');
+        let updated = state.translation;
+        let sourceMap = normalizedSourceMap(state.sourceMap);
+        for (const replacement of [...replacements].sort((left, right) => right.start - left.start)) {
+            updated = updated.slice(0, replacement.start)
+                + replacement.replacement
+                + updated.slice(replacement.end);
+            sourceMap = sourceMapAfterSelection(
+                sourceMap,
+                replacement.start,
+                replacement.end,
+                replacement.replacement,
+            );
+        }
+        clearProgress(toast);
+        toast = null;
+        const approved = await requestChangePreview({
+            title: '묶음 재번역 변경점 미리보기',
+            before: state.translation,
+            after: updated,
+            replacements,
+        });
+        if (!approved) {
+            notify('묶음 재번역 결과를 적용하지 않았어요.', 'info');
+            return;
+        }
+        if (!bundleStillCurrent(state)) throw new Error('미리보는 동안 번역문이 바뀌었습니다.');
+        const context = liveContext();
+        applyTranslation(state.messageId, state.message, state.source, updated, context.chat, {
+            sourceMap,
+            lockedSegments: currentRecordValue?.lockedSegments,
+        });
+        clearMultiSelection();
+        notify(`${replacements.length}개 구간을 한꺼번에 교체했어요.`, 'success');
+    } catch (error) {
+        if (!isAbort(error, controller.signal)) {
+            console.error('[베르바] 묶음 재번역 실패', error);
+            notify(`묶음 재번역 실패: ${errorText(error)}`, 'error');
+        }
+    } finally {
+        clearProgress(toast);
+        selectionBusy = false;
+    }
 }
 
 async function lockSelectionName(snapshot) {
@@ -2691,14 +3214,21 @@ async function retranslateSelection(snapshot) {
         hideSelectionButton();
         return;
     }
+    if (selectionTouchesLocked(snapshot)) {
+        notify('잠긴 번역 구간은 재번역할 수 없어요. 먼저 잠금을 해제해 주세요.', 'warning');
+        hideSelectionButton();
+        return;
+    }
     selectionBusy = true;
-    const instruction = await requestOneTimeInstruction('selection', snapshot.selected.slice(0, 110));
-    if (instruction === null) {
+    const request = await requestOneTimeInstruction('selection', snapshot.selected.slice(0, 110));
+    if (request === null) {
         selectionBusy = false;
         selectionSnapshot = null;
         hideSelectionButton();
         return;
     }
+    const instruction = typeof request === 'object' ? request.instruction : String(request || '');
+    const contextMode = typeof request === 'object' ? request.contextMode : 'standard';
     if (!selectionStillCurrent(snapshot)) {
         selectionBusy = false;
         selectionSnapshot = null;
@@ -2719,6 +3249,8 @@ async function retranslateSelection(snapshot) {
         oneTimeInstruction: instruction,
         speakerIdentity: outputSpeakerIdentity(snapshot.message),
         candidateCount: candidateMode ? 3 : 1,
+        contextMode,
+        sourceContext: selectionSourceContext(snapshot, contextMode),
     });
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected }];
     let toast = showProgress(candidateMode
@@ -2765,6 +3297,25 @@ async function retranslateSelection(snapshot) {
             snapshot.end,
             replacement,
         );
+        if (settings.developerMode) {
+            clearProgress(toast);
+            toast = null;
+            const approved = await requestChangePreview({
+                title: '부분 재번역 변경점 미리보기',
+                before: snapshot.translation,
+                after: updated,
+                replacements: [{
+                    start: snapshot.start,
+                    end: snapshot.end,
+                    replacement,
+                }],
+            });
+            if (!approved) {
+                notify('부분 재번역 결과를 적용하지 않았어요.', 'info');
+                return;
+            }
+            if (!selectionStillCurrent(snapshot)) throw new Error('미리보는 동안 번역문이 바뀌었습니다.');
+        }
         applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat, { sourceMap });
         globalThis.getSelection?.()?.removeAllRanges?.();
         notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');
@@ -3572,6 +4123,7 @@ function setupEvents() {
             });
             selectionSnapshot = null;
             hideSelectionButton();
+            clearMultiSelection();
             document.querySelector('#verba-request-overlay')?.remove();
             setTimeout(() => {
                 injectInputAction();

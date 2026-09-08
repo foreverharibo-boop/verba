@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.4';
+const EXTENSION_VERSION = '0.2.5';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -439,20 +439,49 @@ function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallbac
 
 async function copyText(value) {
     const text = String(value ?? '');
+    let clipboardError = null;
     if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        return;
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch (error) {
+            clipboardError = error;
+        }
     }
     const textarea = document.createElement('textarea');
     textarea.value = text;
-    textarea.setAttribute('readonly', '');
     textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.append(textarea);
+    textarea.style.left = '0';
+    textarea.style.top = '0';
+    textarea.style.width = '1px';
+    textarea.style.height = '1px';
+    textarea.style.padding = '0';
+    textarea.style.border = '0';
+    textarea.style.opacity = '0.01';
+    textarea.style.pointerEvents = 'none';
+    textarea.style.fontSize = '16px';
+    document.documentElement.append(textarea);
+    try {
+        textarea.focus({ preventScroll: true });
+    } catch {
+        textarea.focus();
+    }
     textarea.select();
-    const copied = document.execCommand?.('copy');
+    textarea.setSelectionRange(0, text.length);
+    let copied = false;
+    try {
+        copied = Boolean(document.execCommand?.('copy'));
+    } catch {
+        copied = false;
+    }
     textarea.remove();
-    if (!copied) throw new Error('클립보드 복사를 지원하지 않는 환경입니다.');
+    if (!copied) {
+        throw new Error(
+            clipboardError
+                ? `클립보드 권한이 거부되었고 호환 복사도 실패했습니다: ${errorText(clipboardError)}`
+                : '클립보드 복사를 지원하지 않는 환경입니다.',
+        );
+    }
 }
 
 function debugReportText() {
@@ -3042,7 +3071,17 @@ function resolveInputActionCollision() {
         requiredShift = Math.max(requiredShift, naturalRight + clearance - rect.left);
     }
 
-    const safeShift = Math.min(96, Math.max(0, Math.ceil(requiredShift)));
+    const input = document.querySelector('#send_textarea');
+    const inputRect = input?.getBoundingClientRect?.();
+    const inputSafetyGap = 6;
+    const maxShiftBeforeInput = inputRect?.width && inputRect?.height
+        ? Math.max(0, naturalLeft - inputRect.right - inputSafetyGap)
+        : 96;
+    const safeShift = Math.min(
+        96,
+        maxShiftBeforeInput,
+        Math.max(0, Math.ceil(requiredShift)),
+    );
     actions.style.setProperty('--verba-collision-shift', `${-safeShift}px`);
 }
 

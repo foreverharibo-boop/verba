@@ -349,7 +349,7 @@
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    gap: 2px;
+    gap: 0;
     margin-right: 4px;
     direction: ltr !important;
     border: 0 !important;

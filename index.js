@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.12';
+const EXTENSION_VERSION = '0.2.13';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -3154,7 +3154,7 @@ function injectSettingsPanel() {
                 <div><b>베르바</b> <small>v${EXTENSION_VERSION}</small></div>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
-            <div class="inline-drawer-content">
+            <div class="inline-drawer-content" style="display: none;">
                 <div class="verba-note">AI 아웃풋은 항상 한국어로 자동 번역하며, 한국어 중심 출력은 API를 호출하지 않아요.</div>
 
                 <label for="verba-profile">연결 프로필 A</label>

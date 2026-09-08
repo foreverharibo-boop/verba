@@ -1,5 +1,12 @@
+:root {
+    --verba-accent: var(--SmartThemeQuoteColor, var(--SmartThemeEmColor, #a98be8));
+    --verba-surface: var(--SmartThemeBlurTintColor, #25252a);
+    --verba-text: var(--SmartThemeBodyColor, #fff);
+    --verba-border: var(--SmartThemeBorderColor, #888);
+    --verba-shadow: var(--SmartThemeShadowColor, #000);
+}
+
 #verba-settings {
-    --verba-accent: var(--SmartThemeQuoteColor, #a98be8);
     font-size: 0.92em;
 }
 
@@ -69,7 +76,7 @@
     gap: 8px;
     padding: 7px 8px;
     border-radius: 9px;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #888) 12%, transparent);
+    background: color-mix(in srgb, var(--verba-surface) 72%, transparent);
 }
 
 .verba-check-row input {
@@ -85,6 +92,119 @@
     width: 100%;
     resize: vertical;
     line-height: 1.4;
+}
+
+.verba-name-lock-manager {
+    margin: 2px 0;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 70%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--verba-surface) 82%, transparent);
+    overflow: hidden;
+}
+
+.verba-name-lock-manager > summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 10px;
+    cursor: pointer;
+    font-weight: 650;
+    list-style: none;
+    user-select: none;
+}
+
+.verba-name-lock-manager > summary::-webkit-details-marker {
+    display: none;
+}
+
+.verba-name-lock-manager > summary small {
+    margin-left: auto;
+    opacity: 0.62;
+    font-weight: 400;
+}
+
+.verba-name-lock-manager > summary::after {
+    content: '›';
+    font-size: 1.2em;
+    line-height: 1;
+    transform: rotate(0deg);
+    transition: transform 0.15s ease;
+}
+
+.verba-name-lock-manager[open] > summary::after {
+    transform: rotate(90deg);
+}
+
+.verba-name-lock-manager-content {
+    display: grid;
+    gap: 8px;
+    padding: 0 9px 9px;
+    border-top: 1px solid color-mix(in srgb, var(--verba-border) 45%, transparent);
+}
+
+.verba-name-lock-manager-content > .verba-help:first-child {
+    margin-top: 8px;
+}
+
+.verba-name-lock-pair input {
+    min-width: 0;
+    width: 100%;
+}
+
+.verba-name-lock-row-actions button {
+    width: auto !important;
+    min-width: 58px;
+    white-space: nowrap;
+}
+
+.verba-name-lock-list {
+    display: grid;
+    gap: 6px;
+}
+
+.verba-name-lock-row {
+    display: grid;
+    gap: 6px;
+    padding: 7px;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 50%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--verba-text) 7%, transparent);
+}
+
+.verba-name-lock-pair {
+    display: grid;
+    grid-template-columns: minmax(60px, 0.8fr) auto minmax(0, 1.2fr);
+    align-items: center;
+    gap: 7px;
+}
+
+.verba-name-lock-pair b {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.verba-name-lock-pair > span {
+    color: var(--verba-accent);
+}
+
+.verba-name-lock-row-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.verba-name-lock-delete {
+    opacity: 0.78;
+}
+
+.verba-name-lock-empty {
+    padding: 9px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--verba-text) 7%, transparent);
+    text-align: center;
+    opacity: 0.7;
 }
 
 .verba-input-actions {
@@ -113,7 +233,7 @@
 .verba-input-icon:hover,
 .verba-input-icon:focus-visible {
     opacity: 1;
-    background: color-mix(in srgb, var(--verba-accent, #a98be8) 18%, transparent);
+    background: color-mix(in srgb, var(--verba-accent) 18%, transparent);
 }
 
 .verba-input-icon:disabled {
@@ -144,6 +264,7 @@
 }
 
 .verba-profile-slot {
+    --verba-profile-slot-color: #ad83dc;
     position: absolute;
     top: 1px;
     right: 1px;
@@ -154,23 +275,25 @@
     justify-content: center;
     padding: 0 2px;
     border-radius: 999px;
-    background: var(--SmartThemeBlurTintColor, #25252a);
-    color: var(--verba-accent, #a98be8);
+    background: transparent;
+    color: var(--verba-profile-slot-color);
     font-size: 7px;
     font-weight: 800;
     line-height: 1;
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--verba-accent, #a98be8) 55%, transparent);
+    box-shadow: 0 0 0 1px var(--verba-profile-slot-color);
 }
 
 .verba-profile-toggle.verba-profile-b .verba-profile-slot {
-    background: var(--verba-accent, #a98be8);
-    color: var(--SmartThemeBlurTintColor, #25252a);
+    --verba-profile-slot-color: #dc86a3;
+    background: transparent;
+    color: var(--verba-profile-slot-color);
 }
 
 .verba-profile-toggle.verba-profile-c .verba-profile-slot {
-    background: #79b7e8;
-    color: var(--SmartThemeBlurTintColor, #25252a);
-    box-shadow: 0 0 0 1px color-mix(in srgb, #79b7e8 70%, transparent);
+    --verba-profile-slot-color: #6aa9da;
+    background: transparent;
+    color: var(--verba-profile-slot-color);
+    box-shadow: 0 0 0 1px var(--verba-profile-slot-color);
 }
 
 .verba-input-icon.verba-busy {
@@ -195,11 +318,11 @@
     box-sizing: border-box !important;
     max-width: calc(100vw - 24px) !important;
     padding: 9px 13px !important;
-    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #888) 75%, transparent) !important;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 75%, transparent) !important;
     border-radius: 999px !important;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #20242b) 96%, transparent) !important;
-    color: var(--SmartThemeBodyColor, #fff) !important;
-    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.3) !important;
+    background: color-mix(in srgb, var(--verba-surface) 96%, transparent) !important;
+    color: var(--verba-text) !important;
+    box-shadow: 0 5px 18px color-mix(in srgb, var(--verba-shadow) 30%, transparent) !important;
     font: inherit !important;
     font-size: 0.9rem !important;
     line-height: 1.3 !important;
@@ -233,7 +356,7 @@
     gap: 10px !important;
     border-radius: 14px !important;
     border-color: rgba(214, 92, 92, 0.9) !important;
-    background: color-mix(in srgb, #7d2828 88%, var(--SmartThemeBlurTintColor, #20242b)) !important;
+    background: color-mix(in srgb, #7d2828 78%, var(--verba-surface)) !important;
     color: #fff !important;
 }
 
@@ -269,7 +392,7 @@
     margin: 0 !important;
     transform: none !important;
     padding: 14px;
-    background: rgba(0, 0, 0, 0.52);
+    background: color-mix(in srgb, var(--verba-shadow) 52%, transparent);
 }
 
 .verba-modal {
@@ -284,11 +407,11 @@
     flex-direction: column;
     gap: 10px;
     padding: 15px;
-    border: 1px solid color-mix(in srgb, var(--verba-accent, #a98be8) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--verba-accent) 55%, transparent);
     border-radius: 14px;
-    background: var(--SmartThemeBlurTintColor, #25252a);
-    color: var(--SmartThemeBodyColor, #fff);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.42);
+    background: var(--verba-surface);
+    color: var(--verba-text);
+    box-shadow: 0 16px 48px color-mix(in srgb, var(--verba-shadow) 42%, transparent);
 }
 
 .verba-modal-header {
@@ -313,7 +436,7 @@
     gap: 3px;
     padding: 8px 9px;
     border-radius: 8px;
-    background: rgba(127, 127, 127, 0.12);
+    background: color-mix(in srgb, var(--verba-text) 10%, transparent);
     font-size: 0.9em;
 }
 
@@ -355,10 +478,11 @@
     width: auto !important;
     max-width: calc(100vw - 16px);
     padding: 4px !important;
-    border: 1px solid color-mix(in srgb, var(--verba-accent, #a98be8) 55%, transparent);
+    border: 1px solid color-mix(in srgb, var(--verba-accent) 55%, transparent);
     border-radius: 20px !important;
-    background: var(--SmartThemeBlurTintColor, #25252a);
-    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.38);
+    background: var(--verba-surface);
+    color: var(--verba-text);
+    box-shadow: 0 5px 18px color-mix(in srgb, var(--verba-shadow) 38%, transparent);
 }
 
 .verba-selection-action {
@@ -373,7 +497,7 @@
 }
 
 .verba-name-lock-action {
-    border-color: color-mix(in srgb, var(--verba-accent, #a98be8) 65%, transparent) !important;
+    border-color: color-mix(in srgb, var(--verba-accent) 65%, transparent) !important;
 }
 
 .verba-name-match {
@@ -382,7 +506,7 @@
     gap: 6px 10px;
     padding: 9px 10px;
     border-radius: 9px;
-    background: rgba(127, 127, 127, 0.12);
+    background: color-mix(in srgb, var(--verba-text) 10%, transparent);
 }
 
 .verba-name-match span {
@@ -420,7 +544,7 @@
 }
 
 .verba-candidate-option b {
-    color: var(--verba-accent, #a98be8);
+    color: var(--verba-accent);
     white-space: nowrap;
 }
 
@@ -431,8 +555,8 @@
 
 .verba-candidate-option:hover,
 .verba-candidate-option:focus-visible {
-    border-color: var(--verba-accent, #a98be8) !important;
-    background: color-mix(in srgb, var(--verba-accent, #a98be8) 16%, transparent) !important;
+    border-color: var(--verba-accent) !important;
+    background: color-mix(in srgb, var(--verba-accent) 16%, transparent) !important;
 }
 
 @media (max-width: 600px) {
@@ -458,4 +582,5 @@
         grid-template-columns: 52px minmax(0, 1fr);
         padding: 9px !important;
     }
+
 }

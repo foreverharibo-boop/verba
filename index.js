@@ -23,7 +23,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.31';
+const EXTENSION_VERSION = '0.1.33';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -236,26 +236,16 @@ function normalizedCharacterNameLocks(character = currentCharacterReference()?.c
     return result;
 }
 
-async function saveCharacterNameLock(source, target) {
-    const reference = currentCharacterReference();
+async function writeCharacterNameLocks(reference, rows) {
     if (!reference) throw new Error('개별 캐릭터 채팅에서만 이름을 고정할 수 있습니다.');
     if (typeof reference.context.writeExtensionField !== 'function') {
         throw new Error('현재 SillyTavern에서 캐릭터 확장 데이터 저장을 지원하지 않습니다.');
-    }
-    const sourceName = String(source || '').trim();
-    const targetName = String(target || '').trim();
-    if (!sourceName || !targetName) throw new Error('원문 이름과 고정 표기를 모두 입력해 주세요.');
-    if (sourceName.length > 120 || targetName.length > 120 || /[\r\n]/.test(sourceName + targetName)) {
-        throw new Error('이름은 줄바꿈 없이 120자 이내로 입력해 주세요.');
     }
 
     const existing = reference.character.data?.extensions?.[CHARACTER_FIELD_KEY];
     const field = existing && typeof existing === 'object' && !Array.isArray(existing)
         ? { ...existing }
         : {};
-    const rows = normalizedCharacterNameLocks(reference.character)
-        .filter(row => row.source.toLocaleLowerCase() !== sourceName.toLocaleLowerCase());
-    rows.push({ source: sourceName, target: targetName });
     field.nameLocks = rows;
     await reference.context.writeExtensionField(reference.characterId, CHARACTER_FIELD_KEY, field);
 
@@ -264,6 +254,31 @@ async function saveCharacterNameLock(source, target) {
         reference.character.data.extensions = {};
     }
     reference.character.data.extensions[CHARACTER_FIELD_KEY] = field;
+}
+
+async function saveCharacterNameLock(source, target) {
+    const reference = currentCharacterReference();
+    if (!reference) throw new Error('개별 캐릭터 채팅에서만 이름을 고정할 수 있습니다.');
+    const sourceName = String(source || '').trim();
+    const targetName = String(target || '').trim();
+    if (!sourceName || !targetName) throw new Error('원문 이름과 고정 표기를 모두 입력해 주세요.');
+    if (sourceName.length > 120 || targetName.length > 120 || /[\r\n]/.test(sourceName + targetName)) {
+        throw new Error('이름은 줄바꿈 없이 120자 이내로 입력해 주세요.');
+    }
+
+    const rows = normalizedCharacterNameLocks(reference.character)
+        .filter(row => row.source.toLocaleLowerCase() !== sourceName.toLocaleLowerCase());
+    rows.push({ source: sourceName, target: targetName });
+    await writeCharacterNameLocks(reference, rows);
+}
+
+async function deleteCharacterNameLock(source) {
+    const reference = currentCharacterReference();
+    const sourceName = String(source || '').trim();
+    if (!sourceName) throw new Error('삭제할 원문 이름이 없습니다.');
+    const rows = normalizedCharacterNameLocks(reference?.character)
+        .filter(row => row.source.toLocaleLowerCase() !== sourceName.toLocaleLowerCase());
+    await writeCharacterNameLocks(reference, rows);
 }
 
 function scheduleChatSave(chatReference) {
@@ -2189,6 +2204,7 @@ async function lockSelectionName(snapshot) {
             }
         }
         await saveCharacterNameLock(sourceName, targetName);
+        renderNameLockManager();
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
         if (!message || message !== snapshot.message) throw new Error('현재 메시지가 바뀌었습니다.');
@@ -2476,6 +2492,89 @@ async function testConnection(button) {
     }
 }
 
+function renderNameLockManager() {
+    const content = document.querySelector('#verba-name-lock-manager-content');
+    if (!content) return;
+
+    const reference = currentCharacterReference();
+    if (!reference) {
+        content.innerHTML = '<div class="verba-name-lock-empty">개별 캐릭터 채팅을 연 뒤 사용할 수 있어요.</div>';
+        return;
+    }
+
+    const rows = normalizedCharacterNameLocks(reference.character);
+    const characterName = String(reference.character?.name || '현재 캐릭터');
+    content.innerHTML = `
+        <div class="verba-help">${escapeHtml(characterName)} 카드에 저장된 이름만 관리합니다. 일반 단어나 문장은 저장하지 않아요.</div>
+        <div class="verba-name-lock-list">
+            ${rows.length ? rows.map((row, index) => `
+                <div class="verba-name-lock-row" data-index="${index}">
+                    <div class="verba-name-lock-pair">
+                        <b title="${escapeHtml(row.source)}">${escapeHtml(row.source)}</b>
+                        <span aria-hidden="true">→</span>
+                        <input type="text" class="text_pole verba-name-lock-edit" maxlength="120" value="${escapeHtml(row.target)}" aria-label="${escapeHtml(row.source)}의 고정 표기">
+                    </div>
+                    <div class="verba-name-lock-row-actions">
+                        <button type="button" class="menu_button verba-name-lock-save">저장</button>
+                        <button type="button" class="menu_button verba-name-lock-delete">삭제</button>
+                    </div>
+                </div>`).join('') : '<div class="verba-name-lock-empty">아직 고정한 이름이 없어요.</div>'}
+        </div>
+        <div class="verba-help">새 이름은 번역문에서 이름을 선택한 뒤 `이름으로 고정`으로 등록하세요. 표기를 수정하면 현재 채팅의 기존 저장 번역에서도 이전 표기가 함께 변경되며, 삭제해도 이미 번역된 메시지는 되돌아가지 않아요.</div>`;
+
+    content.querySelectorAll('.verba-name-lock-row').forEach(rowElement => {
+        const index = Number(rowElement.dataset.index);
+        const row = rows[index];
+        if (!row) return;
+        const input = rowElement.querySelector('.verba-name-lock-edit');
+        const saveButton = rowElement.querySelector('.verba-name-lock-save');
+        const deleteButton = rowElement.querySelector('.verba-name-lock-delete');
+
+        const save = async () => {
+            const targetName = String(input.value || '').trim();
+            saveButton.disabled = true;
+            deleteButton.disabled = true;
+            try {
+                await saveCharacterNameLock(row.source, targetName);
+                const historyResult = targetName !== row.target
+                    ? replaceNameAcrossChatTranslations([row.target], targetName)
+                    : { changedRecords: 0 };
+                renderNameLockManager();
+                const historyNotice = historyResult.changedRecords
+                    ? ` 현재 채팅의 저장 번역본 ${historyResult.changedRecords}개도 변경했어요.`
+                    : '';
+                notify(`${row.source}의 표기를 “${targetName}”로 수정했어요.${historyNotice}`, 'success');
+            } catch (error) {
+                notify(`이름 수정 실패: ${errorText(error)}`, 'error');
+            } finally {
+                if (saveButton.isConnected) saveButton.disabled = false;
+                if (deleteButton.isConnected) deleteButton.disabled = false;
+            }
+        };
+        saveButton.addEventListener('click', save);
+        input.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            save();
+        });
+        deleteButton.addEventListener('click', async () => {
+            if (!globalThis.confirm?.(`“${row.source} → ${row.target}” 이름 고정을 삭제할까요?`)) return;
+            saveButton.disabled = true;
+            deleteButton.disabled = true;
+            try {
+                await deleteCharacterNameLock(row.source);
+                renderNameLockManager();
+                notify(`${row.source}의 이름 고정을 삭제했어요.`, 'success');
+            } catch (error) {
+                notify(`이름 삭제 실패: ${errorText(error)}`, 'error');
+            } finally {
+                if (saveButton.isConnected) saveButton.disabled = false;
+                if (deleteButton.isConnected) deleteButton.disabled = false;
+            }
+        });
+    });
+}
+
 function injectSettingsPanel() {
     if (document.querySelector('#verba-settings')) return;
     const host = document.querySelector('#extensions_settings');
@@ -2518,6 +2617,11 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
+                <details id="verba-name-lock-manager" class="verba-name-lock-manager">
+                    <summary>이름 고정 관리 <small>캐릭터별 저장</small></summary>
+                    <div id="verba-name-lock-manager-content" class="verba-name-lock-manager-content"></div>
+                </details>
+
                 <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
                 <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
 
@@ -2537,6 +2641,11 @@ function injectSettingsPanel() {
         </div>`;
     host.append(panel);
     refreshProfileSelect();
+    renderNameLockManager();
+
+    panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
+        if (event.currentTarget.open) renderNameLockManager();
+    });
 
     panel.querySelector('#verba-profile').addEventListener('change', event => {
         settings.profileId = event.target.value;
@@ -2810,6 +2919,7 @@ function setupEvents() {
             setTimeout(() => {
                 injectInputAction();
                 refreshProfileSelect();
+                renderNameLockManager();
                 refreshTranslationClasses();
                 refreshRetranslateButton();
             }, 120);

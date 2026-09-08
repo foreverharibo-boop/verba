@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.6';
+const EXTENSION_VERSION = '0.2.7';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -3052,13 +3052,41 @@ function resolveInputActionCollision() {
     const clearance = 8;
     const blockers = [];
 
+    const hostRect = host.getBoundingClientRect();
+    const input = document.querySelector('#send_textarea');
+    const inputRect = input?.getBoundingClientRect?.();
+    const inputSafetyGap = 6;
+    const controlStripWidth = Math.min(220, Math.max(120, hostRect.width * 0.35));
+    const fallbackMinimumLeft = Math.max(hostRect.left + 6, hostRect.right - controlStripWidth);
+    // Some themes stretch #send_textarea underneath every right-side icon. Only
+    // use its right edge when it genuinely ends before Verba's natural position;
+    // otherwise reserve a bounded right-side control strip instead.
+    const minimumLeft = inputRect?.width && inputRect?.height && inputRect.right < naturalLeft
+        ? inputRect.right + inputSafetyGap
+        : fallbackMinimumLeft;
+
     const candidates = new Set([
         sendButton,
-        ...host.querySelectorAll('button, [role="button"], .menu_button, .interactable'),
+        ...document.querySelectorAll(
+            'button, [role="button"], [onclick], [tabindex], .menu_button, .interactable, [class*="button"], [class*="Button"]',
+        ),
     ]);
+
+    // Extensions may render an icon as an absolutely-positioned div outside the
+    // send button's parent. Sample the visible control strip so those elements
+    // are discovered even when they have no conventional button class.
+    if (typeof document.elementsFromPoint === 'function') {
+        const sampleY = Math.min(innerHeight - 1, Math.max(0, actionRect.top + (actionRect.height / 2)));
+        const sampleEnd = Math.min(innerWidth - 1, Math.max(minimumLeft, hostRect.right));
+        for (let x = Math.max(0, minimumLeft); x <= sampleEnd; x += 6) {
+            document.elementsFromPoint(x, sampleY).forEach(element => candidates.add(element));
+        }
+    }
+
     for (const candidate of candidates) {
         if (!(candidate instanceof HTMLElement)) continue;
         if (candidate === actions || actions.contains(candidate)) continue;
+        if (candidate.contains(actions)) continue;
         const style = getComputedStyle(candidate);
         if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
         const rect = candidate.getBoundingClientRect();
@@ -3068,13 +3096,6 @@ function resolveInputActionCollision() {
         blockers.push({ left: rect.left, right: rect.right });
     }
 
-    const input = document.querySelector('#send_textarea');
-    const inputRect = input?.getBoundingClientRect?.();
-    const hostRect = host.getBoundingClientRect();
-    const inputSafetyGap = 6;
-    const minimumLeft = inputRect?.width && inputRect?.height
-        ? inputRect.right + inputSafetyGap
-        : Math.max(hostRect.left, naturalLeft - 96);
     let targetLeft = naturalLeft;
 
     // Start at the normal position and repeatedly move to the left edge of every

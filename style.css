@@ -779,6 +779,7 @@ html.verba-developer-mode > * .verba-developer-only {
 }
 
 .verba-multi-selection-tray {
+    display: flex !important;
     position: fixed !important;
     z-index: 2147483645 !important;
     left: 50% !important;
@@ -791,15 +792,11 @@ html.verba-developer-mode > * .verba-developer-only {
     padding: 6px 8px;
     border: 1px solid color-mix(in srgb, var(--verba-accent) 58%, transparent);
     border-radius: 18px;
-    background: var(--verba-surface);
-    color: var(--verba-text);
+    background: var(--verba-surface, var(--SmartThemeBlurTintColor, #222));
+    color: var(--verba-text, var(--SmartThemeBodyColor, #eee));
     box-shadow: 0 5px 18px color-mix(in srgb, var(--verba-shadow) 38%, transparent);
     font-family: var(--mainFontFamily, inherit) !important;
     font-size: calc(var(--messageTextFontSize, 1rem) * 0.7) !important;
-}
-
-html.verba-developer-mode > .verba-multi-selection-tray {
-    display: flex !important;
 }
 
 .verba-multi-selection-tray b {

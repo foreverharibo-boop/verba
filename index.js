@@ -2929,7 +2929,9 @@ function renderMultiSelectionTray() {
     if (!settings.developerMode || !multiSelectionState?.ranges?.length) return;
     const tray = document.createElement('div');
     tray.id = 'verba-multi-selection-tray';
-    tray.className = 'verba-multi-selection-tray verba-developer-only';
+    // This tray is already gated by developerMode above. Giving it the generic
+    // developer-only class made some SillyTavern themes keep it display:none.
+    tray.className = 'verba-multi-selection-tray';
     tray.innerHTML = `
         <b>묶음 선택 ${multiSelectionState.ranges.length}개</b>
         <button type="button" class="menu_button verba-bundle-run">한꺼번에 재번역</button>
@@ -2939,7 +2941,9 @@ function renderMultiSelectionTray() {
         clearMultiSelection();
         notify('묶음 선택을 비웠어요.', 'info');
     });
-    document.documentElement.append(tray);
+    // Mount inside body so fixed positioning and inherited theme variables work
+    // consistently across mobile themes and WebView variants.
+    (document.body || document.documentElement).append(tray);
 }
 
 function addSelectionToBundle(snapshot) {

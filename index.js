@@ -25,7 +25,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.0';
+const EXTENSION_VERSION = '0.3.2';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -89,6 +89,8 @@ let developerTapCount = 0;
 let developerTapTimer = null;
 let developerModeBusy = false;
 let multiSelectionState = null;
+let selectionGestureActive = false;
+let selectionNeedsCapture = false;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -2921,7 +2923,13 @@ function bundleStillCurrent(state = multiSelectionState) {
 
 function clearMultiSelection() {
     multiSelectionState = null;
-    document.querySelector('#verba-multi-selection-tray')?.remove();
+    const tray = document.querySelector('#verba-multi-selection-tray');
+    try {
+        tray?.hidePopover?.();
+    } catch {
+        // It may already be closed.
+    }
+    tray?.remove();
 }
 
 function renderMultiSelectionTray() {
@@ -2932,6 +2940,8 @@ function renderMultiSelectionTray() {
     // This tray is already gated by developerMode above. Giving it the generic
     // developer-only class made some SillyTavern themes keep it display:none.
     tray.className = 'verba-multi-selection-tray';
+    tray.setAttribute('role', 'status');
+    if ('showPopover' in HTMLElement.prototype) tray.setAttribute('popover', 'manual');
     tray.innerHTML = `
         <b>묶음 선택 ${multiSelectionState.ranges.length}개</b>
         <button type="button" class="menu_button verba-bundle-run">한꺼번에 재번역</button>
@@ -2944,6 +2954,12 @@ function renderMultiSelectionTray() {
     // Mount inside body so fixed positioning and inherited theme variables work
     // consistently across mobile themes and WebView variants.
     (document.body || document.documentElement).append(tray);
+    try {
+        tray.showPopover?.();
+    } catch {
+        // Fixed positioning remains as a fallback on older WebViews.
+        tray.removeAttribute('popover');
+    }
 }
 
 function addSelectionToBundle(snapshot) {
@@ -3337,18 +3353,41 @@ async function retranslateSelection(snapshot) {
 }
 
 function setupSelection() {
-    document.addEventListener('mouseup', event => {
-        if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(40);
-    });
-    document.addEventListener('touchend', event => {
-        if (!event.target?.closest?.('#verba-selection-actions')) {
-            scheduleSelectionCapture(180);
-            setTimeout(() => scheduleSelectionCapture(0), 420);
+    const hasPointerEvents = 'PointerEvent' in globalThis;
+    if (!hasPointerEvents) {
+        document.addEventListener('mouseup', event => {
+            if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(80);
+        });
+        document.addEventListener('touchend', event => {
+            if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(140);
+        }, { passive: true });
+    }
+    document.addEventListener('pointerdown', event => {
+        if (event.target?.closest?.('#verba-selection-actions')) return;
+        if (event.target?.closest?.('.mes[mesid] .mes_text')) {
+            selectionGestureActive = true;
+            selectionNeedsCapture = false;
+            clearTimeout(selectionTimer);
+            return;
         }
+        selectionGestureActive = false;
+        selectionNeedsCapture = false;
+        selectionSnapshot = null;
+        hideSelectionButton();
     }, { passive: true });
     document.addEventListener('pointerup', event => {
-        if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(100);
+        if (event.target?.closest?.('#verba-selection-actions')) return;
+        const shouldCapture = selectionGestureActive
+            || selectionNeedsCapture
+            || event.target?.closest?.('.mes[mesid] .mes_text');
+        selectionGestureActive = false;
+        selectionNeedsCapture = false;
+        if (shouldCapture) scheduleSelectionCapture(100);
     });
+    document.addEventListener('pointercancel', () => {
+        selectionGestureActive = false;
+        selectionNeedsCapture = false;
+    }, { passive: true });
     document.addEventListener('contextmenu', event => {
         if (Date.now() < suppressMessageCopyClickUntil) {
             event.preventDefault();
@@ -3357,12 +3396,12 @@ function setupSelection() {
         }
         if (event.target?.closest?.('.mes[mesid] .mes_text')) scheduleSelectionCapture(220);
     });
-    document.addEventListener('selectionchange', () => scheduleSelectionCapture(120));
-    document.addEventListener('pointerdown', event => {
-        if (event.target?.closest?.('#verba-selection-actions')) return;
-        if (event.target?.closest?.('.mes[mesid] .mes_text')) return;
-        selectionSnapshot = null;
-        hideSelectionButton();
+    document.addEventListener('selectionchange', () => {
+        if (selectionGestureActive) {
+            selectionNeedsCapture = true;
+            return;
+        }
+        scheduleSelectionCapture(220);
     });
     window.addEventListener('resize', hideSelectionButton);
 }

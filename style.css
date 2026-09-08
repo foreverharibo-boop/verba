@@ -783,8 +783,11 @@ html.verba-developer-mode > * .verba-developer-only {
     position: fixed !important;
     z-index: 2147483645 !important;
     left: 50% !important;
+    top: auto !important;
+    right: auto !important;
     bottom: calc(132px + env(safe-area-inset-bottom, 0px)) !important;
     transform: translateX(-50%) !important;
+    margin: 0 !important;
     width: max-content;
     max-width: calc(100vw - 18px);
     align-items: center;
@@ -797,6 +800,10 @@ html.verba-developer-mode > * .verba-developer-only {
     box-shadow: 0 5px 18px color-mix(in srgb, var(--verba-shadow) 38%, transparent);
     font-family: var(--mainFontFamily, inherit) !important;
     font-size: calc(var(--messageTextFontSize, 1rem) * 0.7) !important;
+}
+
+.verba-multi-selection-tray:popover-open {
+    display: flex !important;
 }
 
 .verba-multi-selection-tray b {

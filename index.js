@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.0';
+const EXTENSION_VERSION = '0.2.1';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -492,13 +492,17 @@ function renderProfileStats() {
     content.innerHTML = ['A', 'B', 'C'].map(slot => {
         const stat = settings.profileStats[slot];
         const successRate = stat.requests ? Math.round((stat.successes / stat.requests) * 100) : 0;
-        const averageMs = stat.requests ? Math.round(stat.totalMs / stat.requests) : 0;
+        const averageSeconds = stat.requests ? stat.totalMs / stat.requests / 1000 : 0;
+        const averageLabel = averageSeconds.toLocaleString('ko-KR', {
+            minimumFractionDigits: 1,
+            maximumFractionDigits: 1,
+        });
         const profile = configuredProfiles().find(candidate => candidate.slot === slot);
         const name = profile ? profileDisplayName(profile.id) : '미설정';
         return `<div class="verba-stat-row">
             <b>${slot}</b>
             <span title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-            <small>요청 ${stat.requests} · 성공 ${successRate}% · 평균 ${averageMs.toLocaleString()}ms · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
+            <small>요청 ${stat.requests} · 성공 ${successRate}% · 평균 ${averageLabel}초 · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
         </div>`;
     }).join('');
 }

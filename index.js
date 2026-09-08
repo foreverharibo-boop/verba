@@ -8,6 +8,7 @@ import {
     buildOutputPrompt,
     buildSelectionPrompt,
     buildUntranslatedRepairPrompt,
+    detectCharacterGender,
     extractResponseText,
     findBannedWords,
     findUntranslatedSegments,
@@ -22,7 +23,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.29';
+const EXTENSION_VERSION = '0.1.30';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -655,7 +656,8 @@ async function translateOutputText(source, options = {}) {
 
 async function translateInputText(source, options = {}) {
     const expected = [{ id: 'seg_0000', type: 'user_input', text: source }];
-    const prompt = buildInputPrompt(source, settings);
+    const targetGender = detectCharacterGender(currentCharacterReference()?.character);
+    const prompt = buildInputPrompt(source, settings, targetGender);
     const translations = await requestSegments(prompt, expected, options);
     const result = String(translations.get('seg_0000') || '').trim();
     if (!result) throw new Error('인풋 번역 결과가 비어 있습니다.');
@@ -2508,7 +2510,7 @@ function injectSettingsPanel() {
                     <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
                     <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
                 </label>
-                <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
+                <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
 
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-selection-candidates" ${settings.selectionCandidates ? 'checked' : ''}>

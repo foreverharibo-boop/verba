@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.3';
+const EXTENSION_VERSION = '0.2.4';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -77,6 +77,8 @@ let selectionBusy = false;
 let selectionSnapshot = null;
 let selectionTimer = null;
 let bottomErrorTimer = null;
+let inputCollisionFrame = null;
+let inputCollisionTimer = null;
 const debugEvents = [];
 const DEBUG_EVENT_LIMIT = 40;
 
@@ -3005,6 +3007,52 @@ function refreshRetranslateButton() {
             : '최근 AI 아웃풋 전체 재번역';
 }
 
+function resolveInputActionCollision() {
+    inputCollisionFrame = null;
+    const actions = document.querySelector('#verba-input-actions');
+    const sendButton = document.querySelector('#send_but');
+    const host = actions?.parentElement;
+    if (!actions || !sendButton || !host) return;
+
+    const currentShift = Math.abs(Number.parseFloat(
+        actions.style.getPropertyValue('--verba-collision-shift'),
+    ) || 0);
+    const actionRect = actions.getBoundingClientRect();
+    if (!actionRect.width || !actionRect.height) return;
+    const naturalLeft = actionRect.left + currentShift;
+    const naturalRight = actionRect.right + currentShift;
+    const naturalCenter = naturalLeft + (actionRect.width / 2);
+    const clearance = 8;
+    let requiredShift = 0;
+
+    const candidates = new Set([
+        sendButton,
+        ...host.querySelectorAll('button, [role="button"], .menu_button, .interactable'),
+    ]);
+    for (const candidate of candidates) {
+        if (!(candidate instanceof HTMLElement)) continue;
+        if (candidate === actions || actions.contains(candidate)) continue;
+        const style = getComputedStyle(candidate);
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue;
+        const rect = candidate.getBoundingClientRect();
+        if (!rect.width || !rect.height || rect.width > 100 || rect.height > 100) continue;
+        const verticalOverlap = Math.min(actionRect.bottom, rect.bottom) - Math.max(actionRect.top, rect.top);
+        if (verticalOverlap < Math.min(8, actionRect.height / 3)) continue;
+        if (rect.right <= naturalCenter || rect.left >= naturalRight + clearance) continue;
+        requiredShift = Math.max(requiredShift, naturalRight + clearance - rect.left);
+    }
+
+    const safeShift = Math.min(96, Math.max(0, Math.ceil(requiredShift)));
+    actions.style.setProperty('--verba-collision-shift', `${-safeShift}px`);
+}
+
+function scheduleInputActionCollisionCheck() {
+    if (inputCollisionFrame !== null) cancelAnimationFrame(inputCollisionFrame);
+    inputCollisionFrame = requestAnimationFrame(resolveInputActionCollision);
+    clearTimeout(inputCollisionTimer);
+    inputCollisionTimer = setTimeout(resolveInputActionCollision, 260);
+}
+
 function injectInputAction() {
     const existingActions = document.querySelector('#verba-input-actions');
     if (existingActions) {
@@ -3013,6 +3061,7 @@ function injectInputAction() {
         }
         refreshProfileToggleButton();
         refreshRetranslateButton();
+        scheduleInputActionCollisionCheck();
         return;
     }
     const sendButton = document.querySelector('#send_but');
@@ -3033,6 +3082,7 @@ function injectInputAction() {
     sendButton.before(actions);
     refreshProfileToggleButton();
     refreshRetranslateButton();
+    scheduleInputActionCollisionCheck();
 }
 
 async function testConnection(button) {
@@ -3566,6 +3616,8 @@ function initialize() {
     setupSelection();
     setupEvents();
     setupObserver();
+    window.addEventListener('resize', scheduleInputActionCollisionCheck);
+    globalThis.visualViewport?.addEventListener?.('resize', scheduleInputActionCollisionCheck);
     globalThis.__verbaTranslatorVersion = EXTENSION_VERSION;
     console.log(`[베르바] v${EXTENSION_VERSION} 준비 완료`);
 }

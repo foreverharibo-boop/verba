@@ -343,16 +343,19 @@
 }
 
 .verba-input-actions {
+    --verba-collision-shift: 0px;
     display: inline-flex;
     flex-direction: row !important;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
     gap: 2px;
-    margin-right: 10px;
+    margin-right: 4px;
     direction: ltr !important;
     border: 0 !important;
     background: transparent !important;
+    transform: translateX(var(--verba-collision-shift)) !important;
+    transition: transform 0.12s ease;
 }
 
 #verba-input-actions #verba-profile-toggle {

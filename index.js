@@ -23,7 +23,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.33';
+const EXTENSION_VERSION = '0.1.34';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -2520,7 +2520,7 @@ function renderNameLockManager() {
                     </div>
                 </div>`).join('') : '<div class="verba-name-lock-empty">아직 고정한 이름이 없어요.</div>'}
         </div>
-        <div class="verba-help">새 이름은 번역문에서 이름을 선택한 뒤 `이름으로 고정`으로 등록하세요. 표기를 수정하면 현재 채팅의 기존 저장 번역에서도 이전 표기가 함께 변경되며, 삭제해도 이미 번역된 메시지는 되돌아가지 않아요.</div>`;
+        <div class="verba-help">새 이름은 번역문에서 이름을 선택한 뒤 ‘이름으로 고정’으로 등록하세요. 표기를 수정하면 현재 채팅의 기존 저장 번역에서도 이전 표기가 함께 변경되며, 삭제해도 이미 번역된 메시지는 되돌아가지 않아요.</div>`;
 
     content.querySelectorAll('.verba-name-lock-row').forEach(rowElement => {
         const index = Number(rowElement.dataset.index);
@@ -2704,19 +2704,19 @@ function injectSettingsPanel() {
         settings.selectionCandidates = event.target.checked;
         saveSettings();
     });
-    panel.querySelector('#verba-global-prompt').addEventListener('change', event => {
+    panel.querySelector('#verba-global-prompt').addEventListener('input', event => {
         settings.globalPrompt = event.target.value;
         saveSettings();
     });
-    panel.querySelector('#verba-all-dialogue-prompt').addEventListener('change', event => {
+    panel.querySelector('#verba-all-dialogue-prompt').addEventListener('input', event => {
         settings.allDialoguePrompt = event.target.value;
         saveSettings();
     });
-    panel.querySelector('#verba-dialogue-prompt').addEventListener('change', event => {
+    panel.querySelector('#verba-dialogue-prompt').addEventListener('input', event => {
         settings.dialoguePrompt = event.target.value;
         saveSettings();
     });
-    panel.querySelector('#verba-banned-words').addEventListener('change', event => {
+    panel.querySelector('#verba-banned-words').addEventListener('input', event => {
         settings.bannedWords = event.target.value;
         saveSettings();
     });

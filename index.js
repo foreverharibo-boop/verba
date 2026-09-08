@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.9';
+const EXTENSION_VERSION = '0.2.10';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -2815,14 +2815,45 @@ function cancelMessageCopyHold() {
     messageCopyStart = null;
 }
 
+function pointHitsRenderedText(container, x, y) {
+    if (!container) return false;
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT;
+            const parent = node.parentElement;
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            const style = globalThis.getComputedStyle?.(parent);
+            if (style && (style.display === 'none' || style.visibility === 'hidden')) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        },
+    });
+    const range = document.createRange();
+    let node;
+    while ((node = walker.nextNode())) {
+        range.selectNodeContents(node);
+        for (const rect of range.getClientRects()) {
+            if (x >= rect.left - 2 && x <= rect.right + 2 && y >= rect.top - 2 && y <= rect.bottom + 2) {
+                range.detach?.();
+                return true;
+            }
+        }
+    }
+    range.detach?.();
+    return false;
+}
+
 function setupMessageCopyHold() {
     document.addEventListener('pointerdown', event => {
         if (event.pointerType === 'mouse' && event.button !== 0) return;
         const messageElement = event.target?.closest?.('.mes[mesid]');
+        const messageText = event.target?.closest?.('.mes_text');
         const interactive = event.target?.closest?.(
             'button, a, input, textarea, select, [contenteditable="true"], .mes_buttons, .extraMesButtons, #verba-selection-actions',
         );
-        if (!messageElement || interactive || document.querySelector('#verba-request-overlay')) {
+        const startedOnText = messageText && pointHitsRenderedText(messageText, event.clientX, event.clientY);
+        if (!messageElement || interactive || startedOnText || document.querySelector('#verba-request-overlay')) {
             cancelMessageCopyHold();
             return;
         }

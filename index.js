@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.2.5';
+const EXTENSION_VERSION = '0.2.6';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -3049,10 +3049,8 @@ function resolveInputActionCollision() {
     const actionRect = actions.getBoundingClientRect();
     if (!actionRect.width || !actionRect.height) return;
     const naturalLeft = actionRect.left + currentShift;
-    const naturalRight = actionRect.right + currentShift;
-    const naturalCenter = naturalLeft + (actionRect.width / 2);
     const clearance = 8;
-    let requiredShift = 0;
+    const blockers = [];
 
     const candidates = new Set([
         sendButton,
@@ -3067,21 +3065,34 @@ function resolveInputActionCollision() {
         if (!rect.width || !rect.height || rect.width > 100 || rect.height > 100) continue;
         const verticalOverlap = Math.min(actionRect.bottom, rect.bottom) - Math.max(actionRect.top, rect.top);
         if (verticalOverlap < Math.min(8, actionRect.height / 3)) continue;
-        if (rect.right <= naturalCenter || rect.left >= naturalRight + clearance) continue;
-        requiredShift = Math.max(requiredShift, naturalRight + clearance - rect.left);
+        blockers.push({ left: rect.left, right: rect.right });
     }
 
     const input = document.querySelector('#send_textarea');
     const inputRect = input?.getBoundingClientRect?.();
+    const hostRect = host.getBoundingClientRect();
     const inputSafetyGap = 6;
-    const maxShiftBeforeInput = inputRect?.width && inputRect?.height
-        ? Math.max(0, naturalLeft - inputRect.right - inputSafetyGap)
-        : 96;
-    const safeShift = Math.min(
-        96,
-        maxShiftBeforeInput,
-        Math.max(0, Math.ceil(requiredShift)),
-    );
+    const minimumLeft = inputRect?.width && inputRect?.height
+        ? inputRect.right + inputSafetyGap
+        : Math.max(hostRect.left, naturalLeft - 96);
+    let targetLeft = naturalLeft;
+
+    // Start at the normal position and repeatedly move to the left edge of every
+    // overlapping control. This finds the nearest empty slot instead of avoiding
+    // one right-side button only to land on a different button to the left.
+    for (let attempt = 0; attempt <= blockers.length; attempt += 1) {
+        const overlapping = blockers.filter(rect => (
+            rect.left < targetLeft + actionRect.width + clearance
+            && rect.right + clearance > targetLeft
+        ));
+        if (!overlapping.length) break;
+        targetLeft = Math.min(...overlapping.map(rect => rect.left - clearance - actionRect.width));
+    }
+
+    // Never use the text-entry area as overflow space. If the available strip is
+    // too narrow, stop at its boundary instead of continuing into typed text.
+    targetLeft = Math.max(minimumLeft, Math.min(naturalLeft, targetLeft));
+    const safeShift = Math.max(0, Math.ceil(naturalLeft - targetLeft));
     actions.style.setProperty('--verba-collision-shift', `${-safeShift}px`);
 }
 

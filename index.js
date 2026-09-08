@@ -22,8 +22,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.1.28';
+const EXTENSION_VERSION = '0.1.29';
 const STATE_KEY = 'verba_current_translation';
+const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -60,6 +61,7 @@ const renderedTranslationCache = new Map();
 const lastRenderedTranslationByMessage = new Map();
 const failedOutputSignatures = new Map();
 const serverRetryStates = new Map();
+const pendingInputControllers = new Set();
 let requestTail = Promise.resolve();
 let chatSaveTimer = null;
 let uiRefreshTimer = null;
@@ -140,13 +142,20 @@ function updateServerRetryIndicator() {
     indicator.setAttribute('aria-label', indicator.title);
 }
 
-function showProgress(message) {
+function showProgress(message, options = {}) {
     if (!globalThis.toastr?.info) return null;
     return globalThis.toastr.info(message, '베르바', {
         timeOut: 0,
         extendedTimeOut: 0,
         tapToDismiss: false,
-        closeButton: false,
+        closeButton: Boolean(options.onCancel),
+        onCloseClick: typeof options.onCancel === 'function' ? options.onCancel : undefined,
+    });
+}
+
+function showInputProgress(controller) {
+    return showProgress('인풋을 영어로 번역 중입니다…', {
+        onCancel: () => controller.abort(),
     });
 }
 
@@ -776,10 +785,16 @@ function repairSwipeTranslationIndexes(message) {
             ? raw
             : String(raw?.mes ?? raw?.text ?? raw?.content ?? raw?.message ?? '');
         if (!source.trim() || record.sourceHash !== hashText(source) || record.swipeId === index) continue;
+        const previousSignature = storedRecordSignature(record);
         const repaired = { ...record, swipeId: index };
+        const repairedSignature = storedRecordSignature(repaired);
         extra[STATE_KEY] = repaired;
+        if (extra[SOURCE_VIEW_KEY] === previousSignature) extra[SOURCE_VIEW_KEY] = repairedSignature;
         if (currentSwipeId(message) === index && message.extra?.[STATE_KEY]?.sourceHash === record.sourceHash) {
             message.extra[STATE_KEY] = { ...repaired };
+            if (message.extra[SOURCE_VIEW_KEY] === previousSignature) {
+                message.extra[SOURCE_VIEW_KEY] = repairedSignature;
+            }
         }
         changed = true;
     }
@@ -811,6 +826,10 @@ function syncOwnedTranslationToCurrentSwipe(message, record) {
     }
     if (swipeExtra.display_text !== record.translation) {
         swipeExtra.display_text = record.translation;
+        changed = true;
+    }
+    if (swipeExtra[SOURCE_VIEW_KEY]) {
+        delete swipeExtra[SOURCE_VIEW_KEY];
         changed = true;
     }
     return changed;
@@ -909,10 +928,12 @@ function clearOwnedDisplay(message) {
     const record = message.extra[STATE_KEY];
     if (record && message.extra.display_text === record.translation) delete message.extra.display_text;
     delete message.extra[STATE_KEY];
+    delete message.extra[SOURCE_VIEW_KEY];
     const swipeExtra = currentSwipeExtra(message);
     if (swipeExtra) {
         if (record && swipeExtra.display_text === record.translation) delete swipeExtra.display_text;
         delete swipeExtra[STATE_KEY];
+        delete swipeExtra[SOURCE_VIEW_KEY];
     }
     return Boolean(record);
 }
@@ -927,22 +948,84 @@ function applyTranslation(messageId, message, source, translation, chatReference
     };
     message.extra[STATE_KEY] = record;
     message.extra.display_text = translation;
+    delete message.extra[SOURCE_VIEW_KEY];
     syncOwnedTranslationToCurrentSwipe(message, record);
     updateMessageBlock(messageId, message);
     cacheRenderedTranslation(messageId, message, record);
     scheduleChatSave(chatReference);
 }
 
+function sourceViewRequested(message, record) {
+    if (!message || !record) return false;
+    const signature = storedRecordSignature(record);
+    const swipeExtra = currentSwipeExtra(message, false);
+    return message.extra?.[SOURCE_VIEW_KEY] === signature
+        || swipeExtra?.[SOURCE_VIEW_KEY] === signature;
+}
+
+function showOriginalDisplay(messageId, message, record) {
+    if (!message || !record) return;
+    if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+    const signature = storedRecordSignature(record);
+    let changed = false;
+    if (!sameTranslationRecord(message.extra[STATE_KEY], record)) {
+        message.extra[STATE_KEY] = { ...record };
+        changed = true;
+    }
+    if (message.extra.display_text === record.translation) {
+        delete message.extra.display_text;
+        changed = true;
+    }
+    if (message.extra[SOURCE_VIEW_KEY] !== signature) {
+        message.extra[SOURCE_VIEW_KEY] = signature;
+        changed = true;
+    }
+    const swipeExtra = currentSwipeExtra(message);
+    if (swipeExtra) {
+        if (!sameTranslationRecord(swipeExtra[STATE_KEY], record)) {
+            swipeExtra[STATE_KEY] = { ...record };
+            changed = true;
+        }
+        if (swipeExtra.display_text === record.translation) {
+            delete swipeExtra.display_text;
+            changed = true;
+        }
+        if (swipeExtra[SOURCE_VIEW_KEY] !== signature) {
+            swipeExtra[SOURCE_VIEW_KEY] = signature;
+            changed = true;
+        }
+    }
+    if (changed) {
+        updateMessageBlock(messageId, message);
+        scheduleChatSave(liveContext().chat);
+    }
+}
+
 function restoreCurrentDisplay(messageId, message, record) {
     if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+    if (sourceViewRequested(message, record)) {
+        showOriginalDisplay(messageId, message, record);
+        return;
+    }
     const recordChanged = !sameTranslationRecord(message.extra[STATE_KEY], record);
     if (recordChanged) message.extra[STATE_KEY] = { ...record };
     const displayChanged = message.extra.display_text !== record.translation;
     if (displayChanged) message.extra.display_text = record.translation;
+    const sourceViewChanged = Boolean(message.extra[SOURCE_VIEW_KEY]);
+    if (sourceViewChanged) delete message.extra[SOURCE_VIEW_KEY];
     const cacheChanged = syncOwnedTranslationToCurrentSwipe(message, record);
     if (displayChanged || recordChanged) updateMessageBlock(messageId, message);
     cacheRenderedTranslation(messageId, message, record);
-    if (displayChanged || recordChanged || cacheChanged) scheduleChatSave(liveContext().chat);
+    if (displayChanged || recordChanged || sourceViewChanged || cacheChanged) scheduleChatSave(liveContext().chat);
+}
+
+function showTranslationDisplay(messageId, message, record) {
+    if (!message || !record) return;
+    if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+    delete message.extra[SOURCE_VIEW_KEY];
+    const swipeExtra = currentSwipeExtra(message, false);
+    if (swipeExtra) delete swipeExtra[SOURCE_VIEW_KEY];
+    restoreCurrentDisplay(messageId, message, record);
 }
 
 async function translateMessage(messageId, options = {}) {
@@ -1038,7 +1121,7 @@ function latestAssistantMessage() {
     return null;
 }
 
-function requestOneTimeInstruction(scope, preview = '') {
+function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     const isSelection = scope === 'selection';
     return new Promise(resolve => {
@@ -1057,7 +1140,9 @@ function requestOneTimeInstruction(scope, preview = '') {
                 <textarea id="verba-request-text" class="text_pole" rows="5" maxlength="1200" placeholder="예: 더 직설적으로 번역해 줘 / 존댓말로 바꿔 줘"></textarea>
                 <small>비워두면 현재 전역 설정대로 다시 번역해요.</small>
                 <div class="verba-modal-actions">
-                    <button type="button" class="menu_button verba-cancel">취소</button>
+                    ${!isSelection && viewAction
+                        ? `<button type="button" class="menu_button verba-view-toggle">${escapeHtml(viewAction.label)}</button>`
+                        : '<button type="button" class="menu_button verba-cancel">취소</button>'}
                     <button type="button" class="menu_button verba-submit">${isSelection && settings.selectionCandidates ? '후보 만들기' : '재번역 시작'}</button>
                 </div>
             </section>`;
@@ -1104,7 +1189,11 @@ function requestOneTimeInstruction(scope, preview = '') {
         const textarea = overlay.querySelector('#verba-request-text');
         const submit = () => finish(String(textarea.value || '').trim());
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
-        overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-cancel')?.addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-view-toggle')?.addEventListener('click', () => finish({
+            action: 'toggle-view',
+            showTranslation: Boolean(viewAction?.showTranslation),
+        }));
         overlay.querySelector('.verba-submit').addEventListener('click', submit);
         overlay.addEventListener('click', event => {
             if (event.target === overlay) finish(null);
@@ -1610,7 +1699,23 @@ async function retranslateLatestOutput() {
         swipeId: currentSwipeId(target.message),
     };
     const preview = source.replace(/\s+/g, ' ').trim().slice(0, 110);
-    const instruction = await requestOneTimeInstruction('message', preview);
+    const record = currentRecord(target.message);
+    const swipeExtra = currentSwipeExtra(target.message, false);
+    const showingTranslation = Boolean(
+        record
+        && !sourceViewRequested(target.message, record)
+        && (
+            target.message.extra?.display_text === record.translation
+            || swipeExtra?.display_text === record.translation
+        )
+    );
+    const viewAction = record
+        ? {
+            label: showingTranslation ? '원문 보기' : '번역본 보기',
+            showTranslation: !showingTranslation,
+        }
+        : null;
+    const instruction = await requestOneTimeInstruction('message', preview, viewAction);
     if (instruction === null) return;
     const latest = liveContext().chat?.[target.id];
     if (
@@ -1620,6 +1725,17 @@ async function retranslateLatestOutput() {
         || hashText(messageSource(latest)) !== snapshot.sourceHash
     ) {
         notify('요구사항을 적는 동안 최근 아웃풋이 바뀌었어요. 다시 눌러 주세요.', 'warning');
+        return;
+    }
+    if (typeof instruction === 'object' && instruction.action === 'toggle-view') {
+        const latestRecord = currentRecord(latest);
+        if (!latestRecord) {
+            notify('전환할 저장 번역본을 찾지 못했어요.', 'warning');
+            return;
+        }
+        if (instruction.showTranslation) showTranslationDisplay(target.id, latest, latestRecord);
+        else showOriginalDisplay(target.id, latest, latestRecord);
+        refreshRetranslateButton();
         return;
     }
     await translateMessage(target.id, { force: true, oneTimeInstruction: instruction });
@@ -1636,9 +1752,11 @@ function setTextareaValue(textarea, value) {
 async function translateInputAndSend(textarea, sendButton, source) {
     if (inputBusy) return;
     inputBusy = true;
-    const toast = showProgress('인풋을 영어로 번역 중입니다…');
+    const controller = new AbortController();
+    pendingInputControllers.add(controller);
+    const toast = showInputProgress(controller);
     try {
-        const translated = await translateInputText(source);
+        const translated = await translateInputText(source, { signal: controller.signal });
         if (document.querySelector('#send_textarea') !== textarea || textarea.value !== source) {
             notify('번역 중 입력 내용이 바뀌어 전송하지 않았어요.', 'warning');
             return;
@@ -1653,6 +1771,7 @@ async function translateInputAndSend(textarea, sendButton, source) {
         }
     } finally {
         clearProgress(toast);
+        pendingInputControllers.delete(controller);
         inputBusy = false;
     }
 }
@@ -1679,9 +1798,11 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         return;
     }
     inputBusy = true;
-    const toast = showProgress('인풋을 영어로 번역 중입니다…');
+    const controller = new AbortController();
+    pendingInputControllers.add(controller);
+    const toast = showInputProgress(controller);
     try {
-        const translated = await translateInputText(source);
+        const translated = await translateInputText(source, { signal: controller.signal });
         if (textarea.value !== source) {
             blockGenerationAndRestore(textarea, source);
             return;
@@ -1695,6 +1816,7 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         blockGenerationAndRestore(textarea, source);
     } finally {
         clearProgress(toast);
+        pendingInputControllers.delete(controller);
         inputBusy = false;
     }
 }
@@ -1708,9 +1830,12 @@ async function translateSentInputMessage(payload) {
     const source = String(message.mes || '');
     if (!source.trim() || !hasKorean(source)) return;
 
+    const controller = new AbortController();
+    pendingInputControllers.add(controller);
+    const toast = showInputProgress(controller);
     const work = (async () => {
         try {
-            const translated = await translateInputText(source);
+            const translated = await translateInputText(source, { signal: controller.signal });
             if (liveContext().chat !== context.chat || context.chat?.[id] !== message || message.mes !== source) return;
             message.mes = translated;
             updateMessageBlock(id, message);
@@ -1733,6 +1858,8 @@ async function translateSentInputMessage(payload) {
     try {
         await work;
     } finally {
+        clearProgress(toast);
+        pendingInputControllers.delete(controller);
         pendingSentInputs.delete(message);
     }
 }
@@ -2662,6 +2789,8 @@ function setupEvents() {
         source.on(types.CHAT_CHANGED, () => {
             for (const pending of pendingOutputs.values()) pending.controller.abort();
             pendingOutputs.clear();
+            for (const controller of pendingInputControllers) controller.abort();
+            pendingInputControllers.clear();
             failedOutputSignatures.clear();
             for (const timer of automaticTranslationTimers.values()) clearTimeout(timer);
             automaticTranslationTimers.clear();

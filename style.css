@@ -317,6 +317,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 0;
     flex: 0 0 auto;
 }
 
@@ -328,6 +329,11 @@
 .verba-input-icon {
     width: 30px;
     height: 30px;
+    min-width: 30px;
+    max-width: 30px;
+    padding: 0 !important;
+    box-sizing: border-box;
+    flex: 0 0 30px;
     display: inline-flex;
     align-items: center;
     justify-content: center;

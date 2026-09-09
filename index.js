@@ -2769,12 +2769,22 @@ function showSelectionButton(snapshot) {
     }
 }
 
-function scheduleSelectionCapture(delay = 80) {
+function selectionHasText() {
+    const selection = globalThis.getSelection?.();
+    return Boolean(
+        selection
+        && selection.rangeCount === 1
+        && !selection.isCollapsed
+        && selection.toString().trim()
+    );
+}
+
+function scheduleSelectionCapture(delay = 80, { hideOnFailure = true } = {}) {
     clearTimeout(selectionTimer);
     selectionTimer = setTimeout(() => {
         const snapshot = resolveSelection();
         if (snapshot) showSelectionButton(snapshot);
-        else if (!selectionBusy) hideSelectionButton();
+        else if (hideOnFailure && !selectionBusy) hideSelectionButton();
     }, delay);
 }
 
@@ -3285,10 +3295,17 @@ async function retranslateSelection(snapshot) {
 
 function setupSelection() {
     const hasPointerEvents = 'PointerEvent' in globalThis;
+    // Desktop browsers expose PointerEvent too, so mouseup cannot be only a
+    // no-PointerEvent fallback. Capture it before themes/extensions can stop it.
+    document.addEventListener('mouseup', event => {
+        if (event.button !== 0) return;
+        if (event.sourceCapabilities?.firesTouchEvents) return;
+        if (event.target?.closest?.('#verba-selection-actions')) return;
+        selectionGestureActive = false;
+        selectionNeedsCapture = false;
+        if (selectionHasText()) scheduleSelectionCapture(30, { hideOnFailure: false });
+    }, true);
     if (!hasPointerEvents) {
-        document.addEventListener('mouseup', event => {
-            if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(80);
-        });
         document.addEventListener('touchend', event => {
             if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(140);
         }, { passive: true });
@@ -3332,7 +3349,9 @@ function setupSelection() {
             selectionNeedsCapture = true;
             return;
         }
-        scheduleSelectionCapture(220);
+        // A desktop selection can briefly report as collapsed while the mouse
+        // button is released. Keep the existing pill through that transient state.
+        if (selectionHasText()) scheduleSelectionCapture(100, { hideOnFailure: false });
     });
     window.addEventListener('resize', hideSelectionButton);
 }

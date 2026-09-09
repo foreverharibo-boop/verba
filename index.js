@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.20';
+const EXTENSION_VERSION = '0.3.21';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2991,6 +2991,115 @@ function pointerPlacementRect(event) {
     };
 }
 
+function selectionFocusPlacementRect(selection = globalThis.getSelection?.()) {
+    if (!selection?.focusNode) return null;
+    try {
+        const range = document.createRange();
+        range.setStart(selection.focusNode, selection.focusOffset);
+        range.collapse(true);
+        const rects = [...range.getClientRects()].filter(rect => rect.height > 0);
+        let rect = rects[0] || range.getBoundingClientRect();
+        if ((!rect || (!rect.height && !rect.width)) && selection.focusNode.nodeType === Node.TEXT_NODE) {
+            const length = selection.focusNode.textContent?.length || 0;
+            if (length) {
+                const character = document.createRange();
+                const offset = Math.min(Math.max(0, selection.focusOffset), length);
+                const start = offset > 0 ? offset - 1 : 0;
+                const end = offset > 0 ? offset : Math.min(1, length);
+                character.setStart(selection.focusNode, start);
+                character.setEnd(selection.focusNode, end);
+                rect = [...character.getClientRects()].find(item => item.height > 0)
+                    || character.getBoundingClientRect();
+                if (rect && rect.height) {
+                    const x = offset > 0 ? rect.right : rect.left;
+                    return {
+                        left: x,
+                        right: x,
+                        top: rect.top,
+                        bottom: rect.bottom,
+                        width: 0,
+                        height: rect.height,
+                    };
+                }
+            }
+        }
+        if (!rect || (!rect.height && !rect.width)) return null;
+        return {
+            left: rect.left,
+            right: rect.left,
+            top: rect.top,
+            bottom: rect.bottom || rect.top,
+            width: 0,
+            height: rect.height || 0,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function rectInsideBounds(rect, bounds, padding = 24) {
+    return Boolean(
+        rect
+        && bounds
+        && Number.isFinite(rect.left)
+        && Number.isFinite(rect.top)
+        && rect.left >= bounds.left - padding
+        && rect.left <= bounds.right + padding
+        && rect.top >= bounds.top - padding
+        && rect.top <= bounds.bottom + padding
+    );
+}
+
+function liveSelectionPlacementRect(range, messageText = null) {
+    if (!range) return null;
+    const bounds = messageText?.getBoundingClientRect?.();
+    try {
+        const rects = [...range.getClientRects()].filter(rect => (
+            rect.width > 0
+            && rect.height > 0
+            && (!bounds || rectInsideBounds(rect, bounds, 2))
+        ));
+        if (rects.length) return rects.at(-1);
+    } catch {
+        // Try the selection focus and the complete range below.
+    }
+    const focusRect = selectionFocusPlacementRect();
+    if (!bounds || rectInsideBounds(focusRect, bounds, 2)) return focusRect;
+    try {
+        const rect = range.getBoundingClientRect();
+        if (!bounds || rectInsideBounds(rect, bounds, 2)) return rect;
+    } catch {
+        // No usable live range rectangle.
+    }
+    return null;
+}
+
+function desktopSelectionPlacement(event) {
+    const pointerRect = pointerPlacementRect(event);
+    const selection = globalThis.getSelection?.();
+    const focusElement = selection?.focusNode?.nodeType === Node.ELEMENT_NODE
+        ? selection.focusNode
+        : selection?.focusNode?.parentElement;
+    const messageText = event?.target?.closest?.('.mes[mesid] .mes_text')
+        || focusElement?.closest?.('.mes[mesid] .mes_text');
+    const bounds = messageText?.getBoundingClientRect?.();
+    const pointerInsideMessage = rectInsideBounds(pointerRect, bounds);
+    if (pointerInsideMessage) return pointerRect;
+    const focusRect = selectionFocusPlacementRect(selection);
+    if (rectInsideBounds(focusRect, bounds)) return focusRect;
+    if (bounds) {
+        return {
+            left: bounds.left + (bounds.width / 2),
+            right: bounds.left + (bounds.width / 2),
+            top: bounds.bottom,
+            bottom: bounds.bottom,
+            width: 0,
+            height: 0,
+        };
+    }
+    return focusRect || pointerRect;
+}
+
 function captureSelectionState() {
     const selection = globalThis.getSelection?.();
     if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
@@ -3051,12 +3160,20 @@ function resolveSelection(preserved = null) {
         selected: storedSelected,
         start: storedRange.start,
         end: storedRange.end,
-        rect: preserved?.rect || selectionPlacementRect(range),
+        rect: liveSelectionPlacementRect(range, messageText)
+            || preserved?.rect
+            || selectionPlacementRect(range),
+        anchorRange: range.cloneRange(),
+        messageText,
     };
 }
 
 function showSelectionButton(snapshot) {
     hideSelectionButton();
+    // Re-measure the actual selected glyphs immediately before rendering.
+    // Desktop event coordinates can be zero or belong to another overlay.
+    const liveRect = liveSelectionPlacementRect(snapshot.anchorRange, snapshot.messageText);
+    if (liveRect) snapshot.rect = liveRect;
     selectionSnapshot = snapshot;
     const actions = document.createElement('div');
     actions.id = 'verba-selection-actions';
@@ -3244,11 +3361,6 @@ function scheduleSelectionCapture(delay = 80, { hideOnFailure = true, preserved 
     selectionTimer = setTimeout(() => {
         const snapshot = resolveSelection() || (preserved ? resolveSelection(preserved) : null);
         if (snapshot) {
-            if (
-                lastDesktopSelectionPlacement
-                && Date.now() - lastDesktopSelectionAt < 1500
-                && !touchSelectionRecentlyActive()
-            ) snapshot.rect = lastDesktopSelectionPlacement;
             showSelectionButton(snapshot);
         }
         else if (hideOnFailure && !selectionBusy) hideSelectionButton();
@@ -3827,18 +3939,16 @@ function setupSelection() {
         if (event.button !== 0) return;
         if (event.sourceCapabilities?.firesTouchEvents) return;
         if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
-        const pointerRect = pointerPlacementRect(event);
+        const pointerRect = desktopSelectionPlacement(event);
         lastDesktopSelectionPlacement = pointerRect;
         lastDesktopSelectionAt = Date.now();
         const preserved = preservedGestureSelection;
-        if (preserved && pointerRect) preserved.rect = pointerRect;
         selectionGestureActive = false;
         selectionNeedsCapture = false;
         selectionPointerType = '';
         preservedGestureSelection = null;
         const snapshot = resolveSelection() || (preserved ? resolveSelection(preserved) : null);
         if (snapshot) {
-            if (pointerRect) snapshot.rect = pointerRect;
             clearTimeout(selectionTimer);
             // Open after the mouse event finishes so the following click cannot
             // light-dismiss a popover that was created during mouseup.
@@ -3898,13 +4008,20 @@ function setupSelection() {
         selectionNeedsCapture = false;
         if (pointerType === 'touch' || pointerType === 'pen') lastTouchSelectionAt = Date.now();
         const preserved = captureSelectionState() || preservedGestureSelection;
+        if (pointerType === 'mouse') {
+            const pointerRect = desktopSelectionPlacement(event);
+            if (pointerRect) {
+                lastDesktopSelectionPlacement = pointerRect;
+                lastDesktopSelectionAt = Date.now();
+            }
+        }
         if (shouldCapture) {
             scheduleSelectionCapture(
                 pointerType === 'touch' || pointerType === 'pen' ? TOUCH_SELECTION_QUIET_MS : 100,
                 { preserved },
             );
         }
-    });
+    }, true);
     document.addEventListener('pointercancel', () => {
         selectionGestureActive = false;
         selectionNeedsCapture = false;

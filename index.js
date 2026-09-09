@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.14';
+const EXTENSION_VERSION = '0.3.16';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -40,6 +40,10 @@ const DEFAULT_SETTINGS = {
     activeProfileSlot: 'A',
     autoInput: false,
     selectionCandidates: false,
+    showSelectionName: true,
+    showSelectionSource: true,
+    showSelectionLock: true,
+    showSelectionBundle: true,
     profileStats: null,
     globalPrompt: '',
     allDialoguePrompt: '',
@@ -92,6 +96,7 @@ let developerTapCount = 0;
 let developerTapTimer = null;
 let developerModeBusy = false;
 let multiSelectionState = null;
+let selectionHighlightTimer = null;
 let selectionGestureActive = false;
 let selectionNeedsCapture = false;
 let selectionPointerType = '';
@@ -2754,6 +2759,137 @@ function resolveStoredSelection(storedValue, visibleSelected, visibleBefore) {
     return mappedOccurrenceRange(storedLoose, selectedLoose, beforeLoose);
 }
 
+function visibleRangeForStoredOffsets(storedValue, start, end, visibleValue) {
+    const stored = String(storedValue || '');
+    const visible = String(visibleValue || '');
+    const selected = stored.slice(start, end);
+    if (!selected || !visible) return null;
+
+    const exactCandidates = occurrenceIndexes(visible, selected);
+    if (exactCandidates.length) {
+        const ordinal = occurrenceIndexes(stored.slice(0, start), selected).length;
+        const visibleStart = exactCandidates[ordinal]
+            ?? (exactCandidates.length === 1 ? exactCandidates[0] : exactCandidates.at(-1));
+        return { start: visibleStart, end: visibleStart + selected.length };
+    }
+
+    const mapComparableRange = mapper => {
+        const visibleComparable = mapper(visible);
+        const selectedComparable = mapper(selected);
+        const beforeComparable = mapper(stored.slice(0, start));
+        if (!selectedComparable.text) return null;
+        const candidates = occurrenceIndexes(visibleComparable.text, selectedComparable.text);
+        if (!candidates.length) return null;
+        const ordinal = occurrenceIndexes(beforeComparable.text, selectedComparable.text).length;
+        const comparableStart = candidates[ordinal]
+            ?? (candidates.length === 1 ? candidates[0] : candidates.at(-1));
+        const comparableEnd = comparableStart + selectedComparable.text.length - 1;
+        const visibleStart = visibleComparable.starts[comparableStart];
+        const visibleEnd = visibleComparable.ends[comparableEnd];
+        if (!Number.isInteger(visibleStart) || !Number.isInteger(visibleEnd) || visibleEnd <= visibleStart) {
+            return null;
+        }
+        return { start: visibleStart, end: visibleEnd };
+    };
+
+    return mapComparableRange(comparableTextWithMap)
+        || mapComparableRange(looseComparableTextWithMap);
+}
+
+function textPositionAtOffset(root, requestedOffset) {
+    const targetOffset = Math.max(0, Number(requestedOffset) || 0);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let consumed = 0;
+    let lastNode = null;
+    let node;
+    while ((node = walker.nextNode())) {
+        lastNode = node;
+        const length = node.nodeValue?.length || 0;
+        if (targetOffset <= consumed + length) {
+            return { node, offset: Math.max(0, Math.min(length, targetOffset - consumed)) };
+        }
+        consumed += length;
+    }
+    return lastNode ? { node: lastNode, offset: lastNode.nodeValue?.length || 0 } : null;
+}
+
+function highlightRangeForStoredOffsets(messageId, translation, start, end) {
+    const textElement = document.querySelector(
+        `.mes[mesid="${Number(messageId)}"] .mes_text:not(.verba-swipe-hold-content)`,
+    );
+    if (!textElement) return null;
+    const visibleRange = visibleRangeForStoredOffsets(
+        translation,
+        start,
+        end,
+        textElement.textContent || '',
+    );
+    if (!visibleRange) return null;
+    const startPosition = textPositionAtOffset(textElement, visibleRange.start);
+    const endPosition = textPositionAtOffset(textElement, visibleRange.end);
+    if (!startPosition || !endPosition) return null;
+    try {
+        const range = document.createRange();
+        range.setStart(startPosition.node, startPosition.offset);
+        range.setEnd(endPosition.node, endPosition.offset);
+        return range.collapsed ? null : range;
+    } catch {
+        return null;
+    }
+}
+
+function refreshSelectionHighlights() {
+    clearTimeout(selectionHighlightTimer);
+    selectionHighlightTimer = null;
+    const highlights = globalThis.CSS?.highlights;
+    const HighlightConstructor = globalThis.Highlight;
+    if (!highlights || typeof HighlightConstructor !== 'function') return;
+
+    highlights.delete('verba-locked-segments');
+    highlights.delete('verba-bundle-selections');
+    const lockedRanges = [];
+    document.querySelectorAll('.mes[mesid]').forEach(element => {
+        const messageId = Number(element.getAttribute('mesid'));
+        const message = liveContext().chat?.[messageId];
+        const record = message && currentRecord(message);
+        if (!record || message.extra?.display_text !== record.translation) return;
+        const lockedKeys = new Set(normalizedLockedSegments(record.lockedSegments).map(lockedSegmentKey));
+        for (const row of normalizedSourceMap(record.sourceMap)) {
+            if (!lockedKeys.has(lockedSegmentKey(row))) continue;
+            const range = highlightRangeForStoredOffsets(
+                messageId,
+                record.translation,
+                row.start,
+                row.end,
+            );
+            if (range) lockedRanges.push(range);
+        }
+    });
+    if (lockedRanges.length) {
+        highlights.set('verba-locked-segments', new HighlightConstructor(...lockedRanges));
+    }
+
+    if (bundleStillCurrent()) {
+        const bundleRanges = multiSelectionState.ranges.flatMap(row => {
+            const range = highlightRangeForStoredOffsets(
+                multiSelectionState.messageId,
+                multiSelectionState.translation,
+                row.start,
+                row.end,
+            );
+            return range ? [range] : [];
+        });
+        if (bundleRanges.length) {
+            highlights.set('verba-bundle-selections', new HighlightConstructor(...bundleRanges));
+        }
+    }
+}
+
+function scheduleSelectionHighlights(delay = 0) {
+    clearTimeout(selectionHighlightTimer);
+    selectionHighlightTimer = setTimeout(refreshSelectionHighlights, delay);
+}
+
 function hideSelectionButton() {
     document.querySelector('#verba-selection-actions')?.remove();
 }
@@ -2890,39 +3026,107 @@ function showSelectionButton(snapshot) {
     actions.className = 'verba-selection-actions';
     if ('showPopover' in HTMLElement.prototype) actions.setAttribute('popover', 'manual');
 
-    const retranslateButton = document.createElement('button');
-    retranslateButton.type = 'button';
-    retranslateButton.className = 'menu_button verba-selection-action';
-    retranslateButton.textContent = '선택 부분 재번역';
-    const nameButton = document.createElement('button');
-    nameButton.type = 'button';
-    nameButton.className = 'menu_button verba-selection-action verba-name-lock-action';
-    nameButton.textContent = '이름으로 고정';
-    const sourceButton = document.createElement('button');
-    sourceButton.type = 'button';
-    sourceButton.className = 'menu_button verba-selection-action verba-source-lens-action';
-    sourceButton.textContent = '원문 보기';
-    actions.append(retranslateButton, sourceButton, nameButton);
+    const createAction = (label, className, handler) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `menu_button verba-selection-action ${className}`.trim();
+        button.textContent = label;
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            handler();
+        });
+        return button;
+    };
+
+    const retranslateButton = createAction('선택 부분 재번역', '', () => {
+        retranslateSelection(selectionSnapshot);
+    });
+    const availableActions = [
+        {
+            quick: settings.showSelectionSource !== false,
+            button: createAction('원문 보기', 'verba-source-lens-action', () => {
+                showSelectionSource(selectionSnapshot);
+            }),
+        },
+        {
+            quick: settings.showSelectionName !== false,
+            button: createAction('이름으로 고정', 'verba-name-lock-action', () => {
+                lockSelectionName(selectionSnapshot);
+            }),
+        },
+    ];
     if (settings.developerMode) {
-        const lockButton = document.createElement('button');
-        lockButton.type = 'button';
-        lockButton.className = 'menu_button verba-selection-action verba-segment-lock-action verba-developer-only';
-        lockButton.textContent = selectionIsLocked(snapshot) ? '잠금 해제' : '구간 잠금';
-        const bundleButton = document.createElement('button');
-        bundleButton.type = 'button';
-        bundleButton.className = 'menu_button verba-selection-action verba-bundle-add-action verba-developer-only';
-        bundleButton.textContent = '묶음 추가';
-        lockButton.addEventListener('click', event => {
+        availableActions.push(
+            {
+                quick: settings.showSelectionLock !== false,
+                button: createAction(
+                    selectionIsLocked(snapshot) ? '잠금 해제' : '구간 잠금',
+                    'verba-segment-lock-action verba-developer-only',
+                    () => toggleSelectionLock(selectionSnapshot),
+                ),
+            },
+            {
+                quick: settings.showSelectionBundle !== false,
+                button: createAction(
+                    '묶음 추가',
+                    'verba-bundle-add-action verba-developer-only',
+                    () => addSelectionToBundle(selectionSnapshot),
+                ),
+            },
+        );
+    }
+
+    actions.append(retranslateButton);
+    const overflowActions = [];
+    for (const action of availableActions) {
+        if (action.quick) actions.append(action.button);
+        else overflowActions.push(action.button);
+    }
+
+    if (overflowActions.length) {
+        const moreButton = document.createElement('button');
+        moreButton.type = 'button';
+        moreButton.className = 'menu_button verba-selection-action verba-selection-more-toggle';
+        moreButton.textContent = '⋯';
+        moreButton.title = '다른 기능';
+        moreButton.setAttribute('aria-label', '다른 기능 열기');
+        moreButton.setAttribute('aria-expanded', 'false');
+
+        const moreMenu = document.createElement('div');
+        moreMenu.className = 'verba-selection-more-menu';
+        moreMenu.hidden = true;
+        overflowActions.forEach(button => {
+            button.classList.add('verba-selection-more-action');
+            moreMenu.append(button);
+        });
+        moreButton.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
-            toggleSelectionLock(selectionSnapshot);
+            const opening = moreMenu.hidden;
+            moreMenu.hidden = !opening;
+            moreButton.setAttribute('aria-expanded', String(opening));
+            if (!opening) return;
+            const viewport = globalThis.visualViewport;
+            const viewportBottom = (viewport?.offsetTop || 0) + (viewport?.height || innerHeight);
+            const actionRect = actions.getBoundingClientRect();
+            moreMenu.classList.toggle(
+                'verba-selection-more-above',
+                actionRect.bottom + moreMenu.scrollHeight + 8 > viewportBottom,
+            );
         });
-        bundleButton.addEventListener('click', event => {
-            event.preventDefault();
-            event.stopPropagation();
-            addSelectionToBundle(selectionSnapshot);
-        });
-        actions.append(lockButton, bundleButton);
+        actions.append(moreButton, moreMenu);
+    }
+
+    actions.addEventListener('pointerdown', event => event.preventDefault());
+    actions.style.setProperty('visibility', 'hidden', 'important');
+    document.documentElement.append(actions);
+    try {
+        actions.showPopover?.();
+    } catch {
+        // A declared but unopened popover is display:none in supporting browsers.
+        // Remove the attribute so fixed positioning remains visible as a fallback.
+        actions.removeAttribute('popover');
     }
 
     const viewport = globalThis.visualViewport;
@@ -2930,8 +3134,9 @@ function showSelectionButton(snapshot) {
     const viewportTop = viewport?.offsetTop || 0;
     const viewportWidth = viewport?.width || innerWidth;
     const viewportHeight = viewport?.height || innerHeight;
-    const buttonWidth = Math.min(420, viewportWidth - 16);
-    const buttonHeight = settings.developerMode ? 84 : 42;
+    const measured = actions.getBoundingClientRect();
+    const buttonWidth = Math.min(measured.width || 420, viewportWidth - 16);
+    const buttonHeight = Math.min(measured.height || 42, viewportHeight - 16);
     const centeredLeft = snapshot.rect.left + (snapshot.rect.width / 2) - (buttonWidth / 2);
     const left = Math.min(
         Math.max(viewportLeft + 8, centeredLeft),
@@ -2949,30 +3154,7 @@ function showSelectionButton(snapshot) {
     actions.style.setProperty('transform', 'none', 'important');
     actions.style.setProperty('z-index', '2147483646', 'important');
     actions.style.setProperty('margin', '0', 'important');
-    actions.addEventListener('pointerdown', event => event.preventDefault());
-    retranslateButton.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        retranslateSelection(selectionSnapshot);
-    });
-    sourceButton.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        showSelectionSource(selectionSnapshot);
-    });
-    nameButton.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        lockSelectionName(selectionSnapshot);
-    });
-    document.documentElement.append(actions);
-    try {
-        actions.showPopover?.();
-    } catch {
-        // A declared but unopened popover is display:none in supporting browsers.
-        // Remove the attribute so fixed positioning remains visible as a fallback.
-        actions.removeAttribute('popover');
-    }
+    actions.style.removeProperty('visibility');
 }
 
 function selectionHasText() {
@@ -3120,6 +3302,7 @@ function clearMultiSelection() {
         // It may already be closed.
     }
     tray?.remove();
+    scheduleSelectionHighlights();
 }
 
 function renderMultiSelectionTray() {
@@ -3200,6 +3383,7 @@ function addSelectionToBundle(snapshot) {
     selectionSnapshot = null;
     hideSelectionButton();
     renderMultiSelectionTray();
+    scheduleSelectionHighlights();
     notify(`묶음에 ${multiSelectionState.ranges.length}개 구간을 담았어요.`, 'success');
 }
 
@@ -3841,6 +4025,7 @@ function refreshTranslationClasses() {
             }
         }
     });
+    scheduleSelectionHighlights();
 }
 
 function createProfileToggleButton() {
@@ -4117,6 +4302,29 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
+                <details id="verba-selection-menu-settings" class="verba-tool-details">
+                    <summary>드래그 메뉴 구성 <small>빠른 버튼 선택</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-name" ${settings.showSelectionName !== false ? 'checked' : ''}>
+                            <span>이름으로 고정 바로 표시</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-source" ${settings.showSelectionSource !== false ? 'checked' : ''}>
+                            <span>원문 보기 바로 표시</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-lock" ${settings.showSelectionLock !== false ? 'checked' : ''}>
+                            <span>구간 잠금 바로 표시 <small>(개발자 모드)</small></span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-bundle" ${settings.showSelectionBundle !== false ? 'checked' : ''}>
+                            <span>묶음 추가 바로 표시 <small>(개발자 모드)</small></span>
+                        </label>
+                        <div class="verba-help">체크한 기능은 드래그 메뉴에 바로 표시하고, 나머지는 ⋯ 안에 넣어요. 모두 체크하면 ⋯은 나타나지 않습니다. 선택 부분 재번역은 항상 표시돼요.</div>
+                    </div>
+                </details>
+
                 <details id="verba-name-lock-manager" class="verba-name-lock-manager">
                     <summary>이름 고정 관리 <small>캐릭터별 저장</small></summary>
                     <div id="verba-name-lock-manager-content" class="verba-name-lock-manager-content"></div>
@@ -4214,6 +4422,18 @@ function injectSettingsPanel() {
     panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
         settings.selectionCandidates = event.target.checked;
         saveSettings();
+    });
+    [
+        ['#verba-show-selection-name', 'showSelectionName'],
+        ['#verba-show-selection-source', 'showSelectionSource'],
+        ['#verba-show-selection-lock', 'showSelectionLock'],
+        ['#verba-show-selection-bundle', 'showSelectionBundle'],
+    ].forEach(([selector, key]) => {
+        panel.querySelector(selector).addEventListener('change', event => {
+            settings[key] = event.target.checked;
+            hideSelectionButton();
+            saveSettings();
+        });
     });
     panel.querySelector('#verba-global-prompt').addEventListener('input', event => {
         settings.globalPrompt = event.target.value;

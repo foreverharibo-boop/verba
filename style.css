@@ -700,6 +700,55 @@ html.verba-developer-mode > * .verba-developer-only {
     border-color: color-mix(in srgb, #6aa9da 68%, transparent) !important;
 }
 
+.verba-selection-more-toggle {
+    width: 32px !important;
+    min-width: 32px !important;
+    padding-inline: 6px !important;
+    font-size: 1em !important;
+    font-weight: 700;
+}
+
+.verba-selection-more-menu {
+    position: absolute;
+    z-index: 1;
+    top: calc(100% + 6px);
+    right: 0;
+    display: grid;
+    min-width: 142px;
+    gap: 4px;
+    padding: 5px;
+    border: 1px solid color-mix(in srgb, var(--verba-accent) 48%, transparent);
+    border-radius: 12px;
+    background: var(--verba-surface);
+    box-shadow: 0 5px 18px color-mix(in srgb, var(--verba-shadow) 38%, transparent);
+}
+
+.verba-selection-more-menu[hidden] {
+    display: none !important;
+}
+
+.verba-selection-more-menu.verba-selection-more-above {
+    top: auto;
+    bottom: calc(100% + 6px);
+}
+
+.verba-selection-more-menu > .verba-selection-more-action {
+    width: 100% !important;
+    min-height: 32px;
+    justify-content: flex-start;
+    padding: 5px 9px !important;
+    font-size: calc(var(--messageTextFontSize, 1rem) * 0.72) !important;
+    text-align: left;
+}
+
+::highlight(verba-locked-segments) {
+    background-color: rgba(217, 164, 65, 0.2);
+}
+
+::highlight(verba-bundle-selections) {
+    background-color: rgba(106, 169, 218, 0.2);
+}
+
 .verba-context-choice {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -863,6 +912,45 @@ html.verba-developer-mode > * .verba-developer-only {
 }
 
 @media (max-width: 600px) {
+    .verba-selection-actions {
+        flex-wrap: nowrap !important;
+        gap: 2px !important;
+        max-width: calc(100vw - 8px) !important;
+        padding: 2px !important;
+        border-radius: 16px !important;
+    }
+
+    .verba-selection-action {
+        min-height: 28px !important;
+        flex: 0 0 auto !important;
+        padding: 3px 5px !important;
+        border-radius: 13px !important;
+        font-size: clamp(8.5px, 2.45vw, 11px) !important;
+        line-height: 1.05 !important;
+        letter-spacing: -0.04em !important;
+        white-space: nowrap !important;
+    }
+
+    .verba-selection-more-toggle {
+        width: 28px !important;
+        min-width: 28px !important;
+        padding-inline: 4px !important;
+        font-size: 12px !important;
+    }
+
+    .verba-selection-more-menu {
+        min-width: 136px;
+        gap: 3px;
+        padding: 4px;
+    }
+
+    .verba-selection-more-menu > .verba-selection-more-action {
+        min-height: 30px !important;
+        padding: 5px 8px !important;
+        font-size: calc(var(--messageTextFontSize, 1rem) * 0.68) !important;
+        letter-spacing: normal !important;
+    }
+
     .verba-modal {
         width: calc(100vw - 18px);
         max-height: 78vh;

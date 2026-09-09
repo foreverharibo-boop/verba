@@ -7,6 +7,7 @@ import {
     buildNameHistoryFormsPrompt,
     buildNameMatchPrompt,
     buildOutputPrompt,
+    buildRoleTermPlanPrompt,
     buildSelectionPrompt,
     buildTermConsistencyRepairPrompt,
     buildUntranslatedRepairPrompt,
@@ -26,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.13';
+const EXTENSION_VERSION = '0.3.14';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -982,9 +983,11 @@ function repeatedRoleTerms(segments) {
     const counts = new Map();
     for (const segment of segments || []) {
         const source = String(segment?.text || '').replace(/@@VERBA_[A-Z0-9_]+@@/g, ' ');
-        for (const match of source.matchAll(/[A-Za-z][A-Za-z'-]{2,}/g)) {
-            const term = match[0].toLocaleLowerCase().replace(/[’']/g, '');
-            if (!CONSISTENCY_ROLE_TERMS.has(term)) continue;
+        for (const match of source.matchAll(/[A-Za-z][A-Za-z'’-]{2,}/g)) {
+            let term = match[0].toLocaleLowerCase();
+            term = term.replace(/[’']s$/u, '').replace(/[’']$/u, '');
+            const singular = term.endsWith('s') ? term.slice(0, -1) : '';
+            if (!CONSISTENCY_ROLE_TERMS.has(term) && !CONSISTENCY_ROLE_TERMS.has(singular)) continue;
             counts.set(term, (counts.get(term) || 0) + 1);
         }
     }
@@ -996,6 +999,39 @@ function repeatedRoleTerms(segments) {
 function segmentContainsRoleTerm(segment, terms) {
     const source = String(segment?.text || '');
     return terms.some(term => new RegExp(`(^|[^A-Za-z])${term}(?=$|[^A-Za-z])`, 'i').test(source));
+}
+
+async function planRepeatedRoleTermLocks(segmented, options = {}) {
+    const terms = repeatedRoleTerms(segmented?.segments);
+    if (!terms.length) return [];
+    const sourceContext = (segmented.segments || []).map(segment => String(segment.text || '')).join('\n\n');
+    const prompt = buildRoleTermPlanPrompt({ sourceContext, terms, settings });
+    const expected = terms.map((term, index) => ({
+        id: `role_${String(index).padStart(4, '0')}`,
+        type: 'role_term',
+        text: term,
+    }));
+    try {
+        const planned = await requestSegments(prompt, expected, {
+            ...options,
+            stage: 'role-term-plan',
+        });
+        return terms.flatMap((term, index) => {
+            const target = String(planned.get(`role_${String(index).padStart(4, '0')}`) || '').trim();
+            if (
+                !target
+                || target.length > 40
+                || /[\r\n@]/.test(target)
+                || !hasKorean(target)
+                || findBannedWords(target, settings.bannedWords).length
+            ) return [];
+            return [{ source: term, target }];
+        });
+    } catch (error) {
+        if (isAbort(error, options.signal)) throw error;
+        console.warn('[베르바] 반복 직책 표기 계획에 실패하여 번역 후 보정으로 전환합니다.', error);
+        return [];
+    }
 }
 
 function protectedTokensIntact(previous, next) {
@@ -1161,7 +1197,14 @@ function sourceMapAfterGlobalReplacements(sourceMap, previousTranslation, nextTr
 }
 
 async function translateOutputText(source, options = {}) {
-    const segmented = segmentSource(source, normalizedCharacterNameLocks());
+    const characterNameLocks = normalizedCharacterNameLocks();
+    const initialSegmented = segmentSource(source, characterNameLocks);
+    const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
+        signal: options.signal,
+    });
+    const segmented = roleTermLocks.length
+        ? segmentSource(source, [...characterNameLocks, ...roleTermLocks])
+        : initialSegmented;
     if (!segmented.segments.length) {
         const translation = assembleTranslation(segmented, new Map());
         return { translation, sourceMap: [] };
@@ -1203,6 +1246,9 @@ async function translateOutputText(source, options = {}) {
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
 
+    // Planned terms are protected and no longer appear as plain source words
+    // here. The fallback therefore checks only any repeated roles that could
+    // not be planned, without touching already locked terminology.
     await repairRepeatedRoleTermConsistency(segmented, translations, {
         signal: options.signal,
     });

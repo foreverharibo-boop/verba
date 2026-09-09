@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.24';
+const EXTENSION_VERSION = '0.3.25';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3716,10 +3716,39 @@ async function retranslateSelectionBundle() {
     const controller = new AbortController();
     let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
     try {
-        const result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'multi-selection-retranslation' });
+        const replacementKey = value => String(value || '')
+            .normalize('NFKC')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLocaleLowerCase();
+        const currentKeys = new Map(selections.map(row => [row.id, replacementKey(row.selected)]));
+        const result = await requestSegments(prompt, expected, {
+            signal: controller.signal,
+            stage: 'multi-selection-retranslation',
+        });
+        const unchangedIds = selections
+            .filter(row => replacementKey(result.get(row.id)) === currentKeys.get(row.id))
+            .map(row => row.id);
+        if (unchangedIds.length) {
+            const changedPrompt = `${prompt}\n\nMANDATORY BUNDLE RETRANSLATION CORRECTION
+Your previous response echoed the existing Korean wording for these ids: ${JSON.stringify(unchangedIds)}.
+- Return every required id again in the same JSON schema.
+- For each listed id, the translation MUST differ from selected_korean after Unicode and whitespace normalization.
+- Do not merely change spacing or punctuation.
+- Rephrase wording, syntax, or rhythm while preserving the exact source meaning, referents, tense, intensity, explicitness, and grammatical role.
+- Follow the user's one-time request. Do not return an unchanged selection.`;
+            const retryResult = await requestSegments(changedPrompt, expected, {
+                signal: controller.signal,
+                stage: 'multi-selection-retranslation-unchanged-retry',
+            });
+            unchangedIds.forEach(id => result.set(id, retryResult.get(id)));
+        }
         const replacements = selections.map(row => {
             const replacement = String(result.get(row.id) || '').trim();
             if (!replacement) throw new Error('묶음 재번역 결과 중 비어 있는 구간이 있습니다.');
+            if (replacementKey(replacement) === currentKeys.get(row.id)) {
+                throw new Error(`AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
+            }
             const banned = findBannedWords(replacement, settings.bannedWords);
             if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
             if (replacement.length > Math.max(300, row.selected.length * 7)) {

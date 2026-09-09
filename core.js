@@ -948,6 +948,8 @@ export function buildMultiSelectionPrompt({
 RULES
 - Return exactly one Korean replacement for every supplied selection id.
 - Replace only each selected fragment, not its surrounding context and not any other part of the message.
+- Every replacement must be genuinely different from its selected_korean value after whitespace normalization. A retranslation request is not satisfied by echoing the existing wording.
+- Even when ONE-TIME REQUEST is empty, rephrase each selected fragment by changing natural Korean syntax, word choice, or rhythm without changing its meaning.
 - Find the corresponding meaning in each SOURCE CONTEXT and preserve meaning, facts, referents, tense, intensity, explicitness, and grammatical role.
 - Make every replacement connect naturally to its LEFT CONTEXT and RIGHT CONTEXT.
 - Keep repeated source terms consistent with the Korean rendering already used for the same meaning in the existing message and across all returned replacements.

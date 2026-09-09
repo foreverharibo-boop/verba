@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.17';
+const EXTENSION_VERSION = '0.3.18';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -40,6 +40,7 @@ const DEFAULT_SETTINGS = {
     activeProfileSlot: 'A',
     autoInput: false,
     selectionCandidates: false,
+    selectionQuickCount: 2,
     showSelectionName: true,
     showSelectionSource: true,
     showSelectionLock: true,
@@ -63,6 +64,7 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 const settings = extension_settings[EXTENSION_KEY];
 settings.profileStats = normalizeProfileStats(settings.profileStats);
 settings.developerMode = settings.developerMode === true;
+settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
 delete settings.debugMode;
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
@@ -2892,7 +2894,15 @@ function scheduleSelectionHighlights(delay = 0) {
 }
 
 function hideSelectionButton() {
-    document.querySelector('#verba-selection-actions')?.remove();
+    ['#verba-selection-more-menu', '#verba-selection-actions'].forEach(selector => {
+        const element = document.querySelector(selector);
+        try {
+            element?.hidePopover?.();
+        } catch {
+            // It may already be closed.
+        }
+        element?.remove();
+    });
 }
 
 function showSelectionSource(snapshot) {
@@ -2955,6 +2965,16 @@ function showSelectionSource(snapshot) {
     hideSelectionButton();
 }
 
+function selectionPlacementRect(range) {
+    try {
+        const rects = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0);
+        if (rects.length) return rects.at(-1);
+    } catch {
+        // Fall through to the complete selection box.
+    }
+    return range.getBoundingClientRect();
+}
+
 function captureSelectionState() {
     const selection = globalThis.getSelection?.();
     if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
@@ -2963,7 +2983,7 @@ function captureSelectionState() {
         return {
             range: range.cloneRange(),
             text: selection.toString(),
-            rect: range.getBoundingClientRect(),
+            rect: selectionPlacementRect(range),
         };
     } catch {
         return null;
@@ -3015,7 +3035,7 @@ function resolveSelection(preserved = null) {
         selected: storedSelected,
         start: storedRange.start,
         end: storedRange.end,
-        rect: preserved?.rect || range.getBoundingClientRect(),
+        rect: preserved?.rect || selectionPlacementRect(range),
     };
 }
 
@@ -3043,47 +3063,38 @@ function showSelectionButton(snapshot) {
     const retranslateButton = createAction('선택 부분 재번역', '', () => {
         retranslateSelection(selectionSnapshot);
     });
-    const availableActions = [
-        {
-            quick: settings.showSelectionSource !== false,
-            button: createAction('원문 보기', 'verba-source-lens-action', () => {
-                showSelectionSource(selectionSnapshot);
-            }),
-        },
-        {
-            quick: settings.showSelectionName !== false,
-            button: createAction('이름으로 고정', 'verba-name-lock-action', () => {
-                lockSelectionName(selectionSnapshot);
-            }),
-        },
-    ];
-    if (settings.developerMode) {
-        availableActions.push(
-            {
-                quick: settings.showSelectionLock !== false,
-                button: createAction(
-                    selectionIsLocked(snapshot) ? '잠금 해제' : '구간 잠금',
-                    'verba-segment-lock-action verba-developer-only',
-                    () => toggleSelectionLock(selectionSnapshot),
-                ),
-            },
-            {
-                quick: settings.showSelectionBundle !== false,
-                button: createAction(
-                    '묶음 추가',
-                    'verba-bundle-add-action verba-developer-only',
-                    () => addSelectionToBundle(selectionSnapshot),
-                ),
-            },
-        );
+    const availableActions = [];
+    if (settings.showSelectionName !== false) {
+        availableActions.push(createAction('이름으로 고정', 'verba-name-lock-action', () => {
+            lockSelectionName(selectionSnapshot);
+        }));
+    }
+    if (settings.showSelectionSource !== false) {
+        availableActions.push(createAction('원문 보기', 'verba-source-lens-action', () => {
+            showSelectionSource(selectionSnapshot);
+        }));
+    }
+    if (settings.developerMode && settings.showSelectionLock !== false) {
+        availableActions.push(createAction(
+            selectionIsLocked(snapshot) ? '잠금 해제' : '구간 잠금',
+            'verba-segment-lock-action verba-developer-only',
+            () => toggleSelectionLock(selectionSnapshot),
+        ));
+    }
+    if (settings.developerMode && settings.showSelectionBundle !== false) {
+        availableActions.push(createAction(
+            '묶음 추가',
+            'verba-bundle-add-action verba-developer-only',
+            () => addSelectionToBundle(selectionSnapshot),
+        ));
     }
 
     actions.append(retranslateButton);
-    const overflowActions = [];
-    for (const action of availableActions) {
-        if (action.quick) actions.append(action.button);
-        else overflowActions.push(action.button);
-    }
+    const quickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
+    const directActionCount = Math.max(0, quickCount - 1);
+    const directActions = availableActions.slice(0, directActionCount);
+    const overflowActions = availableActions.slice(directActionCount);
+    directActions.forEach(button => actions.append(button));
 
     if (overflowActions.length) {
         const moreButton = document.createElement('button');
@@ -3095,28 +3106,61 @@ function showSelectionButton(snapshot) {
         moreButton.setAttribute('aria-expanded', 'false');
 
         const moreMenu = document.createElement('div');
+        moreMenu.id = 'verba-selection-more-menu';
         moreMenu.className = 'verba-selection-more-menu';
-        moreMenu.hidden = true;
+        if ('showPopover' in HTMLElement.prototype) moreMenu.setAttribute('popover', 'manual');
         overflowActions.forEach(button => {
             button.classList.add('verba-selection-more-action');
             moreMenu.append(button);
         });
+        moreMenu.addEventListener('pointerdown', event => event.preventDefault());
         moreButton.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
-            const opening = moreMenu.hidden;
-            moreMenu.hidden = !opening;
-            moreButton.setAttribute('aria-expanded', String(opening));
-            if (!opening) return;
+            if (moreMenu.isConnected) {
+                try {
+                    moreMenu.hidePopover?.();
+                } catch {
+                    // It may already be closed.
+                }
+                moreMenu.remove();
+                moreButton.setAttribute('aria-expanded', 'false');
+                return;
+            }
+            document.querySelector('#verba-selection-more-menu')?.remove();
+            moreButton.setAttribute('aria-expanded', 'true');
+            moreMenu.style.setProperty('visibility', 'hidden', 'important');
+            document.documentElement.append(moreMenu);
+            try {
+                moreMenu.showPopover?.();
+            } catch {
+                moreMenu.removeAttribute('popover');
+            }
             const viewport = globalThis.visualViewport;
+            const viewportLeft = viewport?.offsetLeft || 0;
+            const viewportTop = viewport?.offsetTop || 0;
+            const viewportWidth = viewport?.width || innerWidth;
             const viewportBottom = (viewport?.offsetTop || 0) + (viewport?.height || innerHeight);
             const actionRect = actions.getBoundingClientRect();
-            moreMenu.classList.toggle(
-                'verba-selection-more-above',
-                actionRect.bottom + moreMenu.scrollHeight + 8 > viewportBottom,
+            const menuRect = moreMenu.getBoundingClientRect();
+            const menuWidth = Math.min(menuRect.width || 142, viewportWidth - 16);
+            const menuHeight = menuRect.height || moreMenu.scrollHeight || 40;
+            const left = Math.min(
+                Math.max(viewportLeft + 8, actionRect.right - menuWidth),
+                viewportLeft + viewportWidth - menuWidth - 8,
             );
+            const below = actionRect.bottom + 6;
+            const top = below + menuHeight <= viewportBottom - 8
+                ? below
+                : Math.max(viewportTop + 8, actionRect.top - menuHeight - 6);
+            moreMenu.style.setProperty('left', `${left}px`, 'important');
+            moreMenu.style.setProperty('top', `${top}px`, 'important');
+            moreMenu.style.setProperty('right', 'auto', 'important');
+            moreMenu.style.setProperty('bottom', 'auto', 'important');
+            moreMenu.style.setProperty('margin', '0', 'important');
+            moreMenu.style.removeProperty('visibility');
         });
-        actions.append(moreButton, moreMenu);
+        actions.append(moreButton);
     }
 
     actions.addEventListener('pointerdown', event => event.preventDefault());
@@ -3759,7 +3803,7 @@ function setupSelection() {
     document.addEventListener('mouseup', event => {
         if (event.button !== 0) return;
         if (event.sourceCapabilities?.firesTouchEvents) return;
-        if (event.target?.closest?.('#verba-selection-actions')) return;
+        if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
         const preserved = preservedGestureSelection;
         selectionGestureActive = false;
         selectionNeedsCapture = false;
@@ -3777,7 +3821,7 @@ function setupSelection() {
     }, true);
     if (!hasPointerEvents) {
         document.addEventListener('touchend', event => {
-            if (event.target?.closest?.('#verba-selection-actions')) return;
+            if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
             lastTouchSelectionAt = Date.now();
             const preserved = captureSelectionState();
             scheduleSelectionCapture(TOUCH_SELECTION_QUIET_MS, {
@@ -3787,7 +3831,13 @@ function setupSelection() {
         }, { passive: true });
     }
     document.addEventListener('pointerdown', event => {
-        if (event.target?.closest?.('#verba-selection-actions')) return;
+        if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
+        if (document.querySelector('#verba-selection-actions, #verba-selection-more-menu')) {
+            clearTimeout(selectionTimer);
+            selectionSnapshot = null;
+            hideSelectionButton();
+            globalThis.getSelection?.()?.removeAllRanges?.();
+        }
         if (event.target?.closest?.('.mes[mesid] .mes_text')) {
             selectionGestureActive = true;
             selectionNeedsCapture = false;
@@ -3807,7 +3857,7 @@ function setupSelection() {
         hideSelectionButton();
     }, { passive: true });
     document.addEventListener('pointerup', event => {
-        if (event.target?.closest?.('#verba-selection-actions')) return;
+        if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
         const pointerType = event.pointerType || selectionPointerType;
         const shouldCapture = selectionGestureActive
             || selectionNeedsCapture
@@ -3977,7 +4027,7 @@ function setupMessageCopyHold() {
         const messageElement = event.target?.closest?.('.mes[mesid]');
         const messageText = event.target?.closest?.('.mes_text');
         const interactive = event.target?.closest?.(
-            'button, a, input, textarea, select, [contenteditable="true"], .mes_buttons, .extraMesButtons, #verba-selection-actions',
+            'button, a, input, textarea, select, [contenteditable="true"], .mes_buttons, .extraMesButtons, #verba-selection-actions, #verba-selection-more-menu',
         );
         const startedOnText = messageText && pointHitsRenderedText(messageText, event.clientX, event.clientY);
         if (!messageElement || interactive || startedOnText || document.querySelector('#verba-request-overlay')) {
@@ -4340,25 +4390,31 @@ function injectSettingsPanel() {
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
                 <details id="verba-selection-menu-settings" class="verba-tool-details">
-                    <summary>드래그 메뉴 구성 <small>빠른 버튼 선택</small></summary>
+                    <summary>드래그 메뉴 구성 <small>버튼 수·기능 선택</small></summary>
                     <div class="verba-tool-details-content">
+                        <label for="verba-selection-quick-count">바로 표시할 버튼 수</label>
+                        <select id="verba-selection-quick-count" class="text_pole">
+                            ${[2, 3, 4, 5].map(count => `
+                                <option value="${count}" ${settings.selectionQuickCount === count ? 'selected' : ''}>${count}개</option>
+                            `).join('')}
+                        </select>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-show-selection-name" ${settings.showSelectionName !== false ? 'checked' : ''}>
-                            <span>이름으로 고정 바로 표시</span>
+                            <span>이름으로 고정 메뉴에 포함</span>
                         </label>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-show-selection-source" ${settings.showSelectionSource !== false ? 'checked' : ''}>
-                            <span>원문 보기 바로 표시</span>
+                            <span>원문 보기 메뉴에 포함</span>
                         </label>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-show-selection-lock" ${settings.showSelectionLock !== false ? 'checked' : ''}>
-                            <span>구간 잠금 바로 표시 <small>(개발자 모드)</small></span>
+                            <span>구간 잠금 메뉴에 포함 <small>(개발자 모드)</small></span>
                         </label>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-show-selection-bundle" ${settings.showSelectionBundle !== false ? 'checked' : ''}>
-                            <span>묶음 추가 바로 표시 <small>(개발자 모드)</small></span>
+                            <span>묶음 추가 메뉴에 포함 <small>(개발자 모드)</small></span>
                         </label>
-                        <div class="verba-help">체크한 기능은 드래그 메뉴에 바로 표시하고, 나머지는 ⋯ 안에 넣어요. 모두 체크하면 ⋯은 나타나지 않습니다. 선택 부분 재번역은 항상 표시돼요.</div>
+                        <div class="verba-help">선택 부분 재번역을 포함해 지정한 개수까지만 바로 표시하고, 남은 기능은 ⋯을 누르면 세로로 열려요. 5개를 선택하면 모두 한 줄에 표시할 수 있습니다.</div>
                     </div>
                 </details>
 
@@ -4458,6 +4514,11 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
         settings.selectionCandidates = event.target.checked;
+        saveSettings();
+    });
+    panel.querySelector('#verba-selection-quick-count').addEventListener('change', event => {
+        settings.selectionQuickCount = Math.min(5, Math.max(2, Number(event.target.value) || 2));
+        hideSelectionButton();
         saveSettings();
     });
     [

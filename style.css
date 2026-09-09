@@ -709,27 +709,23 @@ html.verba-developer-mode > * .verba-developer-only {
 }
 
 .verba-selection-more-menu {
-    position: absolute;
-    z-index: 1;
-    top: calc(100% + 6px);
-    right: 0;
-    display: grid;
+    position: fixed !important;
+    z-index: 2147483647 !important;
+    display: grid !important;
     min-width: 142px;
+    max-width: calc(100vw - 16px);
     gap: 4px;
     padding: 5px;
     border: 1px solid color-mix(in srgb, var(--verba-accent) 48%, transparent);
     border-radius: 12px;
     background: var(--verba-surface);
     box-shadow: 0 5px 18px color-mix(in srgb, var(--verba-shadow) 38%, transparent);
+    color: var(--verba-text);
+    font-family: var(--mainFontFamily, inherit) !important;
 }
 
-.verba-selection-more-menu[hidden] {
-    display: none !important;
-}
-
-.verba-selection-more-menu.verba-selection-more-above {
-    top: auto;
-    bottom: calc(100% + 6px);
+.verba-selection-more-menu:popover-open {
+    display: grid !important;
 }
 
 .verba-selection-more-menu > .verba-selection-more-action {

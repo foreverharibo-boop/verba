@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.18';
+const EXTENSION_VERSION = '0.3.19';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2975,6 +2975,20 @@ function selectionPlacementRect(range) {
     return range.getBoundingClientRect();
 }
 
+function pointerPlacementRect(event) {
+    const x = Number(event?.clientX);
+    const y = Number(event?.clientY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return {
+        left: x,
+        right: x,
+        top: y,
+        bottom: y,
+        width: 0,
+        height: 0,
+    };
+}
+
 function captureSelectionState() {
     const selection = globalThis.getSelection?.();
     if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
@@ -3804,13 +3818,16 @@ function setupSelection() {
         if (event.button !== 0) return;
         if (event.sourceCapabilities?.firesTouchEvents) return;
         if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
+        const pointerRect = pointerPlacementRect(event);
         const preserved = preservedGestureSelection;
+        if (preserved && pointerRect) preserved.rect = pointerRect;
         selectionGestureActive = false;
         selectionNeedsCapture = false;
         selectionPointerType = '';
         preservedGestureSelection = null;
         const snapshot = resolveSelection() || (preserved ? resolveSelection(preserved) : null);
         if (snapshot) {
+            if (pointerRect) snapshot.rect = pointerRect;
             clearTimeout(selectionTimer);
             // Open after the mouse event finishes so the following click cannot
             // light-dismiss a popover that was created during mouseup.

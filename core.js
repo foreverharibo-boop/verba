@@ -787,8 +787,9 @@ export function buildSelectionPrompt({
 - Every candidate must preserve exactly the same source meaning, facts, referents, tense, intensity, explicitness, and grammatical role.
 - Vary only natural word choice, nuance, and sentence rhythm. Do not assign style labels and do not make any candidate more or less explicit than the source.
 - Keep all three compatible with LEFT CONTEXT, RIGHT CONTEXT, and every applicable prompt.
-- Make the candidates meaningfully different from one another and, when possible, from the existing selected Korean fragment.`
-        : '- Return a new Korean replacement for only the selected fragment, not the surrounding sentence and not an explanation.';
+- Make the candidates meaningfully different from one another and from the existing selected Korean fragment.`
+        : `- Return a new Korean replacement for only the selected fragment, not the surrounding sentence and not an explanation.
+- The replacement must not be identical to the existing selected fragment after whitespace normalization. A retranslation request requires changed wording; vary syntax, word choice, or rhythm without changing meaning.`;
     const outputSchema = multipleCandidates
         ? '{"candidates":[{"id":"candidate_1","translation":"첫 번째 교체문"},{"id":"candidate_2","translation":"두 번째 교체문"},{"id":"candidate_3","translation":"세 번째 교체문"}]}'
         : '{"segments":[{"id":"seg_0000","translation":"replacement only"}]}';

@@ -25,7 +25,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.10';
+const EXTENSION_VERSION = '0.3.11';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3315,6 +3315,12 @@ async function retranslateSelection(snapshot) {
         sourceContext: selectionSourceContext(snapshot, contextMode),
     });
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected }];
+    const replacementKey = value => String(value || '')
+        .normalize('NFKC')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase();
+    const currentKey = replacementKey(snapshot.selected);
     let toast = showProgress(candidateMode
         ? '선택한 부분의 번역 후보 3개를 만드는 중입니다…'
         : '선택한 부분만 다시 번역 중입니다…');
@@ -3322,10 +3328,9 @@ async function retranslateSelection(snapshot) {
         let replacement = '';
         if (candidateMode) {
             const received = await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' });
-            const currentKey = snapshot.selected.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
-                if (!text || text.replace(/\s+/g, ' ').toLocaleLowerCase() === currentKey) return false;
+                if (!text || replacementKey(text) === currentKey) return false;
                 if (findBannedWords(text, settings.bannedWords).length) return false;
                 return text.length <= Math.max(300, snapshot.selected.length * 7);
             });
@@ -3338,8 +3343,24 @@ async function retranslateSelection(snapshot) {
             replacement = await requestSelectionCandidateChoice(candidates, snapshot.selected);
             if (replacement === null) return;
         } else {
-            const result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'selection-retranslation' });
+            let result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'selection-retranslation' });
             replacement = String(result.get('seg_0000') || '').trim();
+            if (!replacement || replacementKey(replacement) === currentKey) {
+                const changedPrompt = `${prompt}\n\nMANDATORY RETRANSLATION CORRECTION
+Your previous replacement was empty or unchanged. Return a genuinely different Korean wording for the selected fragment now.
+- Do not repeat the existing selected fragment verbatim or with whitespace-only changes.
+- Follow the user's one-time request.
+- Preserve the original meaning, referents, intensity, tense, and grammatical role.
+- Change only wording, syntax, or rhythm; return replacement text only in the required JSON schema.`;
+                result = await requestSegments(changedPrompt, expected, {
+                    signal: controller.signal,
+                    stage: 'selection-retranslation-unchanged-retry',
+                });
+                replacement = String(result.get('seg_0000') || '').trim();
+            }
+            if (replacementKey(replacement) === currentKey) {
+                throw new Error('AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');
+            }
         }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
         const banned = findBannedWords(replacement, settings.bannedWords);

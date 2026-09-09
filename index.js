@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.21';
+const EXTENSION_VERSION = '0.3.22';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3050,9 +3050,63 @@ function rectInsideBounds(rect, bounds, padding = 24) {
     );
 }
 
+function rangeEndPlacementRect(range) {
+    if (!range) return null;
+    try {
+        let node = range.endContainer;
+        let offset = range.endOffset;
+
+        if (node.nodeType === Node.ELEMENT_NODE && offset > 0) {
+            node = node.childNodes[offset - 1];
+            while (node?.lastChild) node = node.lastChild;
+            offset = node?.nodeType === Node.TEXT_NODE ? (node.textContent?.length || 0) : 0;
+        }
+
+        if (node?.nodeType === Node.TEXT_NODE && node.textContent?.length) {
+            const length = node.textContent.length;
+            const end = Math.min(Math.max(1, offset), length);
+            const character = document.createRange();
+            character.setStart(node, end - 1);
+            character.setEnd(node, end);
+            const rect = [...character.getClientRects()].find(item => item.width > 0 && item.height > 0)
+                || character.getBoundingClientRect();
+            if (rect?.height) {
+                return {
+                    left: rect.right,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    width: 0,
+                    height: rect.height,
+                };
+            }
+        }
+
+        const endRange = range.cloneRange();
+        endRange.collapse(false);
+        const rect = [...endRange.getClientRects()].find(item => item.height > 0)
+            || endRange.getBoundingClientRect();
+        if (rect?.height || rect?.width) {
+            return {
+                left: rect.left,
+                right: rect.left,
+                top: rect.top,
+                bottom: rect.bottom || rect.top,
+                width: 0,
+                height: rect.height || 0,
+            };
+        }
+    } catch {
+        // Fall through to the normal selection rectangles.
+    }
+    return null;
+}
+
 function liveSelectionPlacementRect(range, messageText = null) {
     if (!range) return null;
     const bounds = messageText?.getBoundingClientRect?.();
+    const endRect = rangeEndPlacementRect(range);
+    if (!bounds || rectInsideBounds(endRect, bounds, 2)) return endRect;
     try {
         const rects = [...range.getClientRects()].filter(rect => (
             rect.width > 0

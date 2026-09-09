@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.25';
+const EXTENSION_VERSION = '0.3.26';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -80,6 +80,7 @@ const lastRenderedTranslationByMessage = new Map();
 const failedOutputSignatures = new Map();
 const serverRetryStates = new Map();
 const pendingInputControllers = new Set();
+const transientLockedMessages = new Set();
 let requestTail = Promise.resolve();
 let chatSaveTimer = null;
 let uiRefreshTimer = null;
@@ -227,6 +228,20 @@ function errorText(error) {
     return parts.join(' / ') || String(error);
 }
 
+function sameRetranslationWording(left, right) {
+    const normalize = value => String(value || '')
+        .normalize('NFKC')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase();
+    const leftNormalized = normalize(left);
+    const rightNormalized = normalize(right);
+    if (leftNormalized === rightNormalized) return true;
+    const wordingOnly = value => value.replace(/[\s\p{P}]+/gu, '');
+    const leftWording = wordingOnly(leftNormalized);
+    return Boolean(leftWording && leftWording === wordingOnly(rightNormalized));
+}
+
 function isAbort(error, signal) {
     if (signal?.aborted || error?.name === 'AbortError') return true;
     if (error?.code === 'VERBA_TIMEOUT') return false;
@@ -334,7 +349,7 @@ function syncDeveloperModeUi() {
     const enabled = settings.developerMode === true;
     document.body?.classList.toggle('verba-developer-mode', enabled);
     document.documentElement?.classList.toggle('verba-developer-mode', enabled);
-    if (!enabled) clearMultiSelection();
+    if (!enabled) clearTransientTranslationSelections();
     globalThis.__verbaDeveloperMode = enabled;
     document.dispatchEvent(new CustomEvent('verba:developer-mode-changed', {
         detail: { enabled },
@@ -2905,7 +2920,6 @@ function hideSelectionButton() {
         }
         element?.remove();
     });
-    document.querySelector('#verba-selection-anchor')?.remove();
 }
 
 function showSelectionSource(snapshot) {
@@ -3504,6 +3518,8 @@ function toggleSelectionLock(snapshot) {
         sourceMap: snapshot.sourceMap,
         lockedSegments: nextLocks,
     });
+    if (nextLocks.length) transientLockedMessages.add(message);
+    else transientLockedMessages.delete(message);
     globalThis.getSelection?.()?.removeAllRanges?.();
     selectionSnapshot = null;
     hideSelectionButton();
@@ -3565,12 +3581,14 @@ function clearTransientTranslationSelections() {
         changed = true;
     };
 
-    for (const message of chat) {
+    const messagesToClear = new Set([...chat, ...transientLockedMessages]);
+    for (const message of messagesToClear) {
         clearLocksFromExtra(message?.extra);
         if (Array.isArray(message?.swipe_info)) {
             message.swipe_info.forEach(swipe => clearLocksFromExtra(swipe?.extra));
         }
     }
+    transientLockedMessages.clear();
     for (const cached of lastRenderedTranslationByMessage.values()) {
         if (!normalizedLockedSegments(cached?.record?.lockedSegments).length) continue;
         cached.record = { ...cached.record, lockedSegments: [] };
@@ -3716,18 +3734,12 @@ async function retranslateSelectionBundle() {
     const controller = new AbortController();
     let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
     try {
-        const replacementKey = value => String(value || '')
-            .normalize('NFKC')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLocaleLowerCase();
-        const currentKeys = new Map(selections.map(row => [row.id, replacementKey(row.selected)]));
         const result = await requestSegments(prompt, expected, {
             signal: controller.signal,
             stage: 'multi-selection-retranslation',
         });
         const unchangedIds = selections
-            .filter(row => replacementKey(result.get(row.id)) === currentKeys.get(row.id))
+            .filter(row => sameRetranslationWording(result.get(row.id), row.selected))
             .map(row => row.id);
         if (unchangedIds.length) {
             const changedPrompt = `${prompt}\n\nMANDATORY BUNDLE RETRANSLATION CORRECTION
@@ -3746,7 +3758,7 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
         const replacements = selections.map(row => {
             const replacement = String(result.get(row.id) || '').trim();
             if (!replacement) throw new Error('묶음 재번역 결과 중 비어 있는 구간이 있습니다.');
-            if (replacementKey(replacement) === currentKeys.get(row.id)) {
+            if (sameRetranslationWording(replacement, row.selected)) {
                 throw new Error(`AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
             }
             const banned = findBannedWords(replacement, settings.bannedWords);
@@ -3941,12 +3953,6 @@ async function retranslateSelection(snapshot) {
         sourceContext: selectionSourceContext(snapshot, contextMode),
     });
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected }];
-    const replacementKey = value => String(value || '')
-        .normalize('NFKC')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLocaleLowerCase();
-    const currentKey = replacementKey(snapshot.selected);
     let toast = showProgress(candidateMode
         ? '선택한 부분의 번역 후보 3개를 만드는 중입니다…'
         : '선택한 부분만 다시 번역 중입니다…');
@@ -3956,7 +3962,7 @@ async function retranslateSelection(snapshot) {
             const received = await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' });
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
-                if (!text || replacementKey(text) === currentKey) return false;
+                if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
                 if (findBannedWords(text, settings.bannedWords).length) return false;
                 return text.length <= Math.max(300, snapshot.selected.length * 7);
             });
@@ -3971,7 +3977,7 @@ async function retranslateSelection(snapshot) {
         } else {
             let result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'selection-retranslation' });
             replacement = String(result.get('seg_0000') || '').trim();
-            if (!replacement || replacementKey(replacement) === currentKey) {
+            if (!replacement || sameRetranslationWording(replacement, snapshot.selected)) {
                 const changedPrompt = `${prompt}\n\nMANDATORY RETRANSLATION CORRECTION
 Your previous replacement was empty or unchanged. Return a genuinely different Korean wording for the selected fragment now.
 - Do not repeat the existing selected fragment verbatim or with whitespace-only changes.
@@ -3984,7 +3990,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
                 });
                 replacement = String(result.get('seg_0000') || '').trim();
             }
-            if (replacementKey(replacement) === currentKey) {
+            if (sameRetranslationWording(replacement, snapshot.selected)) {
                 throw new Error('AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');
             }
         }
@@ -5011,6 +5017,10 @@ function setupEvents() {
     if (types.GENERATION_ENDED) source.on(types.GENERATION_ENDED, handleGenerationEnded);
     if (types.CHAT_CHANGED) {
         source.on(types.CHAT_CHANGED, () => {
+            // Locks and bundles are one-shot editing state. Clear tracked
+            // records before caches are discarded, and also clear any stale
+            // values loaded with the newly opened chat.
+            clearTransientTranslationSelections();
             for (const pending of pendingOutputs.values()) pending.controller.abort();
             pendingOutputs.clear();
             for (const controller of pendingInputControllers) controller.abort();
@@ -5026,10 +5036,10 @@ function setupEvents() {
                 element.classList.remove('verba-swipe-hold-active');
                 element.querySelectorAll('.verba-swipe-hold-content').forEach(hold => hold.remove());
             });
-            selectionSnapshot = null;
-            hideSelectionButton();
-            clearMultiSelection();
-            document.querySelector('#verba-request-overlay')?.remove();
+            const requestOverlay = document.querySelector('#verba-request-overlay');
+            const closeButton = requestOverlay?.querySelector('.verba-close');
+            if (closeButton) closeButton.click();
+            else requestOverlay?.remove();
             setTimeout(() => {
                 injectInputAction();
                 refreshProfileSelect();

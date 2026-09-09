@@ -830,22 +830,22 @@ export function buildSelectionPrompt({
     const paragraphStart = translation.lastIndexOf('\n\n', Math.max(0, start - 1));
     const paragraphEnd = translation.indexOf('\n\n', end);
     const left = contextMode === 'message'
-        ? translation.slice(0, start)
+        ? translation.slice(Math.max(0, start - 800), start)
         : contextMode === 'paragraph'
             ? translation.slice(paragraphStart < 0 ? 0 : paragraphStart + 2, start)
             : contextMode === 'narrow'
                 ? translation.slice(Math.max(0, start - 320), start)
                 : translation.slice(Math.max(0, start - 1200), start);
     const right = contextMode === 'message'
-        ? translation.slice(end)
+        ? translation.slice(end, end + 800)
         : contextMode === 'paragraph'
             ? translation.slice(end, paragraphEnd < 0 ? translation.length : paragraphEnd)
             : contextMode === 'narrow'
                 ? translation.slice(end, end + 320)
                 : translation.slice(end, end + 1200);
     const sourceReference = String(sourceContext || source || '');
-    const translationReference = contextMode === 'standard'
-        ? boundReference(translation)
+    const translationReference = contextMode === 'standard' || contextMode === 'message'
+        ? boundReference(translation, contextMode === 'message' ? 20000 : 16000)
         : `${left}${selected}${right}`;
     const inDialogue = selectionTouchesDialogue(translation, start, end);
     const multipleCandidates = Number(candidateCount) > 1;
@@ -915,25 +915,28 @@ export function buildMultiSelectionPrompt({
     speakerIdentity = {},
     contextMode = 'paragraph',
 }) {
+    const usesSharedMessageContext = contextMode === 'message';
     const rows = (Array.isArray(selections) ? selections : []).map((selection, index) => {
         const start = Number(selection.start);
         const end = Number(selection.end);
         const paragraphStart = translation.lastIndexOf('\n\n', Math.max(0, start - 1));
         const paragraphEnd = translation.indexOf('\n\n', end);
         const left = contextMode === 'message'
-            ? translation.slice(0, start)
+            ? translation.slice(Math.max(0, start - 600), start)
             : contextMode === 'narrow'
                 ? translation.slice(Math.max(0, start - 320), start)
                 : translation.slice(paragraphStart < 0 ? 0 : paragraphStart + 2, start);
         const right = contextMode === 'message'
-            ? translation.slice(end)
+            ? translation.slice(end, end + 600)
             : contextMode === 'narrow'
                 ? translation.slice(end, end + 320)
                 : translation.slice(end, paragraphEnd < 0 ? translation.length : paragraphEnd);
         return {
             id: String(selection.id || `multi_${String(index).padStart(4, '0')}`),
             selected_korean: String(selection.selected || ''),
-            source_context: boundReference(selection.sourceContext || source, contextMode === 'message' ? 16000 : 6000),
+            source_context: usesSharedMessageContext
+                ? '(use SHARED ORIGINAL SOURCE below)'
+                : boundReference(selection.sourceContext || source, 6000),
             left_context: left,
             right_context: right,
             in_dialogue: selectionTouchesDialogue(translation, start, end),
@@ -958,6 +961,7 @@ RULES
 - For a row whose in_dialogue value is true, apply the all-dialogue prompt and apply the target-character dialogue prompt only when TARGET CHARACTER is the speaker.
 - For a row whose in_dialogue value is false, do not apply either dialogue prompt.
 - Output valid JSON only and include every supplied id exactly once.
+${usesSharedMessageContext ? '- Use the shared full-message contexts together with each row\'s local LEFT/RIGHT CONTEXT. Do not translate or return the shared context itself.' : ''}
 
 ${instructionBlock('GLOBAL TRANSLATION PROMPT', settings.globalPrompt)}
 
@@ -975,6 +979,13 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}
 
 Return exactly:
 ${schema}
+
+${usesSharedMessageContext ? `SHARED ORIGINAL SOURCE — reference only
+${JSON.stringify(boundReference(source, 20000))}
+
+SHARED EXISTING KOREAN MESSAGE — reference only
+${JSON.stringify(boundReference(translation, 20000))}
+` : ''}
 
 SELECTIONS
 ${JSON.stringify(rows)}`;

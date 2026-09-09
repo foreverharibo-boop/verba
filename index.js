@@ -25,7 +25,8 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.7';
+const EXTENSION_VERSION = '0.3.10';
+const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -91,6 +92,9 @@ let developerModeBusy = false;
 let multiSelectionState = null;
 let selectionGestureActive = false;
 let selectionNeedsCapture = false;
+let selectionPointerType = '';
+let preservedGestureSelection = null;
+let lastTouchSelectionAt = 0;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -1239,6 +1243,25 @@ function currentRecord(message) {
         }
     }
     return null;
+}
+
+function currentSelectionRecord(message) {
+    const record = currentRecord(message);
+    if (record) return record;
+
+    // A model may already return Korean-English bilingual dialogue. Automatic
+    // translation can then skip the message as Korean-dominant, leaving no Verba
+    // cache record even though the mixed-language text still needs selection tools.
+    const source = messageSource(message);
+    if (!hasKorean(source) || !/[A-Za-z]/.test(source)) return null;
+    return {
+        swipeId: currentSwipeId(message),
+        sourceHash: hashText(source),
+        translation: source,
+        sourceMap: [],
+        lockedSegments: [],
+        rawBilingual: true,
+    };
 }
 
 function currentSwipeExtra(message, create = true) {
@@ -2539,6 +2562,37 @@ function comparableTextWithMap(value) {
     return { text: text.trim(), starts, ends };
 }
 
+function looseComparableTextWithMap(value) {
+    const comparable = comparableTextWithMap(value);
+    let text = '';
+    const starts = [];
+    const ends = [];
+    for (let index = 0; index < comparable.text.length; index += 1) {
+        const normalized = comparable.text[index].normalize('NFKC').toLocaleLowerCase();
+        for (const character of normalized) {
+            if (!/[\p{L}\p{N}]/u.test(character)) continue;
+            text += character;
+            starts.push(comparable.starts[index]);
+            ends.push(comparable.ends[index]);
+        }
+    }
+    return { text, starts, ends };
+}
+
+function mappedOccurrenceRange(storedComparable, selectedComparable, beforeComparable) {
+    if (!selectedComparable.text) return null;
+    const candidateIndexes = occurrenceIndexes(storedComparable.text, selectedComparable.text);
+    if (!candidateIndexes.length) return null;
+    const ordinal = occurrenceIndexes(beforeComparable.text, selectedComparable.text).length;
+    const comparableStart = candidateIndexes[ordinal]
+        ?? (candidateIndexes.length === 1 ? candidateIndexes[0] : candidateIndexes.at(-1));
+    const comparableEnd = comparableStart + selectedComparable.text.length - 1;
+    const start = storedComparable.starts[comparableStart];
+    const end = storedComparable.ends[comparableEnd];
+    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) return null;
+    return { start, end };
+}
+
 function resolveStoredSelection(storedValue, visibleSelected, visibleBefore) {
     const stored = String(storedValue || '');
     const exactIndexes = occurrenceIndexes(stored, visibleSelected);
@@ -2550,20 +2604,19 @@ function resolveStoredSelection(storedValue, visibleSelected, visibleBefore) {
     }
 
     const storedComparable = comparableTextWithMap(stored);
-    const selectedComparable = comparableTextWithMap(visibleSelected).text;
-    const beforeComparable = comparableTextWithMap(visibleBefore).text;
-    if (!selectedComparable) return null;
+    const selectedComparable = comparableTextWithMap(visibleSelected);
+    const beforeComparable = comparableTextWithMap(visibleBefore);
+    const comparableRange = mappedOccurrenceRange(storedComparable, selectedComparable, beforeComparable);
+    if (comparableRange) return comparableRange;
 
-    const candidateIndexes = occurrenceIndexes(storedComparable.text, selectedComparable);
-    if (!candidateIndexes.length) return null;
-    const ordinal = occurrenceIndexes(beforeComparable, selectedComparable).length;
-    const comparableStart = candidateIndexes[ordinal]
-        ?? (candidateIndexes.length === 1 ? candidateIndexes[0] : candidateIndexes.at(-1));
-    const comparableEnd = comparableStart + selectedComparable.length - 1;
-    const start = storedComparable.starts[comparableStart];
-    const end = storedComparable.ends[comparableEnd];
-    if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) return null;
-    return { start, end };
+    // Rendered bilingual dialogue can differ only in quotes, parentheses,
+    // Markdown escapes, or other punctuation. Match its letters and numbers as
+    // a final fallback while preserving offsets into the stored translation.
+    const storedLoose = looseComparableTextWithMap(stored);
+    const selectedLoose = looseComparableTextWithMap(visibleSelected);
+    const beforeLoose = looseComparableTextWithMap(visibleBefore);
+    if (selectedLoose.text.length < 2) return null;
+    return mappedOccurrenceRange(storedLoose, selectedLoose, beforeLoose);
 }
 
 function hideSelectionButton() {
@@ -2630,11 +2683,27 @@ function showSelectionSource(snapshot) {
     hideSelectionButton();
 }
 
-function resolveSelection() {
-    if (selectionBusy) return null;
+function captureSelectionState() {
     const selection = globalThis.getSelection?.();
     if (!selection || selection.rangeCount !== 1 || selection.isCollapsed) return null;
-    const range = selection.getRangeAt(0);
+    try {
+        const range = selection.getRangeAt(0);
+        return {
+            range: range.cloneRange(),
+            text: selection.toString(),
+            rect: range.getBoundingClientRect(),
+        };
+    } catch {
+        return null;
+    }
+}
+
+function resolveSelection(preserved = null) {
+    if (selectionBusy) return null;
+    const selection = globalThis.getSelection?.();
+    if (!preserved && (!selection || selection.rangeCount !== 1 || selection.isCollapsed)) return null;
+    const range = preserved?.range || selection.getRangeAt(0);
+    if (!range || range.collapsed) return null;
     const startElement = range.startContainer.nodeType === Node.ELEMENT_NODE
         ? range.startContainer
         : range.startContainer.parentElement;
@@ -2648,10 +2717,10 @@ function resolveSelection() {
 
     const messageId = Number(messageElement.getAttribute('mesid'));
     const message = liveContext().chat?.[messageId];
-    const record = message && currentRecord(message);
+    const record = message && currentSelectionRecord(message);
     if (!message || !record) return null;
 
-    const raw = selection.toString();
+    const raw = String(preserved?.text ?? selection.toString());
     const leading = raw.match(/^\s*/)?.[0]?.length || 0;
     const trailing = raw.match(/\s*$/)?.[0]?.length || 0;
     const selected = raw.slice(leading, raw.length - trailing);
@@ -2674,7 +2743,7 @@ function resolveSelection() {
         selected: storedSelected,
         start: storedRange.start,
         end: storedRange.end,
-        rect: range.getBoundingClientRect(),
+        rect: preserved?.rect || range.getBoundingClientRect(),
     };
 }
 
@@ -2765,7 +2834,9 @@ function showSelectionButton(snapshot) {
     try {
         actions.showPopover?.();
     } catch {
-        // Fixed positioning remains as a fallback.
+        // A declared but unopened popover is display:none in supporting browsers.
+        // Remove the attribute so fixed positioning remains visible as a fallback.
+        actions.removeAttribute('popover');
     }
 }
 
@@ -2779,10 +2850,21 @@ function selectionHasText() {
     );
 }
 
-function scheduleSelectionCapture(delay = 80, { hideOnFailure = true } = {}) {
+function touchSelectionRecentlyActive() {
+    const coarseOnly = globalThis.matchMedia?.('(pointer: coarse)')?.matches
+        && !globalThis.matchMedia?.('(hover: hover)')?.matches;
+    return Boolean(
+        selectionPointerType === 'touch'
+        || selectionPointerType === 'pen'
+        || Date.now() - lastTouchSelectionAt < 15000
+        || coarseOnly
+    );
+}
+
+function scheduleSelectionCapture(delay = 80, { hideOnFailure = true, preserved = null } = {}) {
     clearTimeout(selectionTimer);
     selectionTimer = setTimeout(() => {
-        const snapshot = resolveSelection();
+        const snapshot = resolveSelection() || (preserved ? resolveSelection(preserved) : null);
         if (snapshot) showSelectionButton(snapshot);
         else if (hideOnFailure && !selectionBusy) hideSelectionButton();
     }, delay);
@@ -2790,7 +2872,7 @@ function scheduleSelectionCapture(delay = 80, { hideOnFailure = true } = {}) {
 
 function selectionStillCurrent(snapshot) {
     const message = liveContext().chat?.[snapshot.messageId];
-    const record = message && currentRecord(message);
+    const record = message && currentSelectionRecord(message);
     return Boolean(
         message === snapshot.message
         && record
@@ -2807,7 +2889,7 @@ function selectionSourceRows(snapshot) {
 
 function selectionIsLocked(snapshot) {
     if (!snapshot) return false;
-    const record = currentRecord(snapshot.message);
+    const record = currentSelectionRecord(snapshot.message);
     const rows = selectionSourceRows(snapshot);
     if (!record || !rows.length) return false;
     const lockedKeys = new Set(normalizedLockedSegments(record.lockedSegments).map(lockedSegmentKey));
@@ -2835,7 +2917,7 @@ function toggleSelectionLock(snapshot) {
         hideSelectionButton();
         return;
     }
-    const record = currentRecord(snapshot.message);
+    const record = currentSelectionRecord(snapshot.message);
     const existing = normalizedLockedSegments(record.lockedSegments);
     const targetKeys = new Set(rows.map(lockedSegmentKey));
     const unlock = rows.every(row => existing.some(lock => lockedSegmentKey(lock) === lockedSegmentKey(row)));
@@ -2884,7 +2966,7 @@ function selectionSourceContext(snapshot, contextMode) {
 function bundleStillCurrent(state = multiSelectionState) {
     if (!state) return false;
     const message = liveContext().chat?.[state.messageId];
-    const record = message && currentRecord(message);
+    const record = message && currentSelectionRecord(message);
     return Boolean(
         message === state.message
         && record
@@ -3301,13 +3383,30 @@ function setupSelection() {
         if (event.button !== 0) return;
         if (event.sourceCapabilities?.firesTouchEvents) return;
         if (event.target?.closest?.('#verba-selection-actions')) return;
+        const preserved = preservedGestureSelection;
         selectionGestureActive = false;
         selectionNeedsCapture = false;
-        if (selectionHasText()) scheduleSelectionCapture(30, { hideOnFailure: false });
+        selectionPointerType = '';
+        preservedGestureSelection = null;
+        const snapshot = resolveSelection() || (preserved ? resolveSelection(preserved) : null);
+        if (snapshot) {
+            clearTimeout(selectionTimer);
+            // Open after the mouse event finishes so the following click cannot
+            // light-dismiss a popover that was created during mouseup.
+            selectionTimer = setTimeout(() => showSelectionButton(snapshot), 0);
+        } else if (selectionHasText() || preserved) {
+            scheduleSelectionCapture(30, { hideOnFailure: false, preserved });
+        }
     }, true);
     if (!hasPointerEvents) {
         document.addEventListener('touchend', event => {
-            if (!event.target?.closest?.('#verba-selection-actions')) scheduleSelectionCapture(140);
+            if (event.target?.closest?.('#verba-selection-actions')) return;
+            lastTouchSelectionAt = Date.now();
+            const preserved = captureSelectionState();
+            scheduleSelectionCapture(TOUCH_SELECTION_QUIET_MS, {
+                hideOnFailure: false,
+                preserved,
+            });
         }, { passive: true });
     }
     document.addEventListener('pointerdown', event => {
@@ -3315,26 +3414,43 @@ function setupSelection() {
         if (event.target?.closest?.('.mes[mesid] .mes_text')) {
             selectionGestureActive = true;
             selectionNeedsCapture = false;
+            selectionPointerType = event.pointerType || '';
+            preservedGestureSelection = null;
+            if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+                lastTouchSelectionAt = Date.now();
+            }
             clearTimeout(selectionTimer);
             return;
         }
         selectionGestureActive = false;
         selectionNeedsCapture = false;
+        selectionPointerType = '';
+        preservedGestureSelection = null;
         selectionSnapshot = null;
         hideSelectionButton();
     }, { passive: true });
     document.addEventListener('pointerup', event => {
         if (event.target?.closest?.('#verba-selection-actions')) return;
+        const pointerType = event.pointerType || selectionPointerType;
         const shouldCapture = selectionGestureActive
             || selectionNeedsCapture
             || event.target?.closest?.('.mes[mesid] .mes_text');
         selectionGestureActive = false;
         selectionNeedsCapture = false;
-        if (shouldCapture) scheduleSelectionCapture(100);
+        if (pointerType === 'touch' || pointerType === 'pen') lastTouchSelectionAt = Date.now();
+        const preserved = captureSelectionState() || preservedGestureSelection;
+        if (shouldCapture) {
+            scheduleSelectionCapture(
+                pointerType === 'touch' || pointerType === 'pen' ? TOUCH_SELECTION_QUIET_MS : 100,
+                { preserved },
+            );
+        }
     });
     document.addEventListener('pointercancel', () => {
         selectionGestureActive = false;
         selectionNeedsCapture = false;
+        selectionPointerType = '';
+        preservedGestureSelection = null;
     }, { passive: true });
     document.addEventListener('contextmenu', event => {
         if (Date.now() < suppressMessageCopyClickUntil) {
@@ -3342,16 +3458,35 @@ function setupSelection() {
             event.stopPropagation();
             return;
         }
-        if (event.target?.closest?.('.mes[mesid] .mes_text')) scheduleSelectionCapture(220);
+        if (event.target?.closest?.('.mes[mesid] .mes_text')) {
+            if (selectionGestureActive) {
+                selectionNeedsCapture = true;
+                return;
+            }
+            const preserved = captureSelectionState();
+            scheduleSelectionCapture(
+                touchSelectionRecentlyActive() ? TOUCH_SELECTION_QUIET_MS : 220,
+                { hideOnFailure: false, preserved },
+            );
+        }
     });
     document.addEventListener('selectionchange', () => {
         if (selectionGestureActive) {
             selectionNeedsCapture = true;
+            preservedGestureSelection = captureSelectionState() || preservedGestureSelection;
             return;
         }
         // A desktop selection can briefly report as collapsed while the mouse
         // button is released. Keep the existing pill through that transient state.
-        if (selectionHasText()) scheduleSelectionCapture(100, { hideOnFailure: false });
+        const preserved = captureSelectionState();
+        if (preserved) {
+            const isTouchSelection = touchSelectionRecentlyActive();
+            if (isTouchSelection) lastTouchSelectionAt = Date.now();
+            scheduleSelectionCapture(
+                isTouchSelection ? TOUCH_SELECTION_QUIET_MS : 100,
+                { hideOnFailure: false, preserved },
+            );
+        }
     });
     window.addEventListener('resize', hideSelectionButton);
 }

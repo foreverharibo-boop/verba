@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.23';
+const EXTENSION_VERSION = '0.3.24';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3223,28 +3223,6 @@ function resolveSelection(preserved = null) {
     };
 }
 
-function insertSelectionDomAnchor(range) {
-    if (!range) return null;
-    try {
-        const anchor = document.createElement('span');
-        anchor.id = 'verba-selection-anchor';
-        anchor.style.setProperty('display', 'inline-block', 'important');
-        anchor.style.setProperty('position', 'relative', 'important');
-        anchor.style.setProperty('width', '0', 'important');
-        anchor.style.setProperty('height', '1em', 'important');
-        anchor.style.setProperty('padding', '0', 'important');
-        anchor.style.setProperty('margin', '0', 'important');
-        anchor.style.setProperty('vertical-align', 'text-bottom', 'important');
-        anchor.style.setProperty('pointer-events', 'none', 'important');
-        const insertion = range.cloneRange();
-        insertion.collapse(false);
-        insertion.insertNode(anchor);
-        return anchor;
-    } catch {
-        return null;
-    }
-}
-
 function showSelectionButton(snapshot) {
     hideSelectionButton();
     // Re-measure the actual selected glyphs immediately before rendering.
@@ -3255,10 +3233,11 @@ function showSelectionButton(snapshot) {
     const actions = document.createElement('div');
     actions.id = 'verba-selection-actions';
     actions.className = 'verba-selection-actions';
-    const domAnchor = !touchSelectionRecentlyActive()
-        ? insertSelectionDomAnchor(snapshot.anchorRange)
-        : null;
-    if (!domAnchor && 'showPopover' in HTMLElement.prototype) actions.setAttribute('popover', 'manual');
+    const desktopMenu = (
+        Date.now() - lastDesktopSelectionAt < 2000
+        || globalThis.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches
+    ) && lastDesktopSelectionAt >= lastTouchSelectionAt;
+    if (!desktopMenu && 'showPopover' in HTMLElement.prototype) actions.setAttribute('popover', 'manual');
 
     const createAction = (label, className, handler) => {
         const button = document.createElement('button');
@@ -3378,8 +3357,11 @@ function showSelectionButton(snapshot) {
 
     actions.addEventListener('pointerdown', event => event.preventDefault());
     actions.style.setProperty('visibility', 'hidden', 'important');
-    if (domAnchor) {
-        domAnchor.append(actions);
+    if (desktopMenu) {
+        // Do not use the browser top-layer popover on desktop. Some themes and
+        // Chromium webviews reapply the popover's UA inset and force it left.
+        actions.style.setProperty('position', 'fixed', 'important');
+        (document.body || document.documentElement).append(actions);
     } else {
         document.documentElement.append(actions);
         try {
@@ -3399,31 +3381,18 @@ function showSelectionButton(snapshot) {
     const measured = actions.getBoundingClientRect();
     const buttonWidth = Math.min(measured.width || 420, viewportWidth - 16);
     const buttonHeight = Math.min(measured.height || 42, viewportHeight - 16);
-    if (domAnchor) {
-        const anchorRect = domAnchor.getBoundingClientRect();
-        const centeredLeft = anchorRect.left - (buttonWidth / 2);
-        const viewportLeftPosition = Math.min(
-            Math.max(viewportLeft + 8, centeredLeft),
-            viewportLeft + viewportWidth - buttonWidth - 8,
-        );
-        actions.style.setProperty('position', 'absolute', 'important');
-        actions.style.setProperty('left', `${viewportLeftPosition - anchorRect.left}px`, 'important');
-        actions.style.setProperty('top', `${domAnchor.offsetHeight + 8}px`, 'important');
-        actions.style.setProperty('pointer-events', 'auto', 'important');
-    } else {
-        const centeredLeft = snapshot.rect.left + (snapshot.rect.width / 2) - (buttonWidth / 2);
-        const left = Math.min(
-            Math.max(viewportLeft + 8, centeredLeft),
-            viewportLeft + viewportWidth - buttonWidth - 8,
-        );
-        const immediatelyBelow = snapshot.rect.bottom + 8;
-        const top = Math.min(
-            Math.max(viewportTop + 8, immediatelyBelow),
-            viewportTop + viewportHeight - buttonHeight - 8,
-        );
-        actions.style.setProperty('left', `${left}px`, 'important');
-        actions.style.setProperty('top', `${top}px`, 'important');
-    }
+    const centeredLeft = snapshot.rect.left + (snapshot.rect.width / 2) - (buttonWidth / 2);
+    const left = Math.min(
+        Math.max(viewportLeft + 8, centeredLeft),
+        viewportLeft + viewportWidth - buttonWidth - 8,
+    );
+    const immediatelyBelow = snapshot.rect.bottom + 8;
+    const top = Math.min(
+        Math.max(viewportTop + 8, immediatelyBelow),
+        viewportTop + viewportHeight - buttonHeight - 8,
+    );
+    actions.style.setProperty('left', `${left}px`, 'important');
+    actions.style.setProperty('top', `${top}px`, 'important');
     actions.style.setProperty('right', 'auto', 'important');
     actions.style.setProperty('bottom', 'auto', 'important');
     actions.style.setProperty('transform', 'none', 'important');

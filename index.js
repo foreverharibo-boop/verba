@@ -27,12 +27,24 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.26';
+const EXTENSION_VERSION = '0.3.29';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
 const DEVELOPER_PASSWORD_HASH = '39fc1a167edd36664f4d0fdf869c6ec8d9681018ffff05ba2dc30fb9dce81e4b';
+const RELATION_TEMPERATURE_OPTIONS = [
+    { value: 'cold', label: '차가움' },
+    { value: 'distant', label: '거리감' },
+    { value: 'default', label: '기본' },
+    { value: 'close', label: '가까움' },
+    { value: 'intimate', label: '친밀함' },
+];
+const LOCALIZATION_LEVEL_OPTIONS = [
+    { value: 'preserve', label: '원문 유지' },
+    { value: 'balanced', label: '균형' },
+    { value: 'naturalized', label: '한국어화' },
+];
 const DEFAULT_SETTINGS = {
     profileId: '',
     fallbackProfileId: '',
@@ -53,6 +65,9 @@ const DEFAULT_SETTINGS = {
     maxTokens: 15000,
     timeoutSeconds: 120,
     developerMode: false,
+    relationTemperatureEnabled: true,
+    relationTemperature: 'default',
+    localizationLevel: 'balanced',
 };
 
 const baseContext = getContext();
@@ -64,7 +79,14 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 const settings = extension_settings[EXTENSION_KEY];
 settings.profileStats = normalizeProfileStats(settings.profileStats);
 settings.developerMode = settings.developerMode === true;
+settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
+settings.relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === settings.relationTemperature)
+    ? settings.relationTemperature
+    : 'default';
+settings.localizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === settings.localizationLevel)
+    ? settings.localizationLevel
+    : 'balanced';
 delete settings.debugMode;
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
@@ -509,6 +531,30 @@ function escapeHtml(value) {
         .replaceAll("'", '&#039;');
 }
 
+function normalizedTranslationTuning(value = {}) {
+    const relationTemperatureEnabled = typeof value.relationTemperatureEnabled === 'boolean'
+        ? value.relationTemperatureEnabled
+        : settings.relationTemperatureEnabled !== false;
+    const relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === value.relationTemperature)
+        ? value.relationTemperature
+        : settings.relationTemperature;
+    const localizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === value.localizationLevel)
+        ? value.localizationLevel
+        : settings.localizationLevel;
+    return { relationTemperatureEnabled, relationTemperature, localizationLevel };
+}
+
+function tuningChoiceMarkup(name, options, selected) {
+    return `<div class="verba-tuning-options" role="radiogroup">
+        ${options.map(option => `
+            <label>
+                <input type="radio" name="${escapeHtml(name)}" value="${escapeHtml(option.value)}" ${option.value === selected ? 'checked' : ''}>
+                <span>${escapeHtml(option.label)}</span>
+            </label>
+        `).join('')}
+    </div>`;
+}
+
 function emptyProfileStat() {
     return {
         requests: 0,
@@ -517,6 +563,11 @@ function emptyProfileStat() {
         totalMs: 0,
         retries: 0,
         fallbacks: 0,
+        outputJobs: 0,
+        outputSuccesses: 0,
+        outputFailures: 0,
+        outputTotalMs: 0,
+        lastOutputMs: 0,
     };
 }
 
@@ -547,6 +598,20 @@ function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallbac
     else stat.failures += 1;
     if (retry) stat.retries += 1;
     if (fallback) stat.fallbacks += 1;
+    saveSettings();
+    renderProfileStats();
+}
+
+function recordOutputTranslation(slot, { success, elapsedMs } = {}) {
+    const normalizedSlot = ['A', 'B', 'C'].includes(slot) ? slot : 'A';
+    settings.profileStats = normalizeProfileStats(settings.profileStats);
+    const stat = settings.profileStats[normalizedSlot];
+    const measuredMs = Math.max(0, Math.round(Number(elapsedMs) || 0));
+    stat.outputJobs += 1;
+    stat.outputTotalMs += measuredMs;
+    stat.lastOutputMs = measuredMs;
+    if (success) stat.outputSuccesses += 1;
+    else stat.outputFailures += 1;
     saveSettings();
     renderProfileStats();
 }
@@ -604,18 +669,19 @@ function renderProfileStats() {
     settings.profileStats = normalizeProfileStats(settings.profileStats);
     content.innerHTML = ['A', 'B', 'C'].map(slot => {
         const stat = settings.profileStats[slot];
-        const successRate = stat.requests ? Math.round((stat.successes / stat.requests) * 100) : 0;
-        const averageSeconds = stat.requests ? stat.totalMs / stat.requests / 1000 : 0;
-        const averageLabel = averageSeconds.toLocaleString('ko-KR', {
-            minimumFractionDigits: 1,
-            maximumFractionDigits: 1,
-        });
+        const outputAverageSeconds = stat.outputJobs ? stat.outputTotalMs / stat.outputJobs / 1000 : 0;
+        const outputAverageLabel = stat.outputJobs
+            ? `${outputAverageSeconds.toLocaleString('ko-KR', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1,
+            })}초`
+            : '—';
         const profile = configuredProfiles().find(candidate => candidate.slot === slot);
         const name = profile ? profileDisplayName(profile.id) : '미설정';
         return `<div class="verba-stat-row">
             <b>${slot}</b>
             <span title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-            <small>요청 ${stat.requests} · 성공 ${successRate}% · 평균 ${averageLabel}초 · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
+            <small>평균 ${outputAverageLabel}</small>
         </div>`;
     }).join('');
 }
@@ -716,6 +782,25 @@ function retryAfterMs(error) {
 
 function abortError() {
     return new DOMException('번역 요청이 중단되었습니다.', 'AbortError');
+}
+
+function outputAbortReason(code, message, silent = true) {
+    return {
+        name: 'AbortError',
+        verbaCode: String(code || 'VERBA_OUTPUT_ABORTED'),
+        message: String(message || '출력 번역이 중단되었습니다.'),
+        silent: Boolean(silent),
+    };
+}
+
+function abortPendingOutput(messageId, reason) {
+    const pending = pendingOutputs.get(Number(messageId));
+    if (!pending || pending.controller.signal.aborted) return;
+    pending.controller.abort(reason || outputAbortReason(
+        'VERBA_OUTPUT_ABORTED',
+        '출력 번역이 중단되었습니다.',
+        false,
+    ));
 }
 
 function wait(ms, signal) {
@@ -1234,7 +1319,13 @@ async function translateOutputText(source, options = {}) {
         return { translation, sourceMap: [] };
     }
     const speakerIdentity = options.speakerIdentity || {};
-    const prompt = buildOutputPrompt(segmented, settings, options.oneTimeInstruction || '', speakerIdentity);
+    const prompt = buildOutputPrompt(
+        segmented,
+        settings,
+        options.oneTimeInstruction || '',
+        speakerIdentity,
+        options.tuning || null,
+    );
     const translations = await requestSegments(prompt, segmented.segments, {
         ...options,
         stage: options.stage || 'output-translation',
@@ -1251,6 +1342,7 @@ async function translateOutputText(source, options = {}) {
             settings,
             speakerIdentity,
             segmented.nameTokens,
+            options.tuning || null,
         );
         const repaired = await requestSegments(repairPrompt, invalid, { ...options, stage: 'banned-word-repair' });
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
@@ -1265,6 +1357,7 @@ async function translateOutputText(source, options = {}) {
             settings,
             speakerIdentity,
             segmented.nameTokens,
+            options.tuning || null,
         );
         const repaired = await requestSegments(repairPrompt, invalid, { ...options, stage: 'untranslated-repair' });
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
@@ -1758,9 +1851,16 @@ async function translateMessage(messageId, options = {}) {
     }
     if (pendingOutputs.has(id)) {
         if (!options.force) return pendingOutputs.get(id).work;
-        pendingOutputs.get(id).controller.abort();
+        abortPendingOutput(id, outputAbortReason(
+            'VERBA_OUTPUT_REPLACED',
+            '새 전체 재번역 요청으로 이전 작업을 교체했습니다.',
+            true,
+        ));
     }
 
+    const outputJobStartedAt = performance.now();
+    const outputJobSlot = activeProfileSlot();
+    let outputJobSuccess = null;
     const controller = new AbortController();
     const snapshot = {
         chatReference,
@@ -1780,10 +1880,11 @@ async function translateMessage(messageId, options = {}) {
             const translated = await translateOutputText(source, {
                 signal: controller.signal,
                 oneTimeInstruction: options.oneTimeInstruction || '',
+                tuning: options.tuning || null,
                 speakerIdentity: outputSpeakerIdentity(message),
                 stage: options.force ? 'output-retranslation' : 'output-translation',
             });
-            if (controller.signal.aborted) return;
+            if (controller.signal.aborted) throw controller.signal.reason || abortError();
             const latestContext = liveContext();
             const latest = latestContext.chat?.[id];
             if (
@@ -1792,8 +1893,21 @@ async function translateMessage(messageId, options = {}) {
                 || currentSwipeId(latest) !== snapshot.swipeId
                 || hashText(messageSource(latest)) !== snapshot.sourceHash
             ) {
-                console.warn('[베르바] 메시지 또는 스와이프가 바뀌어 이전 결과를 폐기했습니다.');
-                return;
+                const stillSameChat = latestContext.chat === snapshot.chatReference;
+                const canRetryLatest = stillSameChat
+                    && latest
+                    && !latest.is_user
+                    && !latest.is_system
+                    && messageSource(latest).trim();
+                const staleRetryCount = Math.max(0, Number(options.staleRetryCount) || 0);
+                if (canRetryLatest && staleRetryCount < 1) {
+                    scheduleAutomaticTranslation(id, 180, { staleRetryCount: staleRetryCount + 1 });
+                }
+                throw new Error(
+                    canRetryLatest && staleRetryCount < 1
+                        ? '번역 도중 메시지 또는 스와이프가 바뀌어 이전 결과를 폐기하고 최신 답변 번역을 다시 예약했습니다.'
+                        : '번역 도중 메시지 또는 스와이프가 바뀌어 결과를 적용하지 못했습니다.',
+                );
             }
             const finalTranslation = translationWithLockedSegments(
                 translated,
@@ -1812,14 +1926,37 @@ async function translateMessage(messageId, options = {}) {
             );
             clearTransientTranslationSelections();
             failedOutputSignatures.delete(id);
+            outputJobSuccess = true;
             notify(options.force ? '전체 재번역을 적용했어요.' : '자동 번역을 적용했어요.', 'success');
         } catch (error) {
-            if (!isAbort(error, controller.signal)) {
+            if (isAbort(error, controller.signal)) {
+                const reason = controller.signal.reason;
+                if (reason?.silent !== true) {
+                    outputJobSuccess = false;
+                    failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
+                    const reasonMessage = String(reason?.message || error?.message || '알 수 없는 이유');
+                    console.warn('[베르바] 출력 번역 중단', reason || error);
+                    notify(`출력 번역 중단: ${reasonMessage}`, 'error');
+                }
+            } else {
+                outputJobSuccess = false;
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                 console.error('[베르바] 출력 번역 실패', error);
                 notify(`출력 번역 실패: ${errorText(error)}`, 'error');
             }
         } finally {
+            if (outputJobSuccess === null && !controller.signal.aborted) {
+                outputJobSuccess = false;
+                failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
+                console.error('[베르바] 출력 번역이 결과 없이 종료되었습니다.');
+                notify('출력 번역 실패: 작업이 결과 없이 종료되었습니다. 다시 시도해 주세요.', 'error');
+            }
+            if (outputJobSuccess !== null) {
+                recordOutputTranslation(outputJobSlot, {
+                    success: outputJobSuccess,
+                    elapsedMs: performance.now() - outputJobStartedAt,
+                });
+            }
             clearProgress(toast);
             if (pendingOutputs.get(id)?.controller === controller) pendingOutputs.delete(id);
             refreshRetranslateButton();
@@ -1847,6 +1984,8 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
     const isMultiSelection = scope === 'multi';
     const isPartialSelection = isSelection || isMultiSelection;
     const showContextChoice = settings.developerMode && isPartialSelection;
+    const showTuning = settings.developerMode === true;
+    const defaultTuning = normalizedTranslationTuning(settings);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.id = 'verba-request-overlay';
@@ -1862,6 +2001,21 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
                 <label for="verba-request-text">이번 번역에만 적용할 요구사항</label>
                 <textarea id="verba-request-text" class="text_pole" rows="5" maxlength="1200" placeholder="예: 더 직설적으로 번역해 줘 / 존댓말로 바꿔 줘"></textarea>
                 <small>비워두면 현재 전역 설정대로 다시 번역해요.</small>
+                ${showTuning ? `
+                    <fieldset class="verba-tuning-choice">
+                        <legend>번역 미세 조정 <small>이번 요청에만 적용</small></legend>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-request-relation-temperature-enabled" ${defaultTuning.relationTemperatureEnabled ? 'checked' : ''}>
+                            <span>관계 온도 적용 <small>(대사만)</small></span>
+                        </label>
+                        <div id="verba-request-relation-temperature-controls" class="verba-tuning-control-group ${defaultTuning.relationTemperatureEnabled ? '' : 'verba-control-disabled'}">
+                            ${tuningChoiceMarkup('verba-request-relation-temperature', RELATION_TEMPERATURE_OPTIONS, defaultTuning.relationTemperature)}
+                        </div>
+                        <span class="verba-tuning-label">현지화 정도</span>
+                        ${tuningChoiceMarkup('verba-request-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.localizationLevel)}
+                    </fieldset>
+                    <small>표현만 조절하며 인명·지명·숫자·사실관계는 바꾸지 않아요.</small>
+                ` : ''}
                 ${showContextChoice ? `
                     <fieldset class="verba-context-choice">
                         <legend>AI가 참고할 현재 메시지 문맥</legend>
@@ -1923,13 +2077,18 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
         const textarea = overlay.querySelector('#verba-request-text');
         const submit = () => {
             const instruction = String(textarea.value || '').trim();
-            if (!showContextChoice) {
+            if (!showContextChoice && !showTuning) {
                 finish(instruction);
                 return;
             }
             finish({
                 instruction,
                 contextMode: overlay.querySelector('input[name="verba-context-mode"]:checked')?.value || 'paragraph',
+                tuning: showTuning ? normalizedTranslationTuning({
+                    relationTemperatureEnabled: overlay.querySelector('#verba-request-relation-temperature-enabled')?.checked,
+                    relationTemperature: overlay.querySelector('input[name="verba-request-relation-temperature"]:checked')?.value,
+                    localizationLevel: overlay.querySelector('input[name="verba-request-localization-level"]:checked')?.value,
+                }) : null,
             });
         };
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
@@ -1939,6 +2098,18 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
             showTranslation: Boolean(viewAction?.showTranslation),
         }));
         overlay.querySelector('.verba-submit').addEventListener('click', submit);
+        if (showTuning) {
+            const relationToggle = overlay.querySelector('#verba-request-relation-temperature-enabled');
+            const relationControls = overlay.querySelector('#verba-request-relation-temperature-controls');
+            const relationInputs = [...overlay.querySelectorAll('input[name="verba-request-relation-temperature"]')];
+            const syncRelationControls = () => {
+                const enabled = Boolean(relationToggle?.checked);
+                relationControls?.classList.toggle('verba-control-disabled', !enabled);
+                relationInputs.forEach(input => { input.disabled = !enabled; });
+            };
+            relationToggle?.addEventListener('change', syncRelationControls);
+            syncRelationControls();
+        }
         overlay.addEventListener('click', event => {
             if (event.target === overlay) finish(null);
         });
@@ -2477,8 +2648,8 @@ async function retranslateLatestOutput() {
             showTranslation: !showingTranslation,
         }
         : null;
-    const instruction = await requestOneTimeInstruction('message', preview, viewAction);
-    if (instruction === null) return;
+    const request = await requestOneTimeInstruction('message', preview, viewAction);
+    if (request === null) return;
     const latest = liveContext().chat?.[target.id];
     if (
         liveContext().chat !== snapshot.chat
@@ -2489,18 +2660,22 @@ async function retranslateLatestOutput() {
         notify('요구사항을 적는 동안 최근 아웃풋이 바뀌었어요. 다시 눌러 주세요.', 'warning');
         return;
     }
-    if (typeof instruction === 'object' && instruction.action === 'toggle-view') {
+    if (typeof request === 'object' && request.action === 'toggle-view') {
         const latestRecord = currentRecord(latest);
         if (!latestRecord) {
             notify('전환할 저장 번역본을 찾지 못했어요.', 'warning');
             return;
         }
-        if (instruction.showTranslation) showTranslationDisplay(target.id, latest, latestRecord);
+        if (request.showTranslation) showTranslationDisplay(target.id, latest, latestRecord);
         else showOriginalDisplay(target.id, latest, latestRecord);
         refreshRetranslateButton();
         return;
     }
-    await translateMessage(target.id, { force: true, oneTimeInstruction: instruction });
+    await translateMessage(target.id, {
+        force: true,
+        oneTimeInstruction: typeof request === 'object' ? request.instruction : String(request || ''),
+        tuning: typeof request === 'object' ? request.tuning : null,
+    });
 }
 
 function setTextareaValue(textarea, value) {
@@ -3709,6 +3884,7 @@ async function retranslateSelectionBundle() {
     }
     const instruction = typeof request === 'object' ? request.instruction : String(request || '');
     const contextMode = typeof request === 'object' ? request.contextMode : 'paragraph';
+    const tuning = typeof request === 'object' ? request.tuning : null;
     if (!bundleStillCurrent(state)) {
         selectionBusy = false;
         clearMultiSelection();
@@ -3730,6 +3906,7 @@ async function retranslateSelectionBundle() {
         oneTimeInstruction: instruction,
         speakerIdentity: outputSpeakerIdentity(state.message),
         contextMode,
+        tuning,
     });
     const controller = new AbortController();
     let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
@@ -3929,6 +4106,7 @@ async function retranslateSelection(snapshot) {
     }
     const instruction = typeof request === 'object' ? request.instruction : String(request || '');
     const contextMode = typeof request === 'object' ? request.contextMode : 'standard';
+    const tuning = typeof request === 'object' ? request.tuning : null;
     if (!selectionStillCurrent(snapshot)) {
         selectionBusy = false;
         selectionSnapshot = null;
@@ -3951,6 +4129,7 @@ async function retranslateSelection(snapshot) {
         candidateCount: candidateMode ? 3 : 1,
         contextMode,
         sourceContext: selectionSourceContext(snapshot, contextMode),
+        tuning,
     });
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected }];
     let toast = showProgress(candidateMode
@@ -4627,11 +4806,11 @@ function injectSettingsPanel() {
                 <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 바꿀 수 있어요. 현재 프로필 요청이 실패하면 나머지 프로필을 차례로 임시 사용하며, 수동 선택 상태는 바뀌지 않습니다.</div>
 
                 <details id="verba-profile-stats" class="verba-tool-details">
-                    <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
+                    <summary>번역 시간 <small>번역 시작~종료 평균</small></summary>
                     <div class="verba-tool-details-content">
                         <div id="verba-profile-stats-content" class="verba-profile-stats-content"></div>
-                        <div class="verba-help">A/B/C별 실제 요청 수·성공률·평균 응답 시간·재시도·자동 대체 횟수만 기기에 저장합니다.</div>
-                        <button type="button" id="verba-reset-profile-stats" class="menu_button verba-wide">성능 기록 초기화</button>
+                        <div class="verba-help">아웃풋 번역을 시작한 순간부터 번역문이 화면에 적용되거나 실패로 끝날 때까지의 평균 시간이에요.</div>
+                        <button type="button" id="verba-reset-profile-stats" class="menu_button verba-wide">번역 시간 초기화</button>
                     </div>
                 </details>
 
@@ -4646,6 +4825,24 @@ function injectSettingsPanel() {
                     <span>선택 재번역 후보 3개 미리보기</span>
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
+
+                <details id="verba-translation-tuning" class="verba-tool-details verba-developer-only">
+                    <summary>번역 미세 조정 <small>관계 온도·현지화</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-relation-temperature-enabled" ${settings.relationTemperatureEnabled !== false ? 'checked' : ''}>
+                            <span>관계 온도 적용 <small>(직접 대사만)</small></span>
+                        </label>
+                        <div id="verba-relation-temperature-controls" class="verba-tuning-control-group ${settings.relationTemperatureEnabled !== false ? '' : 'verba-control-disabled'}">
+                            <span class="verba-tuning-label">관계 온도</span>
+                            ${tuningChoiceMarkup('verba-relation-temperature', RELATION_TEMPERATURE_OPTIONS, settings.relationTemperature)}
+                            <div class="verba-help">대사의 어미·호칭·언어적 거리만 조절하며 원문에 없는 감정이나 관계는 만들지 않아요.</div>
+                        </div>
+                        <span class="verba-tuning-label">현지화 정도</span>
+                        ${tuningChoiceMarkup('verba-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.localizationLevel)}
+                        <div class="verba-help">관용구·농담·일상 표현만 조절하고 인명·지명·통화·단위·설정·사실관계는 그대로 보존해요.</div>
+                    </div>
+                </details>
 
                 <details id="verba-selection-menu-settings" class="verba-tool-details">
                     <summary>드래그 메뉴 구성 <small>버튼 수·기능 선택</small></summary>
@@ -4760,11 +4957,11 @@ function injectSettingsPanel() {
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
     panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
-        if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
+        if (!globalThis.confirm?.('프로필 A/B/C의 번역 시간 기록을 모두 초기화할까요?')) return;
         settings.profileStats = normalizeProfileStats(null);
         saveSettings();
         renderProfileStats();
-        notify('프로필 성능 기록을 초기화했어요.', 'success');
+        notify('번역 시간 기록을 초기화했어요.', 'success');
     });
     panel.querySelector('#verba-auto-input').addEventListener('change', event => {
         settings.autoInput = event.target.checked;
@@ -4773,6 +4970,37 @@ function injectSettingsPanel() {
     panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
         settings.selectionCandidates = event.target.checked;
         saveSettings();
+    });
+    const relationTemperatureInputs = [...panel.querySelectorAll('input[name="verba-relation-temperature"]')];
+    const syncRelationTemperatureControls = enabled => {
+        panel.querySelector('#verba-relation-temperature-controls')?.classList.toggle('verba-control-disabled', !enabled);
+        relationTemperatureInputs.forEach(input => { input.disabled = !enabled; });
+    };
+    syncRelationTemperatureControls(settings.relationTemperatureEnabled !== false);
+    panel.querySelector('#verba-relation-temperature-enabled').addEventListener('change', event => {
+        settings.relationTemperatureEnabled = event.target.checked;
+        syncRelationTemperatureControls(settings.relationTemperatureEnabled);
+        saveSettings();
+    });
+    relationTemperatureInputs.forEach(input => {
+        input.addEventListener('change', event => {
+            settings.relationTemperature = normalizedTranslationTuning({
+                relationTemperatureEnabled: settings.relationTemperatureEnabled,
+                relationTemperature: event.target.value,
+                localizationLevel: settings.localizationLevel,
+            }).relationTemperature;
+            saveSettings();
+        });
+    });
+    panel.querySelectorAll('input[name="verba-localization-level"]').forEach(input => {
+        input.addEventListener('change', event => {
+            settings.localizationLevel = normalizedTranslationTuning({
+                relationTemperatureEnabled: settings.relationTemperatureEnabled,
+                relationTemperature: settings.relationTemperature,
+                localizationLevel: event.target.value,
+            }).localizationLevel;
+            saveSettings();
+        });
     });
     panel.querySelector('#verba-selection-quick-count').addEventListener('change', event => {
         settings.selectionQuickCount = Math.min(5, Math.max(2, Number(event.target.value) || 2));
@@ -4826,7 +5054,7 @@ function cancelScheduledAutomaticTranslation(messageId) {
     automaticTranslationTimers.delete(messageId);
 }
 
-function scheduleAutomaticTranslation(messageId, delay = 100) {
+function scheduleAutomaticTranslation(messageId, delay = 100, translationOptions = {}) {
     const id = Number(messageId);
     if (!Number.isInteger(id) || id < 0) return;
     cancelScheduledAutomaticTranslation(id);
@@ -4836,7 +5064,7 @@ function scheduleAutomaticTranslation(messageId, delay = 100) {
         const message = liveContext().chat?.[id];
         if (repairSwipeTranslationIndexes(message)) scheduleChatSave(liveContext().chat);
         clearStaleCurrentTranslation(id);
-        translateMessage(id, { automatic: true });
+        translateMessage(id, { automatic: true, ...translationOptions });
         refreshRetranslateButton();
     }, delay);
     automaticTranslationTimers.set(id, timer);
@@ -4951,7 +5179,11 @@ function handleSwipe(payload) {
     const hold = captureSwipeHold(id, message);
     const previousSignature = hold?.signature || storedRecordSignature(message?.extra?.[STATE_KEY]);
     clearTransientTranslationSelections();
-    pendingOutputs.get(id)?.controller.abort();
+    abortPendingOutput(id, outputAbortReason(
+        'VERBA_SWIPE_CHANGED',
+        '스와이프가 변경되어 이전 답변 번역을 취소했습니다.',
+        true,
+    ));
     pendingOutputs.delete(id);
     selectionSnapshot = null;
     hideSelectionButton();
@@ -5021,7 +5253,13 @@ function setupEvents() {
             // records before caches are discarded, and also clear any stale
             // values loaded with the newly opened chat.
             clearTransientTranslationSelections();
-            for (const pending of pendingOutputs.values()) pending.controller.abort();
+            for (const pending of pendingOutputs.values()) {
+                pending.controller.abort(outputAbortReason(
+                    'VERBA_CHAT_CHANGED',
+                    '채팅이 변경되어 이전 채팅의 번역을 취소했습니다.',
+                    true,
+                ));
+            }
             pendingOutputs.clear();
             for (const controller of pendingInputControllers) controller.abort();
             pendingInputControllers.clear();

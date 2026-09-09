@@ -25,7 +25,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.2';
+const EXTENSION_VERSION = '0.3.4';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -632,6 +632,10 @@ async function sendProfileRequest(prompt, options = {}) {
     const profileId = String(options.profileId ?? settings.profileId ?? '');
     if (!profileId) throw new Error('번역기 전용 연결 프로필을 선택해 주세요.');
     const profileSlot = String(options.profileSlot || profileSlotForId(profileId));
+    const availableProfiles = profileList();
+    if (availableProfiles.length && !availableProfiles.some(profile => profile.id === profileId)) {
+        throw new Error(`프로필 ${profileSlot}의 저장된 연결 프로필을 찾을 수 없습니다. 새로고침 후 다시 선택해 주세요.`);
+    }
     const startedAt = performance.now();
     let attemptSucceeded = false;
     let attemptError = null;
@@ -692,8 +696,11 @@ async function sendProfileRequest(prompt, options = {}) {
 }
 
 function fallbackEligibleError(error) {
-    const text = errorText(error).toLowerCase();
-    return !/\b(?:413|422)\b|context length|maximum context|too (?:large|long)|safety|blocked|content.?filter|컨텍스트.*초과/.test(text);
+    // A fallback profile is useful only for temporary server/network/quota
+    // failures. Authentication, invalid project/profile, billing, model and
+    // request errors must stay on the selected profile so an unrelated old
+    // B/C credential cannot hide the real cause.
+    return transientError(error);
 }
 
 function activeProfileSlot() {
@@ -3704,14 +3711,33 @@ async function testConnection(button) {
         notify('먼저 연결 프로필을 선택해 주세요.', 'warning');
         return;
     }
+    const profiles = configuredProfileCycle();
+    const profileId = profiles.active;
+    const profileSlot = profiles.slot;
+    if (!profileId) {
+        notify('테스트할 현재 연결 프로필이 없어요.', 'warning');
+        return;
+    }
     const oldText = button.textContent;
     button.disabled = true;
     button.textContent = '테스트 중…';
     try {
-        const translated = await translateInputText('안녕하세요.');
-        notify(`연결 성공: ${translated}`, 'success');
+        const source = '안녕하세요.';
+        const expected = [{ id: 'seg_0000', type: 'user_input', text: source }];
+        const targetGender = detectCharacterGender(currentCharacterReference()?.character);
+        const prompt = buildInputPrompt(source, settings, targetGender);
+        const response = await sendProfileRequest(prompt, {
+            profileId,
+            profileSlot,
+            stage: 'connection-test',
+        });
+        const translated = String(parseSegmentResponse(extractResponseText(response), expected).get('seg_0000') || '').trim();
+        if (!translated) throw new Error('테스트 응답이 비어 있습니다.');
+        notify(`프로필 ${profileSlot} 연결 성공: ${translated}`, 'success');
     } catch (error) {
-        if (!isAbort(error)) notify(`연결 실패: ${errorText(error)}`, 'error');
+        if (!isAbort(error)) {
+            notify(`프로필 ${profileSlot} “${profileDisplayName(profileId)}” 연결 실패: ${errorText(error)}`, 'error');
+        }
     } finally {
         button.disabled = false;
         button.textContent = oldText;

@@ -302,7 +302,7 @@ export function protectSource(value, configuredNameLocks = []) {
     // Hidden reasoning/control blocks and actual code are opaque, while normal
     // HTML/custom tags are tokenized by themselves so their visible inner text
     // can still be translated regardless of the tag name.
-    const protectedText = String(value || '').replace(PROTECTED_PATTERN, protectValue);
+    let protectedText = String(value || '').replace(PROTECTED_PATTERN, protectValue);
 
     const nameTokens = [];
     for (const lock of normalizeNameLocks(configuredNameLocks)) {

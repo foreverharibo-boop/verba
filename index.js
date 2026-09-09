@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.16';
+const EXTENSION_VERSION = '0.3.17';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -1788,9 +1788,10 @@ async function translateMessage(messageId, options = {}) {
                 snapshot.chatReference,
                 {
                     sourceMap: finalTranslation.sourceMap,
-                    lockedSegments: finalTranslation.lockedSegments,
+                    lockedSegments: [],
                 },
             );
+            clearTransientTranslationSelections();
             failedOutputSignatures.delete(id);
             notify(options.force ? '전체 재번역을 적용했어요.' : '자동 번역을 적용했어요.', 'success');
         } catch (error) {
@@ -3305,6 +3306,39 @@ function clearMultiSelection() {
     scheduleSelectionHighlights();
 }
 
+function clearTransientTranslationSelections() {
+    const context = liveContext();
+    const chat = Array.isArray(context.chat) ? context.chat : [];
+    const visitedExtras = new Set();
+    let changed = false;
+    const clearLocksFromExtra = extra => {
+        if (!extra || typeof extra !== 'object' || visitedExtras.has(extra)) return;
+        visitedExtras.add(extra);
+        const record = extra[STATE_KEY];
+        if (!record || !normalizedLockedSegments(record.lockedSegments).length) return;
+        extra[STATE_KEY] = { ...record, lockedSegments: [] };
+        changed = true;
+    };
+
+    for (const message of chat) {
+        clearLocksFromExtra(message?.extra);
+        if (Array.isArray(message?.swipe_info)) {
+            message.swipe_info.forEach(swipe => clearLocksFromExtra(swipe?.extra));
+        }
+    }
+    for (const cached of lastRenderedTranslationByMessage.values()) {
+        if (!normalizedLockedSegments(cached?.record?.lockedSegments).length) continue;
+        cached.record = { ...cached.record, lockedSegments: [] };
+    }
+
+    selectionSnapshot = null;
+    hideSelectionButton();
+    globalThis.getSelection?.()?.removeAllRanges?.();
+    clearMultiSelection();
+    if (changed) scheduleChatSave(context.chat);
+    scheduleSelectionHighlights();
+}
+
 function renderMultiSelectionTray() {
     document.querySelector('#verba-multi-selection-tray')?.remove();
     if (!settings.developerMode || !multiSelectionState?.ranges?.length) return;
@@ -3399,7 +3433,6 @@ async function retranslateSelectionBundle() {
         notify('번역문이 바뀌어 묶음 선택을 초기화했어요.', 'warning');
         return;
     }
-    const currentRecordValue = currentRecord(state.message);
     if (state.ranges.some(range => selectionTouchesLocked({ ...state, ...range, message: state.message }))) {
         notify('묶음 안에 잠긴 번역 구간이 있어 재번역할 수 없어요.', 'warning');
         return;
@@ -3466,9 +3499,9 @@ async function retranslateSelectionBundle() {
         const context = liveContext();
         applyTranslation(state.messageId, state.message, state.source, updated, context.chat, {
             sourceMap,
-            lockedSegments: currentRecordValue?.lockedSegments,
+            lockedSegments: [],
         });
-        clearMultiSelection();
+        clearTransientTranslationSelections();
         notify(`${replacements.length}개 구간을 한꺼번에 교체했어요.`, 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
@@ -3699,7 +3732,11 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             snapshot.end,
             replacement,
         );
-        applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat, { sourceMap });
+        applyTranslation(snapshot.messageId, message, snapshot.source, updated, context.chat, {
+            sourceMap,
+            lockedSegments: [],
+        });
+        clearTransientTranslationSelections();
         globalThis.getSelection?.()?.removeAllRanges?.();
         notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');
     } catch (error) {
@@ -4594,6 +4631,7 @@ function handleSwipe(payload) {
     const message = liveContext().chat?.[id];
     const hold = captureSwipeHold(id, message);
     const previousSignature = hold?.signature || storedRecordSignature(message?.extra?.[STATE_KEY]);
+    clearTransientTranslationSelections();
     pendingOutputs.get(id)?.controller.abort();
     pendingOutputs.delete(id);
     selectionSnapshot = null;
@@ -4648,7 +4686,10 @@ function setupEvents() {
         source.on(types.MESSAGE_SENT, translateSentInputMessage);
     }
     if (types.MESSAGE_RECEIVED) {
-        source.on(types.MESSAGE_RECEIVED, payload => handleCompletedAssistantMessage(payload, 80));
+        source.on(types.MESSAGE_RECEIVED, payload => {
+            clearTransientTranslationSelections();
+            handleCompletedAssistantMessage(payload, 80);
+        });
     }
     if (types.CHARACTER_MESSAGE_RENDERED) {
         source.on(types.CHARACTER_MESSAGE_RENDERED, payload => handleCompletedAssistantMessage(payload, 120));

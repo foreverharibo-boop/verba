@@ -534,6 +534,7 @@ function sharedOutputRules(settings, oneTimeInstruction = '', speakerIdentity = 
 ABSOLUTE RULES
 - Translate the supplied source into natural Korean without answering, continuing, censoring, summarizing, adding, or omitting anything.
 - Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.
+- When the same source term refers to the same role, person, object, or concept, use one consistent Korean rendering throughout the entire current message. Do not alternate between Korean synonyms such as "매니저" and "팀장" unless the source meaning genuinely changes by context.
 - Preserve Markdown, HTML structure and attributes, code, macros, placeholders, URLs, and every non-name @@VERBA_0000@@ style token exactly once.
 - Handle @@VERBA_NAME_0000@@ style tokens only according to NAME LOCK TOKENS below.
 - Do not create bilingual output unless the user's GLOBAL TRANSLATION PROMPT, ALL-DIALOGUE PROMPT, or applicable TARGET-CHARACTER DIALOGUE PROMPT explicitly requests it.
@@ -798,6 +799,7 @@ RULES
 ${outputRule}
 - Preserve its meaning, referent, tense, intensity, explicitness, and grammatical role.
 - Make the replacement connect naturally to LEFT CONTEXT and RIGHT CONTEXT.
+- Match the Korean rendering already used in EXISTING KOREAN CONTEXT when the same source term has the same meaning. Do not introduce a different synonym without a genuine contextual meaning change.
 - Preserve macros, placeholders, code, URLs, and formatting.
 - Never use a configured banned Korean word.
 - The selected fragment is ${inDialogue ? 'inside or touches dialogue. Always apply the all-dialogue prompt; infer its speaker from ORIGINAL SOURCE and additionally apply the target-character dialogue prompt only if TARGET CHARACTER is actually speaking.' : 'narration: do not apply either dialogue prompt.'}
@@ -880,6 +882,7 @@ RULES
 - Replace only each selected fragment, not its surrounding context and not any other part of the message.
 - Find the corresponding meaning in each SOURCE CONTEXT and preserve meaning, facts, referents, tense, intensity, explicitness, and grammatical role.
 - Make every replacement connect naturally to its LEFT CONTEXT and RIGHT CONTEXT.
+- Keep repeated source terms consistent with the Korean rendering already used for the same meaning in the existing message and across all returned replacements.
 - Preserve macros, placeholders, code, URLs, and formatting.
 - Never use a configured banned Korean word.
 - For a row whose in_dialogue value is true, apply the all-dialogue prompt and apply the target-character dialogue prompt only when TARGET CHARACTER is the speaker.

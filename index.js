@@ -26,7 +26,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.12';
+const EXTENSION_VERSION = '0.3.13';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -998,6 +998,20 @@ function segmentContainsRoleTerm(segment, terms) {
     return terms.some(term => new RegExp(`(^|[^A-Za-z])${term}(?=$|[^A-Za-z])`, 'i').test(source));
 }
 
+function protectedTokensIntact(previous, next) {
+    const collect = value => {
+        const counts = new Map();
+        for (const token of String(value || '').match(/@@VERBA_(?:NAME_)?\d{4}@@/g) || []) {
+            counts.set(token, (counts.get(token) || 0) + 1);
+        }
+        return counts;
+    };
+    const before = collect(previous);
+    const after = collect(next);
+    if (before.size !== after.size) return false;
+    return [...before].every(([token, count]) => after.get(token) === count);
+}
+
 async function repairRepeatedRoleTermConsistency(segmented, translations, options = {}) {
     const terms = repeatedRoleTerms(segmented?.segments);
     if (!terms.length) return;
@@ -1006,8 +1020,10 @@ async function repairRepeatedRoleTermConsistency(segmented, translations, option
     const rows = affected.map(segment => ({
         id: segment.id,
         type: segment.type,
-        source: restoredSegmentText(segment.text, segmented, true),
-        currentTranslation: restoredSegmentText(String(translations.get(segment.id) || ''), segmented, false),
+        // Keep every protection/name token opaque during the repair pass. They
+        // are restored only once, after all translation stages are complete.
+        source: String(segment.text || ''),
+        currentTranslation: String(translations.get(segment.id) || ''),
     }));
     const prompt = buildTermConsistencyRepairPrompt({ rows, terms, settings });
     const expected = affected.map(segment => ({
@@ -1023,7 +1039,11 @@ async function repairRepeatedRoleTermConsistency(segmented, translations, option
         for (const segment of affected) {
             const value = String(repaired.get(segment.id) || '').trim();
             const previous = String(translations.get(segment.id) || '');
-            if (!value || value.length > Math.max(500, previous.length * 1.35)) continue;
+            if (
+                !value
+                || value.length > Math.max(500, previous.length * 1.35)
+                || !protectedTokensIntact(previous, value)
+            ) continue;
             translations.set(segment.id, value);
         }
     } catch (error) {

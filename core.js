@@ -759,6 +759,7 @@ STRICT RULES
 - If identical English spelling clearly has different meanings or referents, do not force them to match.
 - Change only the inconsistent role/title wording and any directly attached Korean particle required by that replacement.
 - Copy every other word, punctuation mark, paragraph break, Markdown/HTML element, protected token, and bilingual dialogue portion exactly.
+- Preserve every @@VERBA_0000@@ and @@VERBA_NAME_0000@@ style token exactly as supplied. Never expose, translate, remove, duplicate, split, or alter a token.
 - Do not rewrite style, improve prose, translate additional text, add, omit, summarize, or explain.
 - Never introduce a configured banned Korean word.
 - Return every supplied id exactly once as valid JSON only.

@@ -25,7 +25,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.6';
+const EXTENSION_VERSION = '0.3.7';
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
@@ -4071,6 +4071,39 @@ function handleSwipe(payload) {
     scheduleSwipeTranslation(id, previousSignature, hold);
 }
 
+function handleCompletedAssistantMessage(payload, delay = 80) {
+    let id = normalizedMessageId(payload);
+    if (id < 0) id = latestAssistantMessage()?.id ?? -1;
+    if (id < 0) return;
+
+    const swipeJob = swipeTranslationJobs.get(id);
+    if (swipeJob) {
+        // MESSAGE_RECEIVED is emitted once the generated swipe has been stored,
+        // while CHARACTER_MESSAGE_RENDERED may be skipped or delayed by some
+        // SillyTavern mobile rendering paths. Either event means the source can
+        // now be checked for a stable completed value.
+        swipeJob.rendered = true;
+        if (swipeJob.timer) clearTimeout(swipeJob.timer);
+        swipeJob.timer = setTimeout(swipeJob.check, delay);
+        return;
+    }
+
+    scheduleAutomaticTranslation(id, Math.max(80, delay));
+}
+
+function handleGenerationEnded() {
+    for (const [id, swipeJob] of swipeTranslationJobs.entries()) {
+        swipeJob.rendered = true;
+        if (swipeJob.timer) clearTimeout(swipeJob.timer);
+        swipeJob.timer = setTimeout(swipeJob.check, 100);
+    }
+
+    const latest = latestAssistantMessage();
+    if (latest && !swipeTranslationJobs.has(latest.id)) {
+        scheduleAutomaticTranslation(latest.id, 120);
+    }
+}
+
 function setupEvents() {
     const context = liveContext();
     const source = context.eventSource;
@@ -4084,19 +4117,14 @@ function setupEvents() {
     if (types.MESSAGE_SENT) {
         source.on(types.MESSAGE_SENT, translateSentInputMessage);
     }
+    if (types.MESSAGE_RECEIVED) {
+        source.on(types.MESSAGE_RECEIVED, payload => handleCompletedAssistantMessage(payload, 80));
+    }
     if (types.CHARACTER_MESSAGE_RENDERED) {
-        source.on(types.CHARACTER_MESSAGE_RENDERED, payload => {
-            const id = normalizedMessageId(payload);
-            const swipeJob = swipeTranslationJobs.get(id);
-            if (swipeJob) {
-                swipeJob.rendered = true;
-                if (swipeJob.timer) clearTimeout(swipeJob.timer);
-                swipeJob.timer = setTimeout(swipeJob.check, 80);
-            }
-            scheduleAutomaticTranslation(id, 120);
-        });
+        source.on(types.CHARACTER_MESSAGE_RENDERED, payload => handleCompletedAssistantMessage(payload, 120));
     }
     if (types.MESSAGE_SWIPED) source.on(types.MESSAGE_SWIPED, handleSwipe);
+    if (types.GENERATION_ENDED) source.on(types.GENERATION_ENDED, handleGenerationEnded);
     if (types.CHAT_CHANGED) {
         source.on(types.CHAT_CHANGED, () => {
             for (const pending of pendingOutputs.values()) pending.controller.abort();

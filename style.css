@@ -87,14 +87,14 @@
     appearance: none !important;
     -webkit-appearance: none !important;
     position: relative;
-    width: 30px !important;
+    width: 17px !important;
     height: 17px !important;
-    min-width: 30px !important;
-    flex: 0 0 30px !important;
+    min-width: 17px !important;
+    flex: 0 0 17px !important;
     margin: 0 !important;
     border: 1px solid color-mix(in srgb, var(--verba-border) 72%, transparent) !important;
-    border-radius: 999px !important;
-    background: color-mix(in srgb, var(--verba-text) 9%, transparent) !important;
+    border-radius: 4px !important;
+    background: color-mix(in srgb, var(--verba-text) 5%, transparent) !important;
     box-shadow: none !important;
     cursor: pointer;
     transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -103,23 +103,24 @@
 .verba-check-row input[type="checkbox"]::before {
     content: '';
     position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    background: color-mix(in srgb, var(--verba-text) 68%, transparent);
-    transition: transform 0.15s ease, background-color 0.15s ease;
+    top: 1px;
+    left: 5px;
+    width: 4px;
+    height: 9px;
+    border: solid var(--verba-text);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg) scale(0);
+    transform-origin: center;
+    transition: transform 0.12s ease;
 }
 
 .verba-check-row input[type="checkbox"]:checked {
     border-color: var(--verba-accent) !important;
-    background: color-mix(in srgb, var(--verba-accent) 34%, transparent) !important;
+    background: color-mix(in srgb, var(--verba-accent) 68%, transparent) !important;
 }
 
 .verba-check-row input[type="checkbox"]:checked::before {
-    transform: translateX(13px);
-    background: var(--verba-text);
+    transform: rotate(45deg) scale(1);
 }
 
 .verba-check-row input[type="checkbox"]:focus-visible {
@@ -657,10 +658,10 @@ html.verba-developer-mode > * .verba-developer-only {
 }
 
 .verba-modal .verba-check-row input[type="checkbox"] {
-    width: 30px !important;
+    width: 17px !important;
     height: 17px !important;
-    min-width: 30px !important;
-    flex: 0 0 30px !important;
+    min-width: 17px !important;
+    flex: 0 0 17px !important;
     margin: 0 !important;
 }
 

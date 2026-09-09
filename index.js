@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.19';
+const EXTENSION_VERSION = '0.3.20';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -104,6 +104,8 @@ let selectionNeedsCapture = false;
 let selectionPointerType = '';
 let preservedGestureSelection = null;
 let lastTouchSelectionAt = 0;
+let lastDesktopSelectionPlacement = null;
+let lastDesktopSelectionAt = 0;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -3241,7 +3243,14 @@ function scheduleSelectionCapture(delay = 80, { hideOnFailure = true, preserved 
     clearTimeout(selectionTimer);
     selectionTimer = setTimeout(() => {
         const snapshot = resolveSelection() || (preserved ? resolveSelection(preserved) : null);
-        if (snapshot) showSelectionButton(snapshot);
+        if (snapshot) {
+            if (
+                lastDesktopSelectionPlacement
+                && Date.now() - lastDesktopSelectionAt < 1500
+                && !touchSelectionRecentlyActive()
+            ) snapshot.rect = lastDesktopSelectionPlacement;
+            showSelectionButton(snapshot);
+        }
         else if (hideOnFailure && !selectionBusy) hideSelectionButton();
     }, delay);
 }
@@ -3819,6 +3828,8 @@ function setupSelection() {
         if (event.sourceCapabilities?.firesTouchEvents) return;
         if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
         const pointerRect = pointerPlacementRect(event);
+        lastDesktopSelectionPlacement = pointerRect;
+        lastDesktopSelectionAt = Date.now();
         const preserved = preservedGestureSelection;
         if (preserved && pointerRect) preserved.rect = pointerRect;
         selectionGestureActive = false;
@@ -3856,6 +3867,10 @@ function setupSelection() {
             globalThis.getSelection?.()?.removeAllRanges?.();
         }
         if (event.target?.closest?.('.mes[mesid] .mes_text')) {
+            if ((event.pointerType || '') === 'mouse') {
+                lastDesktopSelectionPlacement = null;
+                lastDesktopSelectionAt = 0;
+            }
             selectionGestureActive = true;
             selectionNeedsCapture = false;
             selectionPointerType = event.pointerType || '';
@@ -3920,6 +3935,14 @@ function setupSelection() {
             preservedGestureSelection = captureSelectionState() || preservedGestureSelection;
             return;
         }
+        // mouseup already opened the desktop menu at the real pointer position.
+        // Ignore the trailing selectionchange that otherwise redraws it using
+        // an unreliable browser range rectangle near the left edge.
+        if (
+            lastDesktopSelectionPlacement
+            && Date.now() - lastDesktopSelectionAt < 1500
+            && !touchSelectionRecentlyActive()
+        ) return;
         // A desktop selection can briefly report as collapsed while the mouse
         // button is released. Keep the existing pill through that transient state.
         const preserved = captureSelectionState();

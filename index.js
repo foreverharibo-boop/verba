@@ -8,6 +8,7 @@ import {
     buildNameMatchPrompt,
     buildOutputPrompt,
     buildSelectionPrompt,
+    buildTermConsistencyRepairPrompt,
     buildUntranslatedRepairPrompt,
     detectCharacterGender,
     extractResponseText,
@@ -25,7 +26,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.11';
+const EXTENSION_VERSION = '0.3.12';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -967,6 +968,70 @@ function buildSourceMap(segmented, translations, completeTranslation) {
     return entries;
 }
 
+const CONSISTENCY_ROLE_TERMS = new Set([
+    'manager', 'supervisor', 'boss', 'leader', 'director', 'executive', 'administrator',
+    'chief', 'president', 'chairman', 'chairwoman', 'captain', 'commander', 'general',
+    'officer', 'detective', 'agent', 'professor', 'teacher', 'doctor', 'nurse', 'coach',
+    'secretary', 'assistant', 'attorney', 'lawyer', 'judge', 'prosecutor', 'owner',
+    'master', 'mistress', 'lord', 'lady', 'king', 'queen', 'prince', 'princess',
+    'duke', 'duchess', 'emperor', 'empress', 'father', 'mother', 'brother', 'sister',
+    'uncle', 'aunt', 'husband', 'wife', 'boyfriend', 'girlfriend', 'fiance', 'fiancee',
+]);
+
+function repeatedRoleTerms(segments) {
+    const counts = new Map();
+    for (const segment of segments || []) {
+        const source = String(segment?.text || '').replace(/@@VERBA_[A-Z0-9_]+@@/g, ' ');
+        for (const match of source.matchAll(/[A-Za-z][A-Za-z'-]{2,}/g)) {
+            const term = match[0].toLocaleLowerCase().replace(/[’']/g, '');
+            if (!CONSISTENCY_ROLE_TERMS.has(term)) continue;
+            counts.set(term, (counts.get(term) || 0) + 1);
+        }
+    }
+    return [...counts.entries()]
+        .filter(([, count]) => count >= 2)
+        .map(([term]) => term);
+}
+
+function segmentContainsRoleTerm(segment, terms) {
+    const source = String(segment?.text || '');
+    return terms.some(term => new RegExp(`(^|[^A-Za-z])${term}(?=$|[^A-Za-z])`, 'i').test(source));
+}
+
+async function repairRepeatedRoleTermConsistency(segmented, translations, options = {}) {
+    const terms = repeatedRoleTerms(segmented?.segments);
+    if (!terms.length) return;
+    const affected = (segmented.segments || []).filter(segment => segmentContainsRoleTerm(segment, terms));
+    if (!affected.length) return;
+    const rows = affected.map(segment => ({
+        id: segment.id,
+        type: segment.type,
+        source: restoredSegmentText(segment.text, segmented, true),
+        currentTranslation: restoredSegmentText(String(translations.get(segment.id) || ''), segmented, false),
+    }));
+    const prompt = buildTermConsistencyRepairPrompt({ rows, terms, settings });
+    const expected = affected.map(segment => ({
+        id: segment.id,
+        type: segment.type,
+        text: String(translations.get(segment.id) || ''),
+    }));
+    try {
+        const repaired = await requestSegments(prompt, expected, {
+            ...options,
+            stage: 'role-term-consistency-repair',
+        });
+        for (const segment of affected) {
+            const value = String(repaired.get(segment.id) || '').trim();
+            const previous = String(translations.get(segment.id) || '');
+            if (!value || value.length > Math.max(500, previous.length * 1.35)) continue;
+            translations.set(segment.id, value);
+        }
+    } catch (error) {
+        if (isAbort(error, options.signal)) throw error;
+        console.warn('[베르바] 반복 직책 표기 통일을 완료하지 못해 기존 번역을 유지합니다.', error);
+    }
+}
+
 function normalizedSourceMap(value) {
     if (!Array.isArray(value)) return [];
     return value.flatMap((entry, index) => {
@@ -1117,6 +1182,10 @@ async function translateOutputText(source, options = {}) {
         const repaired = await requestSegments(repairPrompt, invalid, { ...options, stage: 'untranslated-repair' });
         for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
+
+    await repairRepeatedRoleTermConsistency(segmented, translations, {
+        signal: options.signal,
+    });
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings.bannedWords));
     if (remaining.length) {

@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.3';
+const EXTENSION_VERSION = '0.4.4';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7516,6 +7516,14 @@ function injectSettingsPanel() {
                                 </select>
                                 <div class="verba-help">직접 대사에서 영어식 문장 끊기와 이어짐을 조절합니다. 의도적인 멈춤·강조·급한 호흡은 원문을 우선합니다.</div>
 
+                                <label for="verba-english-flavor-conversation">영어권 회화 자연화</label>
+                                <select id="verba-english-flavor-conversation" class="text_pole">
+                                    <option value="default" ${settings.englishFlavorConversationNaturalization === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="natural" ${settings.englishFlavorConversationNaturalization === 'natural' ? 'selected' : ''}>자연스럽게</option>
+                                    <option value="active" ${settings.englishFlavorConversationNaturalization === 'active' ? 'selected' : ''}>적극적으로</option>
+                                </select>
+                                <div class="verba-help">한국어 표현을 직역하지 않고 발화 의도·감정·강도가 정확히 같을 때만 실제 영어권 회화에서 쓰는 자연스러운 표현으로 옮깁니다.</div>
+
                                 <label for="verba-english-flavor-slang">슬랭·구어체 농도</label>
                                 <select id="verba-english-flavor-slang" class="text_pole">
                                     <option value="default" ${settings.englishFlavorSlangDensity === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
@@ -7560,13 +7568,6 @@ function injectSettingsPanel() {
                                 </label>
                                 <div class="verba-help">이름·he/she 같은 지칭이 영어에서 부자연스럽게 반복되면 대상이 확실할 때만 자연스럽게 정리합니다. 여러 인물이 있거나 오해 가능성이 있으면 지칭을 유지합니다.</div>
 
-                                <label for="verba-english-flavor-conversation">영어권 회화 자연화</label>
-                                <select id="verba-english-flavor-conversation" class="text_pole">
-                                    <option value="default" ${settings.englishFlavorConversationNaturalization === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
-                                    <option value="natural" ${settings.englishFlavorConversationNaturalization === 'natural' ? 'selected' : ''}>자연스럽게</option>
-                                    <option value="active" ${settings.englishFlavorConversationNaturalization === 'active' ? 'selected' : ''}>적극적으로</option>
-                                </select>
-                                <div class="verba-help">한국어 표현을 직역하지 않고 발화 의도·감정·강도가 정확히 같을 때만 실제 영어권 회화에서 쓰는 자연스러운 표현으로 옮깁니다.</div>
                             </div>
                         </div>
                     </details>

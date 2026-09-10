@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.88';
+const EXTENSION_VERSION = '0.3.89';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -183,6 +183,7 @@ const failedOutputSignatures = new Map();
 const serverRetryStates = new Map();
 const speakerAttributionCache = new Map();
 const roleTermPlanCache = new Map();
+const insteadRevisionTranslationSeen = new Map();
 const pendingInputControllers = new Set();
 const transientLockedMessages = new Set();
 const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
@@ -7378,6 +7379,90 @@ function handleSwipe(payload) {
     scheduleSwipeTranslation(id, previousSignature, hold);
 }
 
+
+function insteadRevisionMeta(message) {
+    if (!message || message.is_user) return null;
+
+    const swipeId = currentSwipeId(message);
+    const swipeInfo = swipeId !== null && Array.isArray(message.swipe_info)
+        ? message.swipe_info[swipeId]
+        : null;
+    const swipeExtra = swipeInfo?.extra && typeof swipeInfo.extra === 'object'
+        ? swipeInfo.extra
+        : null;
+    const messageExtra = message.extra && typeof message.extra === 'object'
+        ? message.extra
+        : null;
+
+    const marked = Boolean(
+        swipeExtra?.instead_revised
+        || String(swipeExtra?.api || '').toLocaleLowerCase() === 'instead'
+        || messageExtra?.instead_revised
+    );
+    if (!marked) return null;
+
+    const finishedRaw = swipeInfo?.gen_finished || messageExtra?.gen_finished || null;
+    const finishedAt = finishedRaw ? Date.parse(finishedRaw) : NaN;
+
+    return {
+        swipeId,
+        swipeInfo,
+        swipeExtra,
+        finishedAt: Number.isFinite(finishedAt) ? finishedAt : null,
+    };
+}
+
+function insteadRevisionSignature(message) {
+    const meta = insteadRevisionMeta(message);
+    if (!meta) return '';
+    const source = messageSource(message);
+    if (!source.trim()) return '';
+
+    return [
+        meta.swipeId ?? 'none',
+        hashText(source),
+        source.length,
+    ].join(':');
+}
+
+function pruneInsteadRevisionSeen(now = Date.now()) {
+    for (const [key, timestamp] of insteadRevisionTranslationSeen) {
+        if (now - Number(timestamp || 0) > 5 * 60 * 1000) {
+            insteadRevisionTranslationSeen.delete(key);
+        }
+    }
+}
+
+function scheduleRecentInsteadRevisionTranslations(delay = 180) {
+    const context = liveContext();
+    const chat = Array.isArray(context.chat) ? context.chat : [];
+    const now = Date.now();
+    pruneInsteadRevisionSeen(now);
+
+    chat.forEach((message, id) => {
+        const meta = insteadRevisionMeta(message);
+        if (!meta) return;
+
+        // inSTead writes gen_finished immediately before save/reload. Restrict
+        // compatibility auto-detection to fresh revisions so opening an old chat
+        // never causes every historical inSTead swipe to be translated at once.
+        if (meta.finishedAt === null || Math.abs(now - meta.finishedAt) > 90_000) return;
+
+        const source = messageSource(message);
+        if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) return;
+        if (currentRecord(message)) return;
+
+        const signature = insteadRevisionSignature(message);
+        if (!signature) return;
+        const key = `${id}:${signature}`;
+        if (insteadRevisionTranslationSeen.has(key)) return;
+
+        insteadRevisionTranslationSeen.set(key, now);
+        console.info(`[베르바] inSTead 새 revision 감지 #${id} swipe ${meta.swipeId ?? '?'} — 자동 번역 예약`);
+        scheduleAutomaticTranslation(id, delay, { insteadRevision: true });
+    });
+}
+
 function handleCompletedAssistantMessage(payload, delay = 80) {
     let id = normalizedMessageId(payload);
     if (id < 0) id = latestAssistantMessage()?.id ?? -1;
@@ -7592,7 +7677,10 @@ function setupEvents() {
                 refreshProfileSelect();
                 renderNameLockManager();
                 scheduleChatOpenTranslationRestore();
+                scheduleRecentInsteadRevisionTranslations(220);
             }, 120);
+            setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 420);
+            setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 900);
         });
     }
     if (types.MESSAGE_EDITED) {
@@ -7614,6 +7702,7 @@ function setupObserver() {
             injectSettingsPanel();
             injectInputAction();
             refreshTranslationClasses();
+            scheduleRecentInsteadRevisionTranslations(180);
         }, 100);
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -7630,6 +7719,7 @@ function initialize() {
     setupSelection();
     setupEvents();
     setupObserver();
+    setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 300);
     globalThis.__verbaTranslatorVersion = EXTENSION_VERSION;
     console.log(`[베르바] v${EXTENSION_VERSION} 준비 완료`);
 }

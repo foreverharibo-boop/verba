@@ -2,9 +2,21 @@
 
 SillyTavern 1.18용 독립 자동번역 확장입니다.
 
-현재 버전: **v0.3.88**
+현재 버전: **v0.3.89**
 
 ## 업데이트 내역
+
+### v0.3.89
+
+- SillyTavern `inSTead` 확장으로 만든 revision 새 스와이프가 베르바 자동 번역 이벤트를 타지 않아 영어로 남는 호환 문제 수정
+- inSTead가 현재 메시지에 `instead_revised` / `api: inSTead` 메타데이터와 새 swipe를 직접 추가한 뒤 채팅을 reload하는 흐름을 별도로 감지
+- 현재 활성 swipe의 `gen_finished`가 최근 90초 이내인 새 inSTead revision만 자동 번역 대상으로 인식
+- 따라서 예전 채팅을 열었다고 과거의 모든 inSTead revision을 한꺼번에 번역하지 않음
+- `CHAT_CHANGED` 이후 3회 짧은 안정화 스캔 + 채팅 DOM MutationObserver fallback으로 모바일/PC 렌더 타이밍 차이 보강
+- 같은 revision은 `message id + swipe id + source hash` 서명으로 중복 예약 방지
+- 일반 SillyTavern 생성, 일반 swipe, 재번역, 기존 캐시 동작에는 영향 없음
+- v0.3.88의 병렬 처리/화자 판별 캐시/부분 성공 segment 재사용 최적화는 그대로 유지
+- 프롬프트 압축 및 문맥 축소 없음
 
 ### v0.3.88
 

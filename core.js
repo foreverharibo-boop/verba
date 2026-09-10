@@ -531,12 +531,15 @@ const LOCALIZATION_RULES = {
 - Actively remove English-style translationese: literal clause order, repeated explicit pronouns, awkward possessives, calqued idioms, stiff connectors, and unnatural repetition.
 - Rebuild sentence rhythm and phrasing into fluent contemporary Korean while preserving every source fact, nuance, intensity, register, and referent.
 - A repeated pronoun may be omitted where Korean naturally omits it and the referent stays unambiguous; never replace it with an identity name merely for fluency.`,
-    native: `NATIVE-KOREAN PROSE
-- Rewrite the passage as if a fluent native Korean web-fiction or roleplay writer had originally written it in Korean. Do not translate sentence-by-sentence.
-- Prioritize Korean narrative flow over English syntax. Freely reorder information, merge or split sentences, reshape flat and/then chains into natural Korean clause linking or adnominal flow, adjust ellipsis and connective rhythm, and omit recoverable subjects or pronouns.
-- Dialogue should sound like real Korean speech, not translated English. Use natural Korean endings, emphasis, rhythm, and discourse particles that fit the scene, tone, and relationship instead of literal question tags or stiff calques.
-- Prefer idiomatic, punchy Korean phrasing even when it departs noticeably from the source wording, as long as the same events, implications, emotional intensity, explicitness, register, speaker intent, and relationship distance remain intact.
-- This is expressive localization, not adaptation: preserve all meaning, facts, actions, chronology, point of view, speaker attribution, and setting details exactly.
+    native: `NATIVE-KOREAN TRANSCREATION
+- Recreate the passage as if it had originally been authored in Korean by a skilled Korean web-fiction or roleplay writer. Do not translate sentence-by-sentence, clause-by-clause, or idiom-by-idiom.
+- Preserve the source's events, meaning, implications, emotional force, humor, hostility, intimacy, explicitness, character voice, speaker intent, relationship distance, chronology, point of view, and factual content — but do NOT preserve English wording, syntax, rhetorical construction, or discourse habits merely for fidelity.
+- Aggressively remove translationese. Freely reorder information, merge or split sentences, convert flat subject+verb repetition into Korean ellipsis or adnominal flow, reshape and/then/but chains, remove redundant possessives and pronouns, and rebuild sentence rhythm around what sounds most natural in Korean.
+- Translate for equivalent reader impact rather than lexical resemblance. Idioms, sarcasm, insults, flirting, jokes, exclamations, slang, rhetorical questions, and question tags should become Korean expressions that create the same effect for a Korean reader, even when the wording is substantially different.
+- Dialogue must sound spoken in Korean, not translated into Korean. Prefer scene-appropriate endings, contractions, interruptions, particles, emphasis, repetition, omission, and discourse markers such as "아", "아니", "진짜", "참", "야", "거든", "잖아", "지", "냐" only when they naturally convey the source tone; never insert them mechanically or add a new emotion or intention.
+- Narration may use the sentence flow and cadence common in polished contemporary Korean web fiction: natural subject omission, clause compression, reordered focus, short punchy sentences, or combined flowing sentences when those choices preserve the same scene and nuance.
+- When a literal rendering sounds technically correct but unlike something a Korean writer would actually write, reject the literal rendering and choose the natural Korean construction instead.
+- Never invent new actions, facts, jokes, metaphors, emotions, relationships, backstory, or setting information. Never intensify or soften content beyond the source.
 - Never Koreanize or replace proper names, places, currencies, measurements, institutions, legal/historical facts, fictional-world facts, or culture-specific setting information.`,
 };
 

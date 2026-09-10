@@ -1432,4 +1432,32 @@
     padding: 5px 9px !important;
     white-space: nowrap !important;
 }
-\n\n/* v0.3.65: center the previous-output picker on phones while keeping its list scrollable */\n@media (max-width: 600px) {\n    #verba-request-overlay.verba-previous-output-overlay {\n        align-items: center !important;\n        justify-content: center !important;\n        padding: max(8px, env(safe-area-inset-top, 0px)) 9px max(8px, env(safe-area-inset-bottom, 0px)) !important;\n    }\n\n    #verba-request-overlay.verba-previous-output-overlay .verba-previous-output-modal {\n        width: 100% !important;\n        max-height: min(82dvh, 680px) !important;\n        margin: auto !important;\n    }\n\n    #verba-request-overlay.verba-previous-output-overlay .verba-previous-output-list {\n        min-height: 0 !important;\n        max-height: min(60dvh, 520px) !important;\n        overflow-y: auto !important;\n        -webkit-overflow-scrolling: touch;\n    }\n}\n
+
+
+/* v0.3.66: previous-output picker is centered against the visual viewport */
+#verba-request-overlay.verba-previous-output-overlay {
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-modal {
+    box-sizing: border-box !important;
+}
+
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-list {
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 600px) {
+    #verba-request-overlay.verba-previous-output-overlay {
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 9px !important;
+    }
+
+    #verba-request-overlay.verba-previous-output-overlay .verba-previous-output-modal {
+        width: calc(100vw - 18px) !important;
+    }
+}

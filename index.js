@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.65';
+const EXTENSION_VERSION = '0.3.66';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2588,7 +2588,7 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null, title
             // Older mobile browsers simply use the fixed-position fallback.
         }
         let settled = false;
-        const finish = value => {
+        let finish = value => {
             if (settled) return;
             settled = true;
             try {
@@ -3275,6 +3275,45 @@ function previousOutputOptionMarkup(target, index) {
     </button>`;
 }
 
+
+function centerPreviousOutputModal(overlay) {
+    const modal = overlay?.querySelector?.('.verba-previous-output-modal');
+    if (!modal) return;
+
+    const viewport = globalThis.visualViewport;
+    const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportTop = viewport?.offsetTop || 0;
+    const viewportWidth = viewport?.width || innerWidth;
+    const viewportHeight = viewport?.height || innerHeight;
+
+    const horizontalCenter = viewportLeft + (viewportWidth / 2);
+    const verticalCenter = viewportTop + (viewportHeight / 2);
+    const safeHeight = Math.max(220, viewportHeight - 24);
+    const maxHeight = Math.min(680, safeHeight);
+
+    // Force the picker itself to the visual viewport center. This avoids
+    // SillyTavern/mobile theme rules that override flex centering on popovers.
+    modal.style.setProperty('position', 'fixed', 'important');
+    modal.style.setProperty('left', `${horizontalCenter}px`, 'important');
+    modal.style.setProperty('top', `${verticalCenter}px`, 'important');
+    modal.style.setProperty('right', 'auto', 'important');
+    modal.style.setProperty('bottom', 'auto', 'important');
+    modal.style.setProperty('margin', '0', 'important');
+    modal.style.setProperty('transform', 'translate(-50%, -50%)', 'important');
+    modal.style.setProperty('width', `min(620px, ${Math.max(240, viewportWidth - 18)}px)`, 'important');
+    modal.style.setProperty('max-height', `${maxHeight}px`, 'important');
+    modal.style.setProperty('overflow', 'hidden', 'important');
+
+    const list = modal.querySelector('.verba-previous-output-list');
+    if (list) {
+        // Reserve room for header + "더 보기" while making only the list scroll.
+        const reserved = 112;
+        list.style.setProperty('max-height', `${Math.max(120, maxHeight - reserved)}px`, 'important');
+        list.style.setProperty('overflow-y', 'auto', 'important');
+        list.style.setProperty('-webkit-overflow-scrolling', 'touch');
+    }
+}
+
 function requestPreviousOutputTarget(beforeId) {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
 
@@ -3346,6 +3385,21 @@ function requestPreviousOutputTarget(beforeId) {
         } catch {
             // Fixed-position fallback.
         }
+
+        const recenter = () => centerPreviousOutputModal(overlay);
+        requestAnimationFrame(recenter);
+        setTimeout(recenter, 60);
+        globalThis.visualViewport?.addEventListener?.('resize', recenter);
+        globalThis.visualViewport?.addEventListener?.('scroll', recenter);
+        window.addEventListener('resize', recenter);
+
+        const originalFinish = finish;
+        finish = value => {
+            globalThis.visualViewport?.removeEventListener?.('resize', recenter);
+            globalThis.visualViewport?.removeEventListener?.('scroll', recenter);
+            window.removeEventListener('resize', recenter);
+            originalFinish(value);
+        };
 
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.addEventListener('click', event => {

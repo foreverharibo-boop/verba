@@ -147,9 +147,11 @@ function looksLikeBilingualDialogue(segment, translation) {
 }
 
 /**
- * Finds only strong signs of accidentally untranslated source. Proper names,
- * short acronyms and dialogue intentionally made bilingual by a prompt are
- * excluded to avoid destructive false positives.
+ * Finds only strong signs of accidentally untranslated source. Short acronyms
+ * and dialogue intentionally made bilingual by a prompt are excluded to avoid
+ * destructive false positives. Human-name transliteration is primarily enforced
+ * by the translation prompt because distinguishing names from acronyms locally
+ * without context is unsafe.
  */
 export function findUntranslatedSegments(segments, translations, settings = {}, speakerScopes = null) {
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
@@ -636,7 +638,7 @@ const LOCALIZATION_RULES = {
 - Narration may use polished contemporary Korean web-fiction cadence: adnominal flow, clause compression, reordered focus, natural omission, short punchy beats, or longer connected rhythm as the scene demands.
 - A technically accurate but translation-like rendering is a FAILURE in this mode. Before returning each segment, silently ask: "Would a Korean web-fiction/RP writer naturally phrase it this way without seeing the English?" If not, rewrite it again.
 - Never invent new actions, facts, jokes, metaphors, emotions, relationships, backstory, or setting information. Never intensify or soften content beyond the source.
-- Never Koreanize or replace proper names, places, currencies, measurements, institutions, legal/historical facts, fictional-world facts, or culture-specific setting information.`,
+- Preserve the identity and referent of proper names and setting terms, but follow the PERSON-NAME SCRIPT POLICY below for human names written in Latin letters. Do not localize or replace places, currencies, measurements, institutions, legal/historical facts, fictional-world facts, or culture-specific setting information.`,
 };
 
 const DEFAULT_TRANSLATION_RULE_ORDER = [
@@ -890,7 +892,13 @@ ${ordered.map((key, index) => `PRIORITY ${index + 1}\n${blocks[key]}`).join('\n\
 }
 
 function absoluteFidelityRule(settings = {}) {
-    return '- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.';
+    return `- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.
+- PERSON-NAME SCRIPT POLICY: In Korean translation text, when a Latin-script word is clearly a HUMAN PERSON'S NAME from context, transliterate that name naturally into Hangul instead of leaving the Latin spelling unchanged.
+- Examples: "SHIN" as a person's name -> "신"; "Victor" -> "빅터"; "Anthony" -> "앤서니". These are script/transliteration examples, not forced identity mappings.
+- Preserve the full identity of the name. Do not drop syllables, invent nicknames, translate the semantic meaning of a surname/given name, or substitute a different person.
+- Do NOT blindly transliterate acronyms, product/brand names, usernames/handles, codes, model names, institutions, file names, URLs, macros, or other non-person Latin text.
+- If it is genuinely ambiguous whether a Latin token is a person's name, use surrounding narration, speech tags, titles, capitalization, and role context before deciding.
+- An explicit NAME LOCK mapping remains authoritative and overrides automatic transliteration.`; 
 }
 
 function parseDialoguePreferenceList(value) {
@@ -1264,8 +1272,9 @@ function speakerIdentityBlock(speakerIdentity = {}) {
 - A quotation mark alone does not prove TARGET CHARACTER is speaking.
 - TARGET CHARACTER and USER names are indivisible proper names. Never reinterpret, remove, or split a final Korean syllable as a grammatical particle. For example, if USER is "혜담은", the complete name is all three syllables "혜담은", never "혜담" plus the topic particle "은".
 - Preserve third-person pronouns as pronoun references in Korean instead of replacing them with TARGET CHARACTER or USER names merely because identity context is available. Render "she/her" with the grammatically appropriate Korean pronoun form such as "그녀", "그녀의", "그녀를", or "그녀에게", according to its role in the source sentence.
-- Never derive a nickname or familiar name by dropping any syllable from TARGET CHARACTER or USER. If the source explicitly contains a person's name, retain that complete name.
-- Whenever the Korean translation uses one of the listed identity names, copy the entire name exactly and attach any required Korean particle only after the complete name.
+- Never derive a nickname or familiar name by dropping any part of TARGET CHARACTER or USER identity. If the source explicitly contains a person's name, preserve the complete name identity.
+- If TARGET CHARACTER or USER is written in Latin script, use a natural Hangul transliteration in Korean translation text instead of mechanically copying the Latin spelling. For example, a person named "SHIN" should normally appear as "신" in Korean prose/dialogue.
+- If an identity name is already written in Hangul, copy the entire Hangul name exactly and attach any required Korean particle only after the complete name.
 - If attribution remains genuinely ambiguous after reading the full output, do not apply the TARGET-CHARACTER DIALOGUE PROMPT to that passage; use only the global and all-dialogue rules.`;
 }
 
@@ -1277,7 +1286,7 @@ function nameTokenInstruction(nameTokens = []) {
     if (!mappings.length) return 'NAME LOCK TOKENS\n(없음)';
     return `NAME LOCK TOKENS
 ${JSON.stringify(mappings)}
-- In Korean-only output, keep each NAME token exactly once where that name belongs. The app will replace it with the fixed Korean spelling.
+- In Korean-only output, keep each NAME token exactly once where that name belongs. The app will replace it with the user's fixed Korean spelling; this mapping overrides automatic person-name transliteration.
 - In bilingual dialogue, write source_spelling literally in the preserved English copy and do NOT put its NAME token there.
 - In the Korean translation paired with that English copy, put the corresponding NAME token exactly once where the name belongs.
 - Never expose, alter, split, translate, or invent a NAME token.`;

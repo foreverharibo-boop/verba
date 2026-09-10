@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.85';
+const EXTENSION_VERSION = '0.3.87';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3053,9 +3053,6 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
                     <small>실제로 교체되는 범위는 선택한 부분뿐이에요.</small>
                 ` : ''}
                 <div class="verba-modal-actions">
-                    ${isPartialSelection
-                        ? ''
-                        : '<button type="button" class="menu_button verba-cancel">취소</button>'}
                     <button type="button" class="menu_button verba-submit">${isSelection && settings.selectionCandidates ? '후보 만들기' : '재번역 시작'}</button>
                 </div>
             </section>`;
@@ -3119,7 +3116,6 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
             });
         };
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
-        overlay.querySelector('.verba-cancel')?.addEventListener('click', () => finish(null));
         overlay.querySelector('.verba-submit').addEventListener('click', submit);
         overlay.querySelectorAll('.verba-request-history-chip').forEach(button => {
             button.addEventListener('click', () => {

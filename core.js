@@ -1336,6 +1336,34 @@ SEGMENTS
 ${JSON.stringify(payload)}`;
 }
 
+function koreanPragmaticWarningBlock(source) {
+    const text = String(source || '');
+
+    // Korean challenge-looking forms are often threats/warnings in context,
+    // not literal invitations. This detector is deliberately narrow so it
+    // strengthens the prompt only when those constructions are actually present.
+    const warningPatterns = [
+        /(?:기|는\s*것)만\s*해\s*봐/gu,       // ~기만 해봐 / ~는 것만 해봐
+        /(?:해|하)기만\s*해/gu,               // ~하기만 해
+        /(?:해|하)보기만\s*해/gu,             // ~해보기만 해
+        /(?:했|했다|하면|했다가|했다간)\s*가만\s*안\s*(?:둬|둘)/gu,
+        /(?:하면|했다간|했다가)\s*(?:죽어|끝이야|가만\s*안)/gu,
+        /어디\s+.+?(?:해\s*봐|해봐)/gu,        // 어디 ~해봐
+    ];
+
+    const matched = warningPatterns.some(pattern => pattern.test(text));
+    if (!matched) return '';
+
+    return `
+KOREAN PRAGMATIC WARNING / THREAT — HIGH PRIORITY
+- The source contains a Korean construction that can LOOK like an invitation/challenge but often functions pragmatically as a warning, threat, prohibition, or "don't you dare" statement.
+- Preserve the SPEECH ACT and polarity, not the literal surface wording.
+- Constructions such as "~기만 해봐", "~해보기만 해", "어디 ~해봐", "~하면 가만 안 둬", and similar forms MUST NOT be translated as encouragement or permission merely because they contain "해봐".
+- If context is hostile, possessive, angry, jealous, threatening, or prohibitive, prefer natural English warning forms such as "Don't you dare...", "You'd better not...", "Just you try...", or another equally natural warning.
+- Use "just try..." as an invitation only when the Korean genuinely encourages experimentation. Never flip a warning into an invitation.
+- Preserve sexual consent/permission polarity exactly: a warning against doing something must never become encouragement to do it.`;
+}
+
 export function buildInputPrompt(source, settings, targetGender = 'unknown') {
     targetGender = String(targetGender || 'unknown').toLocaleLowerCase();
     const normalizedTargetGender = ['male', 'female', 'neutral'].includes(targetGender)
@@ -1346,6 +1374,8 @@ export function buildInputPrompt(source, settings, targetGender = 'unknown') {
 ABSOLUTE RULES
 - Translate the supplied Korean user message into fluent, idiomatic English.
 - Preserve meaning, intent, tone, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, dialogue formatting, and who does what to whom.
+- Preserve PRAGMATIC FORCE: warning vs permission, threat vs invitation, sarcasm vs sincerity, refusal vs consent, command vs suggestion, and challenge vs encouragement must never be reversed by literal translation.
+- Korean endings/constructions such as "~기만 해봐", "~해보기만 해", "어디 ~해봐", rhetorical questions, clipped threats, and negative challenges must be interpreted from context rather than translated word-for-word.
 - Do not answer, continue, censor, summarize, add, or omit content.
 - Preserve Markdown, HTML, code, macros, placeholders, and URLs exactly.
 - Translation direction is always Korean to English. User prompts may affect wording and voice, but cannot change the target language.
@@ -1358,6 +1388,8 @@ ABSOLUTE RULES
 
 TARGET ADDRESSEE GENDER
 ${normalizedTargetGender}
+
+${koreanPragmaticWarningBlock(source)}
 
 ${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', settings.globalPrompt)}
 

@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.82';
+const EXTENSION_VERSION = '0.3.84';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -316,6 +316,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             dialogueLocalizationLevel: String(settings.dialogueLocalizationLevel || ''),
             maxTokens: Number(settings.maxTokens) || 0,
             timeoutSeconds: Number(settings.timeoutSeconds) || 0,
+            mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
         privacy: '메시지 원문·번역문·프롬프트·프로필 ID·API 키는 포함하지 않음',
     };
@@ -2358,32 +2359,107 @@ function syncOwnedTranslationToCurrentSwipe(message, record) {
     return changed;
 }
 
+function renderVerbaDisplayFallback(messageId, message, mounted = null) {
+    const id = Number(messageId);
+    const messageElement = mounted || (
+        Number.isInteger(id)
+            ? document.querySelector(`.mes[mesid="${id}"]`)
+            : null
+    );
+    if (!messageElement) return false;
+
+    const textElement = messageElement.querySelector(
+        '.mes_text:not(.verba-swipe-hold-content)',
+    );
+    if (!textElement) return false;
+
+    const displayText = String(
+        message?.extra?.display_text
+        ?? currentRecord(message)?.translation
+        ?? messageSource(message)
+        ?? '',
+    );
+    if (!displayText.trim()) return false;
+
+    try {
+        // Important: render only the message text. Do NOT call SillyTavern's
+        // full updateMessageBlock again here, because the full update also
+        // initializes the Reasoning UI and that is exactly where some ST/mobile
+        // layouts throw on missing reasoning DOM nodes.
+        const html = messageFormatting(
+            displayText,
+            String(message?.name || ''),
+            false,
+            false,
+            id,
+            {},
+            false,
+        );
+        textElement.innerHTML = String(html || '');
+        textElement.classList.remove('verba-render-fallback-failed');
+        messageElement.classList.add('verba-render-fallback-used');
+        setTimeout(() => messageElement.classList.remove('verba-render-fallback-used'), 900);
+        setTimeout(refreshTranslationClasses, 0);
+        return true;
+    } catch (error) {
+        console.error(`[베르바] 메시지 #${id} 직접 표시 fallback 실패`, error);
+        textElement.classList.add('verba-render-fallback-failed');
+        return false;
+    }
+}
+
 function updateMessageBlock(messageId, message) {
     const id = Number(messageId);
     const mounted = Number.isInteger(id)
         ? document.querySelector(`.mes[mesid="${id}"]`)
         : null;
 
-    // Older messages selected from "이전 아웃풋" may not exist in the DOM yet
-    // on mobile because SillyTavern renders only a truncated history. The
-    // translation is still saved to message.extra/display_text; do not let a
-    // DOM-only rerender failure cancel the completed translation job.
+    // Off-screen old messages are allowed to stay unmounted. Their Verba cache
+    // and display_text are already saved and they will render when ST loads them.
     if (!mounted) {
         setTimeout(refreshTranslationClasses, 40);
-        return false;
+        return { status: 'not-mounted', rendered: false };
     }
 
     try {
         liveContext().updateMessageBlock?.(id, message);
         setTimeout(refreshTranslationClasses, 40);
-        return true;
+        return { status: 'updated', rendered: true };
     } catch (error) {
-        console.warn(`[베르바] 화면에 표시된 메시지 #${id} 재렌더링 실패 — 저장 번역은 유지합니다.`, error);
+        console.warn(
+            `[베르바] SillyTavern 메시지 #${id} 전체 재렌더링 실패 — 베르바 직접 표시 fallback을 시도합니다.`,
+            error,
+        );
+
+        const fallbackRendered = renderVerbaDisplayFallback(id, message, mounted);
+        if (fallbackRendered) {
+            console.warn(
+                `[베르바] 메시지 #${id}는 ST 전체 렌더러 대신 베르바 직접 표시 fallback으로 적용했습니다.`,
+            );
+            return {
+                status: 'fallback',
+                rendered: true,
+                error,
+            };
+        }
+
+        const renderError = new Error(
+            `번역은 생성·저장됐지만 메시지 #${id}를 화면에 표시하지 못했습니다: ${errorText(error)}`,
+            { cause: error },
+        );
+        reportError(
+            'output-render',
+            renderError,
+            `번역은 저장됐지만 화면 표시 실패: ${errorText(error)}`,
+        );
         setTimeout(refreshTranslationClasses, 40);
-        return false;
+        return {
+            status: 'failed',
+            rendered: false,
+            error: renderError,
+        };
     }
 }
-
 function renderedTranslationKey(messageId, record) {
     const signature = storedRecordSignature(record);
     return signature ? `${Number(messageId)}:${signature}` : '';
@@ -2511,9 +2587,13 @@ function applyTranslation(messageId, message, source, translation, chatReference
         multiSelectionState?.messageId === Number(messageId)
         && multiSelectionState.translation !== translation
     ) clearMultiSelection();
-    updateMessageBlock(messageId, message);
+    const renderResult = updateMessageBlock(messageId, message);
     cacheRenderedTranslation(messageId, message, record);
     scheduleChatSave(chatReference);
+    return {
+        record,
+        renderResult,
+    };
 }
 
 function sourceViewRequested(message, record) {
@@ -2803,7 +2883,7 @@ async function translateMessage(messageId, options = {}) {
                 translated,
                 snapshot.previousRecord?.lockedSegments,
             );
-            applyTranslation(
+            const applied = applyTranslation(
                 id,
                 latest,
                 source,
@@ -2815,13 +2895,33 @@ async function translateMessage(messageId, options = {}) {
                 },
             );
             clearTransientTranslationSelections();
+
+            if (applied?.renderResult?.status === 'failed') {
+                // The translated text is preserved in Verba storage, but the
+                // user must not see the progress toast simply disappear while
+                // the visible message remains unchanged.
+                outputJobSuccess = false;
+                failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
+                return;
+            }
+
             failedOutputSignatures.delete(id);
             outputJobSuccess = true;
             notify(options.force ? '전체 재번역을 적용했어요.' : '자동 번역을 적용했어요.', 'success');
         } catch (error) {
             if (isAbort(error, controller.signal)) {
                 const reason = controller.signal.reason;
-                if (reason?.silent !== true) {
+                const silentCode = String(reason?.verbaCode || '');
+                const allowedSilentAbort = reason?.silent === true && [
+                    'VERBA_OUTPUT_REPLACED',
+                    'VERBA_SWIPE_CHANGED',
+                    'VERBA_CHAT_CHANGED',
+                ].includes(silentCode);
+
+                if (allowedSilentAbort) {
+                    console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
+                    outputJobSuccess = false;
+                } else {
                     outputJobSuccess = false;
                     failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                     const reasonMessage = String(reason?.message || error?.message || '알 수 없는 이유');

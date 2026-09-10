@@ -33,7 +33,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.61';
+const EXTENSION_VERSION = '0.3.62';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2499,7 +2499,7 @@ function latestAssistantMessage() {
     return null;
 }
 
-function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
+function requestOneTimeInstruction(scope, preview = '', viewAction = null, titleOverride = '') {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     const isSelection = scope === 'selection';
     const isMultiSelection = scope === 'multi';
@@ -2515,7 +2515,7 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
         overlay.innerHTML = `
             <section class="verba-modal" role="dialog" aria-modal="true">
                 <header class="verba-modal-header">
-                    <strong>${isMultiSelection ? '여러 구간 묶음 재번역' : isSelection ? '선택 부분 재번역' : '최근 아웃풋 전체 재번역'}</strong>
+                    <strong>${escapeHtml(titleOverride || (isMultiSelection ? '여러 구간 묶음 재번역' : isSelection ? '선택 부분 재번역' : '최근 아웃풋 전체 재번역'))}</strong>
                     <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
                 ${preview ? `<div class="verba-target-preview"><b>대상</b><span>${escapeHtml(preview)}</span></div>` : ''}
@@ -3137,23 +3137,180 @@ function resolveExactSourceName(source, candidate) {
     return foldedIndex >= 0 ? text.slice(foldedIndex, foldedIndex + raw.length) : '';
 }
 
-async function retranslateLatestOutput() {
-    const target = latestAssistantMessage();
-    if (!target) {
-        notify('재번역할 AI 아웃풋이 없어요.', 'warning');
+function previousAssistantMessages(beforeId = Number.POSITIVE_INFINITY) {
+    const chat = liveContext().chat || [];
+    const rows = [];
+    for (let id = Math.min(chat.length - 1, Number.isFinite(beforeId) ? beforeId - 1 : chat.length - 1); id >= 0; id -= 1) {
+        const message = chat[id];
+        if (!message || message.is_user || message.is_system) continue;
+        const source = messageSource(message);
+        if (!source.trim()) continue;
+        rows.push({ id, message, source });
+    }
+    return rows;
+}
+
+function requestRetranslateTargetChoice(button = document.querySelector('#verba-retranslate-latest')) {
+    document.querySelector('#verba-retranslate-target-menu')?.remove();
+    if (!button) return Promise.resolve(null);
+
+    return new Promise(resolve => {
+        const menu = document.createElement('div');
+        menu.id = 'verba-retranslate-target-menu';
+        menu.className = 'verba-retranslate-target-menu';
+        menu.setAttribute('role', 'menu');
+        menu.innerHTML = `
+            <button type="button" class="menu_button" data-target="recent">최근</button>
+            <button type="button" class="menu_button" data-target="previous">이전</button>`;
+        (document.body || document.documentElement).append(menu);
+
+        const buttonRect = button.getBoundingClientRect();
+        const viewport = globalThis.visualViewport;
+        const viewportLeft = viewport?.offsetLeft || 0;
+        const viewportTop = viewport?.offsetTop || 0;
+        const viewportWidth = viewport?.width || innerWidth;
+        const menuRect = menu.getBoundingClientRect();
+        const width = menuRect.width || 112;
+        const height = menuRect.height || 38;
+        const centered = buttonRect.left + buttonRect.width / 2 - width / 2;
+        const left = Math.min(
+            Math.max(viewportLeft + 8, centered),
+            viewportLeft + viewportWidth - width - 8,
+        );
+        const above = buttonRect.top - height - 7;
+        const top = above >= viewportTop + 8 ? above : buttonRect.bottom + 7;
+        menu.style.setProperty('left', `${left}px`, 'important');
+        menu.style.setProperty('top', `${top}px`, 'important');
+
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener('pointerdown', onOutside, true);
+            document.removeEventListener('keydown', onKey, true);
+            menu.remove();
+            resolve(value);
+        };
+        const onOutside = event => {
+            if (!menu.contains(event.target) && event.target !== button) finish(null);
+        };
+        const onKey = event => {
+            if (event.key === 'Escape') finish(null);
+        };
+
+        menu.querySelectorAll('[data-target]').forEach(option => {
+            option.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                finish(option.dataset.target || null);
+            });
+        });
+        requestAnimationFrame(() => {
+            document.addEventListener('pointerdown', onOutside, true);
+            document.addEventListener('keydown', onKey, true);
+            menu.querySelector('[data-target="recent"]')?.focus?.();
+        });
+    });
+}
+
+function requestPreviousOutputTarget(beforeId) {
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
+    const targets = previousAssistantMessages(beforeId);
+    if (!targets.length) {
+        notify('선택할 이전 아웃풋이 없어요.', 'info');
+        return Promise.resolve(null);
+    }
+
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay';
+        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+        overlay.innerHTML = `
+            <section class="verba-modal verba-previous-output-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
+                    <strong>이전 아웃풋 선택</strong>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
+                </header>
+                <div class="verba-previous-output-list">
+                    ${targets.map((target, index) => {
+                        const record = currentRecord(target.message);
+                        const failed = failedOutputSignatures.get(target.id) === messageVersionSignature(target.message);
+                        const status = record ? '번역됨' : failed ? '번역 실패' : '미번역';
+                        const preview = target.source.replace(/\s+/g, ' ').trim().slice(0, 150);
+                        return `<button type="button" class="menu_button verba-previous-output-option" data-target-index="${index}">
+                            <span class="verba-previous-output-meta"><b>#${target.id}</b><small>${escapeHtml(status)}</small></span>
+                            <span>${escapeHtml(preview)}</span>
+                        </button>`;
+                    }).join('')}
+                </div>
+            </section>`;
+        document.documentElement.append(overlay);
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed-position fallback.
+        }
+
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            try {
+                overlay.hidePopover?.();
+            } catch {
+                // It may already be closed.
+            }
+            overlay.remove();
+            resolve(value);
+        };
+
+        overlay.querySelectorAll('.verba-previous-output-option').forEach(button => {
+            button.addEventListener('click', () => {
+                const target = targets[Number(button.dataset.targetIndex)];
+                finish(target || null);
+            });
+        });
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) finish(null);
+        });
+        overlay.addEventListener('keydown', event => {
+            if (event.key === 'Escape') finish(null);
+        });
+    });
+}
+
+async function translateUntranslatedOutput(target) {
+    if (!target) return;
+    if (pendingOutputs.has(target.id)) {
+        notify('선택한 아웃풋을 아직 번역 중이에요.', 'info');
         return;
     }
+    const source = messageSource(target.message);
+    const failed = failedOutputSignatures.get(target.id) === messageVersionSignature(target.message);
+    if (isPredominantlyKorean(source) && !failed) {
+        notify('선택한 아웃풋이 이미 한국어라 번역할 필요가 없어요.', 'info');
+        return;
+    }
+    await translateMessage(target.id, { force: failed });
+}
+
+async function retranslateOutputTarget(target, title = '아웃풋 전체 재번역') {
+    if (!target) return;
     if (pendingOutputs.has(target.id)) {
-        notify('최근 아웃풋을 아직 번역 중이에요.', 'info');
+        notify('선택한 아웃풋을 아직 번역 중이에요.', 'info');
         return;
     }
     const source = messageSource(target.message);
     const failedSignature = failedOutputSignatures.get(target.id);
     const isFailedOutput = failedSignature === messageVersionSignature(target.message);
-    if (isPredominantlyKorean(source) && !currentRecord(target.message) && !isFailedOutput) {
-        notify('최근 아웃풋이 이미 한국어라 자동 재번역 대상이 아니에요.', 'info');
+    const record = currentRecord(target.message);
+    if (!record) {
+        await translateUntranslatedOutput(target);
         return;
     }
+
     const snapshot = {
         chat: liveContext().chat,
         message: target.message,
@@ -3161,7 +3318,6 @@ async function retranslateLatestOutput() {
         swipeId: currentSwipeId(target.message),
     };
     const preview = source.replace(/\s+/g, ' ').trim().slice(0, 110);
-    const record = currentRecord(target.message);
     const swipeExtra = currentSwipeExtra(target.message, false);
     const showingTranslation = Boolean(
         record
@@ -3177,7 +3333,7 @@ async function retranslateLatestOutput() {
             showTranslation: !showingTranslation,
         }
         : null;
-    const request = await requestOneTimeInstruction('message', preview, viewAction);
+    const request = await requestOneTimeInstruction('message', preview, viewAction, title);
     if (request === null) return;
     const latest = liveContext().chat?.[target.id];
     if (
@@ -3186,7 +3342,7 @@ async function retranslateLatestOutput() {
         || currentSwipeId(latest) !== snapshot.swipeId
         || hashText(messageSource(latest)) !== snapshot.sourceHash
     ) {
-        notify('요구사항을 적는 동안 최근 아웃풋이 바뀌었어요. 다시 눌러 주세요.', 'warning');
+        notify('요구사항을 적는 동안 선택한 아웃풋이 바뀌었어요. 다시 눌러 주세요.', 'warning');
         return;
     }
     if (typeof request === 'object' && request.action === 'toggle-view') {
@@ -3212,6 +3368,40 @@ async function retranslateLatestOutput() {
         oneTimeInstruction,
         tuning: typeof request === 'object' ? request.tuning : null,
     });
+}
+
+async function retranslateLatestOutput() {
+    const target = latestAssistantMessage();
+    if (!target) {
+        notify('번역할 AI 아웃풋이 없어요.', 'warning');
+        return;
+    }
+    if (pendingOutputs.has(target.id)) {
+        notify('최근 아웃풋을 아직 번역 중이에요.', 'info');
+        return;
+    }
+
+    // The fast path stays one tap: if the latest output has never been
+    // translated (including a failed attempt), immediately translate/retry it.
+    if (!currentRecord(target.message)) {
+        await translateUntranslatedOutput(target);
+        return;
+    }
+
+    const choice = await requestRetranslateTargetChoice();
+    if (choice === 'recent') {
+        await retranslateOutputTarget(target, '최근 아웃풋 전체 재번역');
+        return;
+    }
+    if (choice !== 'previous') return;
+
+    const previous = await requestPreviousOutputTarget(target.id);
+    if (!previous) return;
+    if (!currentRecord(previous.message)) {
+        await translateUntranslatedOutput(previous);
+        return;
+    }
+    await retranslateOutputTarget(previous, '이전 아웃풋 전체 재번역');
 }
 
 function setTextareaValue(textarea, value) {
@@ -5274,11 +5464,12 @@ function refreshRetranslateButton() {
     button.disabled = !target || busy;
     button.classList.toggle('verba-busy', busy);
     button.classList.toggle('verba-retry-needed', failed && !busy);
+    const translated = target ? Boolean(currentRecord(target.message)) : false;
     button.title = busy
         ? '최근 아웃풋 번역 중'
-        : failed
-            ? '번역 실패 — 눌러서 다시 번역'
-            : '최근 AI 아웃풋 전체 재번역';
+        : failed || !translated
+            ? '최근 아웃풋 번역 또는 다시 시도'
+            : '아웃풋 재번역 · 최근/이전 선택';
 }
 
 function createRetranslateButton() {
@@ -5287,7 +5478,7 @@ function createRetranslateButton() {
     button.type = 'button';
     button.className = 'verba-input-icon';
     button.textContent = '↻';
-    button.title = '최근 AI 아웃풋 전체 재번역';
+    button.title = '아웃풋 번역 / 재번역';
     button.setAttribute('aria-label', button.title);
     button.addEventListener('click', retranslateLatestOutput);
     return button;

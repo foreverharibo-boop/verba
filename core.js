@@ -1094,13 +1094,25 @@ function koreanOutputTasteBlock(settings = {}, scope = 'mixed') {
 
     if (!lines.length) return '';
 
-    return `KOREAN OUTPUT TASTE — USER MICRO-PREFERENCES
-- These rules fine-tune Korean expression only. They do NOT increase localization strength and do not override the selected localization level.
+    return `KOREAN-NATIVE CHARACTER TASTE — KOREAN OUTPUT
+- FINAL OUTPUT MUST REMAIN KOREAN.
+- This mode is for a Korean character whose source output happened to be generated in English: reconstruct the Korean so it feels as if the character had originally spoken/narrated naturally in Korean.
+- These rules fine-tune Korean-native expression only. They do NOT increase localization strength and do not override the selected localization level.
 - Preserve source meaning, facts, chronology, intensity, explicitness, consent, relationships, speaker attribution, and character voice.
+- Do not invent Korean cultural facts, hierarchy, kinship titles, slang, memes, or relationship information merely to make the character feel Korean.
 - Do not add information or rewrite merely to satisfy a preference.
 - If a preference conflicts with source fidelity or natural grammar, source fidelity wins.
 
 ${lines.join('\n\n')}`;
+}
+
+
+function outputCharacterTasteConflictNote(settings = {}) {
+    if (settings.koreanFlavorEnabled !== true || settings.englishFlavorEnabled !== true) return '';
+    return `CHARACTER TASTE OVERLAP NOTE
+- Both 한캐의 맛 and 영캐의 맛 are enabled.
+- Do not invent a hybrid nationality or cultural background.
+- Treat both only as surface-style preferences where they are compatible; when they conflict about Korean-native vs English-speaking character flavor, preserve the source and explicit character/user prompts rather than forcing either cultural style.`;
 }
 
 function translationTuningBlock(settings = {}, override = null) {
@@ -1110,6 +1122,8 @@ function translationTuningBlock(settings = {}, override = null) {
         : settings.relationTemperatureEnabled !== false;
     const endingPreferences = dialogueEndingPreferenceBlock(settings, requested);
     const koreanOutputTaste = koreanOutputTasteBlock(settings, 'mixed');
+    const englishCharacterTaste = englishCharacterKoreanTasteBlock(settings, 'mixed');
+    const characterTasteConflictNote = outputCharacterTasteConflictNote(settings);
 
     if (!relationTemperatureEnabled) {
         return `TRANSLATION FINE TUNING
@@ -1118,7 +1132,11 @@ RELATION TEMPERATURE / LOCALIZATION
 
 ${endingPreferences}
 
-${koreanOutputTaste}`;
+${koreanOutputTaste}
+
+${englishCharacterTaste}
+
+${characterTasteConflictNote}`;
     }
 
     const relationKey = Object.hasOwn(RELATION_TEMPERATURE_RULES, requested.relationTemperature)
@@ -1154,6 +1172,10 @@ ${LOCALIZATION_RULES[dialogueLocalizationKey]}
 ${endingPreferences}
 
 ${koreanOutputTaste}
+
+${englishCharacterTaste}
+
+${characterTasteConflictNote}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
@@ -1193,12 +1215,20 @@ function scopedTranslationTuningBlock(settings = {}, override = null, scope = 'n
 RELATION TEMPERATURE / LOCALIZATION
 (비활성화)
 
-${koreanOutputTasteBlock(settings, 'narration')}`;
+${koreanOutputTasteBlock(settings, 'narration')}
+
+${englishCharacterKoreanTasteBlock(settings, 'narration')}
+
+${outputCharacterTasteConflictNote(settings)}`;
         }
         return `TRANSLATION FINE TUNING — NARRATION ONLY
 ${LOCALIZATION_RULES[narrationLocalizationKey]}
 
 ${koreanOutputTasteBlock(settings, 'narration')}
+
+${englishCharacterKoreanTasteBlock(settings, 'narration')}
+
+${outputCharacterTasteConflictNote(settings)}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, chronology, tense, intensity, explicitness, point of view, and who does what to whom.
@@ -1224,6 +1254,10 @@ ${dialogueEndingPreferenceBlock(settings, requested)}`
 ${relationAndLocalization}${characterEndingPreferences}
 
 ${koreanOutputTasteBlock(settings, scope)}
+
+${englishCharacterKoreanTasteBlock(settings, scope)}
+
+${outputCharacterTasteConflictNote(settings)}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
@@ -1535,198 +1569,128 @@ SEXUAL LEXICAL FIDELITY — CONTEXT SENSITIVE
 - These examples demonstrate meaning and polarity only. Do not copy them mechanically when the surrounding wording or subject differs.`;
 }
 
-function koreanFlavorInputBridgeBlock(settings = {}) {
-    if (settings.koreanFlavorEnabled !== true) return '';
+function englishCharacterKoreanTasteBlock(settings = {}, scope = 'mixed') {
+    if (settings.englishFlavorEnabled !== true) return '';
 
-    const pronoun = {
-        default: '',
-        preserve: `KOREAN-SOURCE SUBJECT / PRONOUN READING — SOURCE-ALIGNED
-- Korean may omit subjects even when English usually states them. Recover only the referent clearly supported by the source/context.
-- Keep explicit Korean person references semantically visible in English when natural, but never invent a person or gender.`,
-        natural: `KOREAN-SOURCE SUBJECT / PRONOUN READING — NATURAL
-- Resolve omitted Korean subjects conservatively from the local sentence and dialogue context.
-- Add an English pronoun only when English grammar needs one and the referent is clear; otherwise recast naturally without guessing.`,
-        active: `KOREAN-SOURCE SUBJECT / PRONOUN READING — STRONG OMISSION AWARENESS
-- Expect Korean to omit repeated subjects aggressively. Reconstruct the minimum English subject/reference needed for clarity.
-- Never treat an omitted Korean subject as permission to guess identity, gender, speaker, owner, actor, or recipient.`,
-    }[settings.koreanFlavorPronounOmission] || '';
-
-    const notes = [
-        `KOREAN-SOURCE TASTE BRIDGE — INPUT TRANSLATION
-- "한출의 맛" also informs Korean→English input translation.
-- Use it primarily to understand the Korean source's pacing, omission, roughness, reaction words, and referent economy before producing English.
-- If "영출의 맛" is enabled, its English-target wording preferences override overlapping surface-style choices; source meaning and pragmatic force always override both.`,
-        pronoun,
-    ].filter(Boolean);
-
-    if (settings.koreanFlavorDialogueRhythm !== 'default') {
-        notes.push(`- Preserve the Korean source's intended dialogue pacing associated with the selected 한출 대사 호흡 (${settings.koreanFlavorDialogueRhythm}) when choosing English sentence breaks, unless 영출의 맛 specifies a different English rhythm.`);
-    }
-    if (settings.koreanFlavorProfanityTone !== 'default') {
-        notes.push(`- Read Korean profanity/roughness using the selected 한출 결 (${settings.koreanFlavorProfanityTone}) as a tone cue; preserve equivalent force in English. Do not intensify or sanitize it.`);
-    }
-    if (settings.koreanFlavorInterjectionTone !== 'default') {
-        notes.push(`- Read Korean interjections/reaction words using the selected 한출 감탄사 취향 (${settings.koreanFlavorInterjectionTone}) as a naturalness cue; translate only reactions actually present in the source.`);
-    }
-    if (settings.koreanFlavorMemeDensity && settings.koreanFlavorMemeDensity !== 'default') {
-        notes.push(`- The Korean source may intentionally use internet-native or meme-ish phrasing at the selected 한출 meme density (${settings.koreanFlavorMemeDensity}). Preserve the underlying joke/sarcasm/reaction only when it is genuinely present; do not literalize a Korean meme if an equivalent natural English expression exists.`);
-    }
-    if (settings.koreanFlavorReduceReferentRepetition !== false) {
-        notes.push(`- Treat repeated Korean names/titles/pronouns as eligible for natural English de-duplication only when the referent remains unmistakable; never merge or relabel people.`);
-    }
-
-    return notes.join('\n\n');
-}
-
-function englishOutputTasteBlock(settings = {}) {
-    const englishEnabled = settings.englishFlavorEnabled === true;
-    const koreanFallback = settings.koreanFlavorEnabled === true;
-
-    if (!englishEnabled && !koreanFallback) return '';
-
-    const rhythmKey = englishEnabled && settings.englishFlavorDialogueRhythm !== 'default'
-        ? settings.englishFlavorDialogueRhythm
-        : koreanFallback
-            ? settings.koreanFlavorDialogueRhythm
-            : 'default';
-
-    const profanityKey = englishEnabled && settings.englishFlavorProfanityTone !== 'default'
-        ? settings.englishFlavorProfanityTone
-        : koreanFallback
-            ? settings.koreanFlavorProfanityTone
-            : 'default';
-
-    const interjectionKey = englishEnabled && settings.englishFlavorInterjectionTone !== 'default'
-        ? settings.englishFlavorInterjectionTone
-        : koreanFallback
-            ? settings.koreanFlavorInterjectionTone
-            : 'default';
-
-    const reduceReferentRepetition = englishEnabled
-        ? settings.englishFlavorReduceReferentRepetition !== false
-        : koreanFallback && settings.koreanFlavorReduceReferentRepetition !== false;
-
+    const dialogue = scope === 'mixed' || scope === 'target_dialogue' || scope === 'other_dialogue';
     const lines = [];
 
-    const rhythm = {
-        default: '',
-        short: `DIALOGUE RHYTHM — SHORT / CLIPPED ENGLISH
-- For direct dialogue only, prefer compact English with short, punchy beats where the Korean source permits.
-- Split long Korean clause chains into natural shorter English utterances without changing sequence, emphasis, intent, or emotion.
-- Preserve deliberate pauses and abruptness from the source.`,
-        balanced: `DIALOGUE RHYTHM — NATURAL ENGLISH BALANCE
-- For direct dialogue only, use natural contemporary English conversational pacing rather than mirroring Korean clause boundaries.
-- Mix short and medium-length utterances according to emotion and sentence function.`,
-        smooth: `DIALOGUE RHYTHM — LONGER / SMOOTH ENGLISH
-- For direct dialogue only, prefer slightly longer, smoothly connected English utterances when the meaning naturally belongs together.
-- Preserve deliberate pauses, punch lines, abruptness, hesitation, and emphasis when they matter.`,
-    }[rhythmKey] || '';
-    if (rhythm) lines.push(rhythm);
+    if (dialogue) {
+        const rhythm = {
+            default: '',
+            short: `ENGLISH-CHARACTER DIALOGUE RHYTHM — SHORT / CLIPPED
+- The final output is Korean, but preserve the source character's short, punchy English-speaking cadence when the source supports it.
+- Use natural Korean sentence breaks without smoothing away deliberate clipped beats, interruptions, punch lines, or abrupt emphasis.`,
+            balanced: `ENGLISH-CHARACTER DIALOGUE RHYTHM — BALANCED
+- Keep the Korean fluent and readable while preserving the source character's English-speaking conversational pacing.
+- Do not mechanically mirror English syntax, but do not flatten distinctive English cadence into generic Korean dialogue either.`,
+            smooth: `ENGLISH-CHARACTER DIALOGUE RHYTHM — SMOOTH
+- Render the dialogue as smoothly connected Korean while preserving the source's English-speaking flow, turn structure, pauses, and emphasis.
+- Do not erase deliberate punch lines, hesitation, interruption, or abruptness merely to make the Korean elegant.`,
+        }[settings.englishFlavorDialogueRhythm] || '';
+        if (rhythm) lines.push(rhythm);
 
-    if (englishEnabled) {
+        const naturalization = {
+            default: '',
+            natural: `ENGLISH-SPEAKING CONVERSATION CHARACTER — NATURAL
+- Interpret the source first as natural English conversation: recover its actual speech act, idiom, understatement, sarcasm, teasing, directness, and conversational implication.
+- Then render that meaning naturally in Korean while preserving the sense that this is an English-speaking character, not a Korean-native character whose dialogue was originally written in Korean.
+- Do not invent foreignness, awkward translationese, or unnecessary English words.`,
+            active: `ENGLISH-SPEAKING CONVERSATION CHARACTER — ACTIVE
+- Actively preserve distinctive English-speaking conversational character when translating into Korean: directness, understatement, dry humor, teasing structure, idiomatic reactions, and pragmatic rhythm may remain perceptible when supported by the source.
+- Rebuild Korean syntax freely enough to stay readable, but do not domesticate the line into distinctly Korean-native social phrasing, age hierarchy, or relationship language that the source did not establish.
+- Never add jokes, flirting, hostility, intimacy, or cultural references that are absent from the source.`,
+        }[settings.englishFlavorConversationNaturalization] || '';
+        if (naturalization) lines.push(naturalization);
+
         const slang = {
             default: '',
-            low: `SLANG / COLLOQUIAL DENSITY — LOW
-- Prefer clear spoken English with little slang.
-- Contractions are allowed when natural, but avoid trendy, regional, meme-like, or community-specific expressions unless the source clearly calls for them.`,
-            natural: `SLANG / COLLOQUIAL DENSITY — NATURAL
-- Use contractions, phrasal verbs, conversational idioms, and ordinary colloquial English when they are the natural equivalent of the Korean source.
-- Do not add extra attitude, humor, profanity, or social identity that is absent from the source.`,
-            active: `SLANG / COLLOQUIAL DENSITY — ACTIVE
-- Prefer lively native conversational English, including contractions and idiomatic colloquial phrasing when the same intent and intensity are preserved.
-- Do not invent slang merely for flavor, and avoid dialect- or community-specific language unless clearly supported by the source.`,
+            low: `ENGLISH SLANG / COLLOQUIAL REGISTER — LOW
+- Preserve the meaning and attitude of source slang, but translate it into relatively plain natural Korean.
+- Keep slang light and avoid niche Korean internet replacements.`,
+            natural: `ENGLISH SLANG / COLLOQUIAL REGISTER — NATURAL
+- Preserve ordinary English slang, contractions, phrasal-verb attitude, and colloquial register through natural Korean equivalents with the same social force.
+- Do not automatically replace English slang with unrelated Korean-native memes or community jargon.`,
+            active: `ENGLISH SLANG / COLLOQUIAL REGISTER — ACTIVE
+- Strongly preserve the source's English colloquial/slang identity in Korean when context supports it.
+- Prefer Korean wording that carries the same casual, irreverent, playful, or street-level force; a broadly recognizable English-derived expression may be retained/transliterated only when it sounds natural for the character and scene.
+- Do not invent slang that is absent from the source.`,
         }[settings.englishFlavorSlangDensity] || '';
         if (slang) lines.push(slang);
     }
 
     const profanity = {
         default: '',
-        dry: `PROFANITY / ROUGH LANGUAGE — DRY ENGLISH
-- Preserve the Korean source's exact profanity intensity, hostility, vulgarity, and target.
-- Within that same intensity, prefer terse, dry English roughness over elaborate or flashy swearing.`,
-        blunt: `PROFANITY / ROUGH LANGUAGE — BLUNT ENGLISH
-- Preserve exact force and target, but prefer direct, contemporary, blunt English rather than euphemistic or literary wording.
-- Never make the line more obscene or aggressive than the source.`,
-        everyday: `PROFANITY / ROUGH LANGUAGE — EVERYDAY SPOKEN ENGLISH
-- Preserve exact profanity intensity and aggression.
-- Prefer ordinary profanity a native English speaker would naturally use in everyday heated speech rather than literal Korean word substitution.
-- Do not escalate, sanitize, or add profanity.`,
-        lowSlang: `PROFANITY / ROUGH LANGUAGE — LOW INTERNET / MEME SLANG
-- Preserve exact profanity intensity and aggression while avoiding meme-like, internet-heavy, or niche community phrasing.
-- Prefer ordinary spoken English roughness.`,
-        restrained: `PROFANITY / ROUGH LANGUAGE — RESTRAINED WORDING
-- Preserve the source's hostility, vulgar force, and target while minimizing decorative or unnecessary profanity.
-- If the Korean source explicitly swears, keep equivalent force; do not soften it into politeness.`,
-    }[profanityKey] || '';
+        dry: `ENGLISH-CHARACTER PROFANITY — DRY
+- Preserve the exact profanity intensity, hostility, vulgarity, and target from the English source.
+- In Korean, favor terse, dry roughness that keeps the source character's English-speaking bite rather than expanding it into colorful Korean-native swearing.`,
+        blunt: `ENGLISH-CHARACTER PROFANITY — BLUNT
+- Preserve exact force and target.
+- Use direct contemporary Korean that reflects the source character's blunt English profanity without making it harsher, more obscene, or more relationship-specific than the source.`,
+        everyday: `ENGLISH-CHARACTER PROFANITY — EVERYDAY ENGLISH-SPEAKING FEEL
+- Preserve the source's everyday English profanity feel in Korean: casual swearing should feel casual, not ceremonially harsh or unusually dramatic.
+- Keep equivalent intensity and never add or sanitize profanity.`,
+        lowSlang: `ENGLISH-CHARACTER PROFANITY — LOW MEME / INTERNET SLANG
+- Preserve profanity strength and aggression while avoiding unrelated Korean meme slang or niche community replacements.
+- Prefer straightforward Korean that still carries the original English-speaking character's tone.`,
+        restrained: `ENGLISH-CHARACTER PROFANITY — RESTRAINED
+- Preserve the source's hostility and vulgar force while minimizing decorative Korean slang.
+- Explicit profanity must still retain equivalent force; do not soften it into politeness.`,
+    }[settings.englishFlavorProfanityTone] || '';
     if (profanity) lines.push(profanity);
 
-    const interjection = {
+    if (dialogue) {
+        const interjection = {
+            default: '',
+            natural: `ENGLISH-CHARACTER INTERJECTIONS — NATURAL
+- When the source contains an English interjection, reaction, or filler, translate the actual emotional/pragmatic function into natural Korean while preserving its English-speaking character flavor.
+- Do not mechanically replace every "oh", "ugh", "Jesus", "damn", "God", etc. with the same Korean word.
+- A recognizable English-derived reaction may remain/transliterate only when it is natural for the character and context.`,
+            restrained: `ENGLISH-CHARACTER INTERJECTIONS — RESTRAINED
+- Preserve source reactions but keep the Korean relatively understated when the source intensity allows.
+- Do not add extra Korean fillers or exclamations merely to make the line feel more Korean.`,
+            lively: `ENGLISH-CHARACTER INTERJECTIONS — LIVELY
+- Preserve vivid English-speaking reaction energy in Korean when the source actually contains it.
+- Keep the reaction character-specific and contemporary without inventing extra emotion or unrelated Korean catchphrases.`,
+        }[settings.englishFlavorInterjectionTone] || '';
+        if (interjection) lines.push(interjection);
+    }
+
+    const meme = {
         default: '',
-        natural: `INTERJECTIONS / REACTION WORDS — NATURAL ENGLISH
-- When the Korean source actually contains an interjection, reaction sound, or discourse filler, use the natural English equivalent for that exact emotion and context.
-- Do not map Korean sounds word-for-word when a native English reaction would differ.
-- Never invent a reaction word where the source has none.`,
-        restrained: `INTERJECTIONS / REACTION WORDS — RESTRAINED ENGLISH
-- Preserve source reactions but render them in relatively understated English when intensity allows.
-- Avoid adding repeated exclamations or fillers that are absent from the source.`,
-        lively: `INTERJECTIONS / REACTION WORDS — LIVELY ENGLISH
-- When the source actually contains a reaction/interjection, prefer a vivid contemporary English equivalent with the same emotion and intensity.
-- Keep it natural rather than theatrical; never add new reactions.`,
-    }[interjectionKey] || '';
-    if (interjection) lines.push(interjection);
+        light: `ENGLISH INTERNET / MEME FLAVOR — LIGHT
+- When the English source clearly has online-native or meme-adjacent tone, preserve a light trace of that internet culture in Korean.
+- Do not replace it with an unrelated Korean meme just because a Korean meme sounds funny.`,
+        natural: `ENGLISH INTERNET / MEME FLAVOR — NATURAL
+- Preserve broadly recognizable English-internet humor, reaction structure, meme cadence, or online irony in natural Korean when it is genuinely present in the source.
+- Translate the meme's function and tone rather than blindly substituting a Korean-native meme.
+- Keep cultural references that matter to the joke instead of domesticating them away.`,
+        active: `ENGLISH INTERNET / MEME FLAVOR — ACTIVE
+- Actively preserve English-internet/meme character in Korean when the source itself supports it.
+- You may use bold Korean restructuring, selective transliteration, or a close Korean online equivalent when that best preserves the SAME joke/reaction/irony.
+- Never inject an unrelated Korean meme, new punch line, new insult, or new cultural reference.`,
+    }[settings.englishFlavorMemeDensity] || '';
+    if (meme) lines.push(meme);
 
-    if (englishEnabled) {
-        const meme = {
-            default: '',
-            light: `INTERNET MEME FLAVOR — LIGHT ENGLISH
-- When the Korean source tone naturally supports it, lightly favor familiar internet-native English phrasing or meme-adjacent cadence over stiff literal wording.
-- Keep it occasional and subtle; do not turn ordinary dialogue into a joke.`,
-            natural: `INTERNET MEME FLAVOR — NATURAL ENGLISH
-- When context clearly supports playful, sarcastic, exasperated, teasing, or online-native speech, use broadly understandable contemporary internet-style English or meme-ish phrasing that preserves the same intent and intensity.
-- Prefer common online language over obscure fandom/community references.
-- Do not inject random catchphrases, unrelated jokes, or dated memes.`,
-            active: `INTERNET MEME FLAVOR — ACTIVE ENGLISH
-- Actively favor lively internet-native/meme-ish English when it conveys the SAME speech act, emotion, relationship, and intensity as the Korean source.
-- You may restructure wording more boldly to sound naturally online, but never invent a joke, insult, flirtation, emotion, event, or implication absent from the source.
-- Avoid niche subculture jargon unless the source itself clearly belongs to that register.
-- If meme phrasing would distort meaning or character voice, do not use it.`,
-        }[settings.englishFlavorMemeDensity] || '';
-        if (meme) lines.push(meme);
-    }
-
-    if (reduceReferentRepetition) {
-        lines.push(`REFERENT REPETITION — REDUCE WHEN SAFE IN ENGLISH
-- Reduce conspicuous repetition of the same name, title, or person reference when normal English would naturally use a pronoun or restructure the sentence.
-- Do this only when the referent is unmistakable.
-- With multiple people, ambiguous gender, or shifting speakers, keep explicit names/references rather than risk a wrong pronoun.`);
-    }
-
-    if (englishEnabled) {
-        const naturalization = {
-            default: '',
-            natural: `ENGLISH-SPEAKING CONVERSATION NATURALIZATION — NATURAL
-- For direct dialogue, prefer what a native English speaker would naturally say for the same speech act, emotion, relationship, and intensity instead of mechanically translating Korean wording.
-- Use idiomatic English only when pragmatic meaning is clearly equivalent.
-- Preserve warning vs permission, refusal vs consent, sarcasm, command strength, and emotional force exactly.`,
-            active: `ENGLISH-SPEAKING CONVERSATION NATURALIZATION — ACTIVE
-- For direct dialogue, actively replace Korean-specific literal phrasing with natural idiomatic English when the same speech act, implication, emotion, and intensity are unambiguous.
-- Rebuild syntax freely enough to sound native, but never add jokes, insults, flirting, emphasis, slang, or attitude not supported by the source.
-- If there is any doubt that an idiom preserves the exact pragmatic force, choose the more literal accurate wording.`,
-        }[settings.englishFlavorConversationNaturalization] || '';
-        if (naturalization) lines.push(naturalization);
+    if (settings.englishFlavorReduceReferentRepetition !== false) {
+        lines.push(`ENGLISH-CHARACTER REFERENT BALANCE
+- Make repeated English names/pronouns readable in Korean, but do not erase explicit subject or "I/you" contrast when it contributes to the English-speaking character's emphasis, confrontation, or conversational rhythm.
+- Reduce repetition only when the referent stays unmistakable and no stylistic contrast is lost.`);
     }
 
     if (!lines.length) return '';
 
-    return `ENGLISH OUTPUT TASTE — USER MICRO-PREFERENCES
-- These rules affect Korean→English input translation only.
-- They fine-tune English expression; they never override source fidelity.
-- Preserve meaning, intent, facts, actions, speaker attribution, relationship, chronology, tense, explicitness, consent, negation, warning/permission polarity, and emotional intensity.
-- Never add content just to sound more native.
-- When 영출의 맛 is enabled, its English-target choices take priority over overlapping 한출 fallback preferences.
+    return `ENGLISH-SPEAKING CHARACTER TASTE — KOREAN OUTPUT
+- FINAL OUTPUT MUST REMAIN KOREAN.
+- This mode is for translating an English-speaking character's English output into Korean while preserving that character's English-speaking conversational identity.
+- Keep the Korean natural and readable; do NOT intentionally create awkward "foreigner Korean" or translationese.
+- Preserve source meaning, facts, chronology, tense, explicitness, consent, negation, emotional intensity, relationships, speaker attribution, and who does what to whom.
+- Do not invent nationality, cultural background, slang, memes, honorifics, kinship titles, jokes, or personality traits.
+- If a style preference conflicts with source fidelity, character-specific user prompts, or established relationship facts, source fidelity and explicit user rules win.
 
 ${lines.join('\n\n')}`;
 }
+
 
 export function buildInputPrompt(source, settings, targetGender = 'unknown') {
     targetGender = String(targetGender || 'unknown').toLocaleLowerCase();
@@ -1759,9 +1723,6 @@ ${koreanPragmaticWarningBlock(source)}
 
 ${koreanSexualLexicalFidelityBlock(source)}
 
-${koreanFlavorInputBridgeBlock(settings)}
-
-${englishOutputTasteBlock(settings)}
 
 ${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', settings.globalPrompt)}
 

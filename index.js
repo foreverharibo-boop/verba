@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.4';
+const EXTENSION_VERSION = '0.4.6';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7433,13 +7433,13 @@ function injectSettingsPanel() {
 
 
                 <details id="verba-korean-flavor" class="verba-tool-details verba-korean-flavor">
-                        <summary>🍚 한출의 맛 <small>한국어 말맛 커스텀</small></summary>
+                        <summary>🍚 한캐의 맛 <small>한국어 말맛 커스텀</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-korean-flavor-enabled" ${settings.koreanFlavorEnabled ? 'checked' : ''}>
-                                <span>한출의 맛 사용</span>
+                                <span>한캐의 맛 사용</span>
                             </label>
-                            <div class="verba-help">네이티브 한국어의 전체 현지화 강도와는 별개로 한국어 말맛을 미세 조정합니다. 아웃풋 E→K에 직접 적용되고, 인풋 K→E에서도 한국어 원문의 호흡·생략·욕설·감탄사·지칭 감각을 해석하는 기본 취향으로 반영합니다. 영출의 맛이 켜져 있으면 겹치는 영어 표현 취향은 영출의 맛이 우선합니다. 별도 API 호출은 없습니다.</div>
+                            <div class="verba-help">영어로 생성된 한국인 캐릭터의 아웃풋을 한국어로 번역할 때, 마치 처음부터 자연스러운 한국어로 출력된 것처럼 말맛을 복원합니다. 대사 호흡·주어 생략·욕설·감탄사·인터넷 말투 등을 한국인 캐릭터답게 조절합니다. 아웃풋 E→K에만 적용되며 인풋에는 적용되지 않습니다.</div>
 
                             <div id="verba-korean-flavor-controls" class="${settings.koreanFlavorEnabled ? '' : 'verba-control-disabled'}">
                                 <label for="verba-korean-flavor-rhythm">대사 호흡 취향</label>
@@ -7498,13 +7498,13 @@ function injectSettingsPanel() {
                     </details>
 
                 <details id="verba-english-flavor" class="verba-tool-details verba-english-flavor">
-                        <summary>🗽 영출의 맛 <small>영어 말맛 커스텀</small></summary>
+                        <summary>🗽 영캐의 맛 <small>영어 말맛 커스텀</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-english-flavor-enabled" ${settings.englishFlavorEnabled ? 'checked' : ''}>
-                                <span>영출의 맛 사용</span>
+                                <span>영캐의 맛 사용</span>
                             </label>
-                            <div class="verba-help">한국어 → 영어 인풋 번역의 영어 말맛을 미세 조정합니다. 의미·감정 강도·화자·행동·동의/거절 같은 원문 정보는 바꾸지 않고 영어식 호흡과 구어 표현만 조절합니다. 별도 API 호출은 없습니다.</div>
+                            <div class="verba-help">영어권 캐릭터의 영어 아웃풋을 한국어로 번역할 때, 자연스러운 한국어를 유지하면서도 영어권 특유의 대사 호흡·슬랭·욕설·감탄사·인터넷 말투와 캐릭터성을 납작하게 지우지 않도록 살립니다. 아웃풋 E→K에만 적용되며 인풋에는 적용되지 않습니다.</div>
 
                             <div id="verba-english-flavor-controls" class="${settings.englishFlavorEnabled ? '' : 'verba-control-disabled'}">
                                 <label for="verba-english-flavor-rhythm">대사 호흡 취향</label>
@@ -7514,7 +7514,7 @@ function injectSettingsPanel() {
                                     <option value="balanced" ${settings.englishFlavorDialogueRhythm === 'balanced' ? 'selected' : ''}>자연스러운 보통</option>
                                     <option value="smooth" ${settings.englishFlavorDialogueRhythm === 'smooth' ? 'selected' : ''}>길고 매끄럽게</option>
                                 </select>
-                                <div class="verba-help">직접 대사에서 영어식 문장 끊기와 이어짐을 조절합니다. 의도적인 멈춤·강조·급한 호흡은 원문을 우선합니다.</div>
+                                <div class="verba-help">영어 원문의 대사 호흡을 한국어에서 얼마나 또렷하게 살릴지 조절합니다. 한국어 문장은 자연스럽게 만들되, 영어권 캐릭터 특유의 끊김·이어짐·강조 리듬을 필요 이상으로 한국식으로 평준화하지 않습니다.</div>
 
                                 <label for="verba-english-flavor-conversation">영어권 회화 자연화</label>
                                 <select id="verba-english-flavor-conversation" class="text_pole">
@@ -7522,7 +7522,7 @@ function injectSettingsPanel() {
                                     <option value="natural" ${settings.englishFlavorConversationNaturalization === 'natural' ? 'selected' : ''}>자연스럽게</option>
                                     <option value="active" ${settings.englishFlavorConversationNaturalization === 'active' ? 'selected' : ''}>적극적으로</option>
                                 </select>
-                                <div class="verba-help">한국어 표현을 직역하지 않고 발화 의도·감정·강도가 정확히 같을 때만 실제 영어권 회화에서 쓰는 자연스러운 표현으로 옮깁니다.</div>
+                                <div class="verba-help">영어 원문을 먼저 실제 영어권 회화의 발화 의도와 관용 표현으로 이해한 뒤 한국어로 옮깁니다. 자연스럽게 번역하되 영어권 캐릭터의 직설성·농담 방식·반응 감각을 한국인 캐릭터 말투처럼 바꿔버리지 않습니다.</div>
 
                                 <label for="verba-english-flavor-slang">슬랭·구어체 농도</label>
                                 <select id="verba-english-flavor-slang" class="text_pole">
@@ -7531,9 +7531,9 @@ function injectSettingsPanel() {
                                     <option value="natural" ${settings.englishFlavorSlangDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
                                     <option value="active" ${settings.englishFlavorSlangDensity === 'active' ? 'selected' : ''}>적극적으로</option>
                                 </select>
-                                <div class="verba-help">원문 말투가 허용하는 범위에서 실제 영어 회화의 구어 표현·축약·idiom을 얼마나 적극적으로 쓸지 정합니다. 없는 감정이나 욕설은 추가하지 않습니다.</div>
+                                <div class="verba-help">영어 원문의 slang·colloquial register를 한국어 번역에서 얼마나 적극적으로 살릴지 정합니다. 한국식 유행어로 무조건 치환하지 않고 원래 캐릭터의 영어권 말투 결을 우선합니다.</div>
 
-                                <label for="verba-english-flavor-profanity">욕설·거친 표현의 영문 결</label>
+                                <label for="verba-english-flavor-profanity">영어권 욕설·거친 표현의 결</label>
                                 <select id="verba-english-flavor-profanity" class="text_pole">
                                     <option value="default" ${settings.englishFlavorProfanityTone === 'default' ? 'selected' : ''}>기본 · 원문 결 유지</option>
                                     <option value="dry" ${settings.englishFlavorProfanityTone === 'dry' ? 'selected' : ''}>건조하게</option>
@@ -7542,7 +7542,7 @@ function injectSettingsPanel() {
                                     <option value="lowSlang" ${settings.englishFlavorProfanityTone === 'lowSlang' ? 'selected' : ''}>인터넷·밈식 표현 적게</option>
                                     <option value="restrained" ${settings.englishFlavorProfanityTone === 'restrained' ? 'selected' : ''}>비속어는 최소화</option>
                                 </select>
-                                <div class="verba-help">원문의 욕설 강도·공격성·대상은 고정하고, 같은 강도 안에서 영어 욕설의 결만 조절합니다.</div>
+                                <div class="verba-help">영어 원문의 욕설 강도·공격성·대상은 고정하고, 한국어로 옮겨도 영어권 캐릭터 특유의 건조함·직설성·일상적인 욕설 결이 살아 있도록 조절합니다.</div>
 
                                 <label for="verba-english-flavor-interjection">감탄사·추임새 취향</label>
                                 <select id="verba-english-flavor-interjection" class="text_pole">
@@ -7551,7 +7551,7 @@ function injectSettingsPanel() {
                                     <option value="restrained" ${settings.englishFlavorInterjectionTone === 'restrained' ? 'selected' : ''}>담백하게</option>
                                     <option value="lively" ${settings.englishFlavorInterjectionTone === 'lively' ? 'selected' : ''}>생동감 있게</option>
                                 </select>
-                                <div class="verba-help">원문에 실제 감탄사·추임새가 있을 때만 영어권 화자가 자연스럽게 쓸 반응으로 옮기며 새 반응을 임의로 추가하지 않습니다.</div>
+                                <div class="verba-help">원문에 실제 영어권 감탄사·추임새가 있을 때만 그 반응의 문화적·캐릭터적 결을 살려 한국어로 옮깁니다. 새 감탄사나 감정은 임의로 추가하지 않습니다.</div>
 
                                 <label for="verba-english-flavor-meme">인터넷 밈 농도</label>
                                 <select id="verba-english-flavor-meme" class="text_pole">
@@ -7560,13 +7560,13 @@ function injectSettingsPanel() {
                                     <option value="natural" ${settings.englishFlavorMemeDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
                                     <option value="active" ${settings.englishFlavorMemeDensity === 'active' ? 'selected' : ''}>적극적으로</option>
                                 </select>
-                                <div class="verba-help">문맥이 허용할 때 영어권 인터넷식 밈·온라인 반응체·meme-ish phrasing을 섞습니다. 원문의 의미·감정 강도·관계·발화 의도는 그대로 유지합니다.</div>
+                                <div class="verba-help">영어 원문에 온라인·밈 감각이 있을 때 영어권 인터넷 문화의 결을 살려 한국어로 옮깁니다. 관련 없는 한국 밈으로 갈아끼우지 않으며 원문의 의미·감정 강도·관계·발화 의도는 그대로 유지합니다.</div>
 
                                 <label class="verba-check-row">
                                     <input type="checkbox" id="verba-english-flavor-referent-repeat" ${settings.englishFlavorReduceReferentRepetition ? 'checked' : ''}>
                                     <span>지칭 반복 줄이기</span>
                                 </label>
-                                <div class="verba-help">이름·he/she 같은 지칭이 영어에서 부자연스럽게 반복되면 대상이 확실할 때만 자연스럽게 정리합니다. 여러 인물이 있거나 오해 가능성이 있으면 지칭을 유지합니다.</div>
+                                <div class="verba-help">영어 원문의 이름·he/she·you 같은 지칭을 한국어에서 읽기 자연스럽게 정리하되, 영어권 캐릭터의 명시적인 주어·대조가 말맛에 필요한 경우에는 함부로 지우지 않습니다.</div>
 
                             </div>
                         </div>

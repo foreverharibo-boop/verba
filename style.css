@@ -1917,3 +1917,15 @@
     -webkit-tap-highlight-color: transparent !important;
     cursor: default !important;
 }
+
+
+/* v0.3.93: hidden developer gesture uses document-level hit detection */
+.verba-developer-tap-target {
+    display: inline-block !important;
+    padding: 5px 8px !important;
+    margin: -5px -8px !important;
+    touch-action: manipulation !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+}

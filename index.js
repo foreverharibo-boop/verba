@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.92';
+const EXTENSION_VERSION = '0.3.93';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7184,18 +7184,10 @@ function requestDeveloperPassword() {
 }
 
 async function handleDeveloperTap(event) {
-    // Dedicated hidden gesture on the literal "베르바" title.
-    // Stop propagation so the drawer does not open/close seven times while
-    // the user is trying to unlock developer mode.
     if (event?.pointerType === 'mouse' && event.button !== 0) return;
-
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    event?.stopImmediatePropagation?.();
 
     clearTimeout(developerTapResetTimer);
     developerTapCount += 1;
-
     console.debug(`[베르바] 개발자 모드 제목 탭 ${developerTapCount}/7`);
 
     developerTapResetTimer = setTimeout(() => {
@@ -7214,6 +7206,12 @@ async function handleDeveloperTap(event) {
         return;
     }
 
+    // Only stop the 7th event. The first 6 taps may still toggle the drawer,
+    // but the header remains present and the hidden gesture keeps counting.
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
+
     const unlocked = await requestDeveloperPassword();
     if (!unlocked) return;
 
@@ -7222,6 +7220,57 @@ async function handleDeveloperTap(event) {
     refreshSettingsPanelForDeveloperMode();
     notify('개발자 모드를 활성화했어요.', 'success');
 }
+
+function isDeveloperHeaderTap(event) {
+    const target = event?.target;
+    if (!(target instanceof Element)) return false;
+
+    const header = target.closest('#verba-settings .verba-drawer-header');
+    if (!header) return false;
+
+    // Treat the visible "베르바" title area as the gesture target even if the
+    // theme inserts wrappers/overlays and the original <b> does not receive
+    // the pointer event directly.
+    const title = header.querySelector('.verba-developer-tap-target, b');
+    if (!title) return false;
+
+    const rect = title.getBoundingClientRect();
+    const x = Number(event.clientX);
+    const y = Number(event.clientY);
+
+    if (Number.isFinite(x) && Number.isFinite(y) && rect.width > 0 && rect.height > 0) {
+        const padX = 26;
+        const padY = 12;
+        return (
+            x >= rect.left - padX
+            && x <= rect.right + padX
+            && y >= rect.top - padY
+            && y <= rect.bottom + padY
+        );
+    }
+
+    return Boolean(target.closest('.verba-developer-tap-target, #verba-settings .verba-drawer-header > div:first-child'));
+}
+
+function setupDeveloperModeGesture() {
+    if (globalThis.__verbaDeveloperGestureInstalled) return;
+    globalThis.__verbaDeveloperGestureInstalled = true;
+
+    const listener = event => {
+        if (!isDeveloperHeaderTap(event)) return;
+        handleDeveloperTap(event);
+    };
+
+    // Delegated document-level capture survives SillyTavern/theme DOM rebuilds.
+    if ('PointerEvent' in globalThis) {
+        document.addEventListener('pointerdown', listener, true);
+    } else if ('ontouchstart' in globalThis) {
+        document.addEventListener('touchstart', listener, { capture: true, passive: false });
+    } else {
+        document.addEventListener('mousedown', listener, true);
+    }
+}
+
 function enabledQualityAuditChecks() {
     const checks = [];
     if (settings.qualityAuditMeaning !== false) checks.push('meaning');
@@ -7477,26 +7526,6 @@ function injectSettingsPanel() {
     renderTranslationRuleOrder();
     renderPromptConflictInspector();
     renderQualityAuditStatus();
-
-    const developerTapTarget = panel.querySelector('.verba-developer-tap-target');
-    if (developerTapTarget) {
-        const stopDeveloperTitleClick = event => {
-            event.preventDefault();
-            event.stopPropagation();
-            event.stopImmediatePropagation?.();
-        };
-
-        if ('PointerEvent' in globalThis) {
-            developerTapTarget.addEventListener('pointerdown', handleDeveloperTap, { capture: true });
-            developerTapTarget.addEventListener('click', stopDeveloperTitleClick, { capture: true });
-        } else if ('ontouchstart' in globalThis) {
-            developerTapTarget.addEventListener('touchstart', handleDeveloperTap, { capture: true, passive: false });
-            developerTapTarget.addEventListener('click', stopDeveloperTitleClick, { capture: true });
-        } else {
-            developerTapTarget.addEventListener('mousedown', handleDeveloperTap, { capture: true });
-            developerTapTarget.addEventListener('click', stopDeveloperTitleClick, { capture: true });
-        }
-    }
 
     if (settings.developerMode) {
         const qualityMaster = panel.querySelector('#verba-quality-audit-enabled');
@@ -8269,6 +8298,7 @@ function initialize() {
     setupAutoInput();
     setupMessageCopyHold();
     setupSelection();
+    setupDeveloperModeGesture();
     setupEvents();
     setupObserver();
     setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 300);

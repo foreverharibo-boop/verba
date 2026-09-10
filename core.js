@@ -775,6 +775,19 @@ export function findTranslationPromptConflicts({
         for (let rightIndex = leftIndex + 1; rightIndex < sources.length; rightIndex += 1) {
             const leftSource = sources[leftIndex];
             const rightSource = sources[rightIndex];
+
+            const isolatedDialoguePair = new Set([leftSource.key, rightSource.key]);
+            if (
+                isolatedDialoguePair.has('characterDialogue')
+                && isolatedDialoguePair.has('allDialogue')
+                && String(settings.dialoguePrompt || '').trim()
+            ) {
+                // These two prompts are mutually exclusive at request time:
+                // character dialogue gets characterDialogue, while USER/NPC/other
+                // dialogue gets allDialogue. They cannot conflict in one request.
+                continue;
+            }
+
             const winner = priorityOf(leftSource.key) <= priorityOf(rightSource.key) ? leftSource : rightSource;
             for (const rule of TRANSLATION_PROMPT_CONFLICT_RULES) {
                 const leftLeftMatch = promptDirectiveMatch(leftSource.text, rule.left);
@@ -1079,9 +1092,17 @@ function scopedTranslationRuleBlocks(settings = {}, {
 } = {}) {
     const dialogue = scope === 'target_dialogue' || scope === 'other_dialogue';
     const targetDialogue = scope === 'target_dialogue';
+    const hasCharacterDialoguePrompt = Boolean(String(settings.dialoguePrompt || '').trim());
     const available = new Set(['oneTime', 'global', 'fineTuning']);
-    if (dialogue) available.add('allDialogue');
-    if (targetDialogue) available.add('characterDialogue');
+
+    if (dialogue) {
+        // USER/NPC/OTHER dialogue always uses the shared dialogue prompt.
+        // TARGET dialogue uses it only as a fallback when no character-specific
+        // prompt exists. This keeps character voice fully isolated from NPC/user
+        // dialogue-style instructions.
+        if (!targetDialogue || !hasCharacterDialoguePrompt) available.add('allDialogue');
+    }
+    if (targetDialogue && hasCharacterDialoguePrompt) available.add('characterDialogue');
 
     const blocks = {
         oneTime: `ONE-TIME REQUEST
@@ -1120,6 +1141,8 @@ function scopedOutputRules(settings, oneTimeInstruction = '', nameTokens = [], t
 HARD PROMPT ISOLATION
 - CURRENT REQUEST SCOPE: ${scopeLabel}.
 - Prompts for other scopes are intentionally NOT present in this request.
+- When a TARGET-CHARACTER DIALOGUE PROMPT exists, the ALL-DIALOGUE PROMPT is intentionally excluded from target-character dialogue.
+- The ALL-DIALOGUE PROMPT may act as the target-character fallback only when no TARGET-CHARACTER DIALOGUE PROMPT is configured.
 - Never infer, recreate, borrow, or imitate an omitted prompt.
 - Translate only the supplied TRANSLATION TARGETS. SOURCE CONTEXT is reference data only.
 

@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.73';
+const EXTENSION_VERSION = '0.3.74';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -6368,12 +6368,12 @@ function injectSettingsPanel() {
                 <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
 
                 <label for="verba-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
-                <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="캐릭터·유저·NPC의 모든 대사에 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
-                <div class="verba-help">모든 화자의 직접 대사에 적용해요. 대사 한영병기 같은 공통 형식은 여기에 입력하세요.</div>
+                <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="유저·NPC 대사에 공통 적용할 형식·말투 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
+                <div class="verba-help">유저·NPC·기타 화자의 직접 대사에 적용해요. 캐릭터 전용 프롬프트가 비어 있을 때만 현재 캐릭터 대사에도 적용됩니다.</div>
 
                 <label for="verba-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
                 <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
-                <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 추가 적용해요. 캐릭터 고유 말투는 여기에 입력하세요.</div>
+                <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 적용해요. 이 칸에 내용이 있으면 해당 캐릭터 대사에는 ‘모든 대사 공통 프롬프트’를 함께 보내지 않습니다.</div>
 
                 <label for="verba-banned-words">번역 금지어</label>
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>

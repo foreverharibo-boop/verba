@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.47';
+const EXTENSION_VERSION = '0.3.48';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3063,11 +3063,19 @@ function mappedOccurrenceRange(storedComparable, selectedComparable, beforeCompa
 function resolveStoredSelection(storedValue, visibleSelected, visibleBefore) {
     const stored = String(storedValue || '');
     const exactIndexes = occurrenceIndexes(stored, visibleSelected);
-    if (exactIndexes.length === 1) {
-        return {
-            start: exactIndexes[0],
-            end: exactIndexes[0] + visibleSelected.length,
-        };
+    if (exactIndexes.length) {
+        // Short Korean selections often repeat inside one message. Resolve the
+        // exact occurrence by counting the same text before the visible range
+        // instead of rejecting anything except a unique match.
+        const ordinal = occurrenceIndexes(String(visibleBefore || ''), visibleSelected).length;
+        const exactStart = exactIndexes[ordinal]
+            ?? (exactIndexes.length === 1 ? exactIndexes[0] : exactIndexes.at(-1));
+        if (Number.isInteger(exactStart)) {
+            return {
+                start: exactStart,
+                end: exactStart + visibleSelected.length,
+            };
+        }
     }
 
     const storedComparable = comparableTextWithMap(stored);
@@ -3082,7 +3090,9 @@ function resolveStoredSelection(storedValue, visibleSelected, visibleBefore) {
     const storedLoose = looseComparableTextWithMap(stored);
     const selectedLoose = looseComparableTextWithMap(visibleSelected);
     const beforeLoose = looseComparableTextWithMap(visibleBefore);
-    if (selectedLoose.text.length < 2) return null;
+    // Even a single Hangul syllable can be a deliberate selection. The exact
+    // and occurrence-aware mapping above already guards against random matches.
+    if (!selectedLoose.text.length) return null;
     return mappedOccurrenceRange(storedLoose, selectedLoose, beforeLoose);
 }
 
@@ -3745,8 +3755,18 @@ function touchSelectionRecentlyActive() {
 
 function scheduleSelectionCapture(delay = 80, { hideOnFailure = true, preserved = null } = {}) {
     clearTimeout(selectionTimer);
+
+    // Capture a fully resolved snapshot NOW, while mobile browsers still expose
+    // the tiny selected range. Samsung/Chromium can collapse a 1–2 character
+    // selection while its native selection toolbar is settling during the 2 s
+    // quiet period; a cloned DOM Range alone is not always enough afterwards.
+    const preservedSnapshot = preserved ? resolveSelection(preserved) : null;
+
     selectionTimer = setTimeout(() => {
-        const snapshot = resolveSelection() || (preserved ? resolveSelection(preserved) : null);
+        const liveSnapshot = resolveSelection();
+        const snapshot = liveSnapshot
+            || (preservedSnapshot && selectionStillCurrent(preservedSnapshot) ? preservedSnapshot : null)
+            || (preserved ? resolveSelection(preserved) : null);
         if (snapshot) {
             showSelectionButton(snapshot);
         }

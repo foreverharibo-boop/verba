@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.32';
+const EXTENSION_VERSION = '0.3.33';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -682,7 +682,7 @@ function renderProfileStats() {
         return `<div class="verba-stat-row">
             <b>${slot}</b>
             <span title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-            <small>요청 ${stat.requests} · 평균 ${outputAverageLabel} · 성공 ${successRate}% · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
+            <small>요청 ${stat.requests} · 성공 ${successRate}% · 평균 ${outputAverageLabel} · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
         </div>`;
     }).join('');
 }

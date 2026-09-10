@@ -29,12 +29,11 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.42';
+const EXTENSION_VERSION = '0.3.45';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
 const CHARACTER_FIELD_KEY = 'verba';
-const DEVELOPER_PASSWORD_HASH = '39fc1a167edd36664f4d0fdf869c6ec8d9681018ffff05ba2dc30fb9dce81e4b';
 const RELATION_TEMPERATURE_OPTIONS = [
     { value: 'cold', label: '차가움' },
     { value: 'distant', label: '거리감' },
@@ -44,8 +43,10 @@ const RELATION_TEMPERATURE_OPTIONS = [
 ];
 const LOCALIZATION_LEVEL_OPTIONS = [
     { value: 'preserve', label: '원문 유지' },
+    { value: 'light', label: '약한 현지화' },
     { value: 'balanced', label: '균형' },
-    { value: 'naturalized', label: '한국어화' },
+    { value: 'naturalized', label: '자연스러운 한국어' },
+    { value: 'native', label: '네이티브 한국어' },
 ];
 const TRANSLATION_RULE_DEFINITIONS = [
     { key: 'oneTime', label: '이번 번역 요구사항' },
@@ -75,7 +76,6 @@ const DEFAULT_SETTINGS = {
     bannedWords: '',
     maxTokens: 15000,
     timeoutSeconds: 120,
-    developerMode: false,
     relationTemperatureEnabled: true,
     relationTemperature: 'default',
     narrationLocalizationLevel: 'balanced',
@@ -98,7 +98,7 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 const settings = extension_settings[EXTENSION_KEY];
 settings.profileStats = normalizeProfileStats(settings.profileStats);
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
-settings.developerMode = settings.developerMode === true;
+delete settings.developerMode;
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
 settings.relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === settings.relationTemperature)
@@ -149,9 +149,6 @@ let messageCopyPointerId = null;
 let messageCopyStart = null;
 let messageCopyHoldShown = false;
 let suppressMessageCopyClickUntil = 0;
-let developerTapCount = 0;
-let developerTapTimer = null;
-let developerModeBusy = false;
 let multiSelectionState = null;
 let selectionHighlightTimer = null;
 let selectionGestureActive = false;
@@ -161,9 +158,6 @@ let preservedGestureSelection = null;
 let lastTouchSelectionAt = 0;
 let lastDesktopSelectionPlacement = null;
 let lastDesktopSelectionAt = 0;
-let retranslationHistory = [];
-let retranslationHistoryIndex = -1;
-let retranslationUndoTimer = null;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -189,7 +183,6 @@ function warnTranslationPromptConflicts({
     includeDialogue = true,
     includeCharacterDialogue = true,
 } = {}) {
-    if (!settings.developerMode) return [];
     const conflicts = findTranslationPromptConflicts({
         settings,
         oneTimeInstruction,
@@ -337,148 +330,6 @@ function isAbort(error, signal) {
 
 function saveSettings() {
     liveContext().saveSettingsDebounced?.();
-}
-
-function sha256HexFallback(value) {
-    const bytes = new TextEncoder().encode(String(value ?? ''));
-    const bitLength = bytes.length * 8;
-    const paddedLength = Math.ceil((bytes.length + 9) / 64) * 64;
-    const padded = new Uint8Array(paddedLength);
-    padded.set(bytes);
-    padded[bytes.length] = 0x80;
-    const view = new DataView(padded.buffer);
-    view.setUint32(paddedLength - 8, Math.floor(bitLength / 0x100000000), false);
-    view.setUint32(paddedLength - 4, bitLength >>> 0, false);
-
-    const constants = new Uint32Array([
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-    ]);
-    const hash = new Uint32Array([
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-    ]);
-    const words = new Uint32Array(64);
-    const rotateRight = (number, count) => (number >>> count) | (number << (32 - count));
-
-    for (let offset = 0; offset < paddedLength; offset += 64) {
-        for (let index = 0; index < 16; index += 1) {
-            words[index] = view.getUint32(offset + index * 4, false);
-        }
-        for (let index = 16; index < 64; index += 1) {
-            const s0 = rotateRight(words[index - 15], 7) ^ rotateRight(words[index - 15], 18) ^ (words[index - 15] >>> 3);
-            const s1 = rotateRight(words[index - 2], 17) ^ rotateRight(words[index - 2], 19) ^ (words[index - 2] >>> 10);
-            words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
-        }
-
-        let [a, b, c, d, e, f, g, h] = hash;
-        for (let index = 0; index < 64; index += 1) {
-            const sum1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25);
-            const choose = (e & f) ^ (~e & g);
-            const temporary1 = (h + sum1 + choose + constants[index] + words[index]) >>> 0;
-            const sum0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22);
-            const majority = (a & b) ^ (a & c) ^ (b & c);
-            const temporary2 = (sum0 + majority) >>> 0;
-            h = g;
-            g = f;
-            f = e;
-            e = (d + temporary1) >>> 0;
-            d = c;
-            c = b;
-            b = a;
-            a = (temporary1 + temporary2) >>> 0;
-        }
-
-        hash[0] = (hash[0] + a) >>> 0;
-        hash[1] = (hash[1] + b) >>> 0;
-        hash[2] = (hash[2] + c) >>> 0;
-        hash[3] = (hash[3] + d) >>> 0;
-        hash[4] = (hash[4] + e) >>> 0;
-        hash[5] = (hash[5] + f) >>> 0;
-        hash[6] = (hash[6] + g) >>> 0;
-        hash[7] = (hash[7] + h) >>> 0;
-    }
-
-    return [...hash].map(part => part.toString(16).padStart(8, '0')).join('');
-}
-
-async function sha256Hex(value) {
-    const bytes = new TextEncoder().encode(String(value ?? ''));
-    try {
-        const subtle = globalThis.crypto?.subtle;
-        if (subtle) {
-            const digest = await subtle.digest('SHA-256', bytes);
-            return [...new Uint8Array(digest)]
-                .map(byte => byte.toString(16).padStart(2, '0'))
-                .join('');
-        }
-    } catch (error) {
-        console.warn('[베르바] 브라우저 SHA-256을 사용할 수 없어 호환 방식으로 확인합니다.', error);
-    }
-    return sha256HexFallback(value);
-}
-
-function syncDeveloperModeUi() {
-    const enabled = settings.developerMode === true;
-    document.body?.classList.toggle('verba-developer-mode', enabled);
-    document.documentElement?.classList.toggle('verba-developer-mode', enabled);
-    if (!enabled) clearTransientTranslationSelections();
-    globalThis.__verbaDeveloperMode = enabled;
-    document.dispatchEvent(new CustomEvent('verba:developer-mode-changed', {
-        detail: { enabled },
-    }));
-}
-
-async function toggleDeveloperMode() {
-    if (developerModeBusy) return;
-    if (settings.developerMode) {
-        settings.developerMode = false;
-        saveSettings();
-        syncDeveloperModeUi();
-        notify('개발자 모드를 잠갔어요.', 'success');
-        return;
-    }
-
-    const password = globalThis.prompt?.('개발자 모드 비밀번호를 입력하세요.');
-    if (password === null || password === undefined) return;
-
-    developerModeBusy = true;
-    try {
-        const hash = await sha256Hex(password);
-        if (hash !== DEVELOPER_PASSWORD_HASH) {
-            notify('비밀번호가 맞지 않아요.', 'error');
-            return;
-        }
-        settings.developerMode = true;
-        saveSettings();
-        syncDeveloperModeUi();
-        notify('개발자 모드를 열었어요.', 'success');
-    } catch (error) {
-        notify(`개발자 모드 확인 실패: ${errorText(error)}`, 'error');
-    } finally {
-        developerModeBusy = false;
-    }
-}
-
-function registerDeveloperModeTap() {
-    developerTapCount += 1;
-    clearTimeout(developerTapTimer);
-    developerTapTimer = setTimeout(() => {
-        developerTapCount = 0;
-        developerTapTimer = null;
-    }, 5000);
-
-    if (developerTapCount < 7) return;
-    developerTapCount = 0;
-    clearTimeout(developerTapTimer);
-    developerTapTimer = null;
-    toggleDeveloperMode();
 }
 
 function currentCharacterReference() {
@@ -1916,145 +1767,6 @@ function applyTranslation(messageId, message, source, translation, chatReference
     scheduleChatSave(chatReference);
 }
 
-function cloneTranslationRecord(record) {
-    if (!record || typeof record !== 'object') return null;
-    return {
-        ...record,
-        sourceMap: normalizedSourceMap(record.sourceMap),
-        lockedSegments: normalizedLockedSegments(record.lockedSegments),
-    };
-}
-
-function dismissRetranslationUndoNotice() {
-    clearTimeout(retranslationUndoTimer);
-    retranslationUndoTimer = null;
-    document.querySelector('#verba-retranslation-undo')?.remove();
-}
-
-function historyEntryStillCurrent(entry, expectedRecord) {
-    const context = liveContext();
-    const message = context.chat?.[entry.messageId];
-    if (
-        context.chat !== entry.chatReference
-        || message !== entry.message
-        || currentSwipeId(message) !== entry.swipeId
-        || hashText(messageSource(message)) !== entry.sourceHash
-    ) return false;
-    const record = currentRecord(message);
-    return expectedRecord ? sameTranslationRecord(record, expectedRecord) : !record;
-}
-
-function applyRetranslationHistorySnapshot(entry, record) {
-    const context = liveContext();
-    const message = context.chat?.[entry.messageId];
-    if (!record) {
-        clearOwnedDisplay(message);
-        updateMessageBlock(entry.messageId, message);
-        scheduleChatSave(entry.chatReference);
-    } else {
-        applyTranslation(
-            entry.messageId,
-            message,
-            entry.source,
-            record.translation,
-            entry.chatReference,
-            {
-                sourceMap: record.sourceMap,
-                lockedSegments: record.lockedSegments,
-            },
-        );
-    }
-    clearTransientTranslationSelections();
-    refreshRetranslateButton();
-}
-
-function showRetranslationUndoNotice(status = 'applied') {
-    dismissRetranslationUndoNotice();
-    const notice = document.createElement('div');
-    notice.id = 'verba-retranslation-undo';
-    notice.className = 'verba-bottom-notice verba-retranslation-undo';
-    notice.setAttribute('role', 'status');
-    notice.setAttribute('aria-live', 'polite');
-    const text = document.createElement('span');
-    text.textContent = status === 'undone' ? '재번역을 되돌렸어요.' : '재번역을 적용했어요.';
-    const actions = document.createElement('span');
-    actions.className = 'verba-history-actions';
-    if (retranslationHistoryIndex >= 0) {
-        const undo = document.createElement('button');
-        undo.type = 'button';
-        undo.className = 'menu_button';
-        undo.textContent = '되돌리기';
-        undo.addEventListener('click', undoLatestRetranslation);
-        actions.append(undo);
-    }
-    if (retranslationHistoryIndex + 1 < retranslationHistory.length) {
-        const redo = document.createElement('button');
-        redo.type = 'button';
-        redo.className = 'menu_button';
-        redo.textContent = '다시 적용';
-        redo.addEventListener('click', redoLatestRetranslation);
-        actions.append(redo);
-    }
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'verba-notice-close';
-    close.textContent = '✕';
-    close.setAttribute('aria-label', '재번역 실행 취소 알림 닫기');
-    close.addEventListener('click', dismissRetranslationUndoNotice);
-    notice.append(text, actions, close);
-    document.documentElement.append(notice);
-    retranslationUndoTimer = setTimeout(dismissRetranslationUndoNotice, 12000);
-}
-
-function rememberRetranslationChange(messageId, message, source, chatReference, beforeRecord) {
-    if (!settings.developerMode) return;
-    const afterRecord = cloneTranslationRecord(currentRecord(message));
-    const before = cloneTranslationRecord(beforeRecord);
-    if (afterRecord) afterRecord.lockedSegments = [];
-    if (before) before.lockedSegments = [];
-    if (!afterRecord || (before && sameTranslationRecord(before, afterRecord))) return;
-    if (retranslationHistoryIndex < retranslationHistory.length - 1) {
-        retranslationHistory = retranslationHistory.slice(0, retranslationHistoryIndex + 1);
-    }
-    retranslationHistory.push({
-        messageId: Number(messageId),
-        message,
-        chatReference,
-        source,
-        sourceHash: hashText(source),
-        swipeId: currentSwipeId(message),
-        before,
-        after: afterRecord,
-    });
-    if (retranslationHistory.length > 5) retranslationHistory.shift();
-    retranslationHistoryIndex = retranslationHistory.length - 1;
-    showRetranslationUndoNotice('applied');
-}
-
-function undoLatestRetranslation() {
-    const entry = retranslationHistory[retranslationHistoryIndex];
-    if (!entry || !historyEntryStillCurrent(entry, entry.after)) {
-        dismissRetranslationUndoNotice();
-        notify('현재 메시지가 바뀌어 이 재번역은 되돌릴 수 없어요.', 'warning');
-        return;
-    }
-    applyRetranslationHistorySnapshot(entry, entry.before);
-    retranslationHistoryIndex -= 1;
-    showRetranslationUndoNotice('undone');
-}
-
-function redoLatestRetranslation() {
-    const entry = retranslationHistory[retranslationHistoryIndex + 1];
-    if (!entry || !historyEntryStillCurrent(entry, entry.before)) {
-        dismissRetranslationUndoNotice();
-        notify('현재 메시지가 바뀌어 이 재번역을 다시 적용할 수 없어요.', 'warning');
-        return;
-    }
-    applyRetranslationHistorySnapshot(entry, entry.after);
-    retranslationHistoryIndex += 1;
-    showRetranslationUndoNotice('applied');
-}
-
 function sourceViewRequested(message, record) {
     if (!message || !record) return false;
     const signature = storedRecordSignature(record);
@@ -2232,15 +1944,6 @@ async function translateMessage(messageId, options = {}) {
                     lockedSegments: [],
                 },
             );
-            if (options.force) {
-                rememberRetranslationChange(
-                    id,
-                    latest,
-                    source,
-                    snapshot.chatReference,
-                    snapshot.previousRecord,
-                );
-            }
             clearTransientTranslationSelections();
             failedOutputSignatures.delete(id);
             outputJobSuccess = true;
@@ -2300,8 +2003,8 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
     const isSelection = scope === 'selection';
     const isMultiSelection = scope === 'multi';
     const isPartialSelection = isSelection || isMultiSelection;
-    const showContextChoice = settings.developerMode && isPartialSelection;
-    const showTuning = settings.developerMode === true;
+    const showContextChoice = isPartialSelection;
+    const showTuning = true;
     const defaultTuning = normalizedTranslationTuning(settings);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
@@ -2334,7 +2037,7 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
                             ${tuningChoiceMarkup('verba-request-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.dialogueLocalizationLevel)}
                         </div>
                     </fieldset>
-                    <small>표현만 조절하며 인명·지명·숫자·사실관계는 바꾸지 않아요.</small>
+                    <small>원문 유지부터 네이티브 한국어까지 표현 강도만 조절하며 인명·지명·숫자·사실관계는 바꾸지 않아요.</small>
                 ` : ''}
                 ${showContextChoice ? `
                     <fieldset class="verba-context-choice">
@@ -3787,17 +3490,17 @@ function showSelectionButton(snapshot) {
             showSelectionSource(selectionSnapshot);
         }));
     }
-    if (settings.developerMode && settings.showSelectionLock !== false) {
+    if (settings.showSelectionLock !== false) {
         availableActions.push(createAction(
             selectionIsLocked(snapshot) ? '잠금 해제' : '구간 잠금',
-            'verba-segment-lock-action verba-developer-only',
+            'verba-segment-lock-action',
             () => toggleSelectionLock(selectionSnapshot),
         ));
     }
-    if (settings.developerMode && settings.showSelectionBundle !== false) {
+    if (settings.showSelectionBundle !== false) {
         availableActions.push(createAction(
             '묶음 추가',
-            'verba-bundle-add-action verba-developer-only',
+            'verba-bundle-add-action',
             () => addSelectionToBundle(selectionSnapshot),
         ));
     }
@@ -3989,7 +3692,7 @@ function selectionTouchesLocked(snapshot) {
 }
 
 function toggleSelectionLock(snapshot) {
-    if (!settings.developerMode || !snapshot || selectionBusy) return;
+    if (!snapshot || selectionBusy) return;
     if (!selectionStillCurrent(snapshot)) {
         notify('선택한 뒤 번역문이 바뀌었어요. 다시 드래그해 주세요.', 'warning');
         hideSelectionButton();
@@ -4111,11 +3814,9 @@ function clearTransientTranslationSelections() {
 
 function renderMultiSelectionTray() {
     document.querySelector('#verba-multi-selection-tray')?.remove();
-    if (!settings.developerMode || !multiSelectionState?.ranges?.length) return;
+    if (!multiSelectionState?.ranges?.length) return;
     const tray = document.createElement('div');
     tray.id = 'verba-multi-selection-tray';
-    // This tray is already gated by developerMode above. Giving it the generic
-    // developer-only class made some SillyTavern themes keep it display:none.
     tray.className = 'verba-multi-selection-tray';
     tray.setAttribute('role', 'status');
     if ('showPopover' in HTMLElement.prototype) tray.setAttribute('popover', 'manual');
@@ -4140,7 +3841,7 @@ function renderMultiSelectionTray() {
 }
 
 function addSelectionToBundle(snapshot) {
-    if (!settings.developerMode || !snapshot || selectionBusy) return;
+    if (!snapshot || selectionBusy) return;
     if (!selectionStillCurrent(snapshot)) {
         notify('선택한 뒤 번역문이 바뀌었어요. 다시 드래그해 주세요.', 'warning');
         return;
@@ -4193,7 +3894,7 @@ function addSelectionToBundle(snapshot) {
 
 async function retranslateSelectionBundle() {
     const state = multiSelectionState;
-    if (!settings.developerMode || !state || selectionBusy) return;
+    if (!state || selectionBusy) return;
     if (!settings.profileId) {
         notify('먼저 번역기 전용 연결 프로필을 선택해 주세요.', 'warning');
         return;
@@ -4313,18 +4014,10 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
             );
         }
         const context = liveContext();
-        const beforeRecord = cloneTranslationRecord(currentRecord(state.message));
         applyTranslation(state.messageId, state.message, state.source, updated, context.chat, {
             sourceMap,
             lockedSegments: [],
         });
-        rememberRetranslationChange(
-            state.messageId,
-            state.message,
-            state.source,
-            context.chat,
-            beforeRecord,
-        );
         clearTransientTranslationSelections();
         notify(`${replacements.length}개 구간을 한꺼번에 교체했어요.`, 'success');
     } catch (error) {
@@ -4559,7 +4252,6 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             + snapshot.translation.slice(snapshot.end);
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
-        const beforeRecord = cloneTranslationRecord(currentRecord(message));
         const sourceMap = sourceMapAfterSelection(
             snapshot.sourceMap,
             snapshot.start,
@@ -4570,13 +4262,6 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             sourceMap,
             lockedSegments: [],
         });
-        rememberRetranslationChange(
-            snapshot.messageId,
-            message,
-            snapshot.source,
-            context.chat,
-            beforeRecord,
-        );
         clearTransientTranslationSelections();
         globalThis.getSelection?.()?.removeAllRanges?.();
         notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');
@@ -5214,7 +4899,7 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
-                <details id="verba-translation-tuning" class="verba-tool-details verba-developer-only">
+                <details id="verba-translation-tuning" class="verba-tool-details">
                     <summary>번역 미세 조정 <small>관계 온도·현지화</small></summary>
                     <div class="verba-tool-details-content">
                         <label class="verba-check-row">
@@ -5227,15 +4912,15 @@ function injectSettingsPanel() {
                             <div class="verba-help">대사의 어미·호칭·언어적 거리만 조절하며 원문에 없는 감정이나 관계는 만들지 않아요.</div>
                             <span class="verba-tuning-label">서술 현지화</span>
                             ${tuningChoiceMarkup('verba-narration-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.narrationLocalizationLevel)}
-                            <div class="verba-help">서술의 관용구·묘사·문장 흐름을 어느 정도 자연스러운 한국어로 옮길지 정해요.</div>
+                            <div class="verba-help">원문 유지 → 약한 현지화 → 균형 → 자연스러운 한국어 → 네이티브 한국어 순으로 번역투를 줄이고 한국어식 문장 호흡과 어순을 강화해요.</div>
                             <span class="verba-tuning-label">대사 현지화</span>
                             ${tuningChoiceMarkup('verba-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.dialogueLocalizationLevel)}
-                            <div class="verba-help">대사의 관용구·농담·구어 표현을 어느 정도 자연스러운 한국어로 옮길지 정해요. 인명·지명·수치·사실관계는 두 설정 모두 그대로 보존합니다.</div>
+                            <div class="verba-help">단계가 높을수록 직역투를 줄이고 실제 한국어 화자처럼 어미·생략·호흡·구어 표현을 자연스럽게 다듬어요. 인명·지명·수치·사실관계는 두 설정 모두 그대로 보존합니다.</div>
                         </div>
                     </div>
                 </details>
 
-                <details id="verba-rule-priority-settings" class="verba-tool-details verba-developer-only">
+                <details id="verba-rule-priority-settings" class="verba-tool-details">
                     <summary>번역 규칙 우선순위 <small>위·아래로 정렬</small></summary>
                     <div class="verba-tool-details-content">
                         <div id="verba-rule-priority-list" class="verba-rule-priority-list"></div>
@@ -5263,11 +4948,11 @@ function injectSettingsPanel() {
                         </label>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-show-selection-lock" ${settings.showSelectionLock !== false ? 'checked' : ''}>
-                            <span>구간 잠금 메뉴에 포함 <small>(개발자 모드)</small></span>
+                            <span>구간 잠금 메뉴에 포함</span>
                         </label>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-show-selection-bundle" ${settings.showSelectionBundle !== false ? 'checked' : ''}>
-                            <span>묶음 추가 메뉴에 포함 <small>(개발자 모드)</small></span>
+                            <span>묶음 추가 메뉴에 포함</span>
                         </label>
                         <div class="verba-help">선택 부분 재번역을 포함해 지정한 개수까지만 바로 표시하고, 남은 기능은 ⋯을 누르면 세로로 열려요. 5개를 선택하면 모두 한 줄에 표시할 수 있습니다.</div>
                     </div>
@@ -5300,9 +4985,6 @@ function injectSettingsPanel() {
     renderNameLockManager();
     renderProfileStats();
     renderTranslationRuleOrder();
-    syncDeveloperModeUi();
-
-    panel.querySelector('.verba-drawer-header').addEventListener('click', registerDeveloperModeTap);
 
     panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();
@@ -5750,7 +5432,7 @@ function setupObserver() {
 }
 
 function initialize() {
-    syncDeveloperModeUi();
+    clearTransientTranslationSelections();
     injectSettingsPanel();
     injectInputAction();
     refreshTranslationClasses();

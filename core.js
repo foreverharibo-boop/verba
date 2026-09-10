@@ -517,15 +517,26 @@ const RELATION_TEMPERATURE_RULES = {
 };
 
 const LOCALIZATION_RULES = {
-    preserve: `SOURCE-CULTURE PRESERVING
-- Keep source-culture idioms, titles, institutions, jokes, measurements, and everyday references recognizable.
-- Translate them into understandable Korean without replacing them with Korean cultural equivalents.`,
-    balanced: `BALANCED
-- Use a natural Korean equivalent for ordinary idioms and conversational phrasing when the meaning is stable.
-- Preserve culture-specific facts, institutions, titles, names, places, currencies, measurements, and setting details.`,
+    preserve: `SOURCE-FAITHFUL KOREAN
+- Keep source sentence structure, emphasis, repetitions, idioms, and culture-specific phrasing as recognizable as natural Korean permits.
+- Correct only what Korean grammar requires. Do not freely rephrase merely to sound more native.`,
+    light: `LIGHT LOCALIZATION
+- Remove only obvious translationese while staying close to the source wording and clause order.
+- Naturalize particles, word order, connective endings, and redundant explicit subjects or pronouns when the referent remains unmistakable.
+- Prefer direct Korean equivalents over literal calques, but avoid broad stylistic rewriting.`,
+    balanced: `BALANCED KOREAN
+- Use idiomatic Korean sentence structure and ordinary Korean equivalents for stable idioms and conversational phrasing.
+- Reorder clauses, omit recoverable repeated subjects, and smooth stiff source-language connectors when needed for natural flow, while keeping the source's rhetorical shape recognizable.`,
     naturalized: `NATURAL KOREAN
-- Prefer idiomatic Korean equivalents for jokes, idioms, and everyday phrasing when their meaning and tone can be preserved exactly.
-- Never Koreanize proper names, places, currencies, measurements, institutions, legal facts, historical facts, or fictional setting details.`,
+- Actively remove English-style translationese: literal clause order, repeated explicit pronouns, awkward possessives, calqued idioms, stiff connectors, and unnatural repetition.
+- Rebuild sentence rhythm and phrasing into fluent contemporary Korean while preserving every source fact, nuance, intensity, register, and referent.
+- A repeated pronoun may be omitted where Korean naturally omits it and the referent stays unambiguous; never replace it with an identity name merely for fluency.`,
+    native: `NATIVE-KOREAN PROSE
+- Make the result read as though a fluent native Korean writer originally wrote it in Korean, not as a translation.
+- Freely rebuild syntax, clause order, ellipsis, connective flow, sentence rhythm, natural subject/pronoun omission, dialogue endings, and idiomatic phrasing wherever Korean would normally differ from English.
+- Eliminate visible translationese and literal calques. Choose context-native Korean expressions instead of preserving foreign sentence habits.
+- This is expressive localization, not adaptation: preserve all meaning, facts, actions, emotional intensity, explicitness, register, relationships, chronology, point of view, speaker attribution, and setting details exactly.
+- Never Koreanize or replace proper names, places, currencies, measurements, institutions, legal/historical facts, fictional-world facts, or culture-specific setting information.`,
 };
 
 const DEFAULT_TRANSLATION_RULE_ORDER = [
@@ -693,19 +704,6 @@ function orderedTranslationRuleBlocks(settings = {}, {
     includeDialogue = true,
     includeCharacterDialogue = true,
 } = {}) {
-    if (settings.developerMode !== true) {
-        return `${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', settings.globalPrompt)}
-
-${instructionBlock('ALL-DIALOGUE PROMPT — applies to every direct dialogue passage by TARGET CHARACTER, USER, or NPC; never to narration', includeDialogue ? settings.allDialoguePrompt : '', '(적용 대상 대사 없음)')}
-
-${instructionBlock('TARGET-CHARACTER DIALOGUE PROMPT — additionally applies only to direct speech by TARGET CHARACTER; never to USER/NPC speech, quotations, or narration', includeCharacterDialogue ? settings.dialoguePrompt : '', '(적용 대상 캐릭터 대사 없음)')}
-
-${translationTuningBlock(settings, tuning)}
-
-ONE-TIME REQUEST — applies only to this retranslation and has priority over the configurable prompts unless it conflicts with source fidelity, protected syntax, or banned words
-${String(oneTimeInstruction || '').trim() || '(없음)'}`;
-    }
-
     const blocks = {
         oneTime: `ONE-TIME REQUEST
 ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
@@ -723,7 +721,7 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
         fineTuning: translationTuningBlock(settings, tuning),
     };
     const ordered = normalizedTranslationRuleOrder(settings);
-    return `USER-CONFIGURED TRANSLATION RULE PRIORITY — developer mode
+    return `USER-CONFIGURED TRANSLATION RULE PRIORITY
 - Earlier numbered groups have higher priority when two configurable preferences conflict.
 - Source fidelity, protected syntax/tokens, valid JSON, and banned-word avoidance remain absolute regardless of this order.
 
@@ -735,7 +733,6 @@ function absoluteFidelityRule(settings = {}) {
 }
 
 function translationTuningBlock(settings = {}, override = null) {
-    if (settings.developerMode !== true) return 'TRANSLATION FINE TUNING\n(비활성화)';
     const requested = override && typeof override === 'object' ? override : {};
     const relationTemperatureEnabled = typeof requested.relationTemperatureEnabled === 'boolean'
         ? requested.relationTemperatureEnabled
@@ -761,7 +758,7 @@ function translationTuningBlock(settings = {}, override = null) {
         : Object.hasOwn(LOCALIZATION_RULES, settings.dialogueLocalizationLevel)
             ? settings.dialogueLocalizationLevel
             : legacyLocalizationKey || 'balanced';
-    return `TRANSLATION FINE TUNING — developer mode
+    return `TRANSLATION FINE TUNING
 RELATION TEMPERATURE — applies only to direct dialogue, never narration
 ${RELATION_TEMPERATURE_RULES[relationKey]}
 

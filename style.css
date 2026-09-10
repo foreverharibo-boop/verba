@@ -107,7 +107,7 @@
     left: 5px;
     width: 4px;
     height: 9px;
-    border: solid var(--verba-text);
+    border: solid #111;
     border-width: 0 2px 2px 0;
     transform: rotate(45deg) scale(0);
     transform-origin: center;
@@ -115,8 +115,8 @@
 }
 
 .verba-check-row input[type="checkbox"]:checked {
-    border-color: var(--verba-accent) !important;
-    background: color-mix(in srgb, var(--verba-accent) 68%, transparent) !important;
+    border-color: color-mix(in srgb, #111 72%, var(--verba-border)) !important;
+    background: transparent !important;
 }
 
 .verba-check-row input[type="checkbox"]:checked::before {

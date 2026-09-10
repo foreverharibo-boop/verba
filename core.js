@@ -534,6 +534,7 @@ function translationTuningBlock(settings = {}, override = null) {
     const relationTemperatureEnabled = typeof requested.relationTemperatureEnabled === 'boolean'
         ? requested.relationTemperatureEnabled
         : settings.relationTemperatureEnabled !== false;
+    if (!relationTemperatureEnabled) return 'TRANSLATION FINE TUNING\n(비활성화)';
     const relationKey = Object.hasOwn(RELATION_TEMPERATURE_RULES, requested.relationTemperature)
         ? requested.relationTemperature
         : Object.hasOwn(RELATION_TEMPERATURE_RULES, settings.relationTemperature)
@@ -546,9 +547,7 @@ function translationTuningBlock(settings = {}, override = null) {
             : 'balanced';
     return `TRANSLATION FINE TUNING — developer mode
 RELATION TEMPERATURE — applies only to direct dialogue, never narration
-${relationTemperatureEnabled
-        ? RELATION_TEMPERATURE_RULES[relationKey]
-        : 'DISABLED\n- Do not add any relationship-temperature adjustment. Follow the source and configured dialogue prompts.'}
+${RELATION_TEMPERATURE_RULES[relationKey]}
 
 LOCALIZATION LEVEL — applies to both narration and dialogue
 ${LOCALIZATION_RULES[localizationKey]}

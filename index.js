@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.30';
+const EXTENSION_VERSION = '0.3.31';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2006,13 +2006,14 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
                         <legend>번역 미세 조정 <small>이번 요청에만 적용</small></legend>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-request-relation-temperature-enabled" ${defaultTuning.relationTemperatureEnabled ? 'checked' : ''}>
-                            <span>관계 온도 적용 <small>(대사만)</small></span>
+                            <span>관계 온도·현지화 적용</span>
                         </label>
-                        <div id="verba-request-relation-temperature-controls" class="verba-tuning-control-group ${defaultTuning.relationTemperatureEnabled ? '' : 'verba-control-disabled'}">
+                        <div id="verba-request-fine-tuning-controls" class="verba-tuning-control-group ${defaultTuning.relationTemperatureEnabled ? '' : 'verba-control-disabled'}">
+                            <span class="verba-tuning-label">관계 온도 <small>대사만</small></span>
                             ${tuningChoiceMarkup('verba-request-relation-temperature', RELATION_TEMPERATURE_OPTIONS, defaultTuning.relationTemperature)}
+                            <span class="verba-tuning-label">현지화 정도</span>
+                            ${tuningChoiceMarkup('verba-request-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.localizationLevel)}
                         </div>
-                        <span class="verba-tuning-label">현지화 정도</span>
-                        ${tuningChoiceMarkup('verba-request-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.localizationLevel)}
                     </fieldset>
                     <small>표현만 조절하며 인명·지명·숫자·사실관계는 바꾸지 않아요.</small>
                 ` : ''}
@@ -2100,8 +2101,11 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
         overlay.querySelector('.verba-submit').addEventListener('click', submit);
         if (showTuning) {
             const relationToggle = overlay.querySelector('#verba-request-relation-temperature-enabled');
-            const relationControls = overlay.querySelector('#verba-request-relation-temperature-controls');
-            const relationInputs = [...overlay.querySelectorAll('input[name="verba-request-relation-temperature"]')];
+            const relationControls = overlay.querySelector('#verba-request-fine-tuning-controls');
+            const relationInputs = [
+                ...overlay.querySelectorAll('input[name="verba-request-relation-temperature"]'),
+                ...overlay.querySelectorAll('input[name="verba-request-localization-level"]'),
+            ];
             const syncRelationControls = () => {
                 const enabled = Boolean(relationToggle?.checked);
                 relationControls?.classList.toggle('verba-control-disabled', !enabled);
@@ -4831,16 +4835,16 @@ function injectSettingsPanel() {
                     <div class="verba-tool-details-content">
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-relation-temperature-enabled" ${settings.relationTemperatureEnabled !== false ? 'checked' : ''}>
-                            <span>관계 온도 적용 <small>(직접 대사만)</small></span>
+                            <span>관계 온도·현지화 적용</span>
                         </label>
-                        <div id="verba-relation-temperature-controls" class="verba-tuning-control-group ${settings.relationTemperatureEnabled !== false ? '' : 'verba-control-disabled'}">
+                        <div id="verba-fine-tuning-controls" class="verba-tuning-control-group ${settings.relationTemperatureEnabled !== false ? '' : 'verba-control-disabled'}">
                             <span class="verba-tuning-label">관계 온도</span>
                             ${tuningChoiceMarkup('verba-relation-temperature', RELATION_TEMPERATURE_OPTIONS, settings.relationTemperature)}
                             <div class="verba-help">대사의 어미·호칭·언어적 거리만 조절하며 원문에 없는 감정이나 관계는 만들지 않아요.</div>
+                            <span class="verba-tuning-label">현지화 정도</span>
+                            ${tuningChoiceMarkup('verba-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.localizationLevel)}
+                            <div class="verba-help">관용구·농담·일상 표현만 조절하고 인명·지명·통화·단위·설정·사실관계는 그대로 보존해요.</div>
                         </div>
-                        <span class="verba-tuning-label">현지화 정도</span>
-                        ${tuningChoiceMarkup('verba-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.localizationLevel)}
-                        <div class="verba-help">관용구·농담·일상 표현만 조절하고 인명·지명·통화·단위·설정·사실관계는 그대로 보존해요.</div>
                     </div>
                 </details>
 
@@ -4972,9 +4976,11 @@ function injectSettingsPanel() {
         saveSettings();
     });
     const relationTemperatureInputs = [...panel.querySelectorAll('input[name="verba-relation-temperature"]')];
+    const localizationLevelInputs = [...panel.querySelectorAll('input[name="verba-localization-level"]')];
+    const fineTuningInputs = [...relationTemperatureInputs, ...localizationLevelInputs];
     const syncRelationTemperatureControls = enabled => {
-        panel.querySelector('#verba-relation-temperature-controls')?.classList.toggle('verba-control-disabled', !enabled);
-        relationTemperatureInputs.forEach(input => { input.disabled = !enabled; });
+        panel.querySelector('#verba-fine-tuning-controls')?.classList.toggle('verba-control-disabled', !enabled);
+        fineTuningInputs.forEach(input => { input.disabled = !enabled; });
     };
     syncRelationTemperatureControls(settings.relationTemperatureEnabled !== false);
     panel.querySelector('#verba-relation-temperature-enabled').addEventListener('change', event => {
@@ -4992,7 +4998,7 @@ function injectSettingsPanel() {
             saveSettings();
         });
     });
-    panel.querySelectorAll('input[name="verba-localization-level"]').forEach(input => {
+    localizationLevelInputs.forEach(input => {
         input.addEventListener('change', event => {
             settings.localizationLevel = normalizedTranslationTuning({
                 relationTemperatureEnabled: settings.relationTemperatureEnabled,

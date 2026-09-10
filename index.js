@@ -9,6 +9,8 @@ import {
     buildOutputPrompt,
     buildProtectedTokenRepairPrompt,
     buildRoleTermPlanPrompt,
+    buildScopedOutputPrompt,
+    buildSpeakerAttributionPrompt,
     buildSelectionPrompt,
     buildTermConsistencyRepairPrompt,
     buildUntranslatedRepairPrompt,
@@ -31,7 +33,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.58';
+const EXTENSION_VERSION = '0.3.61';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -162,6 +164,7 @@ let lastTouchSelectionAt = 0;
 let lastDesktopSelectionPlacement = null;
 let lastDesktopSelectionAt = 0;
 let lastDebugDiagnostic = null;
+let lastPromptConflicts = [];
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -288,6 +291,60 @@ function reportError(stage, error, displayMessage = '') {
     console.error(`[베르바] ${stage}`, error || message);
 }
 
+function compactPromptConflictExcerpt(value, limit = 72) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '(감지 문구 없음)';
+    return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function configuredPromptConflicts() {
+    return findTranslationPromptConflicts({
+        settings,
+        oneTimeInstruction: '',
+        includeDialogue: true,
+        includeCharacterDialogue: true,
+    });
+}
+
+function renderPromptConflictInspector(conflicts = null) {
+    const host = document.querySelector('#verba-prompt-conflict-content');
+    const badge = document.querySelector('#verba-prompt-conflict-count');
+    if (!host) return;
+
+    const rows = Array.isArray(conflicts) ? conflicts : configuredPromptConflicts();
+    lastPromptConflicts = rows;
+
+    if (badge) badge.textContent = rows.length ? `${rows.length}건 감지` : '충돌 없음';
+
+    if (!rows.length) {
+        host.innerHTML = `
+            <div class="verba-conflict-empty">
+                현재 저장된 전역·모든 대사·캐릭터 대사 프롬프트에서는 명백한 충돌이 감지되지 않았어요.
+            </div>`;
+        return;
+    }
+
+    host.innerHTML = rows.map((conflict, index) => `
+        <div class="verba-conflict-card">
+            <div class="verba-conflict-card-header">
+                <b>${index + 1}. ${escapeHtml(conflict.label || '번역 규칙')}</b>
+                <small>${escapeHtml(conflict.winner?.label || '')} 우선</small>
+            </div>
+            <div class="verba-conflict-side">
+                <span>${escapeHtml(conflict.left?.label || '')}</span>
+                <b>${escapeHtml(conflict.left?.directive || '')}</b>
+                <code>${escapeHtml(conflict.left?.excerpt || '')}</code>
+            </div>
+            <div class="verba-conflict-vs">↕ 서로 상충</div>
+            <div class="verba-conflict-side">
+                <span>${escapeHtml(conflict.right?.label || '')}</span>
+                <b>${escapeHtml(conflict.right?.directive || '')}</b>
+                <code>${escapeHtml(conflict.right?.excerpt || '')}</code>
+            </div>
+        </div>
+    `).join('');
+}
+
 function warnTranslationPromptConflicts({
     oneTimeInstruction = '',
     includeDialogue = true,
@@ -299,11 +356,19 @@ function warnTranslationPromptConflicts({
         includeDialogue,
         includeCharacterDialogue,
     });
-    if (!conflicts.length) return conflicts;
+    if (!conflicts.length) {
+        lastPromptConflicts = [];
+        renderPromptConflictInspector([]);
+        return conflicts;
+    }
+    lastPromptConflicts = conflicts;
+    renderPromptConflictInspector(conflicts);
     const first = conflicts[0];
     const remainder = conflicts.length > 1 ? ` 외 ${conflicts.length - 1}건` : '';
+    const leftExcerpt = compactPromptConflictExcerpt(first.left?.excerpt);
+    const rightExcerpt = compactPromptConflictExcerpt(first.right?.excerpt);
     notify(
-        `번역 규칙 충돌${remainder}: ${first.left.label}의 “${first.left.directive}”와 ${first.right.label}의 “${first.right.directive}”를 함께 적용할 수 없어요. 현재 우선순위상 ${first.winner.label}을 먼저 적용합니다.`,
+        `번역 규칙 충돌${remainder}: ${first.left.label}의 “${leftExcerpt}” ↔ ${first.right.label}의 “${rightExcerpt}”. 현재 ${first.winner.label} 우선이며, 확장 탭의 ‘프롬프트 충돌 확인’에서 자세히 볼 수 있어요.`,
         'warning',
     );
     return conflicts;
@@ -1601,24 +1666,147 @@ function repairKoreanParticleAlternatives(value) {
     return result;
 }
 
+
+function outputScopeForSegment(segment, speakerScopes = {}) {
+    if (segment?.type !== 'dialogue_candidate') return 'narration';
+    return speakerScopes?.[segment.id] === 'target_dialogue'
+        ? 'target_dialogue'
+        : 'other_dialogue';
+}
+
+function segmentsGroupedByOutputScope(segments, speakerScopes = {}) {
+    const groups = new Map();
+    for (const segment of segments || []) {
+        const scope = outputScopeForSegment(segment, speakerScopes);
+        if (!groups.has(scope)) groups.set(scope, []);
+        groups.get(scope).push(segment);
+    }
+    return groups;
+}
+
+function nameTokensForSegments(segmented, segments) {
+    const source = (segments || []).map(segment => String(segment?.text || '')).join('\n');
+    return (segmented?.nameTokens || []).filter(entry => source.includes(String(entry?.token || '')));
+}
+
+async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, options = {}) {
+    const dialogueSegments = (segmented?.segments || []).filter(segment => segment.type === 'dialogue_candidate');
+    const scopes = Object.fromEntries(dialogueSegments.map(segment => [segment.id, 'other_dialogue']));
+
+    // No target-character dialogue style means there is nothing to isolate
+    // between TARGET and USER/NPC dialogue, so avoid an unnecessary API call.
+    if (!dialogueSegments.length || !String(settings.dialoguePrompt || '').trim()) return scopes;
+
+    try {
+        const prompt = buildSpeakerAttributionPrompt(segmented, speakerIdentity);
+        const classified = await requestSegments(prompt, dialogueSegments, {
+            ...options,
+            stage: 'speaker-attribution',
+        });
+        for (const segment of dialogueSegments) {
+            const value = String(classified.get(segment.id) || '').trim().toLocaleLowerCase();
+            scopes[segment.id] = value === 'target' ? 'target_dialogue' : 'other_dialogue';
+        }
+    } catch (error) {
+        if (isAbort(error, options.signal)) throw error;
+        // Conservative fallback: never leak TARGET style onto an uncertain
+        // speaker. Translation still continues using global/all-dialogue rules.
+        console.warn('[베르바] 대사 화자 분류 실패 — 캐릭터 전용 프롬프트를 보수적으로 제외합니다.', error);
+        debugCaptureError?.(error, 'speaker-attribution');
+    }
+
+    return scopes;
+}
+
+async function requestScopedOutputTranslations(segmented, speakerScopes, options = {}) {
+    const translations = new Map();
+    const groups = segmentsGroupedByOutputScope(segmented.segments, speakerScopes);
+    const strictIsolationNeeded = Boolean(
+        String(settings.allDialoguePrompt || '').trim()
+        || String(settings.dialoguePrompt || '').trim()
+    );
+
+    // Keep the single-request fast path when there are no dialogue-specific
+    // prompts to isolate.
+    if (!strictIsolationNeeded) {
+        const prompt = buildOutputPrompt(
+            segmented,
+            settings,
+            options.oneTimeInstruction || '',
+            options.speakerIdentity || {},
+            options.tuning || null,
+        );
+        return requestSegments(prompt, segmented.segments, {
+            ...options,
+            stage: options.stage || 'output-translation',
+        });
+    }
+
+    for (const [scope, segments] of groups) {
+        if (!segments.length) continue;
+        const prompt = buildScopedOutputPrompt({
+            segments,
+            sourceContext: segmented.protectedText,
+            settings,
+            oneTimeInstruction: options.oneTimeInstruction || '',
+            nameTokens: nameTokensForSegments(segmented, segments),
+            tuning: options.tuning || null,
+            scope,
+        });
+        const result = await requestSegments(prompt, segments, {
+            ...options,
+            stage: `${options.stage || 'output-translation'}:${scope}`,
+        });
+        for (const [id, value] of result) translations.set(id, value);
+    }
+
+    return translations;
+}
+
+async function repairSegmentsByOutputScope({
+    invalid,
+    segmented,
+    translations,
+    speakerScopes,
+    options,
+    buildPrompt,
+    stage,
+}) {
+    const groups = segmentsGroupedByOutputScope(invalid, speakerScopes);
+    for (const [scope, segments] of groups) {
+        if (!segments.length) continue;
+        const prompt = buildPrompt(
+            segments,
+            translations,
+            settings,
+            options.speakerIdentity || {},
+            nameTokensForSegments(segmented, segments),
+            options.tuning || null,
+            scope,
+        );
+        const repaired = await requestSegments(prompt, segments, {
+            ...options,
+            stage: `${stage}:${scope}`,
+        });
+        for (const segment of segments) translations.set(segment.id, repaired.get(segment.id));
+    }
+}
+
 async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
     const speakerIdentity = options.speakerIdentity || {};
+    const speakerScopes = options.speakerScopes || {};
     for (let repairAttempt = 0; repairAttempt < 3; repairAttempt += 1) {
         const invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
         if (!invalid.length) return;
-        const prompt = buildProtectedTokenRepairPrompt(
+        await repairSegmentsByOutputScope({
             invalid,
+            segmented,
             translations,
-            settings,
-            speakerIdentity,
-            segmented.nameTokens,
-            options.tuning || null,
-        );
-        const repaired = await requestSegments(prompt, invalid, {
-            ...options,
+            speakerScopes,
+            options: { ...options, speakerIdentity },
+            buildPrompt: buildProtectedTokenRepairPrompt,
             stage: 'protected-token-repair',
         });
-        for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
     }
 
     const remaining = findProtectedTokenIntegrityProblems(segmented.segments, translations);
@@ -1642,15 +1830,13 @@ async function translateOutputText(source, options = {}) {
         return { translation, sourceMap: [] };
     }
     const speakerIdentity = options.speakerIdentity || {};
-    const prompt = buildOutputPrompt(
-        segmented,
-        settings,
-        options.oneTimeInstruction || '',
-        speakerIdentity,
-        options.tuning || null,
-    );
-    const translations = await requestSegments(prompt, segmented.segments, {
+    const speakerScopes = await classifyOutputDialogueSpeakers(segmented, speakerIdentity, {
         ...options,
+        speakerIdentity,
+    });
+    const translations = await requestScopedOutputTranslations(segmented, speakerScopes, {
+        ...options,
+        speakerIdentity,
         stage: options.stage || 'output-translation',
     });
 
@@ -1659,31 +1845,29 @@ async function translateOutputText(source, options = {}) {
             findBannedWords(translations.get(segment.id), settings.bannedWords).length,
         );
         if (!invalid.length) break;
-        const repairPrompt = buildBannedRepairPrompt(
+        await repairSegmentsByOutputScope({
             invalid,
+            segmented,
             translations,
-            settings,
-            speakerIdentity,
-            segmented.nameTokens,
-            options.tuning || null,
-        );
-        const repaired = await requestSegments(repairPrompt, invalid, { ...options, stage: 'banned-word-repair' });
-        for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
+            speakerScopes,
+            options: { ...options, speakerIdentity },
+            buildPrompt: buildBannedRepairPrompt,
+            stage: 'banned-word-repair',
+        });
     }
 
     for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
-        const invalid = findUntranslatedSegments(segmented.segments, translations, settings);
+        const invalid = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
         if (!invalid.length) break;
-        const repairPrompt = buildUntranslatedRepairPrompt(
+        await repairSegmentsByOutputScope({
             invalid,
+            segmented,
             translations,
-            settings,
-            speakerIdentity,
-            segmented.nameTokens,
-            options.tuning || null,
-        );
-        const repaired = await requestSegments(repairPrompt, invalid, { ...options, stage: 'untranslated-repair' });
-        for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
+            speakerScopes,
+            options: { ...options, speakerIdentity },
+            buildPrompt: buildUntranslatedRepairPrompt,
+            stage: 'untranslated-repair',
+        });
     }
 
     // Planned terms are protected and no longer appear as plain source words
@@ -1699,6 +1883,7 @@ async function translateOutputText(source, options = {}) {
     await repairProtectedTokenIntegrity(segmented, translations, {
         ...options,
         speakerIdentity,
+        speakerScopes,
     });
 
     for (const [id, translation] of translations) {
@@ -1709,7 +1894,7 @@ async function translateOutputText(source, options = {}) {
     if (remaining.length) {
         throw new Error(`금지어가 계속 남아 번역을 적용하지 않았습니다: ${[...new Set(remaining)].join(', ')}`);
     }
-    const untranslated = findUntranslatedSegments(segmented.segments, translations, settings);
+    const untranslated = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
     if (untranslated.length) {
         if (untranslated.length === segmented.segments.length) {
             throw new Error('전체 번역 결과가 외국어 원문으로 남아 번역을 적용하지 않았습니다.');
@@ -5352,6 +5537,15 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+                <details id="verba-prompt-conflict-settings" class="verba-tool-details">
+                    <summary>프롬프트 충돌 확인 <small id="verba-prompt-conflict-count">충돌 없음</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-prompt-conflict-content" class="verba-prompt-conflict-content"></div>
+                        <div class="verba-help">전역·모든 대사·캐릭터 대사 프롬프트에서 베르바가 명백한 충돌로 판단한 실제 문구를 보여줘요. 검사는 로컬에서만 하며 API를 호출하지 않습니다.</div>
+                        <button type="button" id="verba-refresh-prompt-conflicts" class="menu_button verba-wide">지금 다시 확인</button>
+                    </div>
+                </details>
+
                 <details id="verba-selection-menu-settings" class="verba-tool-details">
                     <summary>드래그 메뉴 구성 <small>버튼 수·기능 선택</small></summary>
                     <div class="verba-tool-details-content">
@@ -5408,6 +5602,7 @@ function injectSettingsPanel() {
     renderNameLockManager();
     renderProfileStats();
     renderTranslationRuleOrder();
+    renderPromptConflictInspector();
 
     panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();
@@ -5563,12 +5758,24 @@ function injectSettingsPanel() {
         settings.translationRuleOrder = order;
         saveSettings();
         renderTranslationRuleOrder();
+        renderPromptConflictInspector();
     });
     panel.querySelector('#verba-reset-rule-priority').addEventListener('click', () => {
         settings.translationRuleOrder = [...DEFAULT_TRANSLATION_RULE_ORDER];
         saveSettings();
         renderTranslationRuleOrder();
+        renderPromptConflictInspector();
         notify('번역 규칙 우선순위를 기본 순서로 되돌렸어요.', 'success');
+    });
+    panel.querySelector('#verba-refresh-prompt-conflicts')?.addEventListener('click', () => {
+        const conflicts = configuredPromptConflicts();
+        renderPromptConflictInspector(conflicts);
+        notify(
+            conflicts.length
+                ? `명백한 프롬프트 충돌 ${conflicts.length}건을 찾았어요. 아래 문구를 확인해 주세요.`
+                : '현재 저장된 프롬프트에서는 명백한 충돌이 없어요.',
+            conflicts.length ? 'warning' : 'success',
+        );
     });
     panel.querySelector('#verba-selection-quick-count').addEventListener('change', event => {
         settings.selectionQuickCount = Math.min(5, Math.max(2, Number(event.target.value) || 2));
@@ -5590,14 +5797,17 @@ function injectSettingsPanel() {
     panel.querySelector('#verba-global-prompt').addEventListener('input', event => {
         settings.globalPrompt = event.target.value;
         saveSettings();
+        renderPromptConflictInspector();
     });
     panel.querySelector('#verba-all-dialogue-prompt').addEventListener('input', event => {
         settings.allDialoguePrompt = event.target.value;
         saveSettings();
+        renderPromptConflictInspector();
     });
     panel.querySelector('#verba-dialogue-prompt').addEventListener('input', event => {
         settings.dialoguePrompt = event.target.value;
         saveSettings();
+        renderPromptConflictInspector();
     });
     panel.querySelector('#verba-banned-words').addEventListener('input', event => {
         settings.bannedWords = event.target.value;

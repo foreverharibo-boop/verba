@@ -883,10 +883,21 @@ function parseDialoguePreferenceList(value) {
     return [...new Set(rows)];
 }
 
-function dialogueEndingPreferenceBlock(settings = {}) {
+function dialogueEndingPreferenceBlock(settings = {}, override = null) {
     const preferred = parseDialoguePreferenceList(settings.dialogueEndingPreferred);
     const avoided = parseDialoguePreferenceList(settings.dialogueEndingAvoid);
-    if (!preferred.length && !avoided.length) {
+    const requested = override && typeof override === 'object' ? override : {};
+    const repeatHints = settings.dialogueEndingRepetitionReduction === false
+        ? []
+        : (Array.isArray(requested.dialogueEndingRepeatHints) ? requested.dialogueEndingRepeatHints : [])
+            .map(item => ({
+                ending: String(item?.ending || '').trim(),
+                count: Math.max(0, Number(item?.count) || 0),
+            }))
+            .filter(item => item.ending)
+            .slice(0, 3);
+
+    if (!preferred.length && !avoided.length && !repeatHints.length) {
         return 'DIALOGUE ENDING / EXPRESSION PREFERENCES\n(없음)';
     }
 
@@ -906,6 +917,21 @@ function dialogueEndingPreferenceBlock(settings = {}) {
 - Actively prefer the listed forms when they naturally fit the sentence and scene.
 - Usually avoid the disliked forms when another natural Korean ending/expression conveys the same meaning and tone.`;
 
+    const repetitionBlock = repeatHints.length
+        ? `ENDING REPETITION CONTROL — CURRENT OUTPUT + RECENT HISTORY
+- First, prevent excessive repetition inside the CURRENT translation itself.
+RECENT HISTORY HINTS
+${repeatHints.map(item => `- ${item.ending}: recently repeated ${item.count} times`).join('\n')}
+- In THIS translation, reduce reliance on the endings listed above when another equally natural Korean ending fits.
+- This is not a ban. The repeated ending may still be used when it is the most natural or necessary choice.
+- Do not compensate by mechanically repeating one different ending instead. Keep sentence endings varied and natural.`
+        : `ENDING REPETITION CONTROL — CURRENT OUTPUT
+- Prevent excessive repetition of the same Korean dialogue ending inside THIS translation.
+- If several dialogue sentences would naturally end the same way, vary them when equally natural alternatives preserve the same nuance.
+- Do not force variation when it would distort meaning, politeness, emotion, or character voice.
+RECENT HISTORY
+(감지된 과반복 없음)`;
+
     return `DIALOGUE ENDING / EXPRESSION PREFERENCES — SOFT GUIDANCE
 STRENGTH
 ${strengthRule}
@@ -916,10 +942,16 @@ ${preferred.length ? JSON.stringify(preferred) : '(없음)'}
 PREFER TO AVOID
 ${avoided.length ? JSON.stringify(avoided) : '(없음)'}
 
+${repetitionBlock}
+
 RULES
 - Apply only to direct dialogue, never narration.
 - These are preferences, NOT mandatory substitutions and NOT banned words.
 - Never mechanically append a listed ending to every sentence.
+- IMPORTANT: Within THIS SAME translation output, actively avoid repeating the same sentence ending across multiple dialogue sentences when equally natural alternatives exist.
+- Especially avoid using the same preferred ending (for example ~잖아, ~거든, ~지) in consecutive or densely clustered dialogue sentences just because it is listed as preferred.
+- Before finalizing the translation, review the dialogue sentences in the CURRENT output and diversify repeated endings when doing so preserves the exact meaning, tone, politeness, and character voice.
+- Do not replace one repeated ending with another single ending everywhere; vary endings according to each sentence's function and nuance.
 - Vary sentence endings naturally so dialogue does not become repetitive or patterned.
 - Preserve the source's sentence function, politeness level, relationship distance, emotion, sarcasm, intensity, and character voice.
 - If a preferred form would sound unnatural or change nuance, do not use it.
@@ -932,7 +964,7 @@ function translationTuningBlock(settings = {}, override = null) {
     const relationTemperatureEnabled = typeof requested.relationTemperatureEnabled === 'boolean'
         ? requested.relationTemperatureEnabled
         : settings.relationTemperatureEnabled !== false;
-    const endingPreferences = dialogueEndingPreferenceBlock(settings);
+    const endingPreferences = dialogueEndingPreferenceBlock(settings, requested);
 
     if (!relationTemperatureEnabled) {
         return `TRANSLATION FINE TUNING
@@ -1032,7 +1064,7 @@ ${LOCALIZATION_RULES[dialogueLocalizationKey]}`
     return `TRANSLATION FINE TUNING — DIALOGUE ONLY
 ${relationAndLocalization}
 
-${dialogueEndingPreferenceBlock(settings)}
+${dialogueEndingPreferenceBlock(settings, requested)}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.

@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.70';
+const EXTENSION_VERSION = '0.3.72';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -82,6 +82,7 @@ const DEFAULT_SETTINGS = {
     dialogueEndingPreferred: '',
     dialogueEndingAvoid: '',
     dialogueEndingStrength: 'normal',
+    dialogueEndingRepetitionReduction: true,
     bannedWords: '',
     maxTokens: 15000,
     timeoutSeconds: 120,
@@ -115,6 +116,7 @@ settings.dialogueEndingAvoid = typeof settings.dialogueEndingAvoid === 'string' 
 settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(settings.dialogueEndingStrength)
     ? settings.dialogueEndingStrength
     : 'normal';
+settings.dialogueEndingRepetitionReduction = settings.dialogueEndingRepetitionReduction !== false;
 settings.relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === settings.relationTemperature)
     ? settings.relationTemperature
     : 'default';
@@ -2350,6 +2352,117 @@ function showTranslationDisplay(messageId, message, record) {
     restoreCurrentDisplay(messageId, message, record);
 }
 
+
+const COMMON_DIALOGUE_ENDINGS = [
+    '잖아요', '거든요', '는데요', '네요', '군요', '구나', '군', '잖아', '거든', '는데', '네',
+    '라고요', '라고', '냐고', '냐', '니', '지', '죠', '지요', '나요', '가요', '까요',
+    '어요', '아요', '해요', '예요', '이에요', '입니다', '습니다', '습니까',
+    '어', '아', '야', '해', '래', '대', '데', '걸', '거야', '거냐', '건가', '겠어',
+    '겠네', '겠지', '했어', '했지', '했네', '하자', '하지', '하네', '하냐', '하니',
+];
+
+function normalizedEndingPattern(value) {
+    return String(value || '')
+        .trim()
+        .replace(/^[~～]+/u, '')
+        .replace(/[.!?…。？！~～"'“”‘’)\]}]+$/gu, '')
+        .trim();
+}
+
+function dialogueEndingCandidates() {
+    const preferred = String(settings.dialogueEndingPreferred || '')
+        .split(/\r?\n/u)
+        .map(normalizedEndingPattern)
+        .filter(Boolean);
+    const avoided = String(settings.dialogueEndingAvoid || '')
+        .split(/\r?\n/u)
+        .map(normalizedEndingPattern)
+        .filter(Boolean);
+
+    return [...new Set([...preferred, ...avoided, ...COMMON_DIALOGUE_ENDINGS])]
+        .filter(item => item.length >= 1)
+        .sort((a, b) => b.length - a.length);
+}
+
+function endingFromDialogueSentence(sentence, candidates) {
+    const cleaned = String(sentence || '')
+        .replace(/^[\s"'“”‘’「」『』()[\]{}]+/gu, '')
+        .replace(/[\s"'“”‘’「」『』()[\]{}.!?…。？！~～]+$/gu, '')
+        .trim();
+    if (!cleaned || !/[가-힣]/u.test(cleaned)) return '';
+
+    for (const ending of candidates) {
+        if (cleaned.endsWith(ending)) return ending;
+    }
+    return '';
+}
+
+function translatedDialogueEndings(translation) {
+    const segmented = segmentSource(String(translation || ''), []);
+    const candidates = dialogueEndingCandidates();
+    const endings = [];
+
+    for (const segment of segmented.segments || []) {
+        if (segment.type !== 'dialogue_candidate') continue;
+        const dialogue = String(segment.text || '')
+            .replace(/^[\s"'“”‘’「」『』]+/u, '')
+            .replace(/[\s"'“”‘’「」『』]+$/u, '');
+
+        const sentences = dialogue
+            .split(/(?<=[.!?…。？！])\s+|\n+/u)
+            .map(item => item.trim())
+            .filter(Boolean);
+
+        for (const sentence of sentences) {
+            const ending = endingFromDialogueSentence(sentence, candidates);
+            if (ending) endings.push(ending);
+        }
+    }
+
+    return endings;
+}
+
+function recentDialogueEndingRepeatHints(beforeMessageId) {
+    if (settings.dialogueEndingRepetitionReduction === false) return [];
+
+    const chat = liveContext().chat || [];
+    const beforeId = Number(beforeMessageId);
+    const collected = [];
+
+    // Use only saved Verba translations from recent assistant outputs.
+    // Hidden/ghosted assistant outputs count too; user inputs do not.
+    for (let id = Math.min(chat.length - 1, beforeId - 1); id >= 0 && collected.length < 28; id -= 1) {
+        const message = chat[id];
+        if (!message || message.is_user || !isNameReplacementMessage(message)) continue;
+        const record = currentRecord(message);
+        if (!record?.translation) continue;
+
+        const endings = translatedDialogueEndings(record.translation);
+        for (let i = endings.length - 1; i >= 0 && collected.length < 28; i -= 1) {
+            collected.push(endings[i]);
+        }
+    }
+
+    if (collected.length < 4) return [];
+
+    const recent = collected.slice(0, 20);
+    const counts = new Map();
+    for (const ending of recent) counts.set(ending, (counts.get(ending) || 0) + 1);
+
+    // A repeated ending becomes a prompt hint only when it is genuinely
+    // noticeable: 3+ uses in the recent window or a 2-sentence streak.
+    const streaked = new Set();
+    for (let i = 0; i < recent.length - 1; i += 1) {
+        if (recent[i] && recent[i] === recent[i + 1]) streaked.add(recent[i]);
+    }
+
+    return [...counts.entries()]
+        .filter(([ending, count]) => count >= 3 || (count >= 2 && streaked.has(ending)))
+        .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
+        .slice(0, 3)
+        .map(([ending, count]) => ({ ending: `~${ending}`, count }));
+}
+
 async function translateMessage(messageId, options = {}) {
     const id = Number(messageId);
     if (!Number.isInteger(id)) return;
@@ -2410,7 +2523,10 @@ async function translateMessage(messageId, options = {}) {
             const translated = await translateOutputText(source, {
                 signal: controller.signal,
                 oneTimeInstruction: options.oneTimeInstruction || '',
-                tuning: options.tuning || null,
+                tuning: {
+                    ...(options.tuning && typeof options.tuning === 'object' ? options.tuning : {}),
+                    dialogueEndingRepeatHints: recentDialogueEndingRepeatHints(id),
+                },
                 speakerIdentity: outputSpeakerIdentity(message),
                 stage: options.force ? 'output-retranslation' : 'output-translation',
             });
@@ -6018,6 +6134,12 @@ function injectSettingsPanel() {
                             <option value="strong" ${settings.dialogueEndingStrength === 'strong' ? 'selected' : ''}>강하게</option>
                         </select>
                         <div class="verba-help">대사에만 적용됩니다. 의미·존댓말/반말·감정 강도·캐릭터성은 바꾸지 않고 말끝 선택의 선호도만 조절해요.</div>
+
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-dialogue-ending-repetition-reduction" ${settings.dialogueEndingRepetitionReduction !== false ? 'checked' : ''}>
+                            <span>말끝 반복 줄이기</span>
+                        </label>
+                        <div class="verba-help">현재 번역 안에서도 같은 말끝이 몰리지 않도록 먼저 지시하고, 최근 저장 번역에서 반복된 말끝이 있으면 그 정보도 함께 참고해 다음 번역에서 의존도를 낮춰요. 후처리로 문장을 강제 치환하지 않습니다.</div>
                     </div>
                 </details>
 
@@ -6250,6 +6372,10 @@ function injectSettingsPanel() {
         settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(event.target.value)
             ? event.target.value
             : 'normal';
+        saveSettings();
+    });
+    panel.querySelector('#verba-dialogue-ending-repetition-reduction').addEventListener('change', event => {
+        settings.dialogueEndingRepetitionReduction = event.target.checked;
         saveSettings();
     });
     panel.querySelector('#verba-rule-priority-list').addEventListener('click', event => {

@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.87';
+const EXTENSION_VERSION = '0.3.88';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -181,8 +181,13 @@ const renderedTranslationCache = new Map();
 const lastRenderedTranslationByMessage = new Map();
 const failedOutputSignatures = new Map();
 const serverRetryStates = new Map();
+const speakerAttributionCache = new Map();
+const roleTermPlanCache = new Map();
 const pendingInputControllers = new Set();
 const transientLockedMessages = new Set();
+const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
+const scopedParallelRequestQueue = [];
+let scopedParallelRequestActive = 0;
 let requestTail = Promise.resolve();
 let chatSaveTimer = null;
 let uiRefreshTimer = null;
@@ -955,6 +960,60 @@ function enqueueRequest(task) {
     return run;
 }
 
+function drainScopedParallelRequestQueue() {
+    while (
+        scopedParallelRequestActive < SCOPED_PARALLEL_REQUEST_LIMIT
+        && scopedParallelRequestQueue.length
+    ) {
+        const item = scopedParallelRequestQueue.shift();
+        scopedParallelRequestActive += 1;
+
+        Promise.resolve()
+            .then(item.task)
+            .then(item.resolve, item.reject)
+            .finally(() => {
+                scopedParallelRequestActive = Math.max(0, scopedParallelRequestActive - 1);
+                drainScopedParallelRequestQueue();
+            });
+    }
+}
+
+function enqueueScopedParallelRequest(task) {
+    return new Promise((resolve, reject) => {
+        scopedParallelRequestQueue.push({ task, resolve, reject });
+        drainScopedParallelRequestQueue();
+    });
+}
+
+async function runWithConcurrency(items, limit, worker) {
+    const rows = Array.from(items || []);
+    if (!rows.length) return [];
+    const concurrency = Math.max(1, Math.min(Number(limit) || 1, rows.length));
+    const results = new Array(rows.length);
+    let nextIndex = 0;
+
+    const runners = Array.from({ length: concurrency }, async () => {
+        while (true) {
+            const index = nextIndex;
+            nextIndex += 1;
+            if (index >= rows.length) return;
+            results[index] = await worker(rows[index], index);
+        }
+    });
+
+    await Promise.all(runners);
+    return results;
+}
+
+function setBoundedCache(cache, key, value, limit = 80) {
+    if (cache.has(key)) cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > limit) {
+        const oldest = cache.keys().next().value;
+        cache.delete(oldest);
+    }
+}
+
 function transientError(error) {
     const text = errorText(error).toLowerCase();
     if (/\b(?:400|401|403|404|413|422)\b|bad request|invalid request|invalid api|unauthori[sz]ed|forbidden|authentication|permission|billing|credit|payment|insufficient[_ -]?(?:quota|credit|funds?)|context length|maximum context|too (?:large|long)|model.*(?:not found|may not exist)|safety|blocked|content.?filter|권한|인증|결제|크레딧|잔액|컨텍스트.*초과/.test(text)) {
@@ -1057,7 +1116,7 @@ async function sendProfileRequest(prompt, options = {}) {
     }, timeoutSeconds * 1000);
 
     try {
-        return await enqueueRequest(async () => {
+        const executeRequest = async () => {
             if (controller.signal.aborted) throw abortError();
             const service = liveContext().ConnectionManagerRequestService;
             if (!service?.sendRequest) throw new Error('실리태번 연결 관리자 요청 기능을 찾을 수 없습니다.');
@@ -1070,7 +1129,13 @@ async function sendProfileRequest(prompt, options = {}) {
             if (!extractResponseText(response).trim()) throw new Error('AI가 빈 응답을 반환했습니다.');
             attemptSucceeded = true;
             return response;
-        });
+        };
+
+        return await (
+            options.parallelRequest === true
+                ? enqueueScopedParallelRequest(executeRequest)
+                : enqueueRequest(executeRequest)
+        );
     } catch (error) {
         if (timedOut) {
             const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
@@ -1263,48 +1328,82 @@ async function sendWithRetry(prompt, options = {}) {
     }
 }
 
+function collectPartialSegmentTranslations(raw, expectedSegments) {
+    const partial = new Map();
+    let parseError = null;
+
+    for (const segment of expectedSegments || []) {
+        try {
+            const one = parseSegmentResponse(raw, [segment]);
+            const value = String(one.get(segment.id) || '');
+            if (value.trim()) partial.set(segment.id, value);
+        } catch (error) {
+            parseError ||= error;
+        }
+    }
+
+    return { partial, parseError };
+}
+
 async function requestSegments(prompt, expectedSegments, options = {}) {
     const maxRetries = 5;
     const parseRetryDelays = [500, 700, 1000, 1400, 2000];
+    const completed = new Map();
+    let pending = [...(expectedSegments || [])];
     let lastError;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        if (!pending.length) return completed;
+
+        const missingIds = pending.map(segment => segment.id);
         const repair = attempt
             ? `
 
 Your previous response was invalid or incomplete.
 This is retry ${attempt}/${maxRetries}.
-Return STRICT JSON only.
-Include every required segment id exactly once.
-Do not add markdown fences, commentary, explanations, or missing ids.`
+KEEP all previously successful segment translations unchanged on the client side.
+Return STRICT JSON only for the STILL-MISSING segment ids listed below.
+STILL-MISSING IDS: ${JSON.stringify(missingIds)}
+Do not return already completed ids.
+Include every still-missing id exactly once.
+Do not add markdown fences, commentary, explanations, or extra ids.`
             : '';
 
         try {
             const response = await sendWithRetry(prompt + repair, options);
-            return parseSegmentResponse(extractResponseText(response), expectedSegments);
+            const raw = extractResponseText(response);
+            const { partial, parseError } = collectPartialSegmentTranslations(raw, pending);
+
+            for (const [id, value] of partial) completed.set(id, value);
+            pending = pending.filter(segment => !completed.has(segment.id));
+
+            if (!pending.length) return completed;
+
+            lastError = parseError || new Error(
+                `번역 결과 누락: ${pending.map(segment => segment.id).join(', ')}`,
+            );
         } catch (error) {
             if (isAbort(error, options.signal)) throw error;
-
             lastError = error;
-            if (attempt === maxRetries) break;
-
-            // Transport failures already used their own 5-retry cycle inside
-            // sendWithRetry. This outer retry mainly recovers malformed JSON,
-            // incomplete segment sets, validation/parser failures, etc.
-            console.warn(
-                `[베르바] 번역 결과 해석/검증 실패 — ${attempt + 1}/${maxRetries}회 재시도`,
-                error,
-            );
-            await wait(parseRetryDelays[attempt], options.signal);
         }
+
+        if (attempt === maxRetries) break;
+
+        console.warn(
+            `[베르바] 번역 결과 일부 실패 — 성공 구간 ${completed.size}개 유지, 남은 ${pending.length}개만 ${attempt + 1}/${maxRetries}회 재시도`,
+            lastError,
+        );
+        await wait(parseRetryDelays[attempt], options.signal);
     }
 
-    throw new Error(
+    const finalError = new Error(
         `번역 결과 자동 재시도 ${maxRetries}회를 모두 사용했습니다: ${errorText(lastError)}`,
         { cause: lastError || undefined },
     );
+    finalError.partialTranslations = completed;
+    finalError.missingSegments = pending;
+    throw finalError;
 }
-
 async function requestSelectionCandidates(prompt, options = {}) {
     const maxRetries = 5;
     const parseRetryDelays = [500, 700, 1000, 1400, 2000];
@@ -1445,19 +1544,37 @@ function segmentContainsRoleTerm(segment, terms) {
 async function planRepeatedRoleTermLocks(segmented, options = {}) {
     const terms = repeatedRoleTerms(segmented?.segments);
     if (!terms.length) return [];
-    const sourceContext = (segmented.segments || []).map(segment => String(segment.text || '')).join('\n\n');
+
+    const sourceContext = (segmented.segments || [])
+        .map(segment => String(segment.text || ''))
+        .join('\n\n');
+    const cacheKey = [
+        hashText(sourceContext),
+        sourceContext.length,
+        terms.join('\u0001'),
+        String(settings.bannedWords || ''),
+    ].join('\u0000');
+
+    const cached = roleTermPlanCache.get(cacheKey);
+    if (cached) {
+        // Refresh LRU position and clone so callers cannot mutate the cache.
+        setBoundedCache(roleTermPlanCache, cacheKey, cached, 80);
+        return cached.map(row => ({ ...row }));
+    }
+
     const prompt = buildRoleTermPlanPrompt({ sourceContext, terms, settings });
     const expected = terms.map((term, index) => ({
         id: `role_${String(index).padStart(4, '0')}`,
         type: 'role_term',
         text: term,
     }));
+
     try {
         const planned = await requestSegments(prompt, expected, {
             ...options,
             stage: 'role-term-plan',
         });
-        return terms.flatMap((term, index) => {
+        const locks = terms.flatMap((term, index) => {
             const target = String(planned.get(`role_${String(index).padStart(4, '0')}`) || '').trim();
             if (
                 !target
@@ -1468,13 +1585,20 @@ async function planRepeatedRoleTermLocks(segmented, options = {}) {
             ) return [];
             return [{ source: term, target }];
         });
+
+        setBoundedCache(
+            roleTermPlanCache,
+            cacheKey,
+            locks.map(row => ({ ...row })),
+            80,
+        );
+        return locks;
     } catch (error) {
         if (isAbort(error, options.signal)) throw error;
         console.warn('[베르바] 반복 직책 표기 계획에 실패하여 번역 후 보정으로 전환합니다.', error);
         return [];
     }
 }
-
 function protectedTokensIntact(previous, next) {
     const collect = value => {
         const counts = new Map();
@@ -1823,13 +1947,28 @@ function nameTokensForSegments(segmented, segments) {
     return (segmented?.nameTokens || []).filter(entry => source.includes(String(entry?.token || '')));
 }
 
+function speakerAttributionCacheKey(segmented, speakerIdentity = {}) {
+    const dialogue = (segmented?.segments || [])
+        .filter(segment => segment.type === 'dialogue_candidate')
+        .map(segment => `${segment.id}\u0002${String(segment.text || '')}`)
+        .join('\u0003');
+    const source = String(segmented?.protectedText || '');
+    const characterName = String(speakerIdentity.characterName || '').trim();
+    const userName = String(speakerIdentity.userName || '').trim();
+
+    return [
+        hashText(`${source}\u0000${dialogue}\u0000${characterName}\u0000${userName}`),
+        source.length,
+        dialogue.length,
+        characterName,
+        userName,
+    ].join('\u0001');
+}
+
 async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, options = {}) {
     const dialogueSegments = (segmented?.segments || []).filter(segment => segment.type === 'dialogue_candidate');
     const scopes = Object.fromEntries(dialogueSegments.map(segment => [segment.id, 'other_dialogue']));
 
-    // Speaker classification is needed only when TARGET and USER/NPC dialogue
-    // have different scope-specific prompts. A shared all-dialogue prompt alone
-    // does not require attribution.
     const needsSpeakerIsolation = Boolean(
         String(settings.dialoguePrompt || '').trim()
         || String(settings.otherDialoguePrompt || '').trim()
@@ -1839,47 +1978,35 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
     );
     if (!dialogueSegments.length || !needsSpeakerIsolation) return scopes;
 
+    const cacheKey = speakerAttributionCacheKey(segmented, speakerIdentity);
+    const cached = speakerAttributionCache.get(cacheKey);
+    if (cached) {
+        setBoundedCache(speakerAttributionCache, cacheKey, cached, 120);
+        return { ...cached };
+    }
+
     try {
         const prompt = buildSpeakerAttributionPrompt(segmented, speakerIdentity);
         const classified = await requestSegments(prompt, dialogueSegments, {
             ...options,
             stage: 'speaker-attribution',
         });
+
         for (const segment of dialogueSegments) {
             const value = String(classified.get(segment.id) || '').trim().toLocaleLowerCase();
             scopes[segment.id] = value === 'target' ? 'target_dialogue' : 'other_dialogue';
         }
+
+        setBoundedCache(speakerAttributionCache, cacheKey, { ...scopes }, 120);
     } catch (error) {
         if (isAbort(error, options.signal)) throw error;
-        // Conservative fallback: never leak TARGET style onto an uncertain
-        // speaker. Translation still continues using global/all-dialogue rules.
+        // Conservative fallback is NOT cached. A later retranslation may
+        // successfully classify the speakers.
         console.warn('[베르바] 대사 화자 분류 실패 — 캐릭터 전용 프롬프트를 보수적으로 제외합니다.', error);
         debugCaptureError?.(error, 'speaker-attribution');
     }
 
     return scopes;
-}
-
-
-function compactScopeContext(segmented, segments, radius = 4500) {
-    const full = String(segmented?.protectedText || '');
-    if (!full || !Array.isArray(segments) || !segments.length) return full.slice(0, 9000);
-
-    const positions = segments
-        .map(segment => {
-            const value = String(segment?.text || '');
-            const index = value ? full.indexOf(value) : -1;
-            return index >= 0 ? { index, length: value.length } : null;
-        })
-        .filter(Boolean);
-
-    if (!positions.length) return full.slice(0, 9000);
-
-    const first = Math.min(...positions.map(item => item.index));
-    const last = Math.max(...positions.map(item => item.index + item.length));
-    const start = Math.max(0, first - radius);
-    const end = Math.min(full.length, last + radius);
-    return full.slice(start, end);
 }
 
 async function requestScopedGroupTranslations({
@@ -1888,67 +2015,58 @@ async function requestScopedGroupTranslations({
     segments,
     options,
 }) {
-    const buildPrompt = sourceContext => buildScopedOutputPrompt({
-        segments,
-        sourceContext,
+    const buildPrompt = targetSegments => buildScopedOutputPrompt({
+        segments: targetSegments,
+        sourceContext: segmented.protectedText,
         settings,
         oneTimeInstruction: options.oneTimeInstruction || '',
-        nameTokens: nameTokensForSegments(segmented, segments),
+        nameTokens: nameTokensForSegments(segmented, targetSegments),
         tuning: options.tuning || null,
         scope,
     });
 
     try {
-        return await requestSegments(buildPrompt(segmented.protectedText), segments, {
+        return await requestSegments(buildPrompt(segments), segments, {
             ...options,
+            parallelRequest: true,
             stage: `${options.stage || 'output-translation'}:${scope}`,
         });
     } catch (error) {
-        if (isAbort(error, options.signal) || transientError(error)) throw error;
+        if (isAbort(error, options.signal)) throw error;
+
+        const recovered = error.partialTranslations instanceof Map
+            ? new Map(error.partialTranslations)
+            : new Map();
+        const missing = Array.isArray(error.missingSegments) && error.missingSegments.length
+            ? error.missingSegments
+            : segments.filter(segment => !recovered.has(segment.id));
+
+        if (!missing.length) return recovered;
 
         console.warn(
-            `[베르바] ${scope} 범위 묶음 번역 실패 — 작은 단위로 자동 복구를 시도합니다.`,
+            `[베르바] ${scope} 범위에서 ${recovered.size}개 성공 구간은 유지하고, 실패한 ${missing.length}개 구간만 개별 복구합니다.`,
             error,
         );
 
-        // One segment cannot be split any further. Retry it once with a much
-        // smaller context, which also recovers some context-length/request-size
-        // failures caused by a long full-message reference.
-        const recovered = new Map();
-        for (const segment of segments) {
-            const singleContext = compactScopeContext(segmented, [segment], 3500);
-            const singlePrompt = buildScopedOutputPrompt({
-                segments: [segment],
-                sourceContext: singleContext,
-                settings,
-                oneTimeInstruction: options.oneTimeInstruction || '',
-                nameTokens: nameTokensForSegments(segmented, [segment]),
-                tuning: options.tuning || null,
-                scope,
-            });
-
-            try {
-                const single = await requestSegments(singlePrompt, [segment], {
+        const rows = await runWithConcurrency(
+            missing,
+            SCOPED_PARALLEL_REQUEST_LIMIT,
+            async segment => {
+                // Full message context is deliberately retained. No context
+                // shrinking or prompt compression is used by this optimization.
+                const single = await requestSegments(buildPrompt([segment]), [segment], {
                     ...options,
+                    parallelRequest: true,
                     stage: `${options.stage || 'output-translation'}:${scope}:single`,
                 });
-                recovered.set(segment.id, single.get(segment.id));
-            } catch (singleError) {
-                if (isAbort(singleError, options.signal)) throw singleError;
-                const wrapped = new Error(
-                    `${scope} 범위 번역 복구 실패 (${segment.id}): ${errorText(singleError)}`,
-                    { cause: singleError },
-                );
-                wrapped.verbaScope = scope;
-                wrapped.verbaSegmentId = segment.id;
-                throw wrapped;
-            }
-        }
+                return [segment.id, single.get(segment.id)];
+            },
+        );
 
+        for (const [id, value] of rows) recovered.set(id, value);
         return recovered;
     }
 }
-
 async function requestScopedOutputTranslations(segmented, speakerScopes, options = {}) {
     const translations = new Map();
     const groups = segmentsGroupedByOutputScope(segmented.segments, speakerScopes);
@@ -1977,14 +2095,22 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
         });
     }
 
-    for (const [scope, segments] of groups) {
-        if (!segments.length) continue;
-        const result = await requestScopedGroupTranslations({
-            segmented,
-            scope,
-            segments,
-            options,
-        });
+    const scopeJobs = [...groups.entries()].filter(([, segments]) => segments.length);
+    const scopeResults = await runWithConcurrency(
+        scopeJobs,
+        SCOPED_PARALLEL_REQUEST_LIMIT,
+        async ([scope, segments]) => {
+            const result = await requestScopedGroupTranslations({
+                segmented,
+                scope,
+                segments,
+                options,
+            });
+            return [scope, result];
+        },
+    );
+
+    for (const [, result] of scopeResults) {
         for (const [id, value] of result) translations.set(id, value);
     }
 
@@ -2000,26 +2126,37 @@ async function repairSegmentsByOutputScope({
     buildPrompt,
     stage,
 }) {
-    const groups = segmentsGroupedByOutputScope(invalid, speakerScopes);
-    for (const [scope, segments] of groups) {
-        if (!segments.length) continue;
-        const prompt = buildPrompt(
-            segments,
-            translations,
-            settings,
-            options.speakerIdentity || {},
-            nameTokensForSegments(segmented, segments),
-            options.tuning || null,
-            scope,
-        );
-        const repaired = await requestSegments(prompt, segments, {
-            ...options,
-            stage: `${stage}:${scope}`,
-        });
-        for (const segment of segments) translations.set(segment.id, repaired.get(segment.id));
+    const groups = [...segmentsGroupedByOutputScope(invalid, speakerScopes).entries()]
+        .filter(([, segments]) => segments.length);
+
+    const results = await runWithConcurrency(
+        groups,
+        SCOPED_PARALLEL_REQUEST_LIMIT,
+        async ([scope, segments]) => {
+            const prompt = buildPrompt(
+                segments,
+                translations,
+                settings,
+                options.speakerIdentity || {},
+                nameTokensForSegments(segmented, segments),
+                options.tuning || null,
+                scope,
+            );
+            const repaired = await requestSegments(prompt, segments, {
+                ...options,
+                parallelRequest: true,
+                stage: `${stage}:${scope}`,
+            });
+            return [segments, repaired];
+        },
+    );
+
+    for (const [segments, repaired] of results) {
+        for (const segment of segments) {
+            translations.set(segment.id, repaired.get(segment.id));
+        }
     }
 }
-
 async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = options.speakerScopes || {};
@@ -7439,6 +7576,8 @@ function setupEvents() {
             swipeTranslationJobs.clear();
             renderedTranslationCache.clear();
             lastRenderedTranslationByMessage.clear();
+            speakerAttributionCache.clear();
+            roleTermPlanCache.clear();
             document.querySelectorAll('.verba-swipe-hold-active').forEach(element => {
                 element.classList.remove('verba-swipe-hold-active');
                 element.querySelectorAll('.verba-swipe-hold-content').forEach(hold => hold.remove());

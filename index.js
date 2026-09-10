@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.69';
+const EXTENSION_VERSION = '0.3.70';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -79,6 +79,9 @@ const DEFAULT_SETTINGS = {
     globalPrompt: '',
     allDialoguePrompt: '',
     dialoguePrompt: '',
+    dialogueEndingPreferred: '',
+    dialogueEndingAvoid: '',
+    dialogueEndingStrength: 'normal',
     bannedWords: '',
     maxTokens: 15000,
     timeoutSeconds: 120,
@@ -107,6 +110,11 @@ settings.autoProfileFallback = settings.autoProfileFallback !== false;
 delete settings.developerMode;
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
+settings.dialogueEndingPreferred = typeof settings.dialogueEndingPreferred === 'string' ? settings.dialogueEndingPreferred : '';
+settings.dialogueEndingAvoid = typeof settings.dialogueEndingAvoid === 'string' ? settings.dialogueEndingAvoid : '';
+settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(settings.dialogueEndingStrength)
+    ? settings.dialogueEndingStrength
+    : 'normal';
 settings.relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === settings.relationTemperature)
     ? settings.relationTemperature
     : 'default';
@@ -5992,6 +6000,27 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+                <details id="verba-dialogue-ending-settings" class="verba-tool-details">
+                    <summary>대사 말끝 취향 <small>선호·회피 표현</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label for="verba-dialogue-ending-preferred">선호하는 말끝·표현</label>
+                        <textarea id="verba-dialogue-ending-preferred" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력&#10;예: ~잖아&#10;~거든&#10;~지">${escapeHtml(settings.dialogueEndingPreferred)}</textarea>
+                        <div class="verba-help">가능한 문맥에서 자연스럽게 우선 사용해요. 적어둔 표현을 모든 문장에 억지로 붙이지 않습니다.</div>
+
+                        <label for="verba-dialogue-ending-avoid">피하고 싶은 말끝·표현</label>
+                        <textarea id="verba-dialogue-ending-avoid" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력&#10;예: ~구나&#10;~군">${escapeHtml(settings.dialogueEndingAvoid)}</textarea>
+                        <div class="verba-help">금지어처럼 절대 차단하지 않고, 같은 의미를 자연스럽게 표현할 수 있으면 다른 말끝을 우선해요.</div>
+
+                        <label for="verba-dialogue-ending-strength">적용 강도</label>
+                        <select id="verba-dialogue-ending-strength" class="text_pole">
+                            <option value="light" ${settings.dialogueEndingStrength === 'light' ? 'selected' : ''}>약하게</option>
+                            <option value="normal" ${settings.dialogueEndingStrength === 'normal' ? 'selected' : ''}>보통</option>
+                            <option value="strong" ${settings.dialogueEndingStrength === 'strong' ? 'selected' : ''}>강하게</option>
+                        </select>
+                        <div class="verba-help">대사에만 적용됩니다. 의미·존댓말/반말·감정 강도·캐릭터성은 바꾸지 않고 말끝 선택의 선호도만 조절해요.</div>
+                    </div>
+                </details>
+
                 <details id="verba-rule-priority-settings" class="verba-tool-details">
                     <summary>번역 규칙 우선순위 <small>위·아래로 정렬</small></summary>
                     <div class="verba-tool-details-content">
@@ -6208,6 +6237,20 @@ function injectSettingsPanel() {
             }).dialogueLocalizationLevel;
             saveSettings();
         });
+    });
+    panel.querySelector('#verba-dialogue-ending-preferred').addEventListener('input', event => {
+        settings.dialogueEndingPreferred = event.target.value;
+        saveSettings();
+    });
+    panel.querySelector('#verba-dialogue-ending-avoid').addEventListener('input', event => {
+        settings.dialogueEndingAvoid = event.target.value;
+        saveSettings();
+    });
+    panel.querySelector('#verba-dialogue-ending-strength').addEventListener('change', event => {
+        settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(event.target.value)
+            ? event.target.value
+            : 'normal';
+        saveSettings();
     });
     panel.querySelector('#verba-rule-priority-list').addEventListener('click', event => {
         const button = event.target.closest('.verba-rule-move-up, .verba-rule-move-down');

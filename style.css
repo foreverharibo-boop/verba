@@ -1562,3 +1562,16 @@
     opacity: 0.68 !important;
     line-height: 1.4 !important;
 }
+
+
+/* v0.3.70: dialogue-ending preference controls */
+#verba-dialogue-ending-settings textarea {
+    width: 100% !important;
+    min-height: 82px !important;
+    resize: vertical !important;
+    line-height: 1.4 !important;
+}
+
+#verba-dialogue-ending-settings select {
+    width: 100% !important;
+}

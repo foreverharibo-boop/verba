@@ -873,12 +873,75 @@ function absoluteFidelityRule(settings = {}) {
     return '- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.';
 }
 
+function parseDialoguePreferenceList(value) {
+    const rows = String(value || '')
+        .split(/\r?\n/u)
+        .map(item => item.trim())
+        .filter(Boolean)
+        .filter(item => item.length <= 60)
+        .slice(0, 30);
+    return [...new Set(rows)];
+}
+
+function dialogueEndingPreferenceBlock(settings = {}) {
+    const preferred = parseDialoguePreferenceList(settings.dialogueEndingPreferred);
+    const avoided = parseDialoguePreferenceList(settings.dialogueEndingAvoid);
+    if (!preferred.length && !avoided.length) {
+        return 'DIALOGUE ENDING / EXPRESSION PREFERENCES\n(없음)';
+    }
+
+    const strength = ['light', 'normal', 'strong'].includes(settings.dialogueEndingStrength)
+        ? settings.dialogueEndingStrength
+        : 'normal';
+    const strengthRule = strength === 'strong'
+        ? `STRONG
+- Strongly favor the preferred endings/expressions when they fit naturally.
+- Strongly avoid the disliked ones when an equally natural alternative exists.
+- Even at strong strength, never force the same ending repeatedly or damage grammar, register, character voice, or meaning.`
+        : strength === 'light'
+            ? `LIGHT
+- Treat these as gentle tendencies only.
+- Use preferred forms occasionally when they fit naturally, and avoid disliked forms only when an effortless alternative exists.`
+            : `NORMAL
+- Actively prefer the listed forms when they naturally fit the sentence and scene.
+- Usually avoid the disliked forms when another natural Korean ending/expression conveys the same meaning and tone.`;
+
+    return `DIALOGUE ENDING / EXPRESSION PREFERENCES — SOFT GUIDANCE
+STRENGTH
+${strengthRule}
+
+PREFERRED FORMS
+${preferred.length ? JSON.stringify(preferred) : '(없음)'}
+
+PREFER TO AVOID
+${avoided.length ? JSON.stringify(avoided) : '(없음)'}
+
+RULES
+- Apply only to direct dialogue, never narration.
+- These are preferences, NOT mandatory substitutions and NOT banned words.
+- Never mechanically append a listed ending to every sentence.
+- Vary sentence endings naturally so dialogue does not become repetitive or patterned.
+- Preserve the source's sentence function, politeness level, relationship distance, emotion, sarcasm, intensity, and character voice.
+- If a preferred form would sound unnatural or change nuance, do not use it.
+- If an avoided form is genuinely the most natural or necessary rendering for the exact nuance, it may still be used.
+- Treat a leading "~" as an example of a Korean sentence ending or expression pattern, not as a literal character that must appear in output.`;
+}
+
 function translationTuningBlock(settings = {}, override = null) {
     const requested = override && typeof override === 'object' ? override : {};
     const relationTemperatureEnabled = typeof requested.relationTemperatureEnabled === 'boolean'
         ? requested.relationTemperatureEnabled
         : settings.relationTemperatureEnabled !== false;
-    if (!relationTemperatureEnabled) return 'TRANSLATION FINE TUNING\n(비활성화)';
+    const endingPreferences = dialogueEndingPreferenceBlock(settings);
+
+    if (!relationTemperatureEnabled) {
+        return `TRANSLATION FINE TUNING
+RELATION TEMPERATURE / LOCALIZATION
+(비활성화)
+
+${endingPreferences}`;
+    }
+
     const relationKey = Object.hasOwn(RELATION_TEMPERATURE_RULES, requested.relationTemperature)
         ? requested.relationTemperature
         : Object.hasOwn(RELATION_TEMPERATURE_RULES, settings.relationTemperature)
@@ -908,6 +971,8 @@ ${LOCALIZATION_RULES[narrationLocalizationKey]}
 
 DIALOGUE LOCALIZATION — applies only to direct-dialogue segments, never narration
 ${LOCALIZATION_RULES[dialogueLocalizationKey]}
+
+${endingPreferences}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
@@ -942,6 +1007,11 @@ function scopedTranslationTuningBlock(settings = {}, override = null, scope = 'n
             : legacyLocalizationKey || 'balanced';
 
     if (scope === 'narration') {
+        if (!relationTemperatureEnabled) {
+            return `TRANSLATION FINE TUNING — NARRATION ONLY
+RELATION TEMPERATURE / LOCALIZATION
+(비활성화)`;
+        }
         return `TRANSLATION FINE TUNING — NARRATION ONLY
 ${LOCALIZATION_RULES[narrationLocalizationKey]}
 
@@ -950,20 +1020,25 @@ FINE-TUNING SAFETY
 - Never alter protected tokens, names, formatting, code, tags, URLs, numbers, or setting-specific terminology because of fine tuning.`;
     }
 
-    const relation = relationTemperatureEnabled
+    const relationAndLocalization = relationTemperatureEnabled
         ? `RELATION TEMPERATURE — DIALOGUE ONLY
-${RELATION_TEMPERATURE_RULES[relationKey]}`
-        : 'RELATION TEMPERATURE\n(비활성화)';
-    return `TRANSLATION FINE TUNING — DIALOGUE ONLY
-${relation}
+${RELATION_TEMPERATURE_RULES[relationKey]}
 
 DIALOGUE LOCALIZATION
-${LOCALIZATION_RULES[dialogueLocalizationKey]}
+${LOCALIZATION_RULES[dialogueLocalizationKey]}`
+        : `RELATION TEMPERATURE / DIALOGUE LOCALIZATION
+(비활성화)`;
+
+    return `TRANSLATION FINE TUNING — DIALOGUE ONLY
+${relationAndLocalization}
+
+${dialogueEndingPreferenceBlock(settings)}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
 - Never alter protected tokens, names, formatting, code, tags, URLs, numbers, or setting-specific terminology because of fine tuning.`;
 }
+
 
 function scopedTranslationRuleBlocks(settings = {}, {
     oneTimeInstruction = '',

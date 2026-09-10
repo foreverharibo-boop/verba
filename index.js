@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.53';
+const EXTENSION_VERSION = '0.3.55';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -1041,6 +1041,41 @@ const CONSISTENCY_ROLE_TERMS = new Set([
     'uncle', 'aunt', 'husband', 'wife', 'boyfriend', 'girlfriend', 'fiance', 'fiancee',
 ]);
 
+const CONSISTENCY_ROLE_PHRASES = [
+    'team lead', 'team leader', 'project manager', 'general manager', 'team manager',
+    'floor manager', 'shift manager', 'shift supervisor', 'department head', 'head nurse',
+    'executive director', 'chief executive',
+];
+
+function normalizedRoleMention(raw) {
+    let term = String(raw || '').toLocaleLowerCase().trim().replace(/\s+/g, ' ');
+    term = term.replace(/[’']s$/u, '').replace(/[’']$/u, '');
+    if (CONSISTENCY_ROLE_PHRASES.includes(term)) return term;
+    const singular = term.endsWith('s') ? term.slice(0, -1) : '';
+    if (CONSISTENCY_ROLE_TERMS.has(term)) return term;
+    if (singular && CONSISTENCY_ROLE_TERMS.has(singular)) return singular;
+    return '';
+}
+
+function roleTermsForReferentConsistency(segments) {
+    const phrasePattern = CONSISTENCY_ROLE_PHRASES
+        .map(term => term.split(/\s+/u).map(escapeRegularExpression).join('\\s+'))
+        .join('|');
+    const matcher = new RegExp(`\\b(?:${phrasePattern}|[A-Za-z][A-Za-z'’-]{2,})\\b`, 'giu');
+    const ordered = [];
+    let totalMentions = 0;
+    for (const segment of segments || []) {
+        const source = String(segment?.text || '').replace(/@@VERBA_[A-Z0-9_]+@@/g, ' ');
+        for (const match of source.matchAll(matcher)) {
+            const term = normalizedRoleMention(match[0]);
+            if (!term) continue;
+            totalMentions += 1;
+            if (!ordered.includes(term)) ordered.push(term);
+        }
+    }
+    return totalMentions >= 2 ? ordered : [];
+}
+
 function repeatedRoleTerms(segments) {
     const counts = new Map();
     for (const segment of segments || []) {
@@ -1060,7 +1095,13 @@ function repeatedRoleTerms(segments) {
 
 function segmentContainsRoleTerm(segment, terms) {
     const source = String(segment?.text || '');
-    return terms.some(term => new RegExp(`(^|[^A-Za-z])${term}(?=$|[^A-Za-z])`, 'i').test(source));
+    return terms.some(term => {
+        const pattern = String(term || '')
+            .split(/\s+/u)
+            .map(escapeRegularExpression)
+            .join('\\s+');
+        return new RegExp(`(^|[^A-Za-z])${pattern}(?=$|[^A-Za-z])`, 'i').test(source);
+    });
 }
 
 async function planRepeatedRoleTermLocks(segmented, options = {}) {
@@ -1111,7 +1152,11 @@ function protectedTokensIntact(previous, next) {
 }
 
 async function repairRepeatedRoleTermConsistency(segmented, translations, options = {}) {
-    const terms = repeatedRoleTerms(segmented?.segments);
+    // Unlike the pre-translation lock (which handles exact repeated source terms),
+    // this final pass also compares different role/title words that may point to
+    // the same person, e.g. manager -> team lead. If context confirms the same
+    // referent/function, the earliest Korean rendering becomes canonical.
+    const terms = roleTermsForReferentConsistency(segmented?.segments);
     if (!terms.length) return;
     const affected = (segmented.segments || []).filter(segment => segmentContainsRoleTerm(segment, terms));
     if (!affected.length) return;

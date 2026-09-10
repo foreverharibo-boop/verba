@@ -528,6 +528,137 @@ const LOCALIZATION_RULES = {
 - Never Koreanize proper names, places, currencies, measurements, institutions, legal facts, historical facts, or fictional setting details.`,
 };
 
+const NARRATION_STYLE_RULES = {
+    faithful: `SOURCE-FAITHFUL NARRATION
+- Keep narration close to the source sentence structure and descriptive density while still producing grammatical Korean.
+- Avoid decorative rewriting or literary embellishment absent from the source.`,
+    balanced: `BALANCED NARRATION
+- Render narration as natural, readable Korean while preserving the source's pacing, detail, and atmosphere.
+- Improve awkward literal phrasing only when meaning and intensity remain unchanged.`,
+    literary: `POLISHED LITERARY NARRATION
+- Use polished Korean prose with smooth rhythm and vivid but source-grounded wording.
+- Never add imagery, actions, emotions, facts, or intensity that the source does not contain.`,
+};
+
+const DIALOGUE_STYLE_RULES = {
+    faithful: `SOURCE-FAITHFUL DIALOGUE
+- Keep direct dialogue close to the source wording, register, hesitation, repetition, and sentence force.
+- Do not soften, intensify, or domesticate the speaker's voice.`,
+    balanced: `BALANCED DIALOGUE
+- Use natural spoken Korean while preserving the speaker's register, intent, emotional force, and relationship distance.
+- Avoid both stiff literalism and unnecessary slang.`,
+    conversational: `NATURAL CONVERSATIONAL DIALOGUE
+- Prefer fluent, believable spoken Korean appropriate to the source speaker and situation.
+- Naturalize syntax and conversational rhythm without adding slang, intimacy, rudeness, or emotion absent from the source.`,
+};
+
+const DEFAULT_TRANSLATION_RULE_ORDER = [
+    'oneTime',
+    'characterDialogue',
+    'allDialogue',
+    'splitStyle',
+    'global',
+    'fineTuning',
+    'preservation',
+];
+
+function normalizedTranslationRuleOrder(settings = {}) {
+    const allowed = new Set(DEFAULT_TRANSLATION_RULE_ORDER);
+    const order = [];
+    for (const key of Array.isArray(settings.translationRuleOrder) ? settings.translationRuleOrder : []) {
+        const normalized = String(key || '');
+        if (!allowed.has(normalized) || order.includes(normalized)) continue;
+        order.push(normalized);
+    }
+    for (const key of DEFAULT_TRANSLATION_RULE_ORDER) {
+        if (!order.includes(key)) order.push(key);
+    }
+    return order;
+}
+
+function splitStyleBlock(settings = {}, { includeNarration = true, includeDialogue = true } = {}) {
+    if (settings.developerMode !== true) return 'NARRATION / DIALOGUE STYLE SPLIT\n(비활성화)';
+    const narrationKey = Object.hasOwn(NARRATION_STYLE_RULES, settings.narrationStyle)
+        ? settings.narrationStyle
+        : 'balanced';
+    const dialogueKey = Object.hasOwn(DIALOGUE_STYLE_RULES, settings.dialogueStyle)
+        ? settings.dialogueStyle
+        : 'balanced';
+    return `NARRATION / DIALOGUE STYLE SPLIT — developer mode
+NARRATION — ${includeNarration ? 'apply only to narration segments' : 'not applicable to this selection'}
+${includeNarration ? NARRATION_STYLE_RULES[narrationKey] : '(적용 안 함)'}
+
+DIALOGUE — ${includeDialogue ? 'apply only to direct-dialogue segments' : 'not applicable to this selection'}
+${includeDialogue ? DIALOGUE_STYLE_RULES[dialogueKey] : '(적용 안 함)'}`;
+}
+
+function translationPreservationBlock(settings = {}) {
+    const developerEnabled = settings.developerMode === true;
+    const enabled = key => !developerEnabled || settings[key] !== false;
+    const rules = [
+        enabled('preserveProperNouns') && '- Preserve the identity and consistent rendering of proper names, places, organizations, fictional terms, and setting-specific terminology.',
+        enabled('preserveRoles') && '- Preserve titles, roles, forms of address, kinship terms, and factual relationship distance; do not replace them with a different social role.',
+        enabled('preserveNumbers') && '- Preserve numbers, dates, times, ages, currencies, measurements, quantities, and their factual values.',
+        enabled('preservePerspective') && '- Preserve tense, aspect, point of view, speaker, subject/object relations, pronoun reference, and who performs each action.',
+        enabled('preserveFormatting') && '- Preserve paragraph breaks, line breaks, quotation structure, emphasis, and dialogue/narration boundaries.',
+    ].filter(Boolean);
+    return `TRANSLATION PRESERVATION ${developerEnabled ? '— developer mode' : '— default'}
+${rules.length ? rules.join('\n') : '- No optional preservation category is enabled. Ordinary source fidelity and all technical protection rules still apply.'}
+- Disabled optional categories remove only the extra preservation preference. They never permit invented facts, omissions, mistranslation, or damage to protected syntax.`;
+}
+
+function orderedTranslationRuleBlocks(settings = {}, {
+    oneTimeInstruction = '',
+    tuning = null,
+    includeNarration = true,
+    includeDialogue = true,
+    includeCharacterDialogue = true,
+} = {}) {
+    if (settings.developerMode !== true) {
+        return `${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', settings.globalPrompt)}
+
+${instructionBlock('ALL-DIALOGUE PROMPT — applies to every direct dialogue passage by TARGET CHARACTER, USER, or NPC; never to narration', includeDialogue ? settings.allDialoguePrompt : '', '(적용 대상 대사 없음)')}
+
+${instructionBlock('TARGET-CHARACTER DIALOGUE PROMPT — additionally applies only to direct speech by TARGET CHARACTER; never to USER/NPC speech, quotations, or narration', includeCharacterDialogue ? settings.dialoguePrompt : '', '(적용 대상 캐릭터 대사 없음)')}
+
+${translationTuningBlock(settings, tuning)}
+
+ONE-TIME REQUEST — applies only to this retranslation and has priority over the configurable prompts unless it conflicts with source fidelity, protected syntax, or banned words
+${String(oneTimeInstruction || '').trim() || '(없음)'}`;
+    }
+
+    const blocks = {
+        oneTime: `ONE-TIME REQUEST
+${String(oneTimeInstruction || '').trim() || '(없음)'}`,
+        characterDialogue: instructionBlock(
+            'TARGET-CHARACTER DIALOGUE PROMPT — only direct speech by TARGET CHARACTER',
+            includeCharacterDialogue ? settings.dialoguePrompt : '',
+            '(적용 대상 캐릭터 대사 없음)',
+        ),
+        allDialogue: instructionBlock(
+            'ALL-DIALOGUE PROMPT — every direct dialogue passage, never narration',
+            includeDialogue ? settings.allDialoguePrompt : '',
+            '(적용 대상 대사 없음)',
+        ),
+        splitStyle: splitStyleBlock(settings, { includeNarration, includeDialogue }),
+        global: instructionBlock('GLOBAL TRANSLATION PROMPT — narration and dialogue', settings.globalPrompt),
+        fineTuning: translationTuningBlock(settings, tuning),
+        preservation: translationPreservationBlock(settings),
+    };
+    const ordered = normalizedTranslationRuleOrder(settings);
+    return `USER-CONFIGURED TRANSLATION RULE PRIORITY — developer mode
+- Earlier numbered groups have higher priority when two configurable preferences conflict.
+- Source fidelity, protected syntax/tokens, valid JSON, and banned-word avoidance remain absolute regardless of this order.
+
+${ordered.map((key, index) => `PRIORITY ${index + 1}\n${blocks[key]}`).join('\n\n')}`;
+}
+
+function absoluteFidelityRule(settings = {}) {
+    return settings.developerMode === true
+        ? '- Preserve meaning, facts, actions, emotional intensity, explicitness, negation, chronology, and who does what to whom.'
+        : '- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.';
+}
+
 function translationTuningBlock(settings = {}, override = null) {
     if (settings.developerMode !== true) return 'TRANSLATION FINE TUNING\n(비활성화)';
     const requested = override && typeof override === 'object' ? override : {};
@@ -591,30 +722,27 @@ function sharedOutputRules(settings, oneTimeInstruction = '', speakerIdentity = 
 
 ABSOLUTE RULES
 - Translate the supplied source into natural Korean without answering, continuing, censoring, summarizing, adding, or omitting anything.
-- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.
+${absoluteFidelityRule(settings)}
 - When the same source term refers to the same role, person, object, or concept, use one consistent Korean rendering throughout the entire current message. Do not alternate between Korean synonyms such as "매니저" and "팀장" unless the source meaning genuinely changes by context.
 - Preserve Markdown, HTML structure and attributes, code, macros, placeholders, URLs, and every non-name @@VERBA_0000@@ style token exactly once.
 - Handle @@VERBA_NAME_0000@@ style tokens only according to NAME LOCK TOKENS below.
 - Do not create bilingual output unless the user's GLOBAL TRANSLATION PROMPT, ALL-DIALOGUE PROMPT, or applicable TARGET-CHARACTER DIALOGUE PROMPT explicitly requests it.
 - Output valid JSON only. Do not use a code fence or add commentary.
 
-${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', settings.globalPrompt)}
-
-${instructionBlock('ALL-DIALOGUE PROMPT — applies to every direct dialogue passage by TARGET CHARACTER, USER, or NPC; never to narration', settings.allDialoguePrompt)}
-
-${instructionBlock('TARGET-CHARACTER DIALOGUE PROMPT — additionally applies only to direct speech by TARGET CHARACTER; never to USER/NPC speech, quotations, or narration', settings.dialoguePrompt)}
+${orderedTranslationRuleBlocks(settings, {
+        oneTimeInstruction,
+        tuning,
+        includeNarration: true,
+        includeDialogue: true,
+        includeCharacterDialogue: true,
+    })}
 
 ${speakerIdentityBlock(speakerIdentity)}
 
 ${nameTokenInstruction(nameTokens)}
 
-${translationTuningBlock(settings, tuning)}
-
 BANNED KOREAN WORDS — absolute, including particles or suffixes attached
-${bannedWords.length ? bannedWords.join(', ') : '(없음)'}
-
-ONE-TIME REQUEST — applies only to this retranslation and has priority over the two prompts unless it conflicts with source fidelity, protected syntax, or banned words
-${String(oneTimeInstruction || '').trim() || '(없음)'}`;
+${bannedWords.length ? bannedWords.join(', ') : '(없음)'}`;
 }
 
 export function buildOutputPrompt(segmented, settings, oneTimeInstruction = '', speakerIdentity = {}, tuning = null) {
@@ -934,21 +1062,18 @@ ${outputRule}
 - The selected fragment is ${inDialogue ? 'inside or touches dialogue. Always apply the all-dialogue prompt; infer its speaker from ORIGINAL SOURCE and additionally apply the target-character dialogue prompt only if TARGET CHARACTER is actually speaking.' : 'narration: do not apply either dialogue prompt.'}
 - Output valid JSON only.
 
-${instructionBlock('GLOBAL TRANSLATION PROMPT', settings.globalPrompt)}
-
-${instructionBlock('ALL-DIALOGUE PROMPT — use for dialogue by any speaker', inDialogue ? settings.allDialoguePrompt : '', '(선택 범위가 서술이므로 적용하지 않음)')}
-
-${instructionBlock('TARGET-CHARACTER DIALOGUE PROMPT — additionally use only when the corresponding source dialogue is spoken by TARGET CHARACTER', inDialogue ? settings.dialoguePrompt : '', '(선택 범위가 서술이므로 적용하지 않음)')}
+${orderedTranslationRuleBlocks(settings, {
+        oneTimeInstruction,
+        tuning,
+        includeNarration: !inDialogue,
+        includeDialogue: inDialogue,
+        includeCharacterDialogue: inDialogue,
+    })}
 
 ${speakerIdentityBlock(speakerIdentity)}
 
-${translationTuningBlock(settings, tuning)}
-
 BANNED KOREAN WORDS
 ${parseBannedWords(settings.bannedWords).join(', ') || '(없음)'}
-
-ONE-TIME REQUEST FOR THIS SELECTION
-${String(oneTimeInstruction || '').trim() || '(없음)'}
 
 Return exactly:
 ${outputSchema}
@@ -1027,21 +1152,18 @@ RULES
 - Output valid JSON only and include every supplied id exactly once.
 ${usesSharedMessageContext ? '- Use the shared full-message contexts together with each row\'s local LEFT/RIGHT CONTEXT. Do not translate or return the shared context itself.' : ''}
 
-${instructionBlock('GLOBAL TRANSLATION PROMPT', settings.globalPrompt)}
-
-${instructionBlock('ALL-DIALOGUE PROMPT — use only for dialogue rows', hasDialogue ? settings.allDialoguePrompt : '', '(선택 범위에 대사가 없으므로 적용하지 않음)')}
-
-${instructionBlock('TARGET-CHARACTER DIALOGUE PROMPT — additionally use only when the target character speaks', hasDialogue ? settings.dialoguePrompt : '', '(선택 범위에 대사가 없으므로 적용하지 않음)')}
+${orderedTranslationRuleBlocks(settings, {
+        oneTimeInstruction,
+        tuning,
+        includeNarration: rows.some(row => !row.in_dialogue),
+        includeDialogue: hasDialogue,
+        includeCharacterDialogue: hasDialogue,
+    })}
 
 ${speakerIdentityBlock(speakerIdentity)}
 
-${translationTuningBlock(settings, tuning)}
-
 BANNED KOREAN WORDS
 ${parseBannedWords(settings.bannedWords).join(', ') || '(없음)'}
-
-ONE-TIME REQUEST FOR ALL SELECTIONS
-${String(oneTimeInstruction || '').trim() || '(없음)'}
 
 Return exactly:
 ${schema}

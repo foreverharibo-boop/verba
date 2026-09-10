@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.33';
+const EXTENSION_VERSION = '0.3.35';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -45,6 +45,26 @@ const LOCALIZATION_LEVEL_OPTIONS = [
     { value: 'balanced', label: '균형' },
     { value: 'naturalized', label: '한국어화' },
 ];
+const NARRATION_STYLE_OPTIONS = [
+    { value: 'faithful', label: '원문 충실' },
+    { value: 'balanced', label: '균형' },
+    { value: 'literary', label: '문학적' },
+];
+const DIALOGUE_STYLE_OPTIONS = [
+    { value: 'faithful', label: '원문 충실' },
+    { value: 'balanced', label: '균형' },
+    { value: 'conversational', label: '자연스러운 구어체' },
+];
+const TRANSLATION_RULE_DEFINITIONS = [
+    { key: 'oneTime', label: '이번 번역 요구사항' },
+    { key: 'characterDialogue', label: '캐릭터 대사 프롬프트' },
+    { key: 'allDialogue', label: '모든 대사 공통 프롬프트' },
+    { key: 'splitStyle', label: '서술·대사 개별 설정' },
+    { key: 'global', label: '전체 번역 전역 프롬프트' },
+    { key: 'fineTuning', label: '관계 온도·현지화' },
+    { key: 'preservation', label: '번역 보존 항목' },
+];
+const DEFAULT_TRANSLATION_RULE_ORDER = TRANSLATION_RULE_DEFINITIONS.map(item => item.key);
 const DEFAULT_SETTINGS = {
     profileId: '',
     fallbackProfileId: '',
@@ -68,6 +88,14 @@ const DEFAULT_SETTINGS = {
     relationTemperatureEnabled: true,
     relationTemperature: 'default',
     localizationLevel: 'balanced',
+    narrationStyle: 'balanced',
+    dialogueStyle: 'balanced',
+    preserveProperNouns: true,
+    preserveRoles: true,
+    preserveNumbers: true,
+    preservePerspective: true,
+    preserveFormatting: true,
+    translationRuleOrder: DEFAULT_TRANSLATION_RULE_ORDER,
 };
 
 const baseContext = getContext();
@@ -87,6 +115,16 @@ settings.relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => optio
 settings.localizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === settings.localizationLevel)
     ? settings.localizationLevel
     : 'balanced';
+settings.narrationStyle = NARRATION_STYLE_OPTIONS.some(option => option.value === settings.narrationStyle)
+    ? settings.narrationStyle
+    : 'balanced';
+settings.dialogueStyle = DIALOGUE_STYLE_OPTIONS.some(option => option.value === settings.dialogueStyle)
+    ? settings.dialogueStyle
+    : 'balanced';
+for (const key of ['preserveProperNouns', 'preserveRoles', 'preserveNumbers', 'preservePerspective', 'preserveFormatting']) {
+    settings[key] = settings[key] !== false;
+}
+settings.translationRuleOrder = normalizeTranslationRuleOrder(settings.translationRuleOrder);
 delete settings.debugMode;
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
@@ -555,6 +593,37 @@ function tuningChoiceMarkup(name, options, selected) {
     </div>`;
 }
 
+function normalizeTranslationRuleOrder(value) {
+    const allowed = new Set(DEFAULT_TRANSLATION_RULE_ORDER);
+    const ordered = [];
+    for (const key of Array.isArray(value) ? value : []) {
+        const normalized = String(key || '');
+        if (!allowed.has(normalized) || ordered.includes(normalized)) continue;
+        ordered.push(normalized);
+    }
+    for (const key of DEFAULT_TRANSLATION_RULE_ORDER) {
+        if (!ordered.includes(key)) ordered.push(key);
+    }
+    return ordered;
+}
+
+function renderTranslationRuleOrder() {
+    const host = document.querySelector('#verba-rule-priority-list');
+    if (!host) return;
+    settings.translationRuleOrder = normalizeTranslationRuleOrder(settings.translationRuleOrder);
+    host.innerHTML = settings.translationRuleOrder.map((key, index, order) => {
+        const definition = TRANSLATION_RULE_DEFINITIONS.find(item => item.key === key);
+        return `<div class="verba-rule-priority-row" data-rule-key="${escapeHtml(key)}">
+            <b>${index + 1}</b>
+            <span>${escapeHtml(definition?.label || key)}</span>
+            <div class="verba-rule-priority-actions">
+                <button type="button" class="menu_button verba-rule-move-up" aria-label="위로 이동" ${index === 0 ? 'disabled' : ''}>↑</button>
+                <button type="button" class="menu_button verba-rule-move-down" aria-label="아래로 이동" ${index === order.length - 1 ? 'disabled' : ''}>↓</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
 function emptyProfileStat() {
     return {
         requests: 0,
@@ -597,7 +666,9 @@ function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallbac
     if (success) stat.successes += 1;
     else stat.failures += 1;
     if (retry) stat.retries += 1;
-    if (fallback) stat.fallbacks += 1;
+    // '대체'는 대체 프로필을 시도한 횟수가 아니라, 실제로 성공해
+    // 번역 응답으로 사용된 횟수만 집계한다.
+    if (fallback && success) stat.fallbacks += 1;
     saveSettings();
     renderProfileStats();
 }
@@ -4849,6 +4920,62 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+                <details id="verba-split-style-settings" class="verba-tool-details verba-developer-only">
+                    <summary>서술·대사 개별 설정 <small>문체 분리</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label for="verba-narration-style">서술 스타일</label>
+                        <select id="verba-narration-style" class="text_pole">
+                            ${NARRATION_STYLE_OPTIONS.map(option => `
+                                <option value="${option.value}" ${settings.narrationStyle === option.value ? 'selected' : ''}>${option.label}</option>
+                            `).join('')}
+                        </select>
+                        <div class="verba-help">서술 구간에만 적용됩니다. 문학적을 선택해도 원문에 없는 묘사나 감정은 추가하지 않아요.</div>
+                        <label for="verba-dialogue-style">대사 스타일</label>
+                        <select id="verba-dialogue-style" class="text_pole">
+                            ${DIALOGUE_STYLE_OPTIONS.map(option => `
+                                <option value="${option.value}" ${settings.dialogueStyle === option.value ? 'selected' : ''}>${option.label}</option>
+                            `).join('')}
+                        </select>
+                        <div class="verba-help">직접 대사 구간에만 적용됩니다. 화자의 말투·감정·관계는 원문 범위 안에서 유지해요.</div>
+                    </div>
+                </details>
+
+                <details id="verba-preservation-settings" class="verba-tool-details verba-developer-only">
+                    <summary>번역 보존 항목 <small>항목별 스위치</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-preserve-proper-nouns" ${settings.preserveProperNouns !== false ? 'checked' : ''}>
+                            <span>고유명사·지명·설정 용어</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-preserve-roles" ${settings.preserveRoles !== false ? 'checked' : ''}>
+                            <span>호칭·직책·관계</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-preserve-numbers" ${settings.preserveNumbers !== false ? 'checked' : ''}>
+                            <span>숫자·날짜·시간·단위</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-preserve-perspective" ${settings.preservePerspective !== false ? 'checked' : ''}>
+                            <span>시제·시점·화자·행위 주체</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-preserve-formatting" ${settings.preserveFormatting !== false ? 'checked' : ''}>
+                            <span>문단·줄바꿈·대사 서식</span>
+                        </label>
+                        <div class="verba-help">끄면 해당 항목에 대한 추가 고정 지시만 제외됩니다. 원문 의미 보존과 태그·코드·토큰 보호는 항상 유지돼요.</div>
+                    </div>
+                </details>
+
+                <details id="verba-rule-priority-settings" class="verba-tool-details verba-developer-only">
+                    <summary>번역 규칙 우선순위 <small>위·아래로 정렬</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-rule-priority-list" class="verba-rule-priority-list"></div>
+                        <div class="verba-help">위에 있는 규칙이 서로 충돌할 때 먼저 적용됩니다. 원문 정확성·보호 요소·금지어 규칙은 이 순서와 관계없이 항상 최우선이에요.</div>
+                        <button type="button" id="verba-reset-rule-priority" class="menu_button verba-wide">기본 순서로 되돌리기</button>
+                    </div>
+                </details>
+
                 <details id="verba-selection-menu-settings" class="verba-tool-details">
                     <summary>드래그 메뉴 구성 <small>버튼 수·기능 선택</small></summary>
                     <div class="verba-tool-details-content">
@@ -4904,6 +5031,7 @@ function injectSettingsPanel() {
     refreshProfileSelect();
     renderNameLockManager();
     renderProfileStats();
+    renderTranslationRuleOrder();
     syncDeveloperModeUi();
 
     panel.querySelector('.verba-drawer-header').addEventListener('click', registerDeveloperModeTap);
@@ -5008,6 +5136,50 @@ function injectSettingsPanel() {
             }).localizationLevel;
             saveSettings();
         });
+    });
+    panel.querySelector('#verba-narration-style').addEventListener('change', event => {
+        settings.narrationStyle = NARRATION_STYLE_OPTIONS.some(option => option.value === event.target.value)
+            ? event.target.value
+            : 'balanced';
+        saveSettings();
+    });
+    panel.querySelector('#verba-dialogue-style').addEventListener('change', event => {
+        settings.dialogueStyle = DIALOGUE_STYLE_OPTIONS.some(option => option.value === event.target.value)
+            ? event.target.value
+            : 'balanced';
+        saveSettings();
+    });
+    [
+        ['#verba-preserve-proper-nouns', 'preserveProperNouns'],
+        ['#verba-preserve-roles', 'preserveRoles'],
+        ['#verba-preserve-numbers', 'preserveNumbers'],
+        ['#verba-preserve-perspective', 'preservePerspective'],
+        ['#verba-preserve-formatting', 'preserveFormatting'],
+    ].forEach(([selector, key]) => {
+        panel.querySelector(selector).addEventListener('change', event => {
+            settings[key] = event.target.checked;
+            saveSettings();
+        });
+    });
+    panel.querySelector('#verba-rule-priority-list').addEventListener('click', event => {
+        const button = event.target.closest('.verba-rule-move-up, .verba-rule-move-down');
+        if (!button || button.disabled) return;
+        const key = button.closest('.verba-rule-priority-row')?.dataset.ruleKey;
+        const order = normalizeTranslationRuleOrder(settings.translationRuleOrder);
+        const index = order.indexOf(String(key || ''));
+        if (index < 0) return;
+        const nextIndex = button.classList.contains('verba-rule-move-up') ? index - 1 : index + 1;
+        if (nextIndex < 0 || nextIndex >= order.length) return;
+        [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
+        settings.translationRuleOrder = order;
+        saveSettings();
+        renderTranslationRuleOrder();
+    });
+    panel.querySelector('#verba-reset-rule-priority').addEventListener('click', () => {
+        settings.translationRuleOrder = [...DEFAULT_TRANSLATION_RULE_ORDER];
+        saveSettings();
+        renderTranslationRuleOrder();
+        notify('번역 규칙 우선순위를 기본 순서로 되돌렸어요.', 'success');
     });
     panel.querySelector('#verba-selection-quick-count').addEventListener('change', event => {
         settings.selectionQuickCount = Math.min(5, Math.max(2, Number(event.target.value) || 2));

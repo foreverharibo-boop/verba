@@ -363,6 +363,51 @@ html.verba-developer-mode > * .verba-developer-only {
     line-height: 1.35;
 }
 
+.verba-rule-priority-list {
+    display: grid;
+    gap: 5px;
+}
+
+.verba-rule-priority-row {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 5px 6px 5px 8px;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 42%, transparent);
+    border-radius: 8px;
+    background: transparent;
+}
+
+.verba-rule-priority-row > b {
+    text-align: center;
+    opacity: 0.72;
+}
+
+.verba-rule-priority-row > span {
+    min-width: 0;
+    line-height: 1.3;
+}
+
+.verba-rule-priority-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.verba-rule-priority-actions button {
+    width: 30px !important;
+    min-width: 30px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+    line-height: 1 !important;
+}
+
+.verba-rule-priority-actions button:disabled {
+    opacity: 0.28;
+}
+
 #verba-retranslate-latest {
     position: relative;
     top: -2px;

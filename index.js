@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.41';
+const EXTENSION_VERSION = '0.3.42';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -60,6 +60,7 @@ const DEFAULT_SETTINGS = {
     fallbackProfileId: '',
     thirdProfileId: '',
     activeProfileSlot: 'A',
+    autoProfileFallback: true,
     autoInput: false,
     selectionCandidates: false,
     selectionQuickCount: 2,
@@ -96,6 +97,7 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 );
 const settings = extension_settings[EXTENSION_KEY];
 settings.profileStats = normalizeProfileStats(settings.profileStats);
+settings.autoProfileFallback = settings.autoProfileFallback !== false;
 settings.developerMode = settings.developerMode === true;
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
@@ -1021,7 +1023,7 @@ function configuredProfileCycle() {
     return {
         slot: ordered[0]?.slot || 'A',
         active: ordered[0]?.id || '',
-        fallbacks: ordered.slice(1),
+        fallbacks: settings.autoProfileFallback !== false ? ordered.slice(1) : [],
     };
 }
 
@@ -5183,7 +5185,13 @@ function injectSettingsPanel() {
                 <label for="verba-third-profile">연결 프로필 C <small>(선택)</small></label>
                 <select id="verba-third-profile" class="text_pole"></select>
                 <button type="button" id="verba-test-profile" class="menu_button verba-wide">현재 프로필 연결 테스트</button>
-                <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 바꿀 수 있어요. 현재 프로필 요청이 실패하면 나머지 프로필을 차례로 임시 사용하며, 수동 선택 상태는 바뀌지 않습니다.</div>
+                <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 직접 바꿀 수 있어요.</div>
+
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-auto-profile-fallback" ${settings.autoProfileFallback !== false ? 'checked' : ''}>
+                    <span>번역 실패 시 다른 프로필 자동 사용</span>
+                </label>
+                <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
 
                 <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
@@ -5349,6 +5357,10 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
+    panel.querySelector('#verba-auto-profile-fallback').addEventListener('change', event => {
+        settings.autoProfileFallback = event.target.checked;
+        saveSettings();
+    });
     panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
         if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
         settings.profileStats = normalizeProfileStats(null);

@@ -788,8 +788,8 @@ function speakerIdentityBlock(speakerIdentity = {}) {
 - Never apply it to dialogue spoken by USER or another NPC, or to words that TARGET CHARACTER merely quotes, repeats, reads, remembers, imagines, or imitates.
 - A quotation mark alone does not prove TARGET CHARACTER is speaking.
 - TARGET CHARACTER and USER names are indivisible proper names. Never reinterpret, remove, or split a final Korean syllable as a grammatical particle. For example, if USER is "혜담은", the complete name is all three syllables "혜담은", never "혜담" plus the topic particle "은".
-- Translate English third-person pronouns into natural Korean rather than mechanically repeating "그녀", "그녀의", or "그녀에게". When a pronoun clearly and unambiguously refers to TARGET CHARACTER or USER, either use that person's complete listed name or omit the Korean subject/possessor when omission is natural.
-- If a pronoun's referent is ambiguous or points to another NPC, do not force either listed identity name onto it. Preserve the correct referent without guessing.
+- Preserve third-person pronouns as pronoun references in Korean instead of replacing them with TARGET CHARACTER or USER names merely because identity context is available. Render "she/her" with the grammatically appropriate Korean pronoun form such as "그녀", "그녀의", "그녀를", or "그녀에게", according to its role in the source sentence.
+- Never derive a nickname or familiar name by dropping any syllable from TARGET CHARACTER or USER. If the source explicitly contains a person's name, retain that complete name.
 - Whenever the Korean translation uses one of the listed identity names, copy the entire name exactly and attach any required Korean particle only after the complete name.
 - If attribution remains genuinely ambiguous after reading the full output, do not apply the TARGET-CHARACTER DIALOGUE PROMPT to that passage; use only the global and all-dialogue rules.`;
 }

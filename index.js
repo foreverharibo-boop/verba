@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.0';
+const EXTENSION_VERSION = '0.4.1';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2022,13 +2022,15 @@ function speakerAttributionCacheKey(segmented, speakerIdentity = {}) {
         .join('\u0003');
     const source = String(segmented?.protectedText || '');
     const characterName = String(speakerIdentity.characterName || '').trim();
+    const characterGender = String(speakerIdentity.characterGender || 'unknown').trim();
     const userName = String(speakerIdentity.userName || '').trim();
 
     return [
-        hashText(`${source}\u0000${dialogue}\u0000${characterName}\u0000${userName}`),
+        hashText(`${source}\u0000${dialogue}\u0000${characterName}\u0000${characterGender}\u0000${userName}`),
         source.length,
         dialogue.length,
         characterName,
+        characterGender,
         userName,
     ].join('\u0001');
 }
@@ -2650,8 +2652,10 @@ function messageSource(message) {
 
 function outputSpeakerIdentity(message) {
     const context = liveContext();
+    const character = currentCharacterReference()?.character;
     return {
         characterName: String(message?.name || context.name2 || '').trim(),
+        characterGender: detectCharacterGender(character),
         userName: String(context.name1 || '').trim(),
     };
 }

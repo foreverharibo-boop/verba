@@ -1388,15 +1388,22 @@ ${JSON.stringify(payload)}`;
 
 function speakerIdentityBlock(speakerIdentity = {}) {
     const characterName = String(speakerIdentity.characterName || '').trim() || '(current assistant character)';
+    const characterGender = ['male', 'female', 'neutral'].includes(String(speakerIdentity.characterGender || '').toLocaleLowerCase())
+        ? String(speakerIdentity.characterGender).toLocaleLowerCase()
+        : 'unknown';
     const userName = String(speakerIdentity.userName || '').trim() || '(current user)';
     return `SPEAKER ATTRIBUTION CONTEXT
 - TARGET CHARACTER: ${JSON.stringify(characterName)}
+- TARGET CHARACTER GENDER: ${JSON.stringify(characterGender)}
 - USER: ${JSON.stringify(userName)}
 - TARGET CHARACTER is the author of the current assistant output, but do not assume every quoted passage inside that output is spoken by them.
 - Infer who speaks each quoted passage from the entire supplied output: subject continuity, adjacent actions, pronouns, speech tags, turn order, and surrounding narration.
 - Classify each quoted passage so TARGET-CHARACTER and USER/NPC/OTHER dialogue can receive different speaker-specific prompts. Apply the TARGET-CHARACTER DIALOGUE PROMPT only to direct dialogue actually spoken by TARGET CHARACTER.
 - Never apply it to dialogue spoken by USER or another NPC, or to words that TARGET CHARACTER merely quotes, repeats, reads, remembers, imagines, or imitates.
 - A quotation mark alone does not prove TARGET CHARACTER is speaking.
+- TARGET CHARACTER GENDER is local card metadata. Use it only when TARGET CHARACTER is actually the relevant speaker/person and a Korean expression genuinely depends on that gender.
+- Never apply TARGET CHARACTER GENDER to USER or NPC speech just because this is the current character's card.
+- TARGET CHARACTER GENDER alone does not establish relative age, family relationship, seniority, intimacy, or a preferred form of address.
 - TARGET CHARACTER and USER names are indivisible proper names. Never reinterpret, remove, or split a final Korean syllable as a grammatical particle. For example, if USER is "혜담은", the complete name is all three syllables "혜담은", never "혜담" plus the topic particle "은".
 - Preserve third-person pronouns as pronoun references in Korean instead of replacing them with TARGET CHARACTER or USER names merely because identity context is available. Render "she/her" with the grammatically appropriate Korean pronoun form such as "그녀", "그녀의", "그녀를", or "그녀에게", according to its role in the source sentence.
 - Never derive a nickname or familiar name by dropping any part of TARGET CHARACTER or USER identity. If the source explicitly contains a person's name, preserve the complete name identity.
@@ -1427,6 +1434,12 @@ ABSOLUTE RULES
 - Translate the supplied source into natural Korean without answering, continuing, censoring, summarizing, adding, or omitting anything.
 ${absoluteFidelityRule(settings)}
 - When the same source term refers to the same role, person, object, or concept, use one consistent Korean rendering throughout the entire current message. Do not alternate between Korean synonyms such as "매니저" and "팀장" unless the source meaning genuinely changes by context.
+- KOREAN AGE / RELATIONSHIP ADDRESS SAFETY: Do not turn generic English "you" into Korean age-, kinship-, status-, or relationship-specific titles such as "오빠", "언니", "형", "누나", "선배", "선배님", "사장님", etc. unless the relevant relationship/status is clearly established in the supplied source context or explicitly required by the user's translation settings/prompts.
+- Gender alone is never enough evidence for "오빠/언니/형/누나". Relative age or the corresponding relationship must also be established.
+- When no such evidence exists, use a natural generic address/pronoun or omit the address in Korean when that is natural.
+- If the source explicitly states a relationship such as "big brother", "older brother", "older sister", etc., translate that relationship naturally into Korean instead of suppressing it.
+- Choose gender-dependent Korean forms such as "오빠" vs "형" or "언니" vs "누나" only from reliable gender evidence belonging to the actual relevant speaker/person. TARGET CHARACTER GENDER may be used only when TARGET CHARACTER is that person.
+- If the necessary gender or relationship evidence is unknown, do not guess a gendered Korean kinship/address title.
 - Preserve Markdown, HTML structure and attributes, code, macros, placeholders, URLs, and every non-name @@VERBA_0000@@ style token exactly once.
 - Handle @@VERBA_NAME_0000@@ style tokens only according to NAME LOCK TOKENS below.
 - Do not create bilingual output unless the user's GLOBAL TRANSLATION PROMPT, ALL-DIALOGUE PROMPT, or applicable TARGET-CHARACTER DIALOGUE PROMPT explicitly requests it.

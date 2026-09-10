@@ -1932,7 +1932,7 @@
 
 /* v0.3.96: developer-only "한출의 맛" */
 .verba-korean-flavor {
-    margin: 8px 0 10px !important;
+    margin: 2px 0 !important;
 }
 
 #verba-korean-flavor-controls {
@@ -1952,7 +1952,7 @@
 
 /* v0.3.97: developer-only "영출의 맛" */
 .verba-english-flavor {
-    margin: 8px 0 10px !important;
+    margin: 2px 0 !important;
 }
 
 #verba-english-flavor-controls {

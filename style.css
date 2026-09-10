@@ -1904,3 +1904,16 @@
     margin: 0 auto !important;
     transform: none !important;
 }
+
+
+/* v0.3.92: dedicated 7-tap target on the literal 베르바 title */
+.verba-developer-tap-target {
+    display: inline-block !important;
+    padding: 4px 5px !important;
+    margin: -4px -5px !important;
+    touch-action: manipulation !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+    cursor: default !important;
+}

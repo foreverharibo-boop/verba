@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.91';
+const EXTENSION_VERSION = '0.3.92';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7184,16 +7184,20 @@ function requestDeveloperPassword() {
 }
 
 async function handleDeveloperTap(event) {
-    // Count taps on the whole Verba settings header. Do not prevent the normal
-    // drawer toggle; this hidden gesture should coexist with ordinary use.
-    if (event?.button !== undefined && event.button !== 0) return;
+    // Dedicated hidden gesture on the literal "베르바" title.
+    // Stop propagation so the drawer does not open/close seven times while
+    // the user is trying to unlock developer mode.
+    if (event?.pointerType === 'mouse' && event.button !== 0) return;
+
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
 
     clearTimeout(developerTapResetTimer);
     developerTapCount += 1;
 
-    console.debug(`[베르바] 개발자 모드 탭 ${developerTapCount}/7`);
+    console.debug(`[베르바] 개발자 모드 제목 탭 ${developerTapCount}/7`);
 
-    // Give mobile users enough time. The counter resets only after a quiet gap.
     developerTapResetTimer = setTimeout(() => {
         developerTapCount = 0;
         developerTapResetTimer = null;
@@ -7243,7 +7247,7 @@ function injectSettingsPanel() {
     panel.innerHTML = `
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header verba-drawer-header">
-                <div><b>베르바</b> <small class="verba-version-tap-target">v${EXTENSION_VERSION}</small></div>
+                <div><b class="verba-developer-tap-target">베르바</b> <small>v${EXTENSION_VERSION}</small></div>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content" style="display: none;">
@@ -7474,12 +7478,23 @@ function injectSettingsPanel() {
     renderPromptConflictInspector();
     renderQualityAuditStatus();
 
-    const developerTapTarget = panel.querySelector('.verba-drawer-header');
+    const developerTapTarget = panel.querySelector('.verba-developer-tap-target');
     if (developerTapTarget) {
+        const stopDeveloperTitleClick = event => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+        };
+
         if ('PointerEvent' in globalThis) {
-            developerTapTarget.addEventListener('pointerup', handleDeveloperTap);
+            developerTapTarget.addEventListener('pointerdown', handleDeveloperTap, { capture: true });
+            developerTapTarget.addEventListener('click', stopDeveloperTitleClick, { capture: true });
+        } else if ('ontouchstart' in globalThis) {
+            developerTapTarget.addEventListener('touchstart', handleDeveloperTap, { capture: true, passive: false });
+            developerTapTarget.addEventListener('click', stopDeveloperTitleClick, { capture: true });
         } else {
-            developerTapTarget.addEventListener('click', handleDeveloperTap);
+            developerTapTarget.addEventListener('mousedown', handleDeveloperTap, { capture: true });
+            developerTapTarget.addEventListener('click', stopDeveloperTitleClick, { capture: true });
         }
     }
 

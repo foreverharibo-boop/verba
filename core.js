@@ -532,10 +532,11 @@ const LOCALIZATION_RULES = {
 - Rebuild sentence rhythm and phrasing into fluent contemporary Korean while preserving every source fact, nuance, intensity, register, and referent.
 - A repeated pronoun may be omitted where Korean naturally omits it and the referent stays unambiguous; never replace it with an identity name merely for fluency.`,
     native: `NATIVE-KOREAN PROSE
-- Make the result read as though a fluent native Korean writer originally wrote it in Korean, not as a translation.
-- Freely rebuild syntax, clause order, ellipsis, connective flow, sentence rhythm, natural subject/pronoun omission, dialogue endings, and idiomatic phrasing wherever Korean would normally differ from English.
-- Eliminate visible translationese and literal calques. Choose context-native Korean expressions instead of preserving foreign sentence habits.
-- This is expressive localization, not adaptation: preserve all meaning, facts, actions, emotional intensity, explicitness, register, relationships, chronology, point of view, speaker attribution, and setting details exactly.
+- Rewrite the passage as if a fluent native Korean web-fiction or roleplay writer had originally written it in Korean. Do not translate sentence-by-sentence.
+- Prioritize Korean narrative flow over English syntax. Freely reorder information, merge or split sentences, reshape flat and/then chains into natural Korean clause linking or adnominal flow, adjust ellipsis and connective rhythm, and omit recoverable subjects or pronouns.
+- Dialogue should sound like real Korean speech, not translated English. Use natural Korean endings, emphasis, rhythm, and discourse particles that fit the scene, tone, and relationship instead of literal question tags or stiff calques.
+- Prefer idiomatic, punchy Korean phrasing even when it departs noticeably from the source wording, as long as the same events, implications, emotional intensity, explicitness, register, speaker intent, and relationship distance remain intact.
+- This is expressive localization, not adaptation: preserve all meaning, facts, actions, chronology, point of view, speaker attribution, and setting details exactly.
 - Never Koreanize or replace proper names, places, currencies, measurements, institutions, legal/historical facts, fictional-world facts, or culture-specific setting information.`,
 };
 

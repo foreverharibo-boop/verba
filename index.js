@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.31';
+const EXTENSION_VERSION = '0.3.32';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -669,6 +669,7 @@ function renderProfileStats() {
     settings.profileStats = normalizeProfileStats(settings.profileStats);
     content.innerHTML = ['A', 'B', 'C'].map(slot => {
         const stat = settings.profileStats[slot];
+        const successRate = stat.requests ? Math.round((stat.successes / stat.requests) * 100) : 0;
         const outputAverageSeconds = stat.outputJobs ? stat.outputTotalMs / stat.outputJobs / 1000 : 0;
         const outputAverageLabel = stat.outputJobs
             ? `${outputAverageSeconds.toLocaleString('ko-KR', {
@@ -681,7 +682,7 @@ function renderProfileStats() {
         return `<div class="verba-stat-row">
             <b>${slot}</b>
             <span title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-            <small>평균 ${outputAverageLabel}</small>
+            <small>요청 ${stat.requests} · 평균 ${outputAverageLabel} · 성공 ${successRate}% · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
         </div>`;
     }).join('');
 }
@@ -4810,11 +4811,11 @@ function injectSettingsPanel() {
                 <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 바꿀 수 있어요. 현재 프로필 요청이 실패하면 나머지 프로필을 차례로 임시 사용하며, 수동 선택 상태는 바뀌지 않습니다.</div>
 
                 <details id="verba-profile-stats" class="verba-tool-details">
-                    <summary>번역 시간 <small>번역 시작~종료 평균</small></summary>
+                    <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
                     <div class="verba-tool-details-content">
                         <div id="verba-profile-stats-content" class="verba-profile-stats-content"></div>
-                        <div class="verba-help">아웃풋 번역을 시작한 순간부터 번역문이 화면에 적용되거나 실패로 끝날 때까지의 평균 시간이에요.</div>
-                        <button type="button" id="verba-reset-profile-stats" class="menu_button verba-wide">번역 시간 초기화</button>
+                        <div class="verba-help">평균은 아웃풋 번역 시작부터 화면 적용 또는 실패 종료까지의 전체 시간이며, 나머지는 프로필 내부 요청 기록이에요.</div>
+                        <button type="button" id="verba-reset-profile-stats" class="menu_button verba-wide">성능 기록 초기화</button>
                     </div>
                 </details>
 
@@ -4961,11 +4962,11 @@ function injectSettingsPanel() {
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
     panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
-        if (!globalThis.confirm?.('프로필 A/B/C의 번역 시간 기록을 모두 초기화할까요?')) return;
+        if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
         settings.profileStats = normalizeProfileStats(null);
         saveSettings();
         renderProfileStats();
-        notify('번역 시간 기록을 초기화했어요.', 'success');
+        notify('프로필 성능 기록을 초기화했어요.', 'success');
     });
     panel.querySelector('#verba-auto-input').addEventListener('change', event => {
         settings.autoInput = event.target.checked;

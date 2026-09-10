@@ -1877,3 +1877,30 @@
     font-weight: 500 !important;
     overflow-wrap: anywhere !important;
 }
+
+
+/* v0.3.91: robust hidden developer-mode gesture */
+.verba-drawer-header {
+    touch-action: manipulation !important;
+    -webkit-tap-highlight-color: transparent !important;
+}
+
+.verba-version-tap-target {
+    display: inline-block !important;
+    padding: 2px 3px !important;
+    margin: -2px -3px !important;
+    pointer-events: none !important;
+}
+
+#verba-developer-password-overlay.verba-developer-password-overlay {
+    box-sizing: border-box !important;
+    margin: 0 !important;
+    transform: none !important;
+}
+
+#verba-developer-password-overlay .verba-developer-password-modal {
+    position: relative !important;
+    inset: auto !important;
+    margin: 0 auto !important;
+    transform: none !important;
+}

@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.90';
+const EXTENSION_VERSION = '0.3.91';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7104,16 +7104,46 @@ function requestDeveloperPassword() {
             </section>`;
 
         (document.body || document.documentElement).append(overlay);
+
+        const forceDeveloperOverlayGeometry = () => {
+            const viewport = globalThis.visualViewport;
+            const width = viewport?.width || innerWidth;
+            const height = viewport?.height || innerHeight;
+            const left = viewport?.offsetLeft || 0;
+            const top = viewport?.offsetTop || 0;
+
+            overlay.style.setProperty('position', 'fixed', 'important');
+            overlay.style.setProperty('left', `${left}px`, 'important');
+            overlay.style.setProperty('top', `${top}px`, 'important');
+            overlay.style.setProperty('right', 'auto', 'important');
+            overlay.style.setProperty('bottom', 'auto', 'important');
+            overlay.style.setProperty('width', `${width}px`, 'important');
+            overlay.style.setProperty('height', `${height}px`, 'important');
+            overlay.style.setProperty('display', 'flex', 'important');
+            overlay.style.setProperty('align-items', 'center', 'important');
+            overlay.style.setProperty('justify-content', 'center', 'important');
+            overlay.style.setProperty('z-index', '2147483647', 'important');
+        };
+
+        forceDeveloperOverlayGeometry();
         try {
             overlay.showPopover?.();
         } catch {
             // Fixed overlay fallback.
         }
+        requestAnimationFrame(forceDeveloperOverlayGeometry);
+
+        globalThis.visualViewport?.addEventListener?.('resize', forceDeveloperOverlayGeometry);
+        globalThis.visualViewport?.addEventListener?.('scroll', forceDeveloperOverlayGeometry);
+        window.addEventListener('resize', forceDeveloperOverlayGeometry);
 
         let settled = false;
         const finish = value => {
             if (settled) return;
             settled = true;
+            globalThis.visualViewport?.removeEventListener?.('resize', forceDeveloperOverlayGeometry);
+            globalThis.visualViewport?.removeEventListener?.('scroll', forceDeveloperOverlayGeometry);
+            window.removeEventListener('resize', forceDeveloperOverlayGeometry);
             try {
                 overlay.hidePopover?.();
             } catch {
@@ -7154,14 +7184,20 @@ function requestDeveloperPassword() {
 }
 
 async function handleDeveloperTap(event) {
-    event.preventDefault();
-    event.stopPropagation();
+    // Count taps on the whole Verba settings header. Do not prevent the normal
+    // drawer toggle; this hidden gesture should coexist with ordinary use.
+    if (event?.button !== undefined && event.button !== 0) return;
 
     clearTimeout(developerTapResetTimer);
     developerTapCount += 1;
+
+    console.debug(`[베르바] 개발자 모드 탭 ${developerTapCount}/7`);
+
+    // Give mobile users enough time. The counter resets only after a quiet gap.
     developerTapResetTimer = setTimeout(() => {
         developerTapCount = 0;
-    }, 2600);
+        developerTapResetTimer = null;
+    }, 5000);
 
     if (developerTapCount < 7) return;
 
@@ -7182,7 +7218,6 @@ async function handleDeveloperTap(event) {
     refreshSettingsPanelForDeveloperMode();
     notify('개발자 모드를 활성화했어요.', 'success');
 }
-
 function enabledQualityAuditChecks() {
     const checks = [];
     if (settings.qualityAuditMeaning !== false) checks.push('meaning');
@@ -7439,7 +7474,14 @@ function injectSettingsPanel() {
     renderPromptConflictInspector();
     renderQualityAuditStatus();
 
-    panel.querySelector('.verba-version-tap-target')?.addEventListener('click', handleDeveloperTap);
+    const developerTapTarget = panel.querySelector('.verba-drawer-header');
+    if (developerTapTarget) {
+        if ('PointerEvent' in globalThis) {
+            developerTapTarget.addEventListener('pointerup', handleDeveloperTap);
+        } else {
+            developerTapTarget.addEventListener('click', handleDeveloperTap);
+        }
+    }
 
     if (settings.developerMode) {
         const qualityMaster = panel.querySelector('#verba-quality-audit-enabled');

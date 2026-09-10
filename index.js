@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.40';
+const EXTENSION_VERSION = '0.3.41';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -1437,6 +1437,37 @@ function repairIndivisibleIdentityNames(value, speakerIdentity = {}) {
     return result;
 }
 
+function hasKoreanFinalConsonant(value) {
+    const chars = [...String(value || '').trim()];
+    const last = chars.at(-1) || '';
+    const code = last.charCodeAt(0);
+    if (code < 0xAC00 || code > 0xD7A3) return null;
+    return (code - 0xAC00) % 28 !== 0;
+}
+
+function repairKoreanParticleAlternatives(value) {
+    const particlePairs = [
+        ['이', '가'], ['은', '는'], ['을', '를'], ['과', '와'], ['으로', '로'],
+    ];
+    let result = String(value || '');
+    for (const [withBatchim, withoutBatchim] of particlePairs) {
+        const escapedLeft = escapeRegularExpression(withBatchim);
+        const escapedRight = escapeRegularExpression(withoutBatchim);
+        const pattern = new RegExp(`([가-힣]+)\\s*${escapedLeft}\\s*\\(\\s*${escapedRight}\\s*\\)`, 'gu');
+        result = result.replace(pattern, (whole, noun) => {
+            const hasBatchim = hasKoreanFinalConsonant(noun);
+            if (hasBatchim === null) return whole;
+            if (withBatchim === '으로' && withoutBatchim === '로') {
+                const last = [...noun].at(-1);
+                const jong = (last.charCodeAt(0) - 0xAC00) % 28;
+                return noun + (jong === 0 || jong === 8 ? '로' : '으로');
+            }
+            return noun + (hasBatchim ? withBatchim : withoutBatchim);
+        });
+    }
+    return result;
+}
+
 async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const initialSegmented = segmentSource(source, characterNameLocks);
@@ -1503,7 +1534,7 @@ async function translateOutputText(source, options = {}) {
     });
 
     for (const [id, translation] of translations) {
-        translations.set(id, repairIndivisibleIdentityNames(translation, speakerIdentity));
+        translations.set(id, repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(translation, speakerIdentity)));
     }
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings.bannedWords));
@@ -4229,7 +4260,7 @@ async function retranslateSelectionBundle() {
         for (const row of selections) {
             result.set(
                 row.id,
-                repairIndivisibleIdentityNames(result.get(row.id), speakerIdentity),
+                repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get(row.id), speakerIdentity)),
             );
         }
         const unchangedIds = selections
@@ -4249,7 +4280,7 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
             });
             unchangedIds.forEach(id => result.set(
                 id,
-                repairIndivisibleIdentityNames(retryResult.get(id), speakerIdentity),
+                repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(retryResult.get(id), speakerIdentity)),
             ));
         }
         const replacements = selections.map(row => {
@@ -4479,7 +4510,7 @@ async function retranslateSelection(snapshot) {
         let replacement = '';
         if (candidateMode) {
             const received = (await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' }))
-                .map(candidate => repairIndivisibleIdentityNames(candidate, speakerIdentity));
+                .map(candidate => repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(candidate, speakerIdentity)));
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
@@ -4496,7 +4527,7 @@ async function retranslateSelection(snapshot) {
             if (replacement === null) return;
         } else {
             let result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'selection-retranslation' });
-            replacement = repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity).trim();
+            replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
             if (!replacement || sameRetranslationWording(replacement, snapshot.selected)) {
                 const changedPrompt = `${prompt}\n\nMANDATORY RETRANSLATION CORRECTION
 Your previous replacement was empty or unchanged. Return a genuinely different Korean wording for the selected fragment now.
@@ -4508,7 +4539,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
                     signal: controller.signal,
                     stage: 'selection-retranslation-unchanged-retry',
                 });
-                replacement = repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity).trim();
+                replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
             }
             if (sameRetranslationWording(replacement, snapshot.selected)) {
                 throw new Error('AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');

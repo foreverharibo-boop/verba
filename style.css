@@ -1211,3 +1211,51 @@ html.verba-developer-mode > * .verba-developer-only {
     }
 
 }
+\n\n/* v0.3.41 — mobile retranslation modal: keep the whole dialog reachable above the keyboard */
+#verba-request-overlay.verba-overlay {
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+}
+
+#verba-request-overlay .verba-modal {
+    box-sizing: border-box !important;
+    max-height: calc(100dvh - 28px) !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 600px) {
+    #verba-request-overlay.verba-overlay {
+        align-items: flex-start !important;
+        padding: max(8px, env(safe-area-inset-top, 0px)) 9px max(8px, env(safe-area-inset-bottom, 0px)) !important;
+    }
+
+    #verba-request-overlay .verba-modal {
+        width: 100% !important;
+        max-height: calc(100dvh - max(16px, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px))) !important;
+        margin: 0 auto !important;
+        padding: 12px !important;
+        gap: 8px !important;
+    }
+
+    #verba-request-overlay #verba-request-text {
+        min-height: 72px !important;
+        max-height: 24dvh !important;
+        resize: none !important;
+        flex: 0 0 auto !important;
+    }
+
+    #verba-request-overlay .verba-tuning-choice {
+        flex: 0 0 auto !important;
+    }
+
+    #verba-request-overlay .verba-modal-actions {
+        position: sticky !important;
+        bottom: -12px !important;
+        z-index: 2 !important;
+        padding: 8px 0 4px !important;
+        background: var(--verba-surface) !important;
+    }
+}

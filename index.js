@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.79';
+const EXTENSION_VERSION = '0.3.82';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -220,6 +220,11 @@ function notify(message, type = 'info') {
             : null;
         if (diagnostic) lastDebugDiagnostic = diagnostic;
         showBottomError(message, diagnostic);
+        try {
+            globalThis.toastr?.error?.(message, '베르바');
+        } catch {
+            // Bottom notice above remains the fallback.
+        }
         console.error(`[베르바] ${message}`);
         return;
     }
@@ -330,7 +335,15 @@ function reportError(stage, error, displayMessage = '') {
     const message = String(displayMessage || errorText(error) || '오류가 발생했습니다.');
     const diagnostic = settings.debugMode ? createDebugDiagnostic(stage, error, message) : null;
     if (diagnostic) lastDebugDiagnostic = diagnostic;
+
+    // Keep the diagnostic-capable bottom notice, but also use SillyTavern's
+    // normal error toast so a translation failure can never end silently.
     showBottomError(message, diagnostic);
+    try {
+        globalThis.toastr?.error?.(message, '베르바');
+    } catch {
+        // Bottom notice above remains the fallback.
+    }
     console.error(`[베르바] ${stage}`, error || message);
 }
 
@@ -485,16 +498,16 @@ function updateServerRetryIndicator() {
         indicator.setAttribute('aria-live', 'polite');
         indicator.addEventListener('click', () => {
             indicator.disabled = true;
-            indicator.textContent = '베르바 · 서버 오류 재시도 취소 중…';
+            indicator.textContent = '베르바 · 번역 재시도 취소 중…';
             for (const retry of serverRetryStates.values()) retry.controller.abort();
-            notify('서버 오류 자동 재시도를 취소했어요.', 'info');
+            notify('번역 자동 재시도를 취소했어요.', 'info');
         });
         document.documentElement.append(indicator);
     }
     const timing = state.delayMs > 0 ? `${Math.ceil(state.delayMs / 1000)}초 후` : '요청 중';
     indicator.disabled = false;
-    indicator.textContent = `베르바 · 서버 오류 · ${state.retryCount}/${state.maxRetries}회 ${timing} 재시도 · ✕`;
-    indicator.title = '눌러서 서버 오류 자동 재시도 취소';
+    indicator.textContent = `베르바 · 번역 실패 · ${state.retryCount}/${state.maxRetries}회 ${timing} 재시도 · ✕`;
+    indicator.title = '눌러서 번역 자동 재시도 취소';
     indicator.setAttribute('aria-label', indicator.title);
 }
 
@@ -1139,8 +1152,10 @@ function notifyFallbackUsed(profileId) {
 }
 
 async function sendWithRetry(prompt, options = {}) {
-    const delays = [3000, 5000, 8000, 12000, 18000];
-    const token = Symbol('verba-server-retry');
+    const transientDelays = [3000, 5000, 8000, 12000, 18000];
+    const generalDelays = [800, 1200, 1800, 2600, 4000];
+    const maxRetries = 5;
+    const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
@@ -1148,13 +1163,17 @@ async function sendWithRetry(prompt, options = {}) {
         if (outerSignal.aborted) forwardAbort();
         else outerSignal.addEventListener('abort', forwardAbort, { once: true });
     }
+
     const requestOptions = { ...options, signal: controller.signal };
     let lastError;
+
     try {
-        for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
             if (controller.signal.aborted) throw abortError();
+
             const profiles = configuredProfileCycle();
             const primaryProfileId = profiles.active;
+
             try {
                 return await sendProfileRequest(prompt, {
                     ...requestOptions,
@@ -1165,11 +1184,20 @@ async function sendWithRetry(prompt, options = {}) {
                 });
             } catch (primaryError) {
                 if (isAbort(primaryError, controller.signal)) throw primaryError;
+
                 let cycleError = primaryError;
                 const errors = [primaryError];
+
+                // Existing fallback-profile policy stays conservative:
+                // only temporary server/network/quota errors use B/C profiles.
+                // But the active profile itself is retried for EVERY non-abort
+                // failure, as requested.
                 if (profiles.fallbacks.length && fallbackEligibleError(primaryError)) {
                     for (const fallback of profiles.fallbacks) {
-                        console.warn(`[베르바] 현재 선택 프로필 실패 — 프로필 ${fallback.slot} ${profileDisplayName(fallback.id)}(으)로 임시 전환`, errors.at(-1));
+                        console.warn(
+                            `[베르바] 현재 선택 프로필 실패 — 프로필 ${fallback.slot} ${profileDisplayName(fallback.id)}(으)로 임시 전환`,
+                            errors.at(-1),
+                        );
                         try {
                             const response = await sendProfileRequest(prompt, {
                                 ...requestOptions,
@@ -1188,29 +1216,45 @@ async function sendWithRetry(prompt, options = {}) {
                     }
                     cycleError = [...errors].reverse().find(transientError) || errors.at(-1);
                 }
+
                 lastError = cycleError;
-                if (!transientError(cycleError) || attempt === delays.length) break;
-                const delay = retryAfterMs(cycleError) || delays[attempt];
+                if (attempt === maxRetries) break;
+
+                const transient = transientError(cycleError);
+                const fallbackDelay = transient
+                    ? transientDelays[attempt]
+                    : generalDelays[attempt];
+                const delay = transient
+                    ? (retryAfterMs(cycleError) || fallbackDelay)
+                    : fallbackDelay;
+
                 const state = {
                     controller,
                     retryCount: attempt + 1,
-                    maxRetries: delays.length,
+                    maxRetries,
                     delayMs: delay,
                     updatedAt: Date.now(),
+                    transient,
                 };
                 serverRetryStates.set(token, state);
                 updateServerRetryIndicator();
-                console.warn(`[베르바] 일시적 서버 오류 — ${state.retryCount}/${state.maxRetries}회, ${Math.ceil(delay / 1000)}초 후 번역 재시도`, cycleError);
+
+                console.warn(
+                    `[베르바] 번역 요청 실패 — ${state.retryCount}/${state.maxRetries}회 재시도 예정`,
+                    cycleError,
+                );
+
                 await wait(delay, controller.signal);
                 state.delayMs = 0;
                 state.updatedAt = Date.now();
                 updateServerRetryIndicator();
             }
         }
-        if (lastError && transientError(lastError)) {
-            throw new Error(`서버 오류 자동 재시도 ${delays.length}회를 모두 사용했습니다: ${errorText(lastError)}`, { cause: lastError });
-        }
-        throw lastError || new Error('번역 요청에 실패했습니다.');
+
+        throw new Error(
+            `번역 자동 재시도 ${maxRetries}회를 모두 사용했습니다: ${errorText(lastError)}`,
+            { cause: lastError || undefined },
+        );
     } finally {
         serverRetryStates.delete(token);
         updateServerRetryIndicator();
@@ -1219,37 +1263,83 @@ async function sendWithRetry(prompt, options = {}) {
 }
 
 async function requestSegments(prompt, expectedSegments, options = {}) {
+    const maxRetries = 5;
+    const parseRetryDelays = [500, 700, 1000, 1400, 2000];
     let lastError;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         const repair = attempt
-            ? '\n\nYour previous response was invalid. Return strict JSON only and include every required segment id exactly once.'
+            ? `
+
+Your previous response was invalid or incomplete.
+This is retry ${attempt}/${maxRetries}.
+Return STRICT JSON only.
+Include every required segment id exactly once.
+Do not add markdown fences, commentary, explanations, or missing ids.`
             : '';
+
         try {
             const response = await sendWithRetry(prompt + repair, options);
             return parseSegmentResponse(extractResponseText(response), expectedSegments);
         } catch (error) {
-            if (isAbort(error, options.signal) || transientError(error)) throw error;
+            if (isAbort(error, options.signal)) throw error;
+
             lastError = error;
+            if (attempt === maxRetries) break;
+
+            // Transport failures already used their own 5-retry cycle inside
+            // sendWithRetry. This outer retry mainly recovers malformed JSON,
+            // incomplete segment sets, validation/parser failures, etc.
+            console.warn(
+                `[베르바] 번역 결과 해석/검증 실패 — ${attempt + 1}/${maxRetries}회 재시도`,
+                error,
+            );
+            await wait(parseRetryDelays[attempt], options.signal);
         }
     }
-    throw lastError || new Error('번역 결과를 해석하지 못했습니다.');
+
+    throw new Error(
+        `번역 결과 자동 재시도 ${maxRetries}회를 모두 사용했습니다: ${errorText(lastError)}`,
+        { cause: lastError || undefined },
+    );
 }
 
 async function requestSelectionCandidates(prompt, options = {}) {
+    const maxRetries = 5;
+    const parseRetryDelays = [500, 700, 1000, 1400, 2000];
     let lastError;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         const repair = attempt
-            ? '\n\nYour previous response was invalid. Return strict JSON only with exactly three distinct candidates.'
+            ? `
+
+Your previous response was invalid or incomplete.
+This is retry ${attempt}/${maxRetries}.
+Return STRICT JSON only with exactly three distinct candidates.
+Do not add markdown fences, commentary, or explanations.`
             : '';
+
         try {
             const response = await sendWithRetry(prompt + repair, options);
             return parseSelectionCandidateResponse(extractResponseText(response), 3);
         } catch (error) {
-            if (isAbort(error, options.signal) || transientError(error)) throw error;
+            if (isAbort(error, options.signal)) throw error;
+
             lastError = error;
+            if (attempt === maxRetries) break;
+
+            console.warn(
+                `[베르바] 선택 재번역 후보 해석 실패 — ${attempt + 1}/${maxRetries}회 재시도`,
+                error,
+            );
+            await wait(parseRetryDelays[attempt], options.signal);
         }
     }
-    throw lastError || new Error('선택 재번역 후보를 해석하지 못했습니다.');
+
+    throw new Error(
+        `선택 재번역 후보 자동 재시도 ${maxRetries}회를 모두 사용했습니다: ${errorText(lastError)}`,
+        { cause: lastError || undefined },
+    );
 }
 
 function restoredSegmentText(value, segmented, useSourceNames = false) {
@@ -1742,6 +1832,9 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
     const needsSpeakerIsolation = Boolean(
         String(settings.dialoguePrompt || '').trim()
         || String(settings.otherDialoguePrompt || '').trim()
+        || String(settings.dialogueEndingPreferred || '').trim()
+        || String(settings.dialogueEndingAvoid || '').trim()
+        || settings.dialogueEndingRepetitionReduction !== false
     );
     if (!dialogueSegments.length || !needsSpeakerIsolation) return scopes;
 
@@ -1861,6 +1954,9 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
     const strictIsolationNeeded = Boolean(
         String(settings.dialoguePrompt || '').trim()
         || String(settings.otherDialoguePrompt || '').trim()
+        || String(settings.dialogueEndingPreferred || '').trim()
+        || String(settings.dialogueEndingAvoid || '').trim()
+        || settings.dialogueEndingRepetitionReduction !== false
     );
 
     // A shared ALL-DIALOGUE prompt does not require separate API calls by
@@ -1926,7 +2022,7 @@ async function repairSegmentsByOutputScope({
 async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = options.speakerScopes || {};
-    for (let repairAttempt = 0; repairAttempt < 3; repairAttempt += 1) {
+    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
         const invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
         if (!invalid.length) return;
         await repairSegmentsByOutputScope({
@@ -1971,7 +2067,7 @@ async function translateOutputText(source, options = {}) {
         stage: options.stage || 'output-translation',
     });
 
-    for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
         const invalid = segmented.segments.filter(segment =>
             findBannedWords(translations.get(segment.id), settings.bannedWords).length,
         );
@@ -1987,7 +2083,7 @@ async function translateOutputText(source, options = {}) {
         });
     }
 
-    for (let repairAttempt = 0; repairAttempt < 2; repairAttempt += 1) {
+    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
         const invalid = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
         if (!invalid.length) break;
         await repairSegmentsByOutputScope({
@@ -2575,6 +2671,13 @@ function recentDialogueEndingRepeatHints(beforeMessageId) {
     for (let id = Math.min(chat.length - 1, beforeId - 1); id >= 0 && collected.length < 28; id -= 1) {
         const message = chat[id];
         if (!message || message.is_user || !isNameReplacementMessage(message)) continue;
+
+        // Character-only preference history: count only outputs whose speaker
+        // identity resolves to the current target character. NPC/USER outputs
+        // must not influence the character's ending preference hints.
+        const speaker = outputSpeakerIdentity(message);
+        if (!speaker?.isTargetCharacter) continue;
+
         const record = currentRecord(message);
         if (!record?.translation) continue;
 
@@ -2798,7 +2901,7 @@ function retranslationInstructionHistoryMarkup() {
         </div>`;
 }
 
-function requestOneTimeInstruction(scope, preview = '', viewAction = null, titleOverride = '') {
+function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     const isSelection = scope === 'selection';
     const isMultiSelection = scope === 'multi';
@@ -2852,9 +2955,7 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null, title
                 <div class="verba-modal-actions">
                     ${isPartialSelection
                         ? ''
-                        : viewAction
-                            ? `<button type="button" class="menu_button verba-view-toggle">${escapeHtml(viewAction.label)}</button>`
-                            : '<button type="button" class="menu_button verba-cancel">취소</button>'}
+                        : '<button type="button" class="menu_button verba-cancel">취소</button>'}
                     <button type="button" class="menu_button verba-submit">${isSelection && settings.selectionCandidates ? '후보 만들기' : '재번역 시작'}</button>
                 </div>
             </section>`;
@@ -2919,10 +3020,6 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null, title
         };
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.querySelector('.verba-cancel')?.addEventListener('click', () => finish(null));
-        overlay.querySelector('.verba-view-toggle')?.addEventListener('click', () => finish({
-            action: 'toggle-view',
-            showTranslation: Boolean(viewAction?.showTranslation),
-        }));
         overlay.querySelector('.verba-submit').addEventListener('click', submit);
         overlay.querySelectorAll('.verba-request-history-chip').forEach(button => {
             button.addEventListener('click', () => {
@@ -3659,6 +3756,19 @@ function requestPreviousOutputTarget(beforeId) {
                 </header>
                 <input type="search" class="text_pole verba-previous-output-search"
                     placeholder="내용 또는 #번호 검색" autocomplete="off" enterkeyhint="search">
+                <fieldset class="verba-previous-output-action">
+                    <legend>번역 완료 후</legend>
+                    <label>
+                        <input type="radio" name="verba-previous-output-action" value="jump"
+                            ${settings.previousOutputCompletionAction === 'jump' ? 'checked' : ''}>
+                        <span>해당 메시지로 이동</span>
+                    </label>
+                    <label>
+                        <input type="radio" name="verba-previous-output-action" value="stay"
+                            ${settings.previousOutputCompletionAction === 'stay' ? 'checked' : ''}>
+                        <span>현재 위치 유지</span>
+                    </label>
+                </fieldset>
                 <div class="verba-previous-output-list"></div>
                 <button type="button" class="menu_button verba-previous-output-more">더 보기</button>
             </section>`;
@@ -3723,7 +3833,20 @@ function requestPreviousOutputTarget(beforeId) {
                 wrapper.innerHTML = previousOutputOptionMarkup(target, index, previewFor(target));
                 const button = wrapper.firstElementChild;
                 if (!button) continue;
-                button.addEventListener('click', () => finish(target || null));
+                button.addEventListener('click', () => {
+                    const completionAction = overlay.querySelector(
+                        'input[name="verba-previous-output-action"]:checked',
+                    )?.value === 'stay'
+                        ? 'stay'
+                        : 'jump';
+
+                    settings.previousOutputCompletionAction = completionAction;
+                    saveSettings();
+
+                    finish(target
+                        ? { target, completionAction }
+                        : null);
+                });
                 fragment.append(button);
             }
 
@@ -3764,6 +3887,13 @@ function requestPreviousOutputTarget(beforeId) {
         searchInput.addEventListener('input', () => {
             clearTimeout(searchTimer);
             searchTimer = setTimeout(applySearch, 120);
+        });
+
+        overlay.querySelectorAll('input[name="verba-previous-output-action"]').forEach(input => {
+            input.addEventListener('change', () => {
+                settings.previousOutputCompletionAction = input.value === 'stay' ? 'stay' : 'jump';
+                saveSettings();
+            });
         });
 
         moreButton.addEventListener('click', event => {
@@ -3835,22 +3965,7 @@ async function retranslateOutputTarget(target, title = '아웃풋 전체 재번�
         swipeId: currentSwipeId(target.message),
     };
     const preview = source.replace(/\s+/g, ' ').trim().slice(0, 110);
-    const swipeExtra = currentSwipeExtra(target.message, false);
-    const showingTranslation = Boolean(
-        record
-        && !sourceViewRequested(target.message, record)
-        && (
-            target.message.extra?.display_text === record.translation
-            || swipeExtra?.display_text === record.translation
-        )
-    );
-    const viewAction = record
-        ? {
-            label: showingTranslation ? '원문 보기' : '번역본 보기',
-            showTranslation: !showingTranslation,
-        }
-        : null;
-    const request = await requestOneTimeInstruction('message', preview, viewAction, title);
+    const request = await requestOneTimeInstruction('message', preview, title);
     if (request === null) return;
     const latest = liveContext().chat?.[target.id];
     if (
@@ -3860,17 +3975,6 @@ async function retranslateOutputTarget(target, title = '아웃풋 전체 재번�
         || hashText(messageSource(latest)) !== snapshot.sourceHash
     ) {
         notify('요구사항을 적는 동안 선택한 아웃풋이 바뀌었어요. 다시 눌러 주세요.', 'warning');
-        return;
-    }
-    if (typeof request === 'object' && request.action === 'toggle-view') {
-        const latestRecord = currentRecord(latest);
-        if (!latestRecord) {
-            notify('전환할 저장 번역본을 찾지 못했어요.', 'warning');
-            return;
-        }
-        if (request.showTranslation) showTranslationDisplay(target.id, latest, latestRecord);
-        else showOriginalDisplay(target.id, latest, latestRecord);
-        refreshRetranslateButton();
         return;
     }
     const oneTimeInstruction = typeof request === 'object' ? request.instruction : String(request || '');
@@ -3929,19 +4033,45 @@ function positionPreviousOutputReturnButton(host) {
     const viewport = globalThis.visualViewport;
     const viewportWidth = viewport?.width || innerWidth;
     const viewportHeight = viewport?.height || innerHeight;
-    const offsetLeft = viewport?.offsetLeft || 0;
-    const offsetTop = viewport?.offsetTop || 0;
-    const compact = viewportWidth <= 700;
+    const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportTop = viewport?.offsetTop || 0;
 
-    // Use explicit visualViewport coordinates instead of CSS bottom only.
-    // This is more reliable in mobile browsers with collapsing address bars,
-    // keyboard resize, and SillyTavern's own fixed bottom controls.
-    const rect = host.getBoundingClientRect();
-    const width = rect.width || Math.min(250, viewportWidth - 16);
-    const height = rect.height || 42;
-    const bottomGap = compact ? 92 : 24;
-    const left = offsetLeft + Math.max(8, (viewportWidth - width) / 2);
-    const top = offsetTop + Math.max(8, viewportHeight - height - bottomGap);
+    const textarea = document.querySelector('#send_textarea');
+    const sendButton = document.querySelector('#send_but');
+
+    let anchorRect = null;
+    if (textarea) {
+        const rect = textarea.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) anchorRect = rect;
+    }
+    if (!anchorRect && sendButton) {
+        const rect = sendButton.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) anchorRect = rect;
+    }
+
+    const hostRect = host.getBoundingClientRect();
+    const width = hostRect.width || Math.min(200, viewportWidth - 16);
+    const height = hostRect.height || 34;
+    const gap = 8;
+
+    // Keep the control literally above the composer instead of overlapping it.
+    let centerX = viewportLeft + (viewportWidth / 2);
+    let top = viewportTop + viewportHeight - height - 96;
+    if (anchorRect) {
+        centerX = anchorRect.left + (anchorRect.width / 2);
+        top = anchorRect.top - height - gap;
+    }
+
+    const minLeft = viewportLeft + 8;
+    const maxLeft = viewportLeft + viewportWidth - width - 8;
+    const left = Math.min(
+        Math.max(minLeft, centerX - (width / 2)),
+        Math.max(minLeft, maxLeft),
+    );
+
+    const minTop = viewportTop + 8;
+    const maxTop = viewportTop + viewportHeight - height - 8;
+    top = Math.min(Math.max(minTop, top), Math.max(minTop, maxTop));
 
     host.style.setProperty('left', `${left}px`, 'important');
     host.style.setProperty('top', `${top}px`, 'important');
@@ -3949,7 +4079,6 @@ function positionPreviousOutputReturnButton(host) {
     host.style.setProperty('bottom', 'auto', 'important');
     host.style.setProperty('transform', 'none', 'important');
 }
-
 function dismissPreviousOutputReturnButton() {
     const host = document.querySelector('#verba-return-position');
     if (!host) return;
@@ -4035,10 +4164,18 @@ function showPreviousOutputReturnButton(position) {
     globalThis.visualViewport?.addEventListener?.('resize', recalc);
     globalThis.visualViewport?.addEventListener?.('scroll', recalc);
     window.addEventListener('resize', recalc);
+
+    const textarea = document.querySelector('#send_textarea');
+    const resizeObserver = typeof ResizeObserver !== 'undefined' && textarea
+        ? new ResizeObserver(recalc)
+        : null;
+    resizeObserver?.observe(textarea);
+
     host.__verbaCleanup = () => {
         globalThis.visualViewport?.removeEventListener?.('resize', recalc);
         globalThis.visualViewport?.removeEventListener?.('scroll', recalc);
         window.removeEventListener('resize', recalc);
+        resizeObserver?.disconnect();
     };
 
     host.querySelector('.verba-return-position-main')?.addEventListener('click', async () => {
@@ -4175,10 +4312,13 @@ async function retranslateLatestOutput() {
     }
     if (choice !== 'previous') return;
 
-    const previous = await requestPreviousOutputTarget(target.id);
-    if (!previous) return;
+    const previousChoice = await requestPreviousOutputTarget(target.id);
+    if (!previousChoice?.target) return;
 
-    const returnPosition = settings.previousOutputCompletionAction === 'jump'
+    const previous = previousChoice.target;
+    const completionAction = previousChoice.completionAction === 'stay' ? 'stay' : 'jump';
+
+    const returnPosition = completionAction === 'jump'
         ? captureChatViewportPosition()
         : null;
 
@@ -4186,12 +4326,11 @@ async function retranslateLatestOutput() {
         ? await translateUntranslatedOutput(previous)
         : await retranslateOutputTarget(previous, '이전 아웃풋 전체 재번역');
 
-    if (!success) {
-        notify('이전 아웃풋 재번역에 실패했어요. 하단 오류 알림을 확인해 주세요.', 'error');
-        return;
-    }
+    // translateMessage/retranslateOutputTarget already reports the final error
+    // through reportError after all automatic retries are exhausted.
+    if (!success) return;
 
-    if (settings.previousOutputCompletionAction === 'jump') {
+    if (completionAction === 'jump') {
         const jumped = await jumpToOutputMessage(previous.id);
         if (jumped) showPreviousOutputReturnButton(returnPosition);
     }
@@ -6491,18 +6630,6 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
-                <details id="verba-previous-output-settings" class="verba-tool-details">
-                    <summary>이전 아웃풋 <small>완료 후 동작</small></summary>
-                    <div class="verba-tool-details-content">
-                        <label for="verba-previous-output-completion-action">번역 완료 후</label>
-                        <select id="verba-previous-output-completion-action" class="text_pole">
-                            <option value="jump" ${settings.previousOutputCompletionAction === 'jump' ? 'selected' : ''}>번역한 메시지로 이동</option>
-                            <option value="stay" ${settings.previousOutputCompletionAction === 'stay' ? 'selected' : ''}>현재 위치 유지</option>
-                        </select>
-                        <div class="verba-help">‘이동’을 선택하면 이전 아웃풋 번역/재번역 완료 후 해당 메시지로 이동하고, 화면에 ‘원래 위치로 돌아가기’ 버튼이 표시됩니다.</div>
-                    </div>
-                </details>
-
                 <details id="verba-translation-tuning" class="verba-tool-details">
                     <summary>번역 미세 조정 <small>관계 온도·현지화</small></summary>
                     <div class="verba-tool-details-content">
@@ -6541,13 +6668,13 @@ function injectSettingsPanel() {
                             <option value="normal" ${settings.dialogueEndingStrength === 'normal' ? 'selected' : ''}>보통</option>
                             <option value="strong" ${settings.dialogueEndingStrength === 'strong' ? 'selected' : ''}>강하게</option>
                         </select>
-                        <div class="verba-help">대사에만 적용됩니다. 의미·존댓말/반말·감정 강도·캐릭터성은 바꾸지 않고 말끝 선택의 선호도만 조절해요.</div>
+                        <div class="verba-help">현재 캐릭터의 직접 대사에만 적용됩니다. NPC·USER 대사와 서술에는 적용하지 않아요. 의미·존댓말/반말·감정 강도·캐릭터성은 유지합니다.</div>
 
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-dialogue-ending-repetition-reduction" ${settings.dialogueEndingRepetitionReduction !== false ? 'checked' : ''}>
                             <span>말끝 반복 줄이기</span>
                         </label>
-                        <div class="verba-help">현재 번역 안에서도 같은 말끝이 몰리지 않도록 먼저 지시하고, 최근 저장 번역에서 반복된 말끝이 있으면 그 정보도 함께 참고해 다음 번역에서 의존도를 낮춰요. 후처리로 문장을 강제 치환하지 않습니다.</div>
+                        <div class="verba-help">현재 캐릭터 대사 안에서 같은 말끝이 몰리지 않도록 지시하고, 최근 캐릭터 대사 번역에서 반복된 말끝이 있으면 다음 번역에서 의존도를 낮춰요. NPC·USER 대사는 분석·적용 대상에서 제외하며 후처리 치환은 하지 않습니다.</div>
                     </div>
                 </details>
 
@@ -6723,12 +6850,6 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
         settings.selectionCandidates = event.target.checked;
-        saveSettings();
-    });
-    panel.querySelector('#verba-previous-output-completion-action').addEventListener('change', event => {
-        settings.previousOutputCompletionAction = ['jump', 'stay'].includes(event.target.value)
-            ? event.target.value
-            : 'jump';
         saveSettings();
     });
     const relationTemperatureInputs = [...panel.querySelectorAll('input[name="verba-relation-temperature"]')];

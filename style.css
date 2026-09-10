@@ -1748,3 +1748,66 @@
         min-height: 32px !important;
     }
 }
+
+
+/* v0.3.81: keep the return control above the ST composer, not inside it */
+#verba-return-position.verba-return-position {
+    pointer-events: auto !important;
+}
+
+@media (min-width: 701px) {
+    #verba-return-position .verba-return-position-main {
+        min-height: 28px !important;
+        padding: 4px 9px !important;
+        font-size: .8em !important;
+    }
+
+    #verba-return-position .verba-return-position-close {
+        height: 28px !important;
+        min-height: 28px !important;
+    }
+}
+
+
+/* v0.3.82: choose previous-output completion action inside the picker */
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-action {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 6px 8px !important;
+    border: 1px solid color-mix(in srgb, currentColor 14%, transparent) !important;
+    border-radius: 8px !important;
+}
+
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-action legend {
+    padding: 0 4px !important;
+    font-size: .78em !important;
+    opacity: .72 !important;
+}
+
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-action label {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    font-size: .82em !important;
+    white-space: nowrap !important;
+}
+
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-action input {
+    margin: 0 !important;
+}
+
+@media (max-width: 600px) {
+    #verba-request-overlay.verba-previous-output-overlay .verba-previous-output-action {
+        gap: 6px !important;
+        padding: 5px 7px !important;
+    }
+
+    #verba-request-overlay.verba-previous-output-overlay .verba-previous-output-action label {
+        font-size: .78em !important;
+    }
+}

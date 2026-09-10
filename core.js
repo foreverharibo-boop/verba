@@ -1081,16 +1081,19 @@ ${LOCALIZATION_RULES[dialogueLocalizationKey]}`
         : `RELATION TEMPERATURE / DIALOGUE LOCALIZATION
 (비활성화)`;
 
-    return `TRANSLATION FINE TUNING — DIALOGUE ONLY
-${relationAndLocalization}
+    const characterEndingPreferences = scope === 'target_dialogue'
+        ? `
 
-${dialogueEndingPreferenceBlock(settings, requested)}
+${dialogueEndingPreferenceBlock(settings, requested)}`
+        : '';
+
+    return `TRANSLATION FINE TUNING — DIALOGUE ONLY
+${relationAndLocalization}${characterEndingPreferences}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
 - Never alter protected tokens, names, formatting, code, tags, URLs, numbers, or setting-specific terminology because of fine tuning.`;
 }
-
 
 function scopedTranslationRuleBlocks(settings = {}, {
     oneTimeInstruction = '',

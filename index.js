@@ -31,7 +31,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.57';
+const EXTENSION_VERSION = '0.3.58';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -5843,6 +5843,72 @@ function restoreTranslationAfterMessageUpdate(payload) {
     }, 0);
 }
 
+
+/**
+ * SillyTavern can rebuild the message DOM from `message.mes` when a chat is
+ * opened even though Verba's saved translation record and display_text are
+ * still present. Re-assert the saved display state after chat load without
+ * calling the translation API.
+ *
+ * Run in a few short passes because mobile/WebView chat rendering may finish
+ * after CHAT_CHANGED itself. Only the currently active swipe is restored.
+ */
+function restoreSavedTranslationsAfterChatOpen() {
+    const context = liveContext();
+    const chat = Array.isArray(context.chat) ? context.chat : [];
+    let changed = false;
+
+    chat.forEach((message, messageId) => {
+        if (!message || message.is_user || message.is_system) return;
+
+        if (repairSwipeTranslationIndexes(message)) changed = true;
+
+        const record = currentRecord(message);
+        if (!record || sourceViewRequested(message, record)) return;
+
+        if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+
+        let messageChanged = false;
+        if (!sameTranslationRecord(message.extra[STATE_KEY], record)) {
+            message.extra[STATE_KEY] = { ...record };
+            messageChanged = true;
+        }
+        if (message.extra.display_text !== record.translation) {
+            message.extra.display_text = record.translation;
+            messageChanged = true;
+        }
+        if (message.extra[SOURCE_VIEW_KEY]) {
+            delete message.extra[SOURCE_VIEW_KEY];
+            messageChanged = true;
+        }
+        if (syncOwnedTranslationToCurrentSwipe(message, record)) {
+            messageChanged = true;
+        }
+
+        // CHAT_CHANGED may render the raw source directly. If this message is
+        // already present in the DOM, force one normal SillyTavern redraw so
+        // display_text becomes visible again.
+        const messageElement = document.querySelector(`.mes[mesid="${messageId}"]`);
+        if (messageElement && !messageElement.querySelector('.edit_textarea')) {
+            updateMessageBlock(messageId, message);
+            cacheRenderedTranslation(messageId, message, record);
+        }
+
+        if (messageChanged) changed = true;
+    });
+
+    if (changed) scheduleChatSave(chat);
+    refreshTranslationClasses();
+    refreshRetranslateButton();
+}
+
+function scheduleChatOpenTranslationRestore() {
+    // Immediate-ish pass plus delayed passes for mobile/WebView DOM timing.
+    [80, 260, 700].forEach(delay => {
+        setTimeout(restoreSavedTranslationsAfterChatOpen, delay);
+    });
+}
+
 function setupEvents() {
     const context = liveContext();
     const source = context.eventSource;
@@ -5902,8 +5968,7 @@ function setupEvents() {
                 injectInputAction();
                 refreshProfileSelect();
                 renderNameLockManager();
-                refreshTranslationClasses();
-                refreshRetranslateButton();
+                scheduleChatOpenTranslationRestore();
             }, 120);
         });
     }
@@ -5936,6 +6001,7 @@ function initialize() {
     injectSettingsPanel();
     injectInputAction();
     refreshTranslationClasses();
+    scheduleChatOpenTranslationRestore();
     setupAutoInput();
     setupMessageCopyHold();
     setupSelection();

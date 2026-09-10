@@ -1635,73 +1635,116 @@
 }
 
 
-/* v0.3.75: softer ST-like return chip + reliable mobile placement */
+
+
+
+
+/* v0.3.79: flat/minimal previous-output return control */
 #verba-return-position.verba-return-position {
     position: fixed !important;
-    z-index: 2147483646 !important;
+    z-index: 2147483647 !important;
     display: inline-flex !important;
     align-items: center !important;
-    gap: 4px !important;
-    width: auto !important;
-    max-width: calc(100vw - 20px) !important;
-    min-height: 0 !important;
-    padding: 5px !important;
-    border: 1px solid color-mix(in srgb, currentColor 14%, transparent) !important;
-    border-radius: 16px !important;
-    background: var(--SmartThemeBlurTintColor, rgba(255,255,255,.94)) !important;
+    gap: 2px !important;
+    width: max-content !important;
+    max-width: calc(100vw - 16px) !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
     color: inherit !important;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, .12) !important;
-    backdrop-filter: blur(8px);
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+}
+
+#verba-return-position::backdrop {
+    background: transparent !important;
+    pointer-events: none !important;
 }
 
 #verba-return-position .verba-return-position-main {
     appearance: none !important;
-    border: 1px solid color-mix(in srgb, currentColor 14%, transparent) !important;
-    border-radius: 12px !important;
-    background: transparent !important;
-    color: inherit !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     width: auto !important;
-    max-width: calc(100vw - 74px) !important;
-    min-height: 34px !important;
-    padding: 6px 12px !important;
+    min-width: 0 !important;
+    min-height: 30px !important;
+    padding: 5px 10px !important;
+    margin: 0 !important;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent) !important;
+    border-radius: 6px !important;
+    background: var(--SmartThemeBlurTintColor, rgba(32,32,32,.92)) !important;
+    color: inherit !important;
     box-shadow: none !important;
+    font: inherit !important;
+    font-size: .82em !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    letter-spacing: 0 !important;
     white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    line-height: 1.2 !important;
+    cursor: pointer !important;
+}
+
+#verba-return-position .verba-return-position-main::before {
+    content: '↩' !important;
+    display: inline-block !important;
+    margin-right: 5px !important;
+    font-size: .92em !important;
+    opacity: .72 !important;
+}
+
+#verba-return-position .verba-return-position-main:hover {
+    filter: brightness(1.05);
 }
 
 #verba-return-position .verba-return-position-main:disabled {
-    opacity: 0.68 !important;
+    opacity: .55 !important;
 }
 
 #verba-return-position .verba-return-position-close {
     appearance: none !important;
-    width: 28px !important;
-    height: 28px !important;
-    min-width: 28px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 26px !important;
+    height: 30px !important;
+    min-width: 26px !important;
+    min-height: 30px !important;
+    padding: 0 !important;
+    margin: 0 !important;
     border: 0 !important;
-    border-radius: 10px !important;
+    border-radius: 4px !important;
     background: transparent !important;
     color: inherit !important;
-    padding: 0 !important;
-    font-size: 0.9em !important;
+    box-shadow: none !important;
+    font: inherit !important;
+    font-size: .72em !important;
     line-height: 1 !important;
+    opacity: .5 !important;
     cursor: pointer !important;
-    opacity: 0.78 !important;
 }
 
-@media (max-width: 600px) {
+#verba-return-position .verba-return-position-close:hover {
+    opacity: .85 !important;
+    background: color-mix(in srgb, currentColor 7%, transparent) !important;
+}
+
+@media (max-width: 700px) {
     #verba-return-position.verba-return-position {
-        max-width: calc(100vw - 14px) !important;
-        padding: 4px !important;
-        border-radius: 15px !important;
+        max-width: calc(100vw - 12px) !important;
     }
 
     #verba-return-position .verba-return-position-main {
         min-height: 32px !important;
-        padding: 6px 10px !important;
-        max-width: calc(100vw - 68px) !important;
-        font-size: 0.93em !important;
+        padding: 6px 9px !important;
+        font-size: .84em !important;
+    }
+
+    #verba-return-position .verba-return-position-close {
+        height: 32px !important;
+        min-height: 32px !important;
     }
 }

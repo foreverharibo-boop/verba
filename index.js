@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.77';
+const EXTENSION_VERSION = '0.3.79';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3889,6 +3889,7 @@ async function retranslateOutputTarget(target, title = '아웃풋 전체 재번�
 
 
 function captureChatViewportPosition() {
+    const chatScroller = document.querySelector('#chat');
     const viewportHeight = globalThis.visualViewport?.height || innerHeight;
     const centerY = viewportHeight / 2;
 
@@ -3896,7 +3897,7 @@ function captureChatViewportPosition() {
         .map(element => {
             const id = Number(element.getAttribute('mesid'));
             const rect = element.getBoundingClientRect();
-            return { element, id, rect };
+            return { id, rect };
         })
         .filter(item =>
             Number.isInteger(item.id)
@@ -3905,31 +3906,48 @@ function captureChatViewportPosition() {
             && item.rect.top <= viewportHeight
         );
 
-    if (!candidates.length) return null;
-
     candidates.sort((left, right) => {
         const leftCenter = left.rect.top + (left.rect.height / 2);
         const rightCenter = right.rect.top + (right.rect.height / 2);
         return Math.abs(leftCenter - centerY) - Math.abs(rightCenter - centerY);
     });
 
+    // Keep both an anchor message and the raw chat scroll position. On some
+    // mobile layouts no .mes rect is considered visible while the picker is
+    // closing, so scrollTop gives us a reliable fallback and avoids returning
+    // null (which previously prevented the return button from being created).
     return {
-        messageId: candidates[0].id,
+        messageId: candidates[0]?.id ?? null,
+        scrollTop: chatScroller ? Number(chatScroller.scrollTop) || 0 : null,
         block: 'center',
     };
 }
 
 function positionPreviousOutputReturnButton(host) {
     if (!host) return;
+
     const viewport = globalThis.visualViewport;
     const viewportWidth = viewport?.width || innerWidth;
-    const compact = viewportWidth <= 600;
+    const viewportHeight = viewport?.height || innerHeight;
+    const offsetLeft = viewport?.offsetLeft || 0;
+    const offsetTop = viewport?.offsetTop || 0;
+    const compact = viewportWidth <= 700;
 
-    // Keep the chip clearly above mobile bottom bars / input dock.
-    const bottomOffset = compact ? 112 : 26;
-    host.style.setProperty('left', '50%', 'important');
-    host.style.setProperty('bottom', `${bottomOffset}px`, 'important');
-    host.style.setProperty('transform', 'translateX(-50%)', 'important');
+    // Use explicit visualViewport coordinates instead of CSS bottom only.
+    // This is more reliable in mobile browsers with collapsing address bars,
+    // keyboard resize, and SillyTavern's own fixed bottom controls.
+    const rect = host.getBoundingClientRect();
+    const width = rect.width || Math.min(250, viewportWidth - 16);
+    const height = rect.height || 42;
+    const bottomGap = compact ? 92 : 24;
+    const left = offsetLeft + Math.max(8, (viewportWidth - width) / 2);
+    const top = offsetTop + Math.max(8, viewportHeight - height - bottomGap);
+
+    host.style.setProperty('left', `${left}px`, 'important');
+    host.style.setProperty('top', `${top}px`, 'important');
+    host.style.setProperty('right', 'auto', 'important');
+    host.style.setProperty('bottom', 'auto', 'important');
+    host.style.setProperty('transform', 'none', 'important');
 }
 
 function dismissPreviousOutputReturnButton() {
@@ -3938,30 +3956,48 @@ function dismissPreviousOutputReturnButton() {
 
     host.__verbaCleanup?.();
     delete host.__verbaCleanup;
+
+    try {
+        host.hidePopover?.();
+    } catch {
+        // It may not be in the top layer.
+    }
     host.remove();
 }
 
 async function restorePreviousOutputReturnPosition(position) {
-    if (!position || !Number.isInteger(Number(position.messageId))) return false;
-    const id = Number(position.messageId);
-    let element = document.querySelector(`.mes[mesid="${id}"]`);
+    if (!position) return false;
 
-    for (let attempt = 0; !element && attempt < 8; attempt += 1) {
+    const id = Number(position.messageId);
+    let element = Number.isInteger(id)
+        ? document.querySelector(`.mes[mesid="${id}"]`)
+        : null;
+
+    for (let attempt = 0; Number.isInteger(id) && !element && attempt < 8; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 80));
         element = document.querySelector(`.mes[mesid="${id}"]`);
     }
 
-    if (!element) {
-        notify('원래 보던 위치를 다시 찾지 못했어요.', 'warning');
-        return false;
+    if (element) {
+        element.scrollIntoView({
+            behavior: 'smooth',
+            block: position.block || 'center',
+            inline: 'nearest',
+        });
+        return true;
     }
 
-    element.scrollIntoView({
-        behavior: 'smooth',
-        block: position.block || 'center',
-        inline: 'nearest',
-    });
-    return true;
+    const chatScroller = document.querySelector('#chat');
+    if (chatScroller && Number.isFinite(Number(position.scrollTop))) {
+        chatScroller.scrollTo({
+            top: Math.max(0, Number(position.scrollTop)),
+            behavior: 'smooth',
+        });
+        return true;
+    }
+
+    notify('원래 보던 위치를 다시 찾지 못했어요.', 'warning');
+    return false;
 }
 
 function showPreviousOutputReturnButton(position) {
@@ -3971,16 +4007,30 @@ function showPreviousOutputReturnButton(position) {
     const host = document.createElement('div');
     host.id = 'verba-return-position';
     host.className = 'verba-return-position';
+    if ('showPopover' in HTMLElement.prototype) host.setAttribute('popover', 'manual');
+
     host.innerHTML = `
-        <button type="button" class="menu_button verba-return-position-main">↩ 원래 위치로 돌아가기</button>
+        <button type="button" class="verba-return-position-main">원래 위치</button>
         <button type="button" class="verba-return-position-close" aria-label="닫기">✕</button>`;
 
     (document.body || document.documentElement).append(host);
 
+    // Put it in the browser's top layer where possible. This avoids it being
+    // hidden behind SillyTavern mobile docks, transformed containers, or theme
+    // stacking contexts.
+    try {
+        host.showPopover?.();
+    } catch {
+        // Fixed-position fallback below is enough on browsers without popover.
+    }
+
     const recalc = () => positionPreviousOutputReturnButton(host);
-    recalc();
-    requestAnimationFrame(recalc);
-    setTimeout(recalc, 50);
+    requestAnimationFrame(() => {
+        recalc();
+        requestAnimationFrame(recalc);
+    });
+    setTimeout(recalc, 80);
+    setTimeout(recalc, 260);
 
     globalThis.visualViewport?.addEventListener?.('resize', recalc);
     globalThis.visualViewport?.addEventListener?.('scroll', recalc);
@@ -3998,6 +4048,7 @@ function showPreviousOutputReturnButton(position) {
         if (restored) dismissPreviousOutputReturnButton();
         else if (button) button.disabled = false;
     });
+
     host.querySelector('.verba-return-position-close')?.addEventListener('click', dismissPreviousOutputReturnButton);
 }
 

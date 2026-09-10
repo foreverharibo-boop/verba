@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.46';
+const EXTENSION_VERSION = '0.3.47';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -1173,15 +1173,111 @@ function normalizedLockedSegments(value) {
         const id = String(entry?.id || `seg_${index}`);
         const source = String(entry?.source || '').trim();
         const translation = String(entry?.translation || '');
-        const key = `${id}\u0000${source}`;
+        const rawSentenceIndex = Number(entry?.sentenceIndex);
+        const sentenceIndex = Number.isInteger(rawSentenceIndex) && rawSentenceIndex >= 0
+            ? rawSentenceIndex
+            : null;
+        const key = `${id}\u0000${source}\u0000${sentenceIndex === null ? 'segment' : `sentence:${sentenceIndex}`}`;
         if (!source || !translation || seen.has(key)) return [];
         seen.add(key);
-        return [{ id, source, translation }];
+        return [{
+            id,
+            source,
+            translation,
+            ...(sentenceIndex === null ? {} : { sentenceIndex }),
+        }];
     });
 }
 
 function lockedSegmentKey(entry) {
-    return `${String(entry?.id || '')}\u0000${String(entry?.source || '').trim()}`;
+    const rawSentenceIndex = Number(entry?.sentenceIndex);
+    const sentenceKey = Number.isInteger(rawSentenceIndex) && rawSentenceIndex >= 0
+        ? `sentence:${rawSentenceIndex}`
+        : 'segment';
+    return `${String(entry?.id || '')}\u0000${String(entry?.source || '').trim()}\u0000${sentenceKey}`;
+}
+
+function sentenceRanges(value) {
+    const text = String(value || '');
+    if (!text) return [];
+    const trimRange = (start, end) => {
+        while (start < end && /\s/u.test(text[start])) start += 1;
+        while (end > start && /\s/u.test(text[end - 1])) end -= 1;
+        return end > start ? { start, end } : null;
+    };
+
+    try {
+        const Segmenter = globalThis.Intl?.Segmenter;
+        if (typeof Segmenter === 'function') {
+            const ranges = [];
+            const segmenter = new Segmenter('ko', { granularity: 'sentence' });
+            for (const part of segmenter.segment(text)) {
+                const start = Number(part.index) || 0;
+                const range = trimRange(start, start + String(part.segment || '').length);
+                if (range) ranges.push(range);
+            }
+            if (ranges.length) return ranges;
+        }
+    } catch {
+        // Fall through to the punctuation-based sentence splitter.
+    }
+
+    const ranges = [];
+    let start = 0;
+    let index = 0;
+    const closingMarks = /["'”’」』】）\]\}]/u;
+    const terminalMarks = /[.!?…。！？]/u;
+    while (index < text.length) {
+        const character = text[index];
+        const hardBreak = character === '\n';
+        if (!terminalMarks.test(character) && !hardBreak) {
+            index += 1;
+            continue;
+        }
+
+        let end = index + 1;
+        if (!hardBreak) {
+            while (end < text.length && terminalMarks.test(text[end])) end += 1;
+            while (end < text.length && closingMarks.test(text[end])) end += 1;
+        }
+        const range = trimRange(start, end);
+        if (range) ranges.push(range);
+        start = end;
+        while (start < text.length && /\s/u.test(text[start])) start += 1;
+        index = start;
+    }
+    const tail = trimRange(start, text.length);
+    if (tail) ranges.push(tail);
+    return ranges;
+}
+
+function lockedRangeInTranslation(sourceMap, translation, lock) {
+    const rows = normalizedSourceMap(sourceMap);
+    const row = rows.find(candidate => (
+        candidate.id === lock.id
+        && candidate.source === lock.source
+    ));
+    if (!row) return null;
+
+    const rawSentenceIndex = Number(lock?.sentenceIndex);
+    if (!Number.isInteger(rawSentenceIndex) || rawSentenceIndex < 0) {
+        return { start: row.start, end: row.end };
+    }
+
+    const rowText = String(translation || '').slice(row.start, row.end);
+    const ranges = sentenceRanges(rowText);
+    if (!ranges.length) return null;
+
+    // On the currently displayed translation, prefer the exact locked sentence.
+    // After a full retranslation that wording changes, fall back to the same
+    // sentence ordinal inside the same source-mapped segment.
+    const exact = ranges.find(range => rowText.slice(range.start, range.end) === lock.translation);
+    const target = exact || ranges[rawSentenceIndex];
+    if (!target) return null;
+    return {
+        start: row.start + target.start,
+        end: row.start + target.end,
+    };
 }
 
 function translationWithLockedSegments(translated, lockedSegments) {
@@ -1191,8 +1287,8 @@ function translationWithLockedSegments(translated, lockedSegments) {
     if (!locks.length || !sourceMap.length) return { translation, sourceMap, lockedSegments: locks };
 
     const replacements = locks.flatMap(lock => {
-        const row = sourceMap.find(candidate => lockedSegmentKey(candidate) === lockedSegmentKey(lock));
-        return row ? [{ ...row, replacement: lock.translation }] : [];
+        const range = lockedRangeInTranslation(sourceMap, translation, lock);
+        return range ? [{ ...range, replacement: lock.translation }] : [];
     }).sort((left, right) => right.start - left.start);
 
     for (const replacement of replacements) {
@@ -1593,7 +1689,8 @@ function sameTranslationRecord(left, right) {
         const other = rightLocks[index];
         return lock.id === other?.id
             && lock.source === other?.source
-            && lock.translation === other?.translation;
+            && lock.translation === other?.translation
+            && (lock.sentenceIndex ?? null) === (other?.sentenceIndex ?? null);
     });
     return Boolean(
         left
@@ -3083,14 +3180,14 @@ function refreshSelectionHighlights() {
         const message = liveContext().chat?.[messageId];
         const record = message && currentRecord(message);
         if (!record || message.extra?.display_text !== record.translation) return;
-        const lockedKeys = new Set(normalizedLockedSegments(record.lockedSegments).map(lockedSegmentKey));
-        for (const row of normalizedSourceMap(record.sourceMap)) {
-            if (!lockedKeys.has(lockedSegmentKey(row))) continue;
+        for (const lock of normalizedLockedSegments(record.lockedSegments)) {
+            const lockedRange = lockedRangeInTranslation(record.sourceMap, record.translation, lock);
+            if (!lockedRange) continue;
             const range = highlightRangeForStoredOffsets(
                 messageId,
                 record.translation,
-                row.start,
-                row.end,
+                lockedRange.start,
+                lockedRange.end,
             );
             if (range) lockedRanges.push(range);
         }
@@ -3674,13 +3771,55 @@ function selectionSourceRows(snapshot) {
         .filter(row => snapshot.start < row.end && snapshot.end > row.start);
 }
 
+function selectionSentenceTargets(snapshot) {
+    if (!snapshot) return [];
+    const targets = [];
+    for (const row of selectionSourceRows(snapshot)) {
+        const rowText = snapshot.translation.slice(row.start, row.end);
+        const ranges = sentenceRanges(rowText);
+        const relativeStart = Math.max(0, snapshot.start - row.start);
+        const relativeEnd = Math.min(rowText.length, snapshot.end - row.start);
+        const touched = ranges.flatMap((range, sentenceIndex) => (
+            relativeStart < range.end && relativeEnd > range.start
+                ? [{ range, sentenceIndex }]
+                : []
+        ));
+
+        // If the browser selection lands only on spacing/punctuation between
+        // sentences, use the nearest sentence instead of expanding to the row.
+        const resolved = touched.length ? touched : ranges.flatMap((range, sentenceIndex) => {
+            const distance = relativeStart < range.start
+                ? range.start - relativeStart
+                : relativeStart > range.end
+                    ? relativeStart - range.end
+                    : 0;
+            return [{ range, sentenceIndex, distance }];
+        }).sort((left, right) => left.distance - right.distance).slice(0, 1);
+
+        for (const item of resolved) {
+            const start = row.start + item.range.start;
+            const end = row.start + item.range.end;
+            if (end <= start) continue;
+            targets.push({
+                id: row.id,
+                source: row.source,
+                sentenceIndex: item.sentenceIndex,
+                start,
+                end,
+                translation: snapshot.translation.slice(start, end),
+            });
+        }
+    }
+    return targets;
+}
+
 function selectionIsLocked(snapshot) {
     if (!snapshot) return false;
     const record = currentSelectionRecord(snapshot.message);
-    const rows = selectionSourceRows(snapshot);
-    if (!record || !rows.length) return false;
+    const targets = selectionSentenceTargets(snapshot);
+    if (!record || !targets.length) return false;
     const lockedKeys = new Set(normalizedLockedSegments(record.lockedSegments).map(lockedSegmentKey));
-    return rows.every(row => lockedKeys.has(lockedSegmentKey(row)));
+    return targets.every(target => lockedKeys.has(lockedSegmentKey(target)));
 }
 
 function selectionTouchesLocked(snapshot) {
@@ -3688,7 +3827,7 @@ function selectionTouchesLocked(snapshot) {
     const record = currentRecord(snapshot.message);
     if (!record) return false;
     const lockedKeys = new Set(normalizedLockedSegments(record.lockedSegments).map(lockedSegmentKey));
-    return selectionSourceRows(snapshot).some(row => lockedKeys.has(lockedSegmentKey(row)));
+    return selectionSentenceTargets(snapshot).some(target => lockedKeys.has(lockedSegmentKey(target)));
 }
 
 function toggleSelectionLock(snapshot) {
@@ -3698,24 +3837,25 @@ function toggleSelectionLock(snapshot) {
         hideSelectionButton();
         return;
     }
-    const rows = selectionSourceRows(snapshot);
-    if (!rows.length) {
-        notify('이 번역에는 구간 정보가 없어 잠글 수 없어요. 새로 번역한 메시지에서 사용해 주세요.', 'warning');
+    const targets = selectionSentenceTargets(snapshot);
+    if (!targets.length) {
+        notify('선택한 문장을 찾지 못해 잠글 수 없어요. 다시 드래그해 주세요.', 'warning');
         hideSelectionButton();
         return;
     }
     const record = currentSelectionRecord(snapshot.message);
     const existing = normalizedLockedSegments(record.lockedSegments);
-    const targetKeys = new Set(rows.map(lockedSegmentKey));
-    const unlock = rows.every(row => existing.some(lock => lockedSegmentKey(lock) === lockedSegmentKey(row)));
+    const targetKeys = new Set(targets.map(lockedSegmentKey));
+    const unlock = targets.every(target => existing.some(lock => lockedSegmentKey(lock) === lockedSegmentKey(target)));
     const nextLocks = unlock
         ? existing.filter(lock => !targetKeys.has(lockedSegmentKey(lock)))
         : [
             ...existing.filter(lock => !targetKeys.has(lockedSegmentKey(lock))),
-            ...rows.map(row => ({
-                id: row.id,
-                source: row.source,
-                translation: snapshot.translation.slice(row.start, row.end),
+            ...targets.map(target => ({
+                id: target.id,
+                source: target.source,
+                sentenceIndex: target.sentenceIndex,
+                translation: target.translation,
             })),
         ];
     const context = liveContext();
@@ -3733,7 +3873,12 @@ function toggleSelectionLock(snapshot) {
     globalThis.getSelection?.()?.removeAllRanges?.();
     selectionSnapshot = null;
     hideSelectionButton();
-    notify(unlock ? '선택한 번역 구간의 잠금을 해제했어요.' : `번역 구간 ${rows.length}개를 잠갔어요.`, 'success');
+    notify(
+        unlock
+            ? (targets.length > 1 ? `선택한 문장 ${targets.length}개의 잠금을 해제했어요.` : '선택한 문장의 잠금을 해제했어요.')
+            : (targets.length > 1 ? `선택한 문장 ${targets.length}개를 잠갔어요.` : '선택한 문장만 잠갔어요.'),
+        'success',
+    );
 }
 
 function selectionSourceContext(snapshot, contextMode) {

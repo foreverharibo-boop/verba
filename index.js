@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.6';
+const EXTENSION_VERSION = '0.4.7';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7509,7 +7509,7 @@ function injectSettingsPanel() {
                             <div id="verba-english-flavor-controls" class="${settings.englishFlavorEnabled ? '' : 'verba-control-disabled'}">
                                 <label for="verba-english-flavor-rhythm">대사 호흡 취향</label>
                                 <select id="verba-english-flavor-rhythm" class="text_pole">
-                                    <option value="default" ${settings.englishFlavorDialogueRhythm === 'default' ? 'selected' : ''}>기본 · 한출 취향/기본값 따름</option>
+                                    <option value="default" ${settings.englishFlavorDialogueRhythm === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="short" ${settings.englishFlavorDialogueRhythm === 'short' ? 'selected' : ''}>짧고 툭툭</option>
                                     <option value="balanced" ${settings.englishFlavorDialogueRhythm === 'balanced' ? 'selected' : ''}>자연스러운 보통</option>
                                     <option value="smooth" ${settings.englishFlavorDialogueRhythm === 'smooth' ? 'selected' : ''}>길고 매끄럽게</option>
@@ -7546,7 +7546,7 @@ function injectSettingsPanel() {
 
                                 <label for="verba-english-flavor-interjection">감탄사·추임새 취향</label>
                                 <select id="verba-english-flavor-interjection" class="text_pole">
-                                    <option value="default" ${settings.englishFlavorInterjectionTone === 'default' ? 'selected' : ''}>기본 · 한출 취향/기본값 따름</option>
+                                    <option value="default" ${settings.englishFlavorInterjectionTone === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="natural" ${settings.englishFlavorInterjectionTone === 'natural' ? 'selected' : ''}>자연스러운 영어권 반응</option>
                                     <option value="restrained" ${settings.englishFlavorInterjectionTone === 'restrained' ? 'selected' : ''}>담백하게</option>
                                     <option value="lively" ${settings.englishFlavorInterjectionTone === 'lively' ? 'selected' : ''}>생동감 있게</option>

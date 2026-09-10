@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.72';
+const EXTENSION_VERSION = '0.3.73';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -83,6 +83,8 @@ const DEFAULT_SETTINGS = {
     dialogueEndingAvoid: '',
     dialogueEndingStrength: 'normal',
     dialogueEndingRepetitionReduction: true,
+    previousOutputCompletionAction: 'jump',
+    retranslationInstructionHistory: [],
     bannedWords: '',
     maxTokens: 15000,
     timeoutSeconds: 120,
@@ -117,6 +119,16 @@ settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(setting
     ? settings.dialogueEndingStrength
     : 'normal';
 settings.dialogueEndingRepetitionReduction = settings.dialogueEndingRepetitionReduction !== false;
+settings.previousOutputCompletionAction = ['jump', 'stay'].includes(settings.previousOutputCompletionAction)
+    ? settings.previousOutputCompletionAction
+    : 'jump';
+settings.retranslationInstructionHistory = Array.isArray(settings.retranslationInstructionHistory)
+    ? [...new Set(
+        settings.retranslationInstructionHistory
+            .map(value => String(value || '').trim())
+            .filter(Boolean),
+    )].slice(0, 5)
+    : [];
 settings.relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === settings.relationTemperature)
     ? settings.relationTemperature
     : 'default';
@@ -2625,6 +2637,38 @@ function latestAssistantMessage() {
     return null;
 }
 
+
+function rememberRetranslationInstruction(value) {
+    const instruction = String(value || '').trim();
+    if (!instruction) return;
+    settings.retranslationInstructionHistory = [
+        instruction,
+        ...settings.retranslationInstructionHistory.filter(item => item !== instruction),
+    ].slice(0, 5);
+    saveSettings();
+}
+
+function retranslationInstructionHistoryMarkup() {
+    const history = Array.isArray(settings.retranslationInstructionHistory)
+        ? settings.retranslationInstructionHistory.slice(0, 5)
+        : [];
+    if (!history.length) return '';
+
+    return `
+        <div class="verba-request-history">
+            <div class="verba-request-history-header">
+                <span>최근 요구사항</span>
+                <button type="button" class="verba-request-history-clear">기록 지우기</button>
+            </div>
+            <div class="verba-request-history-list">
+                ${history.map((item, index) => `
+                    <button type="button" class="verba-request-history-chip" data-history-index="${index}" title="${escapeHtml(item)}">
+                        ${escapeHtml(item)}
+                    </button>`).join('')}
+            </div>
+        </div>`;
+}
+
 function requestOneTimeInstruction(scope, preview = '', viewAction = null, titleOverride = '') {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     const isSelection = scope === 'selection';
@@ -2648,6 +2692,7 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null, title
                 <label for="verba-request-text">이번 번역에만 적용할 요구사항</label>
                 <textarea id="verba-request-text" class="text_pole" rows="5" maxlength="1200" placeholder="예: 더 직설적으로 번역해 줘 / 존댓말로 바꿔 줘"></textarea>
                 <small>비워두면 현재 전역 설정대로 다시 번역해요.</small>
+                ${retranslationInstructionHistoryMarkup()}
                 ${showTuning ? `
                     <fieldset class="verba-tuning-choice">
                         <legend>번역 미세 조정 <small>이번 요청에만 적용</small></legend>
@@ -2727,6 +2772,7 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null, title
         const textarea = overlay.querySelector('#verba-request-text');
         const submit = () => {
             const instruction = String(textarea.value || '').trim();
+            if (instruction) rememberRetranslationInstruction(instruction);
             if (!showContextChoice && !showTuning) {
                 finish(instruction);
                 return;
@@ -2749,6 +2795,23 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null, title
             showTranslation: Boolean(viewAction?.showTranslation),
         }));
         overlay.querySelector('.verba-submit').addEventListener('click', submit);
+        overlay.querySelectorAll('.verba-request-history-chip').forEach(button => {
+            button.addEventListener('click', () => {
+                const index = Number(button.dataset.historyIndex);
+                const value = settings.retranslationInstructionHistory[index];
+                if (!value) return;
+                textarea.value = value;
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                textarea.focus();
+                textarea.setSelectionRange?.(textarea.value.length, textarea.value.length);
+            });
+        });
+        overlay.querySelector('.verba-request-history-clear')?.addEventListener('click', () => {
+            settings.retranslationInstructionHistory = [];
+            saveSettings();
+            overlay.querySelector('.verba-request-history')?.remove();
+            textarea.focus();
+        });
         if (showTuning) {
             const relationToggle = overlay.querySelector('#verba-request-relation-temperature-enabled');
             const relationControls = overlay.querySelector('#verba-request-fine-tuning-controls');
@@ -3695,6 +3758,91 @@ async function retranslateOutputTarget(target, title = '아웃풋 전체 재번�
     });
 }
 
+
+function captureChatViewportPosition() {
+    const viewport = globalThis.visualViewport;
+    const viewportTop = viewport?.offsetTop || 0;
+    const viewportHeight = viewport?.height || innerHeight;
+    const centerY = viewportTop + (viewportHeight / 2);
+
+    const candidates = [...document.querySelectorAll('#chat .mes[mesid], .mes[mesid]')]
+        .map(element => {
+            const id = Number(element.getAttribute('mesid'));
+            const rect = element.getBoundingClientRect();
+            return { element, id, rect };
+        })
+        .filter(item =>
+            Number.isInteger(item.id)
+            && item.rect.height > 0
+            && item.rect.bottom >= viewportTop
+            && item.rect.top <= viewportTop + viewportHeight
+        );
+
+    if (!candidates.length) return null;
+
+    candidates.sort((left, right) => {
+        const leftCenter = left.rect.top + (left.rect.height / 2);
+        const rightCenter = right.rect.top + (right.rect.height / 2);
+        return Math.abs(leftCenter - centerY) - Math.abs(rightCenter - centerY);
+    });
+
+    return {
+        messageId: candidates[0].id,
+        block: 'center',
+    };
+}
+
+function dismissPreviousOutputReturnButton() {
+    document.querySelector('#verba-return-position')?.remove();
+}
+
+async function restorePreviousOutputReturnPosition(position) {
+    if (!position || !Number.isInteger(Number(position.messageId))) return false;
+    const id = Number(position.messageId);
+    let element = document.querySelector(`.mes[mesid="${id}"]`);
+
+    // The original position should normally still be loaded, but give the DOM
+    // a moment in case SillyTavern is finishing a render after deep paging.
+    for (let attempt = 0; !element && attempt < 8; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        element = document.querySelector(`.mes[mesid="${id}"]`);
+    }
+
+    if (!element) {
+        notify('원래 보던 위치를 다시 찾지 못했어요.', 'warning');
+        return false;
+    }
+
+    element.scrollIntoView({
+        behavior: 'smooth',
+        block: position.block || 'center',
+        inline: 'nearest',
+    });
+    return true;
+}
+
+function showPreviousOutputReturnButton(position) {
+    dismissPreviousOutputReturnButton();
+    if (!position) return;
+
+    const host = document.createElement('div');
+    host.id = 'verba-return-position';
+    host.className = 'verba-return-position';
+    host.innerHTML = `
+        <button type="button" class="menu_button verba-return-position-main">↩ 원래 위치로 돌아가기</button>
+        <button type="button" class="verba-return-position-close" aria-label="닫기">✕</button>`;
+    document.documentElement.append(host);
+
+    host.querySelector('.verba-return-position-main')?.addEventListener('click', async () => {
+        const button = host.querySelector('.verba-return-position-main');
+        if (button) button.disabled = true;
+        const restored = await restorePreviousOutputReturnPosition(position);
+        if (restored) dismissPreviousOutputReturnButton();
+        else if (button) button.disabled = false;
+    });
+    host.querySelector('.verba-return-position-close')?.addEventListener('click', dismissPreviousOutputReturnButton);
+}
+
 async function jumpToOutputMessage(messageId) {
     const id = Number(messageId);
     if (!Number.isInteger(id)) return false;
@@ -3794,11 +3942,20 @@ async function retranslateLatestOutput() {
     const previous = await requestPreviousOutputTarget(target.id);
     if (!previous) return;
 
+    const returnPosition = settings.previousOutputCompletionAction === 'jump'
+        ? captureChatViewportPosition()
+        : null;
+
     const success = !currentRecord(previous.message)
         ? await translateUntranslatedOutput(previous)
         : await retranslateOutputTarget(previous, '이전 아웃풋 전체 재번역');
 
-    if (success) await jumpToOutputMessage(previous.id);
+    if (!success) return;
+
+    if (settings.previousOutputCompletionAction === 'jump') {
+        const jumped = await jumpToOutputMessage(previous.id);
+        if (jumped) showPreviousOutputReturnButton(returnPosition);
+    }
 }
 
 function setTextareaValue(textarea, value) {
@@ -6095,6 +6252,18 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
+                <details id="verba-previous-output-settings" class="verba-tool-details">
+                    <summary>이전 아웃풋 <small>완료 후 동작</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label for="verba-previous-output-completion-action">번역 완료 후</label>
+                        <select id="verba-previous-output-completion-action" class="text_pole">
+                            <option value="jump" ${settings.previousOutputCompletionAction === 'jump' ? 'selected' : ''}>번역한 메시지로 이동</option>
+                            <option value="stay" ${settings.previousOutputCompletionAction === 'stay' ? 'selected' : ''}>현재 위치 유지</option>
+                        </select>
+                        <div class="verba-help">‘이동’을 선택하면 이전 아웃풋 번역/재번역 완료 후 해당 메시지로 이동하고, 화면에 ‘원래 위치로 돌아가기’ 버튼이 표시됩니다.</div>
+                    </div>
+                </details>
+
                 <details id="verba-translation-tuning" class="verba-tool-details">
                     <summary>번역 미세 조정 <small>관계 온도·현지화</small></summary>
                     <div class="verba-tool-details-content">
@@ -6311,6 +6480,12 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
         settings.selectionCandidates = event.target.checked;
+        saveSettings();
+    });
+    panel.querySelector('#verba-previous-output-completion-action').addEventListener('change', event => {
+        settings.previousOutputCompletionAction = ['jump', 'stay'].includes(event.target.value)
+            ? event.target.value
+            : 'jump';
         saveSettings();
     });
     const relationTemperatureInputs = [...panel.querySelectorAll('input[name="verba-relation-temperature"]')];
@@ -6803,6 +6978,7 @@ function setupEvents() {
                 element.classList.remove('verba-swipe-hold-active');
                 element.querySelectorAll('.verba-swipe-hold-content').forEach(hold => hold.remove());
             });
+            dismissPreviousOutputReturnButton();
             const requestOverlay = document.querySelector('#verba-request-overlay');
             const closeButton = requestOverlay?.querySelector('.verba-close');
             if (closeButton) closeButton.click();

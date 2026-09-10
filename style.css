@@ -1575,3 +1575,103 @@
 #verba-dialogue-ending-settings select {
     width: 100% !important;
 }
+
+
+/* v0.3.73: recent retranslation instructions */
+.verba-request-history {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    margin-top: 5px !important;
+}
+
+.verba-request-history-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    font-size: 0.82em !important;
+    opacity: 0.82 !important;
+}
+
+.verba-request-history-clear {
+    appearance: none !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    padding: 2px 4px !important;
+    font: inherit !important;
+    opacity: 0.72 !important;
+    cursor: pointer !important;
+}
+
+.verba-request-history-list {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 5px !important;
+}
+
+.verba-request-history-chip {
+    appearance: none !important;
+    max-width: 100% !important;
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent) !important;
+    border-radius: 999px !important;
+    background: color-mix(in srgb, currentColor 7%, transparent) !important;
+    color: inherit !important;
+    padding: 4px 8px !important;
+    font: inherit !important;
+    font-size: 0.78em !important;
+    line-height: 1.25 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    cursor: pointer !important;
+}
+
+/* v0.3.73: return to the position seen before jumping to an old output */
+#verba-return-position.verba-return-position {
+    position: fixed !important;
+    left: 50% !important;
+    bottom: max(78px, calc(env(safe-area-inset-bottom) + 70px)) !important;
+    transform: translateX(-50%) !important;
+    z-index: 2147483645 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    max-width: calc(100vw - 18px) !important;
+    padding: 4px !important;
+    border-radius: 999px !important;
+    background: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, .88)) !important;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, .28) !important;
+    backdrop-filter: blur(8px);
+}
+
+#verba-return-position .verba-return-position-main {
+    min-height: 34px !important;
+    width: auto !important;
+    padding: 5px 10px !important;
+    white-space: nowrap !important;
+}
+
+#verba-return-position .verba-return-position-close {
+    appearance: none !important;
+    width: 30px !important;
+    height: 30px !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    color: inherit !important;
+    padding: 0 !important;
+    font-size: 0.82em !important;
+    cursor: pointer !important;
+}
+
+@media (max-width: 600px) {
+    #verba-return-position.verba-return-position {
+        bottom: max(72px, calc(env(safe-area-inset-bottom) + 66px)) !important;
+    }
+
+    .verba-request-history-chip {
+        max-width: min(100%, 250px) !important;
+    }
+}

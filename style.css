@@ -1526,3 +1526,39 @@
         padding: 8px 9px !important;
     }
 }
+
+
+/* v0.3.68: brief cue after jumping to a completed previous-output translation */
+.mes.verba-jump-highlight {
+    animation: verba-jump-highlight 1.8s ease-out;
+}
+
+@keyframes verba-jump-highlight {
+    0%, 35% {
+        outline: 2px solid var(--verba-accent);
+        outline-offset: 3px;
+    }
+    100% {
+        outline-color: transparent;
+        outline-offset: 6px;
+    }
+}
+
+
+/* v0.3.69: previous-output search */
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-search {
+    width: 100% !important;
+    min-height: 36px !important;
+    flex: 0 0 auto !important;
+    box-sizing: border-box !important;
+    padding: 7px 10px !important;
+    font-family: inherit !important;
+    font-size: calc(var(--messageTextFontSize, 1rem) * 0.78) !important;
+}
+
+#verba-request-overlay.verba-previous-output-overlay .verba-previous-output-empty {
+    padding: 18px 10px !important;
+    text-align: center !important;
+    opacity: 0.68 !important;
+    line-height: 1.4 !important;
+}

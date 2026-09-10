@@ -1,5 +1,5 @@
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
-import { messageFormatting } from '../../../../script.js';
+import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.67';
+const EXTENSION_VERSION = '0.3.69';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2348,7 +2348,7 @@ async function translateMessage(messageId, options = {}) {
     const context = liveContext();
     const chatReference = context.chat;
     const message = chatReference?.[id];
-    if (!message || message.is_user || message.is_system) return;
+    if (!message || message.is_user || !isNameReplacementMessage(message)) return;
     const source = messageSource(message);
     if (!source.trim()) return;
 
@@ -2483,6 +2483,7 @@ async function translateMessage(messageId, options = {}) {
             if (pendingOutputs.get(id)?.controller === controller) pendingOutputs.delete(id);
             refreshRetranslateButton();
         }
+        return outputJobSuccess === true;
     })();
     pendingOutputs.set(id, { controller, work });
     refreshRetranslateButton();
@@ -2493,7 +2494,7 @@ function latestAssistantMessage() {
     const chat = liveContext().chat || [];
     for (let id = chat.length - 1; id >= 0; id -= 1) {
         const message = chat[id];
-        if (message && !message.is_user && !message.is_system && messageSource(message).trim()) {
+        if (message && isNameReplacementMessage(message) && messageSource(message).trim()) {
             return { id, message };
         }
     }
@@ -3143,7 +3144,7 @@ function previousAssistantMessages(beforeId = Number.POSITIVE_INFINITY) {
     const rows = [];
     for (let id = Math.min(chat.length - 1, Number.isFinite(beforeId) ? beforeId - 1 : chat.length - 1); id >= 0; id -= 1) {
         const message = chat[id];
-        if (!message || message.is_user || message.is_system) continue;
+        if (!message || !isNameReplacementMessage(message)) continue;
         const source = messageSource(message);
         if (!source.trim()) continue;
         rows.push({ id, message, source });
@@ -3241,11 +3242,15 @@ function visiblePreviousOutputPreview(target) {
 
     const displayText = message?.extra?.display_text ?? messageSource(message);
     try {
+        // Hidden/ghosted character outputs may be marked is_system by
+        // SillyTavern. For preview purposes they are still character outputs,
+        // so render them as assistant text while preserving the same regex and
+        // Markdown pipeline the chat uses.
         const html = messageFormatting(
             String(displayText || ''),
             String(message.name || ''),
-            Boolean(message.is_system),
-            Boolean(message.is_user),
+            false,
+            false,
             id,
             {},
             false,
@@ -3267,8 +3272,8 @@ function visiblePreviousOutputPreview(target) {
         .trim();
 }
 
-function previousOutputOptionMarkup(target, index) {
-    const preview = visiblePreviousOutputPreview(target).slice(0, 180) || '(표시할 내용 없음)';
+function previousOutputOptionMarkup(target, index, previewText = '') {
+    const preview = String(previewText || visiblePreviousOutputPreview(target)).slice(0, 180) || '(표시할 내용 없음)';
     return `<button type="button" class="menu_button verba-previous-output-option" data-target-index="${index}">
         <span class="verba-previous-output-meta"><b>#${target.id}</b></span>
         <span>${escapeHtml(preview)}</span>
@@ -3317,6 +3322,8 @@ function centerPreviousOutputModal(overlay) {
 function requestPreviousOutputTarget(beforeId) {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
 
+    // Includes normal and SillyTavern-hidden/ghosted assistant outputs, while
+    // still excluding user inputs and genuine system notices.
     const targets = previousAssistantMessages(beforeId);
     if (!targets.length) {
         notify('선택할 이전 아웃풋이 없어요.', 'info');
@@ -3334,17 +3341,30 @@ function requestPreviousOutputTarget(beforeId) {
                     <strong>이전 아웃풋 선택</strong>
                     <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
+                <input type="search" class="text_pole verba-previous-output-search"
+                    placeholder="내용 또는 #번호 검색" autocomplete="off" enterkeyhint="search">
                 <div class="verba-previous-output-list"></div>
                 <button type="button" class="menu_button verba-previous-output-more">더 보기</button>
             </section>`;
 
+        const searchInput = overlay.querySelector('.verba-previous-output-search');
         const list = overlay.querySelector('.verba-previous-output-list');
         const moreButton = overlay.querySelector('.verba-previous-output-more');
+        const previewCache = new Map();
+        let filteredTargets = targets;
         let renderedCount = 0;
         let settled = false;
         let recenter = null;
+        let searchTimer = null;
+
+        const previewFor = target => {
+            const key = Number(target.id);
+            if (!previewCache.has(key)) previewCache.set(key, visiblePreviousOutputPreview(target));
+            return previewCache.get(key) || '';
+        };
 
         const cleanup = () => {
+            clearTimeout(searchTimer);
             if (!recenter) return;
             globalThis.visualViewport?.removeEventListener?.('resize', recenter);
             globalThis.visualViewport?.removeEventListener?.('scroll', recenter);
@@ -3364,24 +3384,71 @@ function requestPreviousOutputTarget(beforeId) {
             resolve(value);
         };
 
+        const renderEmpty = message => {
+            list.innerHTML = `<div class="verba-previous-output-empty">${escapeHtml(message)}</div>`;
+            moreButton.hidden = true;
+        };
+
         const renderMore = () => {
-            const nextEnd = Math.min(targets.length, renderedCount + PREVIOUS_OUTPUT_PAGE_SIZE);
+            if (!filteredTargets.length) {
+                renderEmpty('검색 결과가 없어요.');
+                return;
+            }
+
+            const nextEnd = Math.min(
+                filteredTargets.length,
+                renderedCount + PREVIOUS_OUTPUT_PAGE_SIZE,
+            );
             const fragment = document.createDocumentFragment();
 
             for (let index = renderedCount; index < nextEnd; index += 1) {
+                const target = filteredTargets[index];
                 const wrapper = document.createElement('div');
-                wrapper.innerHTML = previousOutputOptionMarkup(targets[index], index);
+                wrapper.innerHTML = previousOutputOptionMarkup(target, index, previewFor(target));
                 const button = wrapper.firstElementChild;
                 if (!button) continue;
-                button.addEventListener('click', () => finish(targets[index] || null));
+                button.addEventListener('click', () => finish(target || null));
                 fragment.append(button);
             }
 
-            list.append(fragment);
+            if (renderedCount === 0) list.replaceChildren(fragment);
+            else list.append(fragment);
+
             renderedCount = nextEnd;
-            moreButton.hidden = renderedCount >= targets.length;
-            if (!moreButton.hidden) moreButton.textContent = `더 보기 · ${renderedCount}/${targets.length}`;
+            moreButton.hidden = renderedCount >= filteredTargets.length;
+            if (!moreButton.hidden) {
+                moreButton.textContent = `더 보기 · ${renderedCount}/${filteredTargets.length}`;
+            }
         };
+
+        const applySearch = () => {
+            const query = String(searchInput.value || '').trim().toLocaleLowerCase();
+            renderedCount = 0;
+
+            if (!query) {
+                filteredTargets = targets;
+            } else {
+                const numeric = query.replace(/^#/, '');
+                filteredTargets = targets.filter(target => {
+                    if (
+                        numeric
+                        && /^\d+$/.test(numeric)
+                        && String(target.id).includes(numeric)
+                    ) return true;
+                    return previewFor(target).toLocaleLowerCase().includes(query);
+                });
+            }
+
+            list.replaceChildren();
+            renderMore();
+            list.scrollTop = 0;
+            requestAnimationFrame(() => centerPreviousOutputModal(overlay));
+        };
+
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(applySearch, 120);
+        });
 
         moreButton.addEventListener('click', event => {
             event.preventDefault();
@@ -3398,8 +3465,6 @@ function requestPreviousOutputTarget(beforeId) {
             if (event.key === 'Escape') finish(null);
         });
 
-        // First page is rendered before the modal opens, so the picker can never
-        // start as an empty shell with only the More button.
         renderMore();
         document.documentElement.append(overlay);
 
@@ -3430,7 +3495,7 @@ async function translateUntranslatedOutput(target) {
         notify('선택한 아웃풋이 이미 한국어라 번역할 필요가 없어요.', 'info');
         return;
     }
-    await translateMessage(target.id, { force: failed });
+    return await translateMessage(target.id, { force: failed });
 }
 
 async function retranslateOutputTarget(target, title = '아웃풋 전체 재번역') {
@@ -3444,8 +3509,7 @@ async function retranslateOutputTarget(target, title = '아웃풋 전체 재번�
     const isFailedOutput = failedSignature === messageVersionSignature(target.message);
     const record = currentRecord(target.message);
     if (!record) {
-        await translateUntranslatedOutput(target);
-        return;
+        return await translateUntranslatedOutput(target);
     }
 
     const snapshot = {
@@ -3500,11 +3564,63 @@ async function retranslateOutputTarget(target, title = '아웃풋 전체 재번�
         includeDialogue: sourceHasDialogue,
         includeCharacterDialogue: sourceHasDialogue,
     });
-    await translateMessage(target.id, {
+    return await translateMessage(target.id, {
         force: true,
         oneTimeInstruction,
         tuning: typeof request === 'object' ? request.tuning : null,
     });
+}
+
+async function jumpToOutputMessage(messageId) {
+    const id = Number(messageId);
+    if (!Number.isInteger(id)) return false;
+
+    const findElement = () => document.querySelector(`.mes[mesid="${id}"]`);
+    let element = findElement();
+
+    // SillyTavern only renders the newest N messages when chat truncation is
+    // enabled. Load older pages with its own public API until the target is in
+    // the DOM, so a result found through search or "더 보기" can still jump.
+    for (let pass = 0; !element && pass < 80; pass += 1) {
+        const firstDisplayed = Number(
+            document.querySelector('#chat .mes[mesid], .mes[mesid]')?.getAttribute('mesid'),
+        );
+        if (Number.isFinite(firstDisplayed) && firstDisplayed <= id) break;
+
+        const amount = Number.isFinite(firstDisplayed)
+            ? Math.min(100, Math.max(20, firstDisplayed - id))
+            : 100;
+
+        try {
+            await showMoreMessages(amount);
+        } catch (error) {
+            console.warn('[베르바] 이전 메시지 자동 불러오기 실패', error);
+            break;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 25));
+        element = findElement();
+    }
+
+    // Give extensions/theme rendering a short chance to finish after paging.
+    for (let attempt = 0; !element && attempt < 8; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 80));
+        element = findElement();
+    }
+
+    if (!element) {
+        notify('번역은 완료됐지만 해당 메시지 위치를 화면에 불러오지 못했어요.', 'warning');
+        return false;
+    }
+
+    element.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+        inline: 'nearest',
+    });
+    element.classList.add('verba-jump-highlight');
+    setTimeout(() => element.classList.remove('verba-jump-highlight'), 1800);
+    return true;
 }
 
 async function retranslateLatestOutput() {
@@ -3553,11 +3669,12 @@ async function retranslateLatestOutput() {
 
     const previous = await requestPreviousOutputTarget(target.id);
     if (!previous) return;
-    if (!currentRecord(previous.message)) {
-        await translateUntranslatedOutput(previous);
-        return;
-    }
-    await retranslateOutputTarget(previous, '이전 아웃풋 전체 재번역');
+
+    const success = !currentRecord(previous.message)
+        ? await translateUntranslatedOutput(previous)
+        : await retranslateOutputTarget(previous, '이전 아웃풋 전체 재번역');
+
+    if (success) await jumpToOutputMessage(previous.id);
 }
 
 function setTextareaValue(textarea, value) {

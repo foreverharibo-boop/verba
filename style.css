@@ -1928,3 +1928,43 @@
         padding-right: 9px !important;
     }
 }
+
+
+/* v0.3.96: developer-only "한출의 맛" */
+.verba-korean-flavor {
+    margin: 8px 0 10px !important;
+}
+
+#verba-korean-flavor-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 5px !important;
+}
+
+#verba-korean-flavor-controls > label:not(.verba-check-row) {
+    margin-top: 5px !important;
+}
+
+#verba-korean-flavor-controls select {
+    width: 100% !important;
+}
+
+
+/* v0.3.97: developer-only "영출의 맛" */
+.verba-english-flavor {
+    margin: 8px 0 10px !important;
+}
+
+#verba-english-flavor-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 5px !important;
+}
+
+#verba-english-flavor-controls > label:not(.verba-check-row) {
+    margin-top: 5px !important;
+}
+
+#verba-english-flavor-controls select {
+    width: 100% !important;
+}

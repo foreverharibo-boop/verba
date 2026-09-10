@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.95';
+const EXTENSION_VERSION = '0.3.98';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -77,6 +77,19 @@ const DEFAULT_SETTINGS = {
     qualityAuditVoice: true,
     qualityAuditTranslationese: true,
     qualityAuditContinuity: true,
+    koreanFlavorEnabled: false,
+    koreanFlavorDialogueRhythm: 'balanced',
+    koreanFlavorPronounOmission: 'natural',
+    koreanFlavorProfanityTone: 'default',
+    koreanFlavorInterjectionTone: 'natural',
+    koreanFlavorReduceReferentRepetition: true,
+    englishFlavorEnabled: false,
+    englishFlavorDialogueRhythm: 'balanced',
+    englishFlavorSlangDensity: 'natural',
+    englishFlavorProfanityTone: 'default',
+    englishFlavorInterjectionTone: 'natural',
+    englishFlavorReduceReferentRepetition: true,
+    englishFlavorConversationNaturalization: 'natural',
     autoInput: false,
     selectionCandidates: false,
     selectionQuickCount: 2,
@@ -127,6 +140,37 @@ settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
 settings.qualityAuditVoice = settings.qualityAuditVoice !== false;
 settings.qualityAuditTranslationese = settings.qualityAuditTranslationese !== false;
 settings.qualityAuditContinuity = settings.qualityAuditContinuity !== false;
+settings.koreanFlavorEnabled = settings.koreanFlavorEnabled === true;
+settings.koreanFlavorDialogueRhythm = ['default', 'short', 'balanced', 'smooth'].includes(settings.koreanFlavorDialogueRhythm)
+    ? settings.koreanFlavorDialogueRhythm
+    : 'balanced';
+settings.koreanFlavorPronounOmission = ['default', 'preserve', 'natural', 'active'].includes(settings.koreanFlavorPronounOmission)
+    ? settings.koreanFlavorPronounOmission
+    : 'natural';
+settings.koreanFlavorProfanityTone = ['default', 'dry', 'blunt', 'lowSlang', 'restrained'].includes(settings.koreanFlavorProfanityTone)
+    ? settings.koreanFlavorProfanityTone
+    : 'default';
+settings.koreanFlavorInterjectionTone = ['default', 'natural', 'restrained', 'lively'].includes(settings.koreanFlavorInterjectionTone)
+    ? settings.koreanFlavorInterjectionTone
+    : 'natural';
+settings.koreanFlavorReduceReferentRepetition = settings.koreanFlavorReduceReferentRepetition !== false;
+settings.englishFlavorEnabled = settings.englishFlavorEnabled === true;
+settings.englishFlavorDialogueRhythm = ['default', 'short', 'balanced', 'smooth'].includes(settings.englishFlavorDialogueRhythm)
+    ? settings.englishFlavorDialogueRhythm
+    : 'balanced';
+settings.englishFlavorSlangDensity = ['default', 'low', 'natural', 'active'].includes(settings.englishFlavorSlangDensity)
+    ? settings.englishFlavorSlangDensity
+    : 'natural';
+settings.englishFlavorProfanityTone = ['default', 'dry', 'blunt', 'everyday', 'lowSlang', 'restrained'].includes(settings.englishFlavorProfanityTone)
+    ? settings.englishFlavorProfanityTone
+    : 'default';
+settings.englishFlavorInterjectionTone = ['default', 'natural', 'restrained', 'lively'].includes(settings.englishFlavorInterjectionTone)
+    ? settings.englishFlavorInterjectionTone
+    : 'natural';
+settings.englishFlavorReduceReferentRepetition = settings.englishFlavorReduceReferentRepetition !== false;
+settings.englishFlavorConversationNaturalization = ['default', 'natural', 'active'].includes(settings.englishFlavorConversationNaturalization)
+    ? settings.englishFlavorConversationNaturalization
+    : 'natural';
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
 settings.dialoguePrompt = typeof settings.dialoguePrompt === 'string' ? settings.dialoguePrompt : '';
@@ -7101,6 +7145,127 @@ function developerSettingsMarkup() {
                         </div>
                     </details>
 
+                    <details id="verba-korean-flavor" class="verba-tool-details verba-korean-flavor">
+                        <summary>🍚 한출의 맛 <small>한국어 말맛 커스텀</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-korean-flavor-enabled" ${settings.koreanFlavorEnabled ? 'checked' : ''}>
+                                <span>한출의 맛 사용</span>
+                            </label>
+                            <div class="verba-help">네이티브 한국어의 전체 현지화 강도와는 별개로 한국어 말맛을 미세 조정합니다. 아웃풋 E→K에 직접 적용되고, 인풋 K→E에서도 한국어 원문의 호흡·생략·욕설·감탄사·지칭 감각을 해석하는 기본 취향으로 반영합니다. 영출의 맛이 켜져 있으면 겹치는 영어 표현 취향은 영출의 맛이 우선합니다. 별도 API 호출은 없습니다.</div>
+
+                            <div id="verba-korean-flavor-controls" class="${settings.koreanFlavorEnabled ? '' : 'verba-control-disabled'}">
+                                <label for="verba-korean-flavor-rhythm">대사 호흡 취향</label>
+                                <select id="verba-korean-flavor-rhythm" class="text_pole">
+                                    <option value="default" ${settings.koreanFlavorDialogueRhythm === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="short" ${settings.koreanFlavorDialogueRhythm === 'short' ? 'selected' : ''}>짧고 툭툭</option>
+                                    <option value="balanced" ${settings.koreanFlavorDialogueRhythm === 'balanced' ? 'selected' : ''}>자연스러운 보통</option>
+                                    <option value="smooth" ${settings.koreanFlavorDialogueRhythm === 'smooth' ? 'selected' : ''}>길고 매끄럽게</option>
+                                </select>
+                                <div class="verba-help">직접 대사의 문장 끊기와 이어짐만 조절하며 의미·강조·말투는 바꾸지 않습니다.</div>
+
+                                <label for="verba-korean-flavor-pronoun">주어·대명사 생략 취향</label>
+                                <select id="verba-korean-flavor-pronoun" class="text_pole">
+                                    <option value="default" ${settings.koreanFlavorPronounOmission === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="preserve" ${settings.koreanFlavorPronounOmission === 'preserve' ? 'selected' : ''}>원문 지칭을 비교적 유지</option>
+                                    <option value="natural" ${settings.koreanFlavorPronounOmission === 'natural' ? 'selected' : ''}>자연스러우면 생략</option>
+                                    <option value="active" ${settings.koreanFlavorPronounOmission === 'active' ? 'selected' : ''}>한국어답게 적극 생략</option>
+                                </select>
+                                <div class="verba-help">지칭 대상이 헷갈리지 않는 범위에서만 생략하며, 누가 누구를 가리키는지는 절대 바꾸지 않습니다.</div>
+
+                                <label for="verba-korean-flavor-profanity">욕설·거친 표현의 번역 결</label>
+                                <select id="verba-korean-flavor-profanity" class="text_pole">
+                                    <option value="default" ${settings.koreanFlavorProfanityTone === 'default' ? 'selected' : ''}>기본 · 원문 결 유지</option>
+                                    <option value="dry" ${settings.koreanFlavorProfanityTone === 'dry' ? 'selected' : ''}>건조하게</option>
+                                    <option value="blunt" ${settings.koreanFlavorProfanityTone === 'blunt' ? 'selected' : ''}>직설적·거칠게</option>
+                                    <option value="lowSlang" ${settings.koreanFlavorProfanityTone === 'lowSlang' ? 'selected' : ''}>인터넷식 표현 적게</option>
+                                    <option value="restrained" ${settings.koreanFlavorProfanityTone === 'restrained' ? 'selected' : ''}>비속어는 최소화</option>
+                                </select>
+                                <div class="verba-help">원문의 욕설 강도와 공격성은 그대로 보존하고, 같은 강도 안에서 한국어 표현의 결만 조절합니다.</div>
+
+                                <label for="verba-korean-flavor-interjection">감탄사·추임새 취향</label>
+                                <select id="verba-korean-flavor-interjection" class="text_pole">
+                                    <option value="default" ${settings.koreanFlavorInterjectionTone === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="natural" ${settings.koreanFlavorInterjectionTone === 'natural' ? 'selected' : ''}>자연스러운 한국식 반응</option>
+                                    <option value="restrained" ${settings.koreanFlavorInterjectionTone === 'restrained' ? 'selected' : ''}>담백하게</option>
+                                    <option value="lively" ${settings.koreanFlavorInterjectionTone === 'lively' ? 'selected' : ''}>생동감 있게</option>
+                                </select>
+                                <div class="verba-help">원문에 실제 감탄사·추임새가 있을 때만 표현 방식을 조절하며 새 감탄사를 임의로 추가하지 않습니다.</div>
+
+                                <label class="verba-check-row">
+                                    <input type="checkbox" id="verba-korean-flavor-referent-repeat" ${settings.koreanFlavorReduceReferentRepetition ? 'checked' : ''}>
+                                    <span>반복 지칭 줄이기</span>
+                                </label>
+                                <div class="verba-help">같은 문단·대사에서 이름·그는·그녀는 같은 지칭이 과하게 반복되면, 대상이 명확할 때만 생략하거나 문장을 자연스럽게 재구성합니다.</div>
+                            </div>
+                        </div>
+                    </details>
+
+                    <details id="verba-english-flavor" class="verba-tool-details verba-english-flavor">
+                        <summary>🗽 영출의 맛 <small>영어 말맛 커스텀</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-english-flavor-enabled" ${settings.englishFlavorEnabled ? 'checked' : ''}>
+                                <span>영출의 맛 사용</span>
+                            </label>
+                            <div class="verba-help">한국어 → 영어 인풋 번역의 영어 말맛을 미세 조정합니다. 의미·감정 강도·화자·행동·동의/거절 같은 원문 정보는 바꾸지 않고 영어식 호흡과 구어 표현만 조절합니다. 별도 API 호출은 없습니다.</div>
+
+                            <div id="verba-english-flavor-controls" class="${settings.englishFlavorEnabled ? '' : 'verba-control-disabled'}">
+                                <label for="verba-english-flavor-rhythm">대사 호흡 취향</label>
+                                <select id="verba-english-flavor-rhythm" class="text_pole">
+                                    <option value="default" ${settings.englishFlavorDialogueRhythm === 'default' ? 'selected' : ''}>기본 · 한출 취향/기본값 따름</option>
+                                    <option value="short" ${settings.englishFlavorDialogueRhythm === 'short' ? 'selected' : ''}>짧고 툭툭</option>
+                                    <option value="balanced" ${settings.englishFlavorDialogueRhythm === 'balanced' ? 'selected' : ''}>자연스러운 보통</option>
+                                    <option value="smooth" ${settings.englishFlavorDialogueRhythm === 'smooth' ? 'selected' : ''}>길고 매끄럽게</option>
+                                </select>
+                                <div class="verba-help">직접 대사에서 영어식 문장 끊기와 이어짐을 조절합니다. 의도적인 멈춤·강조·급한 호흡은 원문을 우선합니다.</div>
+
+                                <label for="verba-english-flavor-slang">슬랭·구어체 농도</label>
+                                <select id="verba-english-flavor-slang" class="text_pole">
+                                    <option value="default" ${settings.englishFlavorSlangDensity === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="low" ${settings.englishFlavorSlangDensity === 'low' ? 'selected' : ''}>적게</option>
+                                    <option value="natural" ${settings.englishFlavorSlangDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
+                                    <option value="active" ${settings.englishFlavorSlangDensity === 'active' ? 'selected' : ''}>적극적으로</option>
+                                </select>
+                                <div class="verba-help">원문 말투가 허용하는 범위에서 실제 영어 회화의 구어 표현·축약·idiom을 얼마나 적극적으로 쓸지 정합니다. 없는 감정이나 욕설은 추가하지 않습니다.</div>
+
+                                <label for="verba-english-flavor-profanity">욕설·거친 표현의 영문 결</label>
+                                <select id="verba-english-flavor-profanity" class="text_pole">
+                                    <option value="default" ${settings.englishFlavorProfanityTone === 'default' ? 'selected' : ''}>기본 · 원문 결 유지</option>
+                                    <option value="dry" ${settings.englishFlavorProfanityTone === 'dry' ? 'selected' : ''}>건조하게</option>
+                                    <option value="blunt" ${settings.englishFlavorProfanityTone === 'blunt' ? 'selected' : ''}>직설적·거칠게</option>
+                                    <option value="everyday" ${settings.englishFlavorProfanityTone === 'everyday' ? 'selected' : ''}>일상적인 영어 욕설</option>
+                                    <option value="lowSlang" ${settings.englishFlavorProfanityTone === 'lowSlang' ? 'selected' : ''}>인터넷·밈식 표현 적게</option>
+                                    <option value="restrained" ${settings.englishFlavorProfanityTone === 'restrained' ? 'selected' : ''}>비속어는 최소화</option>
+                                </select>
+                                <div class="verba-help">원문의 욕설 강도·공격성·대상은 고정하고, 같은 강도 안에서 영어 욕설의 결만 조절합니다.</div>
+
+                                <label for="verba-english-flavor-interjection">감탄사·추임새 취향</label>
+                                <select id="verba-english-flavor-interjection" class="text_pole">
+                                    <option value="default" ${settings.englishFlavorInterjectionTone === 'default' ? 'selected' : ''}>기본 · 한출 취향/기본값 따름</option>
+                                    <option value="natural" ${settings.englishFlavorInterjectionTone === 'natural' ? 'selected' : ''}>자연스러운 영어권 반응</option>
+                                    <option value="restrained" ${settings.englishFlavorInterjectionTone === 'restrained' ? 'selected' : ''}>담백하게</option>
+                                    <option value="lively" ${settings.englishFlavorInterjectionTone === 'lively' ? 'selected' : ''}>생동감 있게</option>
+                                </select>
+                                <div class="verba-help">원문에 실제 감탄사·추임새가 있을 때만 영어권 화자가 자연스럽게 쓸 반응으로 옮기며 새 반응을 임의로 추가하지 않습니다.</div>
+
+                                <label class="verba-check-row">
+                                    <input type="checkbox" id="verba-english-flavor-referent-repeat" ${settings.englishFlavorReduceReferentRepetition ? 'checked' : ''}>
+                                    <span>지칭 반복 줄이기</span>
+                                </label>
+                                <div class="verba-help">이름·he/she 같은 지칭이 영어에서 부자연스럽게 반복되면 대상이 확실할 때만 자연스럽게 정리합니다. 여러 인물이 있거나 오해 가능성이 있으면 지칭을 유지합니다.</div>
+
+                                <label for="verba-english-flavor-conversation">영어권 회화 자연화</label>
+                                <select id="verba-english-flavor-conversation" class="text_pole">
+                                    <option value="default" ${settings.englishFlavorConversationNaturalization === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="natural" ${settings.englishFlavorConversationNaturalization === 'natural' ? 'selected' : ''}>자연스럽게</option>
+                                    <option value="active" ${settings.englishFlavorConversationNaturalization === 'active' ? 'selected' : ''}>적극적으로</option>
+                                </select>
+                                <div class="verba-help">한국어 표현을 직역하지 않고 발화 의도·감정·강도가 정확히 같을 때만 실제 영어권 회화에서 쓰는 자연스러운 표현으로 옮깁니다.</div>
+                            </div>
+                        </div>
+                    </details>
+
                     <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
                 ` : `
                     <label for="verba-developer-code">개발자 번호</label>
@@ -7123,6 +7288,26 @@ function syncDeveloperQualityControls(root = document.querySelector('#verba-sett
     qualityControls.querySelectorAll('input').forEach(input => {
         input.disabled = !enabled;
     });
+
+    const flavorMaster = root?.querySelector('#verba-korean-flavor-enabled');
+    const flavorControls = root?.querySelector('#verba-korean-flavor-controls');
+    if (flavorControls) {
+        const flavorEnabled = Boolean(flavorMaster?.checked);
+        flavorControls.classList.toggle('verba-control-disabled', !flavorEnabled);
+        flavorControls.querySelectorAll('input, select').forEach(control => {
+            control.disabled = !flavorEnabled;
+        });
+    }
+
+    const englishFlavorMaster = root?.querySelector('#verba-english-flavor-enabled');
+    const englishFlavorControls = root?.querySelector('#verba-english-flavor-controls');
+    if (englishFlavorControls) {
+        const englishFlavorEnabled = Boolean(englishFlavorMaster?.checked);
+        englishFlavorControls.classList.toggle('verba-control-disabled', !englishFlavorEnabled);
+        englishFlavorControls.querySelectorAll('input, select').forEach(control => {
+            control.disabled = !englishFlavorEnabled;
+        });
+    }
 }
 
 function refreshSettingsPanelForDeveloperMode() {
@@ -7408,7 +7593,7 @@ function injectSettingsPanel() {
     });
 
     panel.addEventListener('change', event => {
-        const target = event.target instanceof HTMLInputElement ? event.target : null;
+        const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
 
         if (target.id === 'verba-quality-audit-enabled') {
@@ -7430,9 +7615,90 @@ function injectSettingsPanel() {
             'verba-quality-audit-continuity': 'qualityAuditContinuity',
         };
         const key = map[target.id];
-        if (!key) return;
-        settings[key] = target.checked;
-        saveSettings();
+        if (key && target instanceof HTMLInputElement) {
+            settings[key] = target.checked;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-korean-flavor-enabled' && target instanceof HTMLInputElement) {
+            settings.koreanFlavorEnabled = target.checked;
+            saveSettings();
+            syncDeveloperQualityControls(panel);
+            return;
+        }
+
+        if (target.id === 'verba-korean-flavor-rhythm' && target instanceof HTMLSelectElement) {
+            settings.koreanFlavorDialogueRhythm = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-korean-flavor-pronoun' && target instanceof HTMLSelectElement) {
+            settings.koreanFlavorPronounOmission = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-korean-flavor-profanity' && target instanceof HTMLSelectElement) {
+            settings.koreanFlavorProfanityTone = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-korean-flavor-interjection' && target instanceof HTMLSelectElement) {
+            settings.koreanFlavorInterjectionTone = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-korean-flavor-referent-repeat' && target instanceof HTMLInputElement) {
+            settings.koreanFlavorReduceReferentRepetition = target.checked;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-enabled' && target instanceof HTMLInputElement) {
+            settings.englishFlavorEnabled = target.checked;
+            saveSettings();
+            syncDeveloperQualityControls(panel);
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-rhythm' && target instanceof HTMLSelectElement) {
+            settings.englishFlavorDialogueRhythm = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-slang' && target instanceof HTMLSelectElement) {
+            settings.englishFlavorSlangDensity = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-profanity' && target instanceof HTMLSelectElement) {
+            settings.englishFlavorProfanityTone = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-interjection' && target instanceof HTMLSelectElement) {
+            settings.englishFlavorInterjectionTone = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-referent-repeat' && target instanceof HTMLInputElement) {
+            settings.englishFlavorReduceReferentRepetition = target.checked;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-conversation' && target instanceof HTMLSelectElement) {
+            settings.englishFlavorConversationNaturalization = target.value;
+            saveSettings();
+        }
     });
 
     syncDeveloperQualityControls(panel);

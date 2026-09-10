@@ -1066,6 +1066,25 @@ function koreanOutputTasteBlock(settings = {}, scope = 'mixed') {
         if (interjection) lines.push(interjection);
     }
 
+    const meme = {
+        default: '',
+        light: `INTERNET MEME FLAVOR — LIGHT KOREAN
+- When the source tone and character voice naturally allow it, lightly favor familiar Korean online phrasing or meme-adjacent rhythm over stiff literal wording.
+- Keep meme flavor occasional and subtle. Do not force a meme into every line.
+- Never invent a new joke, event, emotion, relationship, insult, or factual implication.`,
+        natural: `INTERNET MEME FLAVOR — NATURAL KOREAN
+- When context clearly supports a playful, sarcastic, exasperated, teasing, or online-native tone, use familiar contemporary Korean internet-style phrasing where it conveys the same intent and intensity more naturally.
+- Prefer broadly understandable meme-like wording over obscure community-specific references.
+- Do not insert random catchphrases, outdated memes, or unrelated jokes merely for flavor.
+- Preserve character voice, meaning, emotional force, and who is speaking to whom.`,
+        active: `INTERNET MEME FLAVOR — ACTIVE KOREAN
+- Actively favor lively Korean internet-native/meme-ish phrasing when it can express the SAME speech act, emotion, relationship, and intensity as the source.
+- You may reshape phrasing more boldly to sound like natural online Korean, but never create a joke, insult, flirtation, reaction, event, or implication that the source did not support.
+- Avoid niche community jargon or extremely dated memes unless the source itself clearly matches that register.
+- If meme wording would distort meaning or character voice, do not use it.`,
+    }[settings.koreanFlavorMemeDensity] || '';
+    if (meme) lines.push(meme);
+
     if (settings.koreanFlavorReduceReferentRepetition !== false) {
         lines.push(`REFERENT REPETITION — REDUCE WHEN SAFE
 - Within the current Korean output, reduce conspicuous repetition of the same name, title, "그는/그녀는", or other person reference when the referent remains unmistakable.
@@ -1536,6 +1555,9 @@ function koreanFlavorInputBridgeBlock(settings = {}) {
     if (settings.koreanFlavorInterjectionTone !== 'default') {
         notes.push(`- Read Korean interjections/reaction words using the selected 한출 감탄사 취향 (${settings.koreanFlavorInterjectionTone}) as a naturalness cue; translate only reactions actually present in the source.`);
     }
+    if (settings.koreanFlavorMemeDensity && settings.koreanFlavorMemeDensity !== 'default') {
+        notes.push(`- The Korean source may intentionally use internet-native or meme-ish phrasing at the selected 한출 meme density (${settings.koreanFlavorMemeDensity}). Preserve the underlying joke/sarcasm/reaction only when it is genuinely present; do not literalize a Korean meme if an equivalent natural English expression exists.`);
+    }
     if (settings.koreanFlavorReduceReferentRepetition !== false) {
         notes.push(`- Treat repeated Korean names/titles/pronouns as eligible for natural English de-duplication only when the referent remains unmistakable; never merge or relabel people.`);
     }
@@ -1641,6 +1663,25 @@ function englishOutputTasteBlock(settings = {}) {
 - Keep it natural rather than theatrical; never add new reactions.`,
     }[interjectionKey] || '';
     if (interjection) lines.push(interjection);
+
+    if (englishEnabled) {
+        const meme = {
+            default: '',
+            light: `INTERNET MEME FLAVOR — LIGHT ENGLISH
+- When the Korean source tone naturally supports it, lightly favor familiar internet-native English phrasing or meme-adjacent cadence over stiff literal wording.
+- Keep it occasional and subtle; do not turn ordinary dialogue into a joke.`,
+            natural: `INTERNET MEME FLAVOR — NATURAL ENGLISH
+- When context clearly supports playful, sarcastic, exasperated, teasing, or online-native speech, use broadly understandable contemporary internet-style English or meme-ish phrasing that preserves the same intent and intensity.
+- Prefer common online language over obscure fandom/community references.
+- Do not inject random catchphrases, unrelated jokes, or dated memes.`,
+            active: `INTERNET MEME FLAVOR — ACTIVE ENGLISH
+- Actively favor lively internet-native/meme-ish English when it conveys the SAME speech act, emotion, relationship, and intensity as the Korean source.
+- You may restructure wording more boldly to sound naturally online, but never invent a joke, insult, flirtation, emotion, event, or implication absent from the source.
+- Avoid niche subculture jargon unless the source itself clearly belongs to that register.
+- If meme phrasing would distort meaning or character voice, do not use it.`,
+        }[settings.englishFlavorMemeDensity] || '';
+        if (meme) lines.push(meme);
+    }
 
     if (reduceReferentRepetition) {
         lines.push(`REFERENT REPETITION — REDUCE WHEN SAFE IN ENGLISH

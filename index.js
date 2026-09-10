@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.98';
+const EXTENSION_VERSION = '0.3.99';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -82,12 +82,14 @@ const DEFAULT_SETTINGS = {
     koreanFlavorPronounOmission: 'natural',
     koreanFlavorProfanityTone: 'default',
     koreanFlavorInterjectionTone: 'natural',
+    koreanFlavorMemeDensity: 'default',
     koreanFlavorReduceReferentRepetition: true,
     englishFlavorEnabled: false,
     englishFlavorDialogueRhythm: 'balanced',
     englishFlavorSlangDensity: 'natural',
     englishFlavorProfanityTone: 'default',
     englishFlavorInterjectionTone: 'natural',
+    englishFlavorMemeDensity: 'default',
     englishFlavorReduceReferentRepetition: true,
     englishFlavorConversationNaturalization: 'natural',
     autoInput: false,
@@ -153,6 +155,9 @@ settings.koreanFlavorProfanityTone = ['default', 'dry', 'blunt', 'lowSlang', 're
 settings.koreanFlavorInterjectionTone = ['default', 'natural', 'restrained', 'lively'].includes(settings.koreanFlavorInterjectionTone)
     ? settings.koreanFlavorInterjectionTone
     : 'natural';
+settings.koreanFlavorMemeDensity = ['default', 'light', 'natural', 'active'].includes(settings.koreanFlavorMemeDensity)
+    ? settings.koreanFlavorMemeDensity
+    : 'default';
 settings.koreanFlavorReduceReferentRepetition = settings.koreanFlavorReduceReferentRepetition !== false;
 settings.englishFlavorEnabled = settings.englishFlavorEnabled === true;
 settings.englishFlavorDialogueRhythm = ['default', 'short', 'balanced', 'smooth'].includes(settings.englishFlavorDialogueRhythm)
@@ -167,6 +172,9 @@ settings.englishFlavorProfanityTone = ['default', 'dry', 'blunt', 'everyday', 'l
 settings.englishFlavorInterjectionTone = ['default', 'natural', 'restrained', 'lively'].includes(settings.englishFlavorInterjectionTone)
     ? settings.englishFlavorInterjectionTone
     : 'natural';
+settings.englishFlavorMemeDensity = ['default', 'light', 'natural', 'active'].includes(settings.englishFlavorMemeDensity)
+    ? settings.englishFlavorMemeDensity
+    : 'default';
 settings.englishFlavorReduceReferentRepetition = settings.englishFlavorReduceReferentRepetition !== false;
 settings.englishFlavorConversationNaturalization = ['default', 'natural', 'active'].includes(settings.englishFlavorConversationNaturalization)
     ? settings.englishFlavorConversationNaturalization
@@ -7192,6 +7200,15 @@ function developerSettingsMarkup() {
                                 </select>
                                 <div class="verba-help">원문에 실제 감탄사·추임새가 있을 때만 표현 방식을 조절하며 새 감탄사를 임의로 추가하지 않습니다.</div>
 
+                                <label for="verba-korean-flavor-meme">인터넷 밈 농도</label>
+                                <select id="verba-korean-flavor-meme" class="text_pole">
+                                    <option value="default" ${settings.koreanFlavorMemeDensity === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="light" ${settings.koreanFlavorMemeDensity === 'light' ? 'selected' : ''}>살짝</option>
+                                    <option value="natural" ${settings.koreanFlavorMemeDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
+                                    <option value="active" ${settings.koreanFlavorMemeDensity === 'active' ? 'selected' : ''}>적극적으로</option>
+                                </select>
+                                <div class="verba-help">문맥과 캐릭터 말투에 맞을 때만 한국 인터넷식 밈·짤방체·온라인 구어 감각을 섞습니다. 원문에 없는 사건·감정·관계·농담을 새로 만들지는 않습니다.</div>
+
                                 <label class="verba-check-row">
                                     <input type="checkbox" id="verba-korean-flavor-referent-repeat" ${settings.koreanFlavorReduceReferentRepetition ? 'checked' : ''}>
                                     <span>반복 지칭 줄이기</span>
@@ -7248,6 +7265,15 @@ function developerSettingsMarkup() {
                                     <option value="lively" ${settings.englishFlavorInterjectionTone === 'lively' ? 'selected' : ''}>생동감 있게</option>
                                 </select>
                                 <div class="verba-help">원문에 실제 감탄사·추임새가 있을 때만 영어권 화자가 자연스럽게 쓸 반응으로 옮기며 새 반응을 임의로 추가하지 않습니다.</div>
+
+                                <label for="verba-english-flavor-meme">인터넷 밈 농도</label>
+                                <select id="verba-english-flavor-meme" class="text_pole">
+                                    <option value="default" ${settings.englishFlavorMemeDensity === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                                    <option value="light" ${settings.englishFlavorMemeDensity === 'light' ? 'selected' : ''}>살짝</option>
+                                    <option value="natural" ${settings.englishFlavorMemeDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
+                                    <option value="active" ${settings.englishFlavorMemeDensity === 'active' ? 'selected' : ''}>적극적으로</option>
+                                </select>
+                                <div class="verba-help">문맥이 허용할 때 영어권 인터넷식 밈·온라인 반응체·meme-ish phrasing을 섞습니다. 원문의 의미·감정 강도·관계·발화 의도는 그대로 유지합니다.</div>
 
                                 <label class="verba-check-row">
                                     <input type="checkbox" id="verba-english-flavor-referent-repeat" ${settings.englishFlavorReduceReferentRepetition ? 'checked' : ''}>
@@ -7652,6 +7678,12 @@ function injectSettingsPanel() {
             return;
         }
 
+        if (target.id === 'verba-korean-flavor-meme' && target instanceof HTMLSelectElement) {
+            settings.koreanFlavorMemeDensity = target.value;
+            saveSettings();
+            return;
+        }
+
         if (target.id === 'verba-korean-flavor-referent-repeat' && target instanceof HTMLInputElement) {
             settings.koreanFlavorReduceReferentRepetition = target.checked;
             saveSettings();
@@ -7685,6 +7717,12 @@ function injectSettingsPanel() {
 
         if (target.id === 'verba-english-flavor-interjection' && target instanceof HTMLSelectElement) {
             settings.englishFlavorInterjectionTone = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-english-flavor-meme' && target instanceof HTMLSelectElement) {
+            settings.englishFlavorMemeDensity = target.value;
             saveSettings();
             return;
         }

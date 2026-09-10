@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.48';
+const EXTENSION_VERSION = '0.3.49';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -4534,11 +4534,24 @@ function setupSelection() {
             );
         }
     }, true);
-    document.addEventListener('pointercancel', () => {
+    document.addEventListener('pointercancel', event => {
+        const pointerType = event.pointerType || selectionPointerType;
+        const preserved = captureSelectionState() || preservedGestureSelection;
         selectionGestureActive = false;
         selectionNeedsCapture = false;
         selectionPointerType = '';
-        preservedGestureSelection = null;
+        preservedGestureSelection = preserved;
+
+        // Android/Chromium commonly cancels the original touch pointer as soon as
+        // native word selection takes over. Treat that cancel exactly like a
+        // completed touch selection instead of throwing the selected word away.
+        if ((pointerType === 'touch' || pointerType === 'pen') && preserved) {
+            lastTouchSelectionAt = Date.now();
+            scheduleSelectionCapture(TOUCH_SELECTION_QUIET_MS, {
+                hideOnFailure: false,
+                preserved,
+            });
+        }
     }, { passive: true });
     document.addEventListener('contextmenu', event => {
         if (Date.now() < suppressMessageCopyClickUntil) {
@@ -4559,9 +4572,23 @@ function setupSelection() {
         }
     });
     document.addEventListener('selectionchange', () => {
+        const currentSelection = captureSelectionState();
         if (selectionGestureActive) {
             selectionNeedsCapture = true;
-            preservedGestureSelection = captureSelectionState() || preservedGestureSelection;
+            preservedGestureSelection = currentSelection || preservedGestureSelection;
+
+            // A simple long-press word selection may never produce pointerup on
+            // mobile: the browser can hand control to its native selection UI and
+            // emit pointercancel instead. Start the same 2-second quiet timer as
+            // soon as any real non-collapsed selection exists. Further handle
+            // movement fires selectionchange again and resets this timer.
+            if (preservedGestureSelection && touchSelectionRecentlyActive()) {
+                lastTouchSelectionAt = Date.now();
+                scheduleSelectionCapture(TOUCH_SELECTION_QUIET_MS, {
+                    hideOnFailure: false,
+                    preserved: preservedGestureSelection,
+                });
+            }
             return;
         }
         // mouseup already opened the desktop menu at the real pointer position.

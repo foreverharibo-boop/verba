@@ -1,4 +1,5 @@
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
+import { messageFormatting } from '../../../../script.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -33,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.62';
+const EXTENSION_VERSION = '0.3.63';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3213,8 +3214,61 @@ function requestRetranslateTargetChoice(button = document.querySelector('#verba-
     });
 }
 
+
+const PREVIOUS_OUTPUT_PAGE_SIZE = 20;
+
+function visiblePreviousOutputPreview(target) {
+    const id = Number(target?.id);
+    const message = target?.message;
+    if (!message || !Number.isInteger(id)) return '';
+
+    const liveText = document.querySelector(
+        `.mes[mesid="${id}"] .mes_text:not(.verba-swipe-hold-content)`,
+    )?.innerText?.trim();
+    if (liveText) return liveText.replace(/\s+/g, ' ');
+
+    const displayText = message?.extra?.display_text ?? messageSource(message);
+    try {
+        const html = messageFormatting(
+            String(displayText || ''),
+            String(message.name || ''),
+            Boolean(message.is_system),
+            Boolean(message.is_user),
+            id,
+            {},
+            false,
+        );
+        const holder = document.createElement('div');
+        holder.innerHTML = String(html || '');
+        const rendered = String(holder.innerText || holder.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (rendered) return rendered;
+    } catch (error) {
+        console.warn('[베르바] 이전 아웃풋 미리보기 렌더링 실패', error);
+    }
+
+    return String(displayText || '')
+        .replace(/<(?:think|thinking|thought|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/(?:think|thinking|thought|analysis|reasoning|scratchpad|start|starter)\s*>/giu, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function previousOutputOptionMarkup(target, index) {
+    const record = currentRecord(target.message);
+    const failed = failedOutputSignatures.get(target.id) === messageVersionSignature(target.message);
+    const status = record ? '번역됨' : failed ? '번역 실패' : '미번역';
+    const preview = visiblePreviousOutputPreview(target).slice(0, 180) || '(표시할 내용 없음)';
+    return `<button type="button" class="menu_button verba-previous-output-option" data-target-index="${index}">
+        <span class="verba-previous-output-meta"><b>#${target.id}</b><small>${escapeHtml(status)}</small></span>
+        <span>${escapeHtml(preview)}</span>
+    </button>`;
+}
+
 function requestPreviousOutputTarget(beforeId) {
     if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
+
     const targets = previousAssistantMessages(beforeId);
     if (!targets.length) {
         notify('선택할 이전 아웃풋이 없어요.', 'info');
@@ -3232,27 +3286,15 @@ function requestPreviousOutputTarget(beforeId) {
                     <strong>이전 아웃풋 선택</strong>
                     <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
-                <div class="verba-previous-output-list">
-                    ${targets.map((target, index) => {
-                        const record = currentRecord(target.message);
-                        const failed = failedOutputSignatures.get(target.id) === messageVersionSignature(target.message);
-                        const status = record ? '번역됨' : failed ? '번역 실패' : '미번역';
-                        const preview = target.source.replace(/\s+/g, ' ').trim().slice(0, 150);
-                        return `<button type="button" class="menu_button verba-previous-output-option" data-target-index="${index}">
-                            <span class="verba-previous-output-meta"><b>#${target.id}</b><small>${escapeHtml(status)}</small></span>
-                            <span>${escapeHtml(preview)}</span>
-                        </button>`;
-                    }).join('')}
-                </div>
+                <div class="verba-previous-output-list"></div>
+                <button type="button" class="menu_button verba-previous-output-more">더 보기</button>
             </section>`;
-        document.documentElement.append(overlay);
-        try {
-            overlay.showPopover?.();
-        } catch {
-            // Fixed-position fallback.
-        }
 
+        const list = overlay.querySelector('.verba-previous-output-list');
+        const moreButton = overlay.querySelector('.verba-previous-output-more');
+        let renderedCount = 0;
         let settled = false;
+
         const finish = value => {
             if (settled) return;
             settled = true;
@@ -3265,12 +3307,37 @@ function requestPreviousOutputTarget(beforeId) {
             resolve(value);
         };
 
-        overlay.querySelectorAll('.verba-previous-output-option').forEach(button => {
-            button.addEventListener('click', () => {
-                const target = targets[Number(button.dataset.targetIndex)];
-                finish(target || null);
-            });
+        const renderMore = () => {
+            const nextEnd = Math.min(targets.length, renderedCount + PREVIOUS_OUTPUT_PAGE_SIZE);
+            const fragment = document.createDocumentFragment();
+
+            for (let index = renderedCount; index < nextEnd; index += 1) {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = previousOutputOptionMarkup(targets[index], index);
+                const button = wrapper.firstElementChild;
+                button.addEventListener('click', () => finish(targets[index] || null));
+                fragment.append(button);
+            }
+
+            list.append(fragment);
+            renderedCount = nextEnd;
+            moreButton.hidden = renderedCount >= targets.length;
+            if (!moreButton.hidden) moreButton.textContent = `더 보기 · ${renderedCount}/${targets.length}`;
+        };
+
+        moreButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            renderMore();
         });
+
+        document.documentElement.append(overlay);
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed-position fallback.
+        }
+
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.addEventListener('click', event => {
             if (event.target === overlay) finish(null);
@@ -3278,6 +3345,8 @@ function requestPreviousOutputTarget(beforeId) {
         overlay.addEventListener('keydown', event => {
             if (event.key === 'Escape') finish(null);
         });
+
+        renderMore();
     });
 }
 

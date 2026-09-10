@@ -1402,3 +1402,17 @@
     overflow-wrap: anywhere;
     opacity: 0.82;
 }
+
+
+.verba-previous-output-more {
+    width: 100% !important;
+    min-height: 34px !important;
+    flex: 0 0 auto !important;
+    margin-top: 2px !important;
+    font-family: inherit !important;
+    font-size: calc(var(--messageTextFontSize, 1rem) * 0.76) !important;
+}
+
+.verba-previous-output-more[hidden] {
+    display: none !important;
+}

@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.49';
+const EXTENSION_VERSION = '0.3.50';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -5538,6 +5538,58 @@ function handleGenerationEnded() {
     }
 }
 
+/**
+ * SillyTavern's message-edit cancel path intentionally redraws `message.mes`
+ * directly, even when `extra.display_text` still contains Verba's translation.
+ * MESSAGE_UPDATED fires after that redraw. If the underlying source did not
+ * change, force one normal message render so the saved translation is visible
+ * again. Use only an exact source-hash match here: a real edit must be handled
+ * by MESSAGE_EDITED and translated again, never restored from a stale cache.
+ */
+function restoreTranslationAfterMessageUpdate(payload) {
+    const id = normalizedMessageId(payload);
+    if (id < 0) return;
+
+    setTimeout(() => {
+        const context = liveContext();
+        const message = context.chat?.[id];
+        if (!message) return;
+
+        const source = messageSource(message);
+        const sourceHash = hashText(source);
+        const swipeId = currentSwipeId(message);
+        const storedCandidates = [
+            message?.extra?.[STATE_KEY],
+            currentSwipeExtra(message, false)?.[STATE_KEY],
+        ];
+        const stored = storedCandidates.find(record => (
+            record
+            && typeof record === 'object'
+            && record.sourceHash === sourceHash
+            && String(record.translation || '').trim()
+        ));
+        if (!stored) return;
+
+        const record = stored.swipeId === swipeId ? stored : { ...stored, swipeId };
+        if (sourceViewRequested(message, record)) return;
+
+        const messageElement = document.querySelector(`.mes[mesid="${id}"]`);
+        if (!messageElement || messageElement.querySelector('.edit_textarea')) return;
+
+        if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+        message.extra[STATE_KEY] = { ...record };
+        message.extra.display_text = record.translation;
+        delete message.extra[SOURCE_VIEW_KEY];
+        syncOwnedTranslationToCurrentSwipe(message, record);
+
+        // Force the DOM refresh even when display_text was already correct in
+        // data; the edit-cancel handler bypasses display_text while redrawing.
+        updateMessageBlock(id, message);
+        cacheRenderedTranslation(id, message, record);
+        refreshTranslationClasses();
+    }, 0);
+}
+
 function setupEvents() {
     const context = liveContext();
     const source = context.eventSource;
@@ -5607,6 +5659,9 @@ function setupEvents() {
             const id = normalizedMessageId(payload);
             scheduleAutomaticTranslation(id, 80);
         });
+    }
+    if (types.MESSAGE_UPDATED) {
+        source.on(types.MESSAGE_UPDATED, restoreTranslationAfterMessageUpdate);
     }
 }
 

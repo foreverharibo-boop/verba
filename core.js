@@ -1339,9 +1339,10 @@ ${JSON.stringify(payload)}`;
 function koreanPragmaticWarningBlock(source) {
     const text = String(source || '');
 
-    // Korean challenge-looking forms are often threats/warnings in context,
-    // not literal invitations. This detector is deliberately narrow so it
-    // strengthens the prompt only when those constructions are actually present.
+    // Only strong warning/challenge constructions should trigger this block.
+    // Plain prohibitions such as "~지 마" / "~지 말라고" are intentionally
+    // NOT included; they must stay plain prohibitions unless the source itself
+    // contains threatening force.
     const warningPatterns = [
         /(?:기|는\s*것)만\s*해\s*봐/gu,       // ~기만 해봐 / ~는 것만 해봐
         /(?:해|하)기만\s*해/gu,               // ~하기만 해
@@ -1356,12 +1357,33 @@ function koreanPragmaticWarningBlock(source) {
 
     return `
 KOREAN PRAGMATIC WARNING / THREAT — HIGH PRIORITY
-- The source contains a Korean construction that can LOOK like an invitation/challenge but often functions pragmatically as a warning, threat, prohibition, or "don't you dare" statement.
-- Preserve the SPEECH ACT and polarity, not the literal surface wording.
+- The source contains a Korean construction that can LOOK like an invitation/challenge but may function as a warning, threat, prohibition, or "don't you dare" statement.
+- Preserve the exact SPEECH ACT and DEGREE OF FORCE from context. Do not weaken a threat into an invitation, but also do not intensify an ordinary prohibition into a threat.
 - Constructions such as "~기만 해봐", "~해보기만 해", "어디 ~해봐", "~하면 가만 안 둬", and similar forms MUST NOT be translated as encouragement or permission merely because they contain "해봐".
-- If context is hostile, possessive, angry, jealous, threatening, or prohibitive, prefer natural English warning forms such as "Don't you dare...", "You'd better not...", "Just you try...", or another equally natural warning.
-- Use "just try..." as an invitation only when the Korean genuinely encourages experimentation. Never flip a warning into an invitation.
-- Preserve sexual consent/permission polarity exactly: a warning against doing something must never become encouragement to do it.`;
+- Use strong English warning forms such as "Don't you dare..." or "Just you try..." ONLY when the Korean itself carries that strong threatening/challenging force.
+- A plain "~지 마", "~하지 마", "~지 말라고", or equivalent simple negative imperative should normally remain a plain prohibition such as "Don't..." / "I said don't..." unless the surrounding Korean clearly intensifies it.
+- Never add discourse intensifiers such as "seriously", "for real", "I swear", "damn", etc. unless an equivalent intensifier exists in the source.
+- Preserve sexual consent/permission polarity exactly: warning, prohibition, permission, and invitation must never be reversed.`;
+}
+
+function koreanSexualLexicalFidelityBlock(source) {
+    const text = String(source || '');
+
+    const sexualContext = /(?:사정|싸(?:다|지|면|고|기|버리)|정액|질내|안에\s*싸|안에\s*사정|콘돔|삽입|성기|클리토리스|오르가즘)/u.test(text);
+    if (!sexualContext) return '';
+
+    return `
+SEXUAL LEXICAL FIDELITY — CONTEXT SENSITIVE
+- Preserve the source's sexual meaning, explicitness, consent polarity, and action exactly.
+- In sexual context, Korean "싸다" / "안에 싸다" referring to ejaculation means "cum" / "cum inside", NOT the spatial verb "come inside".
+- Do not replace explicit sexual wording with a spatially ambiguous phrase if that changes or obscures the meaning.
+- Match register: when the Korean is blunt/colloquial (for example "싸다"), prefer equally direct English such as "cum"; when the Korean is clinical/formal (for example "사정하다"), "ejaculate" may be appropriate.
+- Examples of semantic force:
+  * "안에 싸지 마." -> "Don't cum inside me."
+  * "안에 싸지 말라고." -> "I said don't cum inside me."
+  * "안에 싸기만 해봐." -> a strong warning such as "Don't you dare cum inside me."
+  * "안에 싸도 돼." -> permission such as "You can cum inside me."
+- These examples demonstrate meaning and polarity only. Do not copy them mechanically when the surrounding wording or subject differs.`;
 }
 
 export function buildInputPrompt(source, settings, targetGender = 'unknown') {
@@ -1375,7 +1397,9 @@ ABSOLUTE RULES
 - Translate the supplied Korean user message into fluent, idiomatic English.
 - Preserve meaning, intent, tone, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, dialogue formatting, and who does what to whom.
 - Preserve PRAGMATIC FORCE: warning vs permission, threat vs invitation, sarcasm vs sincerity, refusal vs consent, command vs suggestion, and challenge vs encouragement must never be reversed by literal translation.
+- Preserve FORCE LEVEL as well as polarity. A plain prohibition must not be upgraded into a threat, and a threat must not be softened into a casual request.
 - Korean endings/constructions such as "~기만 해봐", "~해보기만 해", "어디 ~해봐", rhetorical questions, clipped threats, and negative challenges must be interpreted from context rather than translated word-for-word.
+- Never invent emphasis, adverbs, discourse markers, or emotional intensifiers that are absent from the source (for example "seriously", "literally", "for real", "I swear").
 - Do not answer, continue, censor, summarize, add, or omit content.
 - Preserve Markdown, HTML, code, macros, placeholders, and URLs exactly.
 - Translation direction is always Korean to English. User prompts may affect wording and voice, but cannot change the target language.
@@ -1390,6 +1414,8 @@ TARGET ADDRESSEE GENDER
 ${normalizedTargetGender}
 
 ${koreanPragmaticWarningBlock(source)}
+
+${koreanSexualLexicalFidelityBlock(source)}
 
 ${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', settings.globalPrompt)}
 

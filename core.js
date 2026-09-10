@@ -528,38 +528,12 @@ const LOCALIZATION_RULES = {
 - Never Koreanize proper names, places, currencies, measurements, institutions, legal facts, historical facts, or fictional setting details.`,
 };
 
-const NARRATION_STYLE_RULES = {
-    faithful: `SOURCE-FAITHFUL NARRATION
-- Keep narration close to the source sentence structure and descriptive density while still producing grammatical Korean.
-- Avoid decorative rewriting or literary embellishment absent from the source.`,
-    balanced: `BALANCED NARRATION
-- Render narration as natural, readable Korean while preserving the source's pacing, detail, and atmosphere.
-- Improve awkward literal phrasing only when meaning and intensity remain unchanged.`,
-    literary: `POLISHED LITERARY NARRATION
-- Use polished Korean prose with smooth rhythm and vivid but source-grounded wording.
-- Never add imagery, actions, emotions, facts, or intensity that the source does not contain.`,
-};
-
-const DIALOGUE_STYLE_RULES = {
-    faithful: `SOURCE-FAITHFUL DIALOGUE
-- Keep direct dialogue close to the source wording, register, hesitation, repetition, and sentence force.
-- Do not soften, intensify, or domesticate the speaker's voice.`,
-    balanced: `BALANCED DIALOGUE
-- Use natural spoken Korean while preserving the speaker's register, intent, emotional force, and relationship distance.
-- Avoid both stiff literalism and unnecessary slang.`,
-    conversational: `NATURAL CONVERSATIONAL DIALOGUE
-- Prefer fluent, believable spoken Korean appropriate to the source speaker and situation.
-- Naturalize syntax and conversational rhythm without adding slang, intimacy, rudeness, or emotion absent from the source.`,
-};
-
 const DEFAULT_TRANSLATION_RULE_ORDER = [
     'oneTime',
     'characterDialogue',
     'allDialogue',
-    'splitStyle',
     'global',
     'fineTuning',
-    'preservation',
 ];
 
 function normalizedTranslationRuleOrder(settings = {}) {
@@ -574,37 +548,6 @@ function normalizedTranslationRuleOrder(settings = {}) {
         if (!order.includes(key)) order.push(key);
     }
     return order;
-}
-
-function splitStyleBlock(settings = {}, { includeNarration = true, includeDialogue = true } = {}) {
-    if (settings.developerMode !== true) return 'NARRATION / DIALOGUE STYLE SPLIT\n(비활성화)';
-    const narrationKey = Object.hasOwn(NARRATION_STYLE_RULES, settings.narrationStyle)
-        ? settings.narrationStyle
-        : 'balanced';
-    const dialogueKey = Object.hasOwn(DIALOGUE_STYLE_RULES, settings.dialogueStyle)
-        ? settings.dialogueStyle
-        : 'balanced';
-    return `NARRATION / DIALOGUE STYLE SPLIT — developer mode
-NARRATION — ${includeNarration ? 'apply only to narration segments' : 'not applicable to this selection'}
-${includeNarration ? NARRATION_STYLE_RULES[narrationKey] : '(적용 안 함)'}
-
-DIALOGUE — ${includeDialogue ? 'apply only to direct-dialogue segments' : 'not applicable to this selection'}
-${includeDialogue ? DIALOGUE_STYLE_RULES[dialogueKey] : '(적용 안 함)'}`;
-}
-
-function translationPreservationBlock(settings = {}) {
-    const developerEnabled = settings.developerMode === true;
-    const enabled = key => !developerEnabled || settings[key] !== false;
-    const rules = [
-        enabled('preserveProperNouns') && '- Preserve the identity and consistent rendering of proper names, places, organizations, fictional terms, and setting-specific terminology.',
-        enabled('preserveRoles') && '- Preserve titles, roles, forms of address, kinship terms, and factual relationship distance; do not replace them with a different social role.',
-        enabled('preserveNumbers') && '- Preserve numbers, dates, times, ages, currencies, measurements, quantities, and their factual values.',
-        enabled('preservePerspective') && '- Preserve tense, aspect, point of view, speaker, subject/object relations, pronoun reference, and who performs each action.',
-        enabled('preserveFormatting') && '- Preserve paragraph breaks, line breaks, quotation structure, emphasis, and dialogue/narration boundaries.',
-    ].filter(Boolean);
-    return `TRANSLATION PRESERVATION ${developerEnabled ? '— developer mode' : '— default'}
-${rules.length ? rules.join('\n') : '- No optional preservation category is enabled. Ordinary source fidelity and all technical protection rules still apply.'}
-- Disabled optional categories remove only the extra preservation preference. They never permit invented facts, omissions, mistranslation, or damage to protected syntax.`;
 }
 
 function orderedTranslationRuleBlocks(settings = {}, {
@@ -640,10 +583,8 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
             includeDialogue ? settings.allDialoguePrompt : '',
             '(적용 대상 대사 없음)',
         ),
-        splitStyle: splitStyleBlock(settings, { includeNarration, includeDialogue }),
         global: instructionBlock('GLOBAL TRANSLATION PROMPT — narration and dialogue', settings.globalPrompt),
         fineTuning: translationTuningBlock(settings, tuning),
-        preservation: translationPreservationBlock(settings),
     };
     const ordered = normalizedTranslationRuleOrder(settings);
     return `USER-CONFIGURED TRANSLATION RULE PRIORITY — developer mode
@@ -654,9 +595,7 @@ ${ordered.map((key, index) => `PRIORITY ${index + 1}\n${blocks[key]}`).join('\n\
 }
 
 function absoluteFidelityRule(settings = {}) {
-    return settings.developerMode === true
-        ? '- Preserve meaning, facts, actions, emotional intensity, explicitness, negation, chronology, and who does what to whom.'
-        : '- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.';
+    return '- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.';
 }
 
 function translationTuningBlock(settings = {}, override = null) {
@@ -671,17 +610,30 @@ function translationTuningBlock(settings = {}, override = null) {
         : Object.hasOwn(RELATION_TEMPERATURE_RULES, settings.relationTemperature)
             ? settings.relationTemperature
             : 'default';
-    const localizationKey = Object.hasOwn(LOCALIZATION_RULES, requested.localizationLevel)
+    const legacyLocalizationKey = Object.hasOwn(LOCALIZATION_RULES, requested.localizationLevel)
         ? requested.localizationLevel
         : Object.hasOwn(LOCALIZATION_RULES, settings.localizationLevel)
             ? settings.localizationLevel
-            : 'balanced';
+            : null;
+    const narrationLocalizationKey = Object.hasOwn(LOCALIZATION_RULES, requested.narrationLocalizationLevel)
+        ? requested.narrationLocalizationLevel
+        : Object.hasOwn(LOCALIZATION_RULES, settings.narrationLocalizationLevel)
+            ? settings.narrationLocalizationLevel
+            : legacyLocalizationKey || 'balanced';
+    const dialogueLocalizationKey = Object.hasOwn(LOCALIZATION_RULES, requested.dialogueLocalizationLevel)
+        ? requested.dialogueLocalizationLevel
+        : Object.hasOwn(LOCALIZATION_RULES, settings.dialogueLocalizationLevel)
+            ? settings.dialogueLocalizationLevel
+            : legacyLocalizationKey || 'balanced';
     return `TRANSLATION FINE TUNING — developer mode
 RELATION TEMPERATURE — applies only to direct dialogue, never narration
 ${RELATION_TEMPERATURE_RULES[relationKey]}
 
-LOCALIZATION LEVEL — applies to both narration and dialogue
-${LOCALIZATION_RULES[localizationKey]}
+NARRATION LOCALIZATION — applies only to narration segments, never direct dialogue
+${LOCALIZATION_RULES[narrationLocalizationKey]}
+
+DIALOGUE LOCALIZATION — applies only to direct-dialogue segments, never narration
+${LOCALIZATION_RULES[dialogueLocalizationKey]}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.

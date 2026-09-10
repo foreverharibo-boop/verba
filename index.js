@@ -27,7 +27,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.35';
+const EXTENSION_VERSION = '0.3.36';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -45,24 +45,12 @@ const LOCALIZATION_LEVEL_OPTIONS = [
     { value: 'balanced', label: '균형' },
     { value: 'naturalized', label: '한국어화' },
 ];
-const NARRATION_STYLE_OPTIONS = [
-    { value: 'faithful', label: '원문 충실' },
-    { value: 'balanced', label: '균형' },
-    { value: 'literary', label: '문학적' },
-];
-const DIALOGUE_STYLE_OPTIONS = [
-    { value: 'faithful', label: '원문 충실' },
-    { value: 'balanced', label: '균형' },
-    { value: 'conversational', label: '자연스러운 구어체' },
-];
 const TRANSLATION_RULE_DEFINITIONS = [
     { key: 'oneTime', label: '이번 번역 요구사항' },
     { key: 'characterDialogue', label: '캐릭터 대사 프롬프트' },
     { key: 'allDialogue', label: '모든 대사 공통 프롬프트' },
-    { key: 'splitStyle', label: '서술·대사 개별 설정' },
     { key: 'global', label: '전체 번역 전역 프롬프트' },
     { key: 'fineTuning', label: '관계 온도·현지화' },
-    { key: 'preservation', label: '번역 보존 항목' },
 ];
 const DEFAULT_TRANSLATION_RULE_ORDER = TRANSLATION_RULE_DEFINITIONS.map(item => item.key);
 const DEFAULT_SETTINGS = {
@@ -87,18 +75,18 @@ const DEFAULT_SETTINGS = {
     developerMode: false,
     relationTemperatureEnabled: true,
     relationTemperature: 'default',
-    localizationLevel: 'balanced',
-    narrationStyle: 'balanced',
-    dialogueStyle: 'balanced',
-    preserveProperNouns: true,
-    preserveRoles: true,
-    preserveNumbers: true,
-    preservePerspective: true,
-    preserveFormatting: true,
+    narrationLocalizationLevel: 'balanced',
+    dialogueLocalizationLevel: 'balanced',
     translationRuleOrder: DEFAULT_TRANSLATION_RULE_ORDER,
 };
 
 const baseContext = getContext();
+const previousSettings = extension_settings[EXTENSION_KEY] && typeof extension_settings[EXTENSION_KEY] === 'object'
+    ? extension_settings[EXTENSION_KEY]
+    : {};
+const previousLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === previousSettings.localizationLevel)
+    ? previousSettings.localizationLevel
+    : 'balanced';
 extension_settings[EXTENSION_KEY] = Object.assign(
     {},
     DEFAULT_SETTINGS,
@@ -112,19 +100,21 @@ settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selection
 settings.relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === settings.relationTemperature)
     ? settings.relationTemperature
     : 'default';
-settings.localizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === settings.localizationLevel)
-    ? settings.localizationLevel
-    : 'balanced';
-settings.narrationStyle = NARRATION_STYLE_OPTIONS.some(option => option.value === settings.narrationStyle)
-    ? settings.narrationStyle
-    : 'balanced';
-settings.dialogueStyle = DIALOGUE_STYLE_OPTIONS.some(option => option.value === settings.dialogueStyle)
-    ? settings.dialogueStyle
-    : 'balanced';
-for (const key of ['preserveProperNouns', 'preserveRoles', 'preserveNumbers', 'preservePerspective', 'preserveFormatting']) {
-    settings[key] = settings[key] !== false;
-}
+settings.narrationLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === previousSettings.narrationLocalizationLevel)
+    ? previousSettings.narrationLocalizationLevel
+    : previousLocalizationLevel;
+settings.dialogueLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === previousSettings.dialogueLocalizationLevel)
+    ? previousSettings.dialogueLocalizationLevel
+    : previousLocalizationLevel;
 settings.translationRuleOrder = normalizeTranslationRuleOrder(settings.translationRuleOrder);
+delete settings.localizationLevel;
+delete settings.narrationStyle;
+delete settings.dialogueStyle;
+delete settings.preserveProperNouns;
+delete settings.preserveRoles;
+delete settings.preserveNumbers;
+delete settings.preservePerspective;
+delete settings.preserveFormatting;
 delete settings.debugMode;
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
@@ -576,10 +566,21 @@ function normalizedTranslationTuning(value = {}) {
     const relationTemperature = RELATION_TEMPERATURE_OPTIONS.some(option => option.value === value.relationTemperature)
         ? value.relationTemperature
         : settings.relationTemperature;
-    const localizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === value.localizationLevel)
+    const legacyLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === value.localizationLevel)
         ? value.localizationLevel
-        : settings.localizationLevel;
-    return { relationTemperatureEnabled, relationTemperature, localizationLevel };
+        : null;
+    const narrationLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === value.narrationLocalizationLevel)
+        ? value.narrationLocalizationLevel
+        : legacyLocalizationLevel || settings.narrationLocalizationLevel;
+    const dialogueLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === value.dialogueLocalizationLevel)
+        ? value.dialogueLocalizationLevel
+        : legacyLocalizationLevel || settings.dialogueLocalizationLevel;
+    return {
+        relationTemperatureEnabled,
+        relationTemperature,
+        narrationLocalizationLevel,
+        dialogueLocalizationLevel,
+    };
 }
 
 function tuningChoiceMarkup(name, options, selected) {
@@ -2083,8 +2084,10 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
                         <div id="verba-request-fine-tuning-controls" class="verba-tuning-control-group ${defaultTuning.relationTemperatureEnabled ? '' : 'verba-control-disabled'}">
                             <span class="verba-tuning-label">관계 온도 <small>대사만</small></span>
                             ${tuningChoiceMarkup('verba-request-relation-temperature', RELATION_TEMPERATURE_OPTIONS, defaultTuning.relationTemperature)}
-                            <span class="verba-tuning-label">현지화 정도</span>
-                            ${tuningChoiceMarkup('verba-request-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.localizationLevel)}
+                            <span class="verba-tuning-label">서술 현지화</span>
+                            ${tuningChoiceMarkup('verba-request-narration-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.narrationLocalizationLevel)}
+                            <span class="verba-tuning-label">대사 현지화</span>
+                            ${tuningChoiceMarkup('verba-request-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.dialogueLocalizationLevel)}
                         </div>
                     </fieldset>
                     <small>표현만 조절하며 인명·지명·숫자·사실관계는 바꾸지 않아요.</small>
@@ -2160,7 +2163,8 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
                 tuning: showTuning ? normalizedTranslationTuning({
                     relationTemperatureEnabled: overlay.querySelector('#verba-request-relation-temperature-enabled')?.checked,
                     relationTemperature: overlay.querySelector('input[name="verba-request-relation-temperature"]:checked')?.value,
-                    localizationLevel: overlay.querySelector('input[name="verba-request-localization-level"]:checked')?.value,
+                    narrationLocalizationLevel: overlay.querySelector('input[name="verba-request-narration-localization-level"]:checked')?.value,
+                    dialogueLocalizationLevel: overlay.querySelector('input[name="verba-request-dialogue-localization-level"]:checked')?.value,
                 }) : null,
             });
         };
@@ -2176,7 +2180,8 @@ function requestOneTimeInstruction(scope, preview = '', viewAction = null) {
             const relationControls = overlay.querySelector('#verba-request-fine-tuning-controls');
             const relationInputs = [
                 ...overlay.querySelectorAll('input[name="verba-request-relation-temperature"]'),
-                ...overlay.querySelectorAll('input[name="verba-request-localization-level"]'),
+                ...overlay.querySelectorAll('input[name="verba-request-narration-localization-level"]'),
+                ...overlay.querySelectorAll('input[name="verba-request-dialogue-localization-level"]'),
             ];
             const syncRelationControls = () => {
                 const enabled = Boolean(relationToggle?.checked);
@@ -4913,57 +4918,13 @@ function injectSettingsPanel() {
                             <span class="verba-tuning-label">관계 온도</span>
                             ${tuningChoiceMarkup('verba-relation-temperature', RELATION_TEMPERATURE_OPTIONS, settings.relationTemperature)}
                             <div class="verba-help">대사의 어미·호칭·언어적 거리만 조절하며 원문에 없는 감정이나 관계는 만들지 않아요.</div>
-                            <span class="verba-tuning-label">현지화 정도</span>
-                            ${tuningChoiceMarkup('verba-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.localizationLevel)}
-                            <div class="verba-help">관용구·농담·일상 표현만 조절하고 인명·지명·통화·단위·설정·사실관계는 그대로 보존해요.</div>
+                            <span class="verba-tuning-label">서술 현지화</span>
+                            ${tuningChoiceMarkup('verba-narration-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.narrationLocalizationLevel)}
+                            <div class="verba-help">서술의 관용구·묘사·문장 흐름을 어느 정도 자연스러운 한국어로 옮길지 정해요.</div>
+                            <span class="verba-tuning-label">대사 현지화</span>
+                            ${tuningChoiceMarkup('verba-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.dialogueLocalizationLevel)}
+                            <div class="verba-help">대사의 관용구·농담·구어 표현을 어느 정도 자연스러운 한국어로 옮길지 정해요. 인명·지명·수치·사실관계는 두 설정 모두 그대로 보존합니다.</div>
                         </div>
-                    </div>
-                </details>
-
-                <details id="verba-split-style-settings" class="verba-tool-details verba-developer-only">
-                    <summary>서술·대사 개별 설정 <small>문체 분리</small></summary>
-                    <div class="verba-tool-details-content">
-                        <label for="verba-narration-style">서술 스타일</label>
-                        <select id="verba-narration-style" class="text_pole">
-                            ${NARRATION_STYLE_OPTIONS.map(option => `
-                                <option value="${option.value}" ${settings.narrationStyle === option.value ? 'selected' : ''}>${option.label}</option>
-                            `).join('')}
-                        </select>
-                        <div class="verba-help">서술 구간에만 적용됩니다. 문학적을 선택해도 원문에 없는 묘사나 감정은 추가하지 않아요.</div>
-                        <label for="verba-dialogue-style">대사 스타일</label>
-                        <select id="verba-dialogue-style" class="text_pole">
-                            ${DIALOGUE_STYLE_OPTIONS.map(option => `
-                                <option value="${option.value}" ${settings.dialogueStyle === option.value ? 'selected' : ''}>${option.label}</option>
-                            `).join('')}
-                        </select>
-                        <div class="verba-help">직접 대사 구간에만 적용됩니다. 화자의 말투·감정·관계는 원문 범위 안에서 유지해요.</div>
-                    </div>
-                </details>
-
-                <details id="verba-preservation-settings" class="verba-tool-details verba-developer-only">
-                    <summary>번역 보존 항목 <small>항목별 스위치</small></summary>
-                    <div class="verba-tool-details-content">
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-preserve-proper-nouns" ${settings.preserveProperNouns !== false ? 'checked' : ''}>
-                            <span>고유명사·지명·설정 용어</span>
-                        </label>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-preserve-roles" ${settings.preserveRoles !== false ? 'checked' : ''}>
-                            <span>호칭·직책·관계</span>
-                        </label>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-preserve-numbers" ${settings.preserveNumbers !== false ? 'checked' : ''}>
-                            <span>숫자·날짜·시간·단위</span>
-                        </label>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-preserve-perspective" ${settings.preservePerspective !== false ? 'checked' : ''}>
-                            <span>시제·시점·화자·행위 주체</span>
-                        </label>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-preserve-formatting" ${settings.preserveFormatting !== false ? 'checked' : ''}>
-                            <span>문단·줄바꿈·대사 서식</span>
-                        </label>
-                        <div class="verba-help">끄면 해당 항목에 대한 추가 고정 지시만 제외됩니다. 원문 의미 보존과 태그·코드·토큰 보호는 항상 유지돼요.</div>
                     </div>
                 </details>
 
@@ -5105,8 +5066,9 @@ function injectSettingsPanel() {
         saveSettings();
     });
     const relationTemperatureInputs = [...panel.querySelectorAll('input[name="verba-relation-temperature"]')];
-    const localizationLevelInputs = [...panel.querySelectorAll('input[name="verba-localization-level"]')];
-    const fineTuningInputs = [...relationTemperatureInputs, ...localizationLevelInputs];
+    const narrationLocalizationInputs = [...panel.querySelectorAll('input[name="verba-narration-localization-level"]')];
+    const dialogueLocalizationInputs = [...panel.querySelectorAll('input[name="verba-dialogue-localization-level"]')];
+    const fineTuningInputs = [...relationTemperatureInputs, ...narrationLocalizationInputs, ...dialogueLocalizationInputs];
     const syncRelationTemperatureControls = enabled => {
         panel.querySelector('#verba-fine-tuning-controls')?.classList.toggle('verba-control-disabled', !enabled);
         fineTuningInputs.forEach(input => { input.disabled = !enabled; });
@@ -5122,42 +5084,31 @@ function injectSettingsPanel() {
             settings.relationTemperature = normalizedTranslationTuning({
                 relationTemperatureEnabled: settings.relationTemperatureEnabled,
                 relationTemperature: event.target.value,
-                localizationLevel: settings.localizationLevel,
+                narrationLocalizationLevel: settings.narrationLocalizationLevel,
+                dialogueLocalizationLevel: settings.dialogueLocalizationLevel,
             }).relationTemperature;
             saveSettings();
         });
     });
-    localizationLevelInputs.forEach(input => {
+    narrationLocalizationInputs.forEach(input => {
         input.addEventListener('change', event => {
-            settings.localizationLevel = normalizedTranslationTuning({
+            settings.narrationLocalizationLevel = normalizedTranslationTuning({
                 relationTemperatureEnabled: settings.relationTemperatureEnabled,
                 relationTemperature: settings.relationTemperature,
-                localizationLevel: event.target.value,
-            }).localizationLevel;
+                narrationLocalizationLevel: event.target.value,
+                dialogueLocalizationLevel: settings.dialogueLocalizationLevel,
+            }).narrationLocalizationLevel;
             saveSettings();
         });
     });
-    panel.querySelector('#verba-narration-style').addEventListener('change', event => {
-        settings.narrationStyle = NARRATION_STYLE_OPTIONS.some(option => option.value === event.target.value)
-            ? event.target.value
-            : 'balanced';
-        saveSettings();
-    });
-    panel.querySelector('#verba-dialogue-style').addEventListener('change', event => {
-        settings.dialogueStyle = DIALOGUE_STYLE_OPTIONS.some(option => option.value === event.target.value)
-            ? event.target.value
-            : 'balanced';
-        saveSettings();
-    });
-    [
-        ['#verba-preserve-proper-nouns', 'preserveProperNouns'],
-        ['#verba-preserve-roles', 'preserveRoles'],
-        ['#verba-preserve-numbers', 'preserveNumbers'],
-        ['#verba-preserve-perspective', 'preservePerspective'],
-        ['#verba-preserve-formatting', 'preserveFormatting'],
-    ].forEach(([selector, key]) => {
-        panel.querySelector(selector).addEventListener('change', event => {
-            settings[key] = event.target.checked;
+    dialogueLocalizationInputs.forEach(input => {
+        input.addEventListener('change', event => {
+            settings.dialogueLocalizationLevel = normalizedTranslationTuning({
+                relationTemperatureEnabled: settings.relationTemperatureEnabled,
+                relationTemperature: settings.relationTemperature,
+                narrationLocalizationLevel: settings.narrationLocalizationLevel,
+                dialogueLocalizationLevel: event.target.value,
+            }).dialogueLocalizationLevel;
             saveSettings();
         });
     });

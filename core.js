@@ -988,7 +988,7 @@ RULES
 }
 
 function koreanOutputTasteBlock(settings = {}, scope = 'mixed') {
-    if (settings.developerMode !== true || settings.koreanFlavorEnabled !== true) return '';
+    if (settings.koreanFlavorEnabled !== true) return '';
 
     const dialogue = scope === 'mixed' || scope === 'target_dialogue' || scope === 'other_dialogue';
     const lines = [];
@@ -1094,7 +1094,7 @@ function koreanOutputTasteBlock(settings = {}, scope = 'mixed') {
 
     if (!lines.length) return '';
 
-    return `KOREAN OUTPUT TASTE — DEVELOPER MICRO-PREFERENCES
+    return `KOREAN OUTPUT TASTE — USER MICRO-PREFERENCES
 - These rules fine-tune Korean expression only. They do NOT increase localization strength and do not override the selected localization level.
 - Preserve source meaning, facts, chronology, intensity, explicitness, consent, relationships, speaker attribution, and character voice.
 - Do not add information or rewrite merely to satisfy a preference.
@@ -1523,7 +1523,7 @@ SEXUAL LEXICAL FIDELITY — CONTEXT SENSITIVE
 }
 
 function koreanFlavorInputBridgeBlock(settings = {}) {
-    if (settings.developerMode !== true || settings.koreanFlavorEnabled !== true) return '';
+    if (settings.koreanFlavorEnabled !== true) return '';
 
     const pronoun = {
         default: '',
@@ -1566,8 +1566,6 @@ function koreanFlavorInputBridgeBlock(settings = {}) {
 }
 
 function englishOutputTasteBlock(settings = {}) {
-    if (settings.developerMode !== true) return '';
-
     const englishEnabled = settings.englishFlavorEnabled === true;
     const koreanFallback = settings.koreanFlavorEnabled === true;
 
@@ -1707,7 +1705,7 @@ function englishOutputTasteBlock(settings = {}) {
 
     if (!lines.length) return '';
 
-    return `ENGLISH OUTPUT TASTE — DEVELOPER MICRO-PREFERENCES
+    return `ENGLISH OUTPUT TASTE — USER MICRO-PREFERENCES
 - These rules affect Korean→English input translation only.
 - They fine-tune English expression; they never override source fidelity.
 - Preserve meaning, intent, facts, actions, speaker attribution, relationship, chronology, tense, explicitness, consent, negation, warning/permission polarity, and emotional intensity.

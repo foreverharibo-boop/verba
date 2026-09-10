@@ -99,15 +99,15 @@ function allowsIntentionalForeignText(segment, settings = {}, speakerScopes = nu
     if (segment?.type !== 'dialogue_candidate') return false;
     if (requestsBilingual(settings.allDialoguePrompt)) return true;
 
-    // When output speaker attribution has already been classified, the
-    // target-character prompt is valid only for target-character dialogue.
-    // This prevents a bilingual/style rule stored in the character prompt
-    // from relaxing validation for USER/NPC dialogue.
     const scoped = speakerScopes && typeof speakerScopes === 'object'
         ? speakerScopes[segment.id]
         : null;
-    if (scoped && scoped !== 'target_dialogue') return false;
-    return requestsBilingual(settings.dialoguePrompt);
+    if (scoped === 'target_dialogue') return requestsBilingual(settings.dialoguePrompt);
+    if (scoped === 'other_dialogue') return requestsBilingual(settings.otherDialoguePrompt);
+
+    // Without attribution, do not let a speaker-specific prompt relax foreign-
+    // text validation for every dialogue segment.
+    return false;
 }
 
 function normalizedLatinWords(value) {
@@ -642,6 +642,7 @@ const LOCALIZATION_RULES = {
 const DEFAULT_TRANSLATION_RULE_ORDER = [
     'oneTime',
     'characterDialogue',
+    'otherDialogue',
     'allDialogue',
     'global',
     'fineTuning',
@@ -663,7 +664,8 @@ function normalizedTranslationRuleOrder(settings = {}) {
 
 const TRANSLATION_PROMPT_SOURCE_LABELS = {
     oneTime: '이번 번역 요구사항',
-    characterDialogue: '캐릭터 대사 프롬프트',
+    characterDialogue: '캐릭터 대사 전용 프롬프트',
+    otherDialogue: 'NPC·USER 대사 전용 프롬프트',
     allDialogue: '모든 대사 공통 프롬프트',
     global: '전체 번역 전역 프롬프트',
 };
@@ -761,7 +763,10 @@ export function findTranslationPromptConflicts({
     const sources = [
         { key: 'oneTime', text: oneTimeInstruction },
         ...(includeCharacterDialogue ? [{ key: 'characterDialogue', text: settings.dialoguePrompt }] : []),
-        ...(includeDialogue ? [{ key: 'allDialogue', text: settings.allDialoguePrompt }] : []),
+        ...(includeDialogue ? [
+            { key: 'otherDialogue', text: settings.otherDialoguePrompt },
+            { key: 'allDialogue', text: settings.allDialoguePrompt },
+        ] : []),
         { key: 'global', text: settings.globalPrompt },
     ].filter(source => String(source.text || '').trim());
     const priority = normalizedTranslationRuleOrder(settings);
@@ -779,12 +784,9 @@ export function findTranslationPromptConflicts({
             const isolatedDialoguePair = new Set([leftSource.key, rightSource.key]);
             if (
                 isolatedDialoguePair.has('characterDialogue')
-                && isolatedDialoguePair.has('allDialogue')
-                && String(settings.dialoguePrompt || '').trim()
+                && isolatedDialoguePair.has('otherDialogue')
             ) {
-                // These two prompts are mutually exclusive at request time:
-                // character dialogue gets characterDialogue, while USER/NPC/other
-                // dialogue gets allDialogue. They cannot conflict in one request.
+                // TARGET and USER/NPC-specific prompts are mutually exclusive.
                 continue;
             }
 
@@ -866,8 +868,13 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
             includeCharacterDialogue ? settings.dialoguePrompt : '',
             '(적용 대상 캐릭터 대사 없음)',
         ),
+        otherDialogue: instructionBlock(
+            'USER/NPC/OTHER DIALOGUE PROMPT — only direct speech NOT spoken by TARGET CHARACTER',
+            includeDialogue ? settings.otherDialoguePrompt : '',
+            '(적용 대상 USER/NPC/기타 대사 없음)',
+        ),
         allDialogue: instructionBlock(
-            'ALL-DIALOGUE PROMPT — every direct dialogue passage, never narration',
+            'ALL-DIALOGUE COMMON PROMPT — every direct dialogue passage, never narration',
             includeDialogue ? settings.allDialoguePrompt : '',
             '(적용 대상 대사 없음)',
         ),
@@ -1092,27 +1099,32 @@ function scopedTranslationRuleBlocks(settings = {}, {
 } = {}) {
     const dialogue = scope === 'target_dialogue' || scope === 'other_dialogue';
     const targetDialogue = scope === 'target_dialogue';
+    const otherDialogue = scope === 'other_dialogue';
     const hasCharacterDialoguePrompt = Boolean(String(settings.dialoguePrompt || '').trim());
+    const hasOtherDialoguePrompt = Boolean(String(settings.otherDialoguePrompt || '').trim());
     const available = new Set(['oneTime', 'global', 'fineTuning']);
 
-    if (dialogue) {
-        // USER/NPC/OTHER dialogue always uses the shared dialogue prompt.
-        // TARGET dialogue uses it only as a fallback when no character-specific
-        // prompt exists. This keeps character voice fully isolated from NPC/user
-        // dialogue-style instructions.
-        if (!targetDialogue || !hasCharacterDialoguePrompt) available.add('allDialogue');
-    }
+    // Common dialogue rules (bilingual format, quotation format, etc.) always
+    // accompany every direct-dialogue request, regardless of speaker.
+    if (dialogue) available.add('allDialogue');
+
+    // Speaker-specific style prompts are mutually exclusive.
     if (targetDialogue && hasCharacterDialoguePrompt) available.add('characterDialogue');
+    if (otherDialogue && hasOtherDialoguePrompt) available.add('otherDialogue');
 
     const blocks = {
         oneTime: `ONE-TIME REQUEST
 ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
         characterDialogue: instructionBlock(
-            'TARGET-CHARACTER DIALOGUE PROMPT — applies ONLY to this TARGET-CHARACTER dialogue request',
+            'TARGET-CHARACTER DIALOGUE PROMPT — applies ONLY to TARGET-CHARACTER dialogue',
             settings.dialoguePrompt,
         ),
+        otherDialogue: instructionBlock(
+            'USER/NPC/OTHER DIALOGUE PROMPT — applies ONLY to dialogue NOT spoken by TARGET CHARACTER',
+            settings.otherDialoguePrompt,
+        ),
         allDialogue: instructionBlock(
-            'ALL-DIALOGUE PROMPT — applies ONLY to dialogue, never narration',
+            'ALL-DIALOGUE COMMON PROMPT — applies to EVERY direct dialogue passage, never narration',
             settings.allDialoguePrompt,
         ),
         global: instructionBlock('GLOBAL TRANSLATION PROMPT — applies to this request', settings.globalPrompt),
@@ -1123,6 +1135,8 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
     return `STRICTLY SCOPED USER RULES
 - Only the rule groups printed below exist for this request.
 - A prompt omitted from this request MUST NOT influence the translation.
+- ALL-DIALOGUE COMMON PROMPT is the shared layer for every direct dialogue speaker.
+- TARGET-CHARACTER DIALOGUE PROMPT and USER/NPC/OTHER DIALOGUE PROMPT are speaker-specific layers and are never printed together.
 - Earlier numbered groups have higher priority when two printed preferences conflict.
 - Source fidelity, protected syntax/tokens, valid JSON, and banned-word avoidance remain absolute regardless of this order.
 
@@ -1141,9 +1155,10 @@ function scopedOutputRules(settings, oneTimeInstruction = '', nameTokens = [], t
 HARD PROMPT ISOLATION
 - CURRENT REQUEST SCOPE: ${scopeLabel}.
 - Prompts for other scopes are intentionally NOT present in this request.
-- When a TARGET-CHARACTER DIALOGUE PROMPT exists, the ALL-DIALOGUE PROMPT is intentionally excluded from target-character dialogue.
-- The ALL-DIALOGUE PROMPT may act as the target-character fallback only when no TARGET-CHARACTER DIALOGUE PROMPT is configured.
-- Never infer, recreate, borrow, or imitate an omitted prompt.
+- ALL-DIALOGUE COMMON PROMPT, when configured, is intentionally shared by every direct-dialogue scope.
+- TARGET-CHARACTER DIALOGUE PROMPT appears only for TARGET-CHARACTER dialogue.
+- USER/NPC/OTHER DIALOGUE PROMPT appears only for dialogue not spoken by TARGET CHARACTER.
+- Never infer, recreate, borrow, or imitate an omitted speaker-specific prompt.
 - Translate only the supplied TRANSLATION TARGETS. SOURCE CONTEXT is reference data only.
 
 ABSOLUTE RULES
@@ -1213,12 +1228,12 @@ TASK
 Translate every TRANSLATION TARGET into Korean.
 - SOURCE CONTEXT is supplied only so referents, scene continuity, terminology, and tone remain understandable. Never translate or return the context itself.
 ${dialogue
-        ? '- Every target in this request is direct dialogue. Apply the ALL-DIALOGUE PROMPT if configured.'
+        ? '- Every target in this request is direct dialogue. Apply the ALL-DIALOGUE COMMON PROMPT if configured.'
         : '- Every target in this request is narration. No dialogue prompt exists in this request and no dialogue-only style may affect it.'}
 ${targetDialogue
-        ? '- Every target in this request has already been independently classified as dialogue spoken by TARGET CHARACTER. Apply the TARGET-CHARACTER DIALOGUE PROMPT if configured.'
+        ? '- Every target in this request has already been independently classified as dialogue spoken by TARGET CHARACTER. Apply the TARGET-CHARACTER DIALOGUE PROMPT if configured; the USER/NPC/OTHER prompt is absent.'
         : dialogue
-            ? '- Every target in this request has already been independently classified as USER/NPC/other dialogue. The TARGET-CHARACTER DIALOGUE PROMPT is deliberately absent and MUST NOT influence these targets.'
+            ? '- Every target in this request has already been independently classified as USER/NPC/other dialogue. Apply the USER/NPC/OTHER DIALOGUE PROMPT if configured; the TARGET-CHARACTER prompt is absent.'
             : ''}
 - Preserve quotation marks already present in each target.
 - Silently check that every target id is returned exactly once.
@@ -1241,7 +1256,7 @@ function speakerIdentityBlock(speakerIdentity = {}) {
 - USER: ${JSON.stringify(userName)}
 - TARGET CHARACTER is the author of the current assistant output, but do not assume every quoted passage inside that output is spoken by them.
 - Infer who speaks each quoted passage from the entire supplied output: subject continuity, adjacent actions, pronouns, speech tags, turn order, and surrounding narration.
-- Apply the TARGET-CHARACTER DIALOGUE PROMPT only to direct dialogue actually spoken by TARGET CHARACTER.
+- Classify each quoted passage so TARGET-CHARACTER and USER/NPC/OTHER dialogue can receive different speaker-specific prompts. Apply the TARGET-CHARACTER DIALOGUE PROMPT only to direct dialogue actually spoken by TARGET CHARACTER.
 - Never apply it to dialogue spoken by USER or another NPC, or to words that TARGET CHARACTER merely quotes, repeats, reads, remembers, imagines, or imitates.
 - A quotation mark alone does not prove TARGET CHARACTER is speaking.
 - TARGET CHARACTER and USER names are indivisible proper names. Never reinterpret, remove, or split a final Korean syllable as a grammatical particle. For example, if USER is "혜담은", the complete name is all three syllables "혜담은", never "혜담" plus the topic particle "은".

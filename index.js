@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.75';
+const EXTENSION_VERSION = '0.3.77';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -55,7 +55,8 @@ const LOCALIZATION_LEVEL_OPTIONS = [
 ];
 const TRANSLATION_RULE_DEFINITIONS = [
     { key: 'oneTime', label: '이번 번역 요구사항' },
-    { key: 'characterDialogue', label: '캐릭터 대사 프롬프트' },
+    { key: 'characterDialogue', label: '캐릭터 대사 전용 프롬프트' },
+    { key: 'otherDialogue', label: 'NPC·USER 대사 전용 프롬프트' },
     { key: 'allDialogue', label: '모든 대사 공통 프롬프트' },
     { key: 'global', label: '전체 번역 전역 프롬프트' },
     { key: 'fineTuning', label: '관계 온도·현지화' },
@@ -79,6 +80,7 @@ const DEFAULT_SETTINGS = {
     globalPrompt: '',
     allDialoguePrompt: '',
     dialoguePrompt: '',
+    otherDialoguePrompt: '',
     dialogueEndingPreferred: '',
     dialogueEndingAvoid: '',
     dialogueEndingStrength: 'normal',
@@ -113,6 +115,9 @@ settings.autoProfileFallback = settings.autoProfileFallback !== false;
 delete settings.developerMode;
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
+settings.dialoguePrompt = typeof settings.dialoguePrompt === 'string' ? settings.dialoguePrompt : '';
+settings.allDialoguePrompt = typeof settings.allDialoguePrompt === 'string' ? settings.allDialoguePrompt : '';
+settings.otherDialoguePrompt = typeof settings.otherDialoguePrompt === 'string' ? settings.otherDialoguePrompt : '';
 settings.dialogueEndingPreferred = typeof settings.dialogueEndingPreferred === 'string' ? settings.dialogueEndingPreferred : '';
 settings.dialogueEndingAvoid = typeof settings.dialogueEndingAvoid === 'string' ? settings.dialogueEndingAvoid : '';
 settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(settings.dialogueEndingStrength)
@@ -138,6 +143,21 @@ settings.narrationLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => 
 settings.dialogueLocalizationLevel = LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === previousSettings.dialogueLocalizationLevel)
     ? previousSettings.dialogueLocalizationLevel
     : previousLocalizationLevel;
+if (
+    Array.isArray(settings.translationRuleOrder)
+    && !settings.translationRuleOrder.includes('otherDialogue')
+) {
+    const migratedOrder = [...settings.translationRuleOrder];
+    const characterIndex = migratedOrder.indexOf('characterDialogue');
+    const allDialogueIndex = migratedOrder.indexOf('allDialogue');
+    const insertAt = characterIndex >= 0
+        ? characterIndex + 1
+        : allDialogueIndex >= 0
+            ? allDialogueIndex
+            : 1;
+    migratedOrder.splice(insertAt, 0, 'otherDialogue');
+    settings.translationRuleOrder = migratedOrder;
+}
 settings.translationRuleOrder = normalizeTranslationRuleOrder(settings.translationRuleOrder);
 delete settings.localizationLevel;
 delete settings.narrationStyle;
@@ -342,7 +362,7 @@ function renderPromptConflictInspector(conflicts = null) {
     if (!rows.length) {
         host.innerHTML = `
             <div class="verba-conflict-empty">
-                현재 저장된 전역·모든 대사·캐릭터 대사 프롬프트에서는 명백한 충돌이 감지되지 않았어요.
+                현재 저장된 전역·모든 대사 공통·캐릭터 전용·NPC·USER 전용 프롬프트에서는 명백한 충돌이 감지되지 않았어요.
             </div>`;
         return;
     }
@@ -1716,9 +1736,14 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
     const dialogueSegments = (segmented?.segments || []).filter(segment => segment.type === 'dialogue_candidate');
     const scopes = Object.fromEntries(dialogueSegments.map(segment => [segment.id, 'other_dialogue']));
 
-    // No target-character dialogue style means there is nothing to isolate
-    // between TARGET and USER/NPC dialogue, so avoid an unnecessary API call.
-    if (!dialogueSegments.length || !String(settings.dialoguePrompt || '').trim()) return scopes;
+    // Speaker classification is needed only when TARGET and USER/NPC dialogue
+    // have different scope-specific prompts. A shared all-dialogue prompt alone
+    // does not require attribution.
+    const needsSpeakerIsolation = Boolean(
+        String(settings.dialoguePrompt || '').trim()
+        || String(settings.otherDialoguePrompt || '').trim()
+    );
+    if (!dialogueSegments.length || !needsSpeakerIsolation) return scopes;
 
     try {
         const prompt = buildSpeakerAttributionPrompt(segmented, speakerIdentity);
@@ -1741,16 +1766,106 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
     return scopes;
 }
 
+
+function compactScopeContext(segmented, segments, radius = 4500) {
+    const full = String(segmented?.protectedText || '');
+    if (!full || !Array.isArray(segments) || !segments.length) return full.slice(0, 9000);
+
+    const positions = segments
+        .map(segment => {
+            const value = String(segment?.text || '');
+            const index = value ? full.indexOf(value) : -1;
+            return index >= 0 ? { index, length: value.length } : null;
+        })
+        .filter(Boolean);
+
+    if (!positions.length) return full.slice(0, 9000);
+
+    const first = Math.min(...positions.map(item => item.index));
+    const last = Math.max(...positions.map(item => item.index + item.length));
+    const start = Math.max(0, first - radius);
+    const end = Math.min(full.length, last + radius);
+    return full.slice(start, end);
+}
+
+async function requestScopedGroupTranslations({
+    segmented,
+    scope,
+    segments,
+    options,
+}) {
+    const buildPrompt = sourceContext => buildScopedOutputPrompt({
+        segments,
+        sourceContext,
+        settings,
+        oneTimeInstruction: options.oneTimeInstruction || '',
+        nameTokens: nameTokensForSegments(segmented, segments),
+        tuning: options.tuning || null,
+        scope,
+    });
+
+    try {
+        return await requestSegments(buildPrompt(segmented.protectedText), segments, {
+            ...options,
+            stage: `${options.stage || 'output-translation'}:${scope}`,
+        });
+    } catch (error) {
+        if (isAbort(error, options.signal) || transientError(error)) throw error;
+
+        console.warn(
+            `[베르바] ${scope} 범위 묶음 번역 실패 — 작은 단위로 자동 복구를 시도합니다.`,
+            error,
+        );
+
+        // One segment cannot be split any further. Retry it once with a much
+        // smaller context, which also recovers some context-length/request-size
+        // failures caused by a long full-message reference.
+        const recovered = new Map();
+        for (const segment of segments) {
+            const singleContext = compactScopeContext(segmented, [segment], 3500);
+            const singlePrompt = buildScopedOutputPrompt({
+                segments: [segment],
+                sourceContext: singleContext,
+                settings,
+                oneTimeInstruction: options.oneTimeInstruction || '',
+                nameTokens: nameTokensForSegments(segmented, [segment]),
+                tuning: options.tuning || null,
+                scope,
+            });
+
+            try {
+                const single = await requestSegments(singlePrompt, [segment], {
+                    ...options,
+                    stage: `${options.stage || 'output-translation'}:${scope}:single`,
+                });
+                recovered.set(segment.id, single.get(segment.id));
+            } catch (singleError) {
+                if (isAbort(singleError, options.signal)) throw singleError;
+                const wrapped = new Error(
+                    `${scope} 범위 번역 복구 실패 (${segment.id}): ${errorText(singleError)}`,
+                    { cause: singleError },
+                );
+                wrapped.verbaScope = scope;
+                wrapped.verbaSegmentId = segment.id;
+                throw wrapped;
+            }
+        }
+
+        return recovered;
+    }
+}
+
 async function requestScopedOutputTranslations(segmented, speakerScopes, options = {}) {
     const translations = new Map();
     const groups = segmentsGroupedByOutputScope(segmented.segments, speakerScopes);
     const strictIsolationNeeded = Boolean(
-        String(settings.allDialoguePrompt || '').trim()
-        || String(settings.dialoguePrompt || '').trim()
+        String(settings.dialoguePrompt || '').trim()
+        || String(settings.otherDialoguePrompt || '').trim()
     );
 
-    // Keep the single-request fast path when there are no dialogue-specific
-    // prompts to isolate.
+    // A shared ALL-DIALOGUE prompt does not require separate API calls by
+    // itself. Keep one request unless speaker-specific TARGET/NPC-USER prompts
+    // actually need hard isolation.
     if (!strictIsolationNeeded) {
         const prompt = buildOutputPrompt(
             segmented,
@@ -1767,18 +1882,11 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
 
     for (const [scope, segments] of groups) {
         if (!segments.length) continue;
-        const prompt = buildScopedOutputPrompt({
-            segments,
-            sourceContext: segmented.protectedText,
-            settings,
-            oneTimeInstruction: options.oneTimeInstruction || '',
-            nameTokens: nameTokensForSegments(segmented, segments),
-            tuning: options.tuning || null,
+        const result = await requestScopedGroupTranslations({
+            segmented,
             scope,
-        });
-        const result = await requestSegments(prompt, segments, {
-            ...options,
-            stage: `${options.stage || 'output-translation'}:${scope}`,
+            segments,
+            options,
         });
         for (const [id, value] of result) translations.set(id, value);
     }
@@ -2155,8 +2263,29 @@ function syncOwnedTranslationToCurrentSwipe(message, record) {
 }
 
 function updateMessageBlock(messageId, message) {
-    liveContext().updateMessageBlock?.(messageId, message);
-    setTimeout(refreshTranslationClasses, 40);
+    const id = Number(messageId);
+    const mounted = Number.isInteger(id)
+        ? document.querySelector(`.mes[mesid="${id}"]`)
+        : null;
+
+    // Older messages selected from "이전 아웃풋" may not exist in the DOM yet
+    // on mobile because SillyTavern renders only a truncated history. The
+    // translation is still saved to message.extra/display_text; do not let a
+    // DOM-only rerender failure cancel the completed translation job.
+    if (!mounted) {
+        setTimeout(refreshTranslationClasses, 40);
+        return false;
+    }
+
+    try {
+        liveContext().updateMessageBlock?.(id, message);
+        setTimeout(refreshTranslationClasses, 40);
+        return true;
+    } catch (error) {
+        console.warn(`[베르바] 화면에 표시된 메시지 #${id} 재렌더링 실패 — 저장 번역은 유지합니다.`, error);
+        setTimeout(refreshTranslationClasses, 40);
+        return false;
+    }
 }
 
 function renderedTranslationKey(messageId, record) {
@@ -3880,17 +4009,13 @@ async function jumpToOutputMessage(messageId) {
     const findElement = () => document.querySelector(`.mes[mesid="${id}"]`);
     let element = findElement();
 
-    // SillyTavern only renders the newest N messages when chat truncation is
-    // enabled. Load older pages with its own public API until the target is in
-    // the DOM, so a result found through search or "더 보기" can still jump.
     for (let pass = 0; !element && pass < 80; pass += 1) {
         const firstDisplayed = Number(
             document.querySelector('#chat .mes[mesid], .mes[mesid]')?.getAttribute('mesid'),
         );
-        if (Number.isFinite(firstDisplayed) && firstDisplayed <= id) break;
 
         const amount = Number.isFinite(firstDisplayed)
-            ? Math.min(100, Math.max(20, firstDisplayed - id))
+            ? Math.min(100, Math.max(20, Math.abs(firstDisplayed - id) + 1))
             : 100;
 
         try {
@@ -3900,26 +4025,56 @@ async function jumpToOutputMessage(messageId) {
             break;
         }
 
-        await new Promise(resolve => setTimeout(resolve, 25));
+        await new Promise(resolve => setTimeout(resolve, 60));
         element = findElement();
+
+        // If history already reaches past the target and the exact element still
+        // does not exist, it may be a SillyTavern-hidden message.
+        if (!element && Number.isFinite(firstDisplayed) && firstDisplayed <= id) break;
     }
 
-    // Give extensions/theme rendering a short chance to finish after paging.
-    for (let attempt = 0; !element && attempt < 8; attempt += 1) {
+    for (let attempt = 0; !element && attempt < 10; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 80));
         element = findElement();
     }
 
     if (!element) {
-        notify('번역은 완료됐지만 해당 메시지 위치를 화면에 불러오지 못했어요.', 'warning');
+        notify('번역은 저장됐지만 해당 메시지가 현재 채팅 화면에 표시되지 않아 자동 이동하지 못했어요.', 'warning');
         return false;
     }
 
-    element.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-        inline: 'nearest',
-    });
+    // The translation may have completed while the old message was off-screen.
+    // Force one rerender only after the message has actually been mounted.
+    const message = liveContext().chat?.[id];
+    if (message) updateMessageBlock(id, message);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    element = findElement() || element;
+    const chatScroller = document.querySelector('#chat');
+    let scrolled = false;
+
+    if (chatScroller && chatScroller.scrollHeight > chatScroller.clientHeight) {
+        try {
+            const chatRect = chatScroller.getBoundingClientRect();
+            const elementRect = element.getBoundingClientRect();
+            const delta = (elementRect.top + elementRect.height / 2)
+                - (chatRect.top + chatRect.height / 2);
+            const targetTop = Math.max(0, chatScroller.scrollTop + delta);
+            chatScroller.scrollTo({ top: targetTop, behavior: 'smooth' });
+            scrolled = true;
+        } catch (error) {
+            console.warn('[베르바] 채팅 컨테이너 직접 이동 실패 — 기본 이동으로 전환합니다.', error);
+        }
+    }
+
+    if (!scrolled) {
+        element.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'nearest',
+        });
+    }
+
     element.classList.add('verba-jump-highlight');
     setTimeout(() => element.classList.remove('verba-jump-highlight'), 1800);
     return true;
@@ -3980,7 +4135,10 @@ async function retranslateLatestOutput() {
         ? await translateUntranslatedOutput(previous)
         : await retranslateOutputTarget(previous, '이전 아웃풋 전체 재번역');
 
-    if (!success) return;
+    if (!success) {
+        notify('이전 아웃풋 재번역에 실패했어요. 하단 오류 알림을 확인해 주세요.', 'error');
+        return;
+    }
 
     if (settings.previousOutputCompletionAction === 'jump') {
         const jumped = await jumpToOutputMessage(previous.id);
@@ -6355,7 +6513,7 @@ function injectSettingsPanel() {
                     <summary>프롬프트 충돌 확인 <small id="verba-prompt-conflict-count">충돌 없음</small></summary>
                     <div class="verba-tool-details-content">
                         <div id="verba-prompt-conflict-content" class="verba-prompt-conflict-content"></div>
-                        <div class="verba-help">전역·모든 대사·캐릭터 대사 프롬프트에서 베르바가 명백한 충돌로 판단한 실제 문구를 보여줘요. 검사는 로컬에서만 하며 API를 호출하지 않습니다.</div>
+                        <div class="verba-help">전역·모든 대사 공통·캐릭터 전용·NPC·USER 전용 프롬프트에서 베르바가 명백한 충돌로 판단한 실제 문구를 보여줘요. 검사는 로컬에서만 하며 API를 호출하지 않습니다.</div>
                         <button type="button" id="verba-refresh-prompt-conflicts" class="menu_button verba-wide">지금 다시 확인</button>
                     </div>
                 </details>
@@ -6398,12 +6556,16 @@ function injectSettingsPanel() {
                 <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
 
                 <label for="verba-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
-                <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="유저·NPC 대사에 공통 적용할 형식·말투 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
-                <div class="verba-help">유저·NPC·기타 화자의 직접 대사에 적용해요. 캐릭터 전용 프롬프트가 비어 있을 때만 현재 캐릭터 대사에도 적용됩니다.</div>
+                <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="모든 직접 대사에 공통 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
+                <div class="verba-help">캐릭터·NPC·USER의 모든 직접 대사에 항상 적용해요. 대사 한영병기, 따옴표 형식처럼 화자와 무관한 공통 규칙은 여기에 입력하세요.</div>
 
                 <label for="verba-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
                 <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
-                <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 적용해요. 이 칸에 내용이 있으면 해당 캐릭터 대사에는 ‘모든 대사 공통 프롬프트’를 함께 보내지 않습니다.</div>
+                <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 추가 적용해요. 캐릭터 고유 말투는 여기에 입력하세요.</div>
+
+                <label for="verba-other-dialogue-prompt">NPC·USER 대사 전용 프롬프트</label>
+                <textarea id="verba-other-dialogue-prompt" class="text_pole" rows="5" placeholder="NPC·USER·기타 화자 대사에만 적용할 말투 규칙">${escapeHtml(settings.otherDialoguePrompt)}</textarea>
+                <div class="verba-help">현재 캐릭터가 아닌 NPC·USER·기타 화자의 직접 대사에만 추가 적용해요. 캐릭터와 다른 말투를 주고 싶을 때 사용하세요.</div>
 
                 <label for="verba-banned-words">번역 금지어</label>
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
@@ -6644,6 +6806,11 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-dialogue-prompt').addEventListener('input', event => {
         settings.dialoguePrompt = event.target.value;
+        saveSettings();
+        renderPromptConflictInspector();
+    });
+    panel.querySelector('#verba-other-dialogue-prompt').addEventListener('input', event => {
+        settings.otherDialoguePrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
     });

@@ -14,6 +14,7 @@ import {
     detectCharacterGender,
     extractResponseText,
     findBannedWords,
+    findTranslationPromptConflicts,
     findUntranslatedSegments,
     hasForeignText,
     hasKorean,
@@ -24,10 +25,11 @@ import {
     replaceOutsideProtected,
     restoreProtected,
     segmentSource,
+    selectionTouchesDialogue,
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.36';
+const EXTENSION_VERSION = '0.3.37';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -157,6 +159,9 @@ let preservedGestureSelection = null;
 let lastTouchSelectionAt = 0;
 let lastDesktopSelectionPlacement = null;
 let lastDesktopSelectionAt = 0;
+let retranslationHistory = [];
+let retranslationHistoryIndex = -1;
+let retranslationUndoTimer = null;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -175,6 +180,28 @@ function notify(message, type = 'info') {
     }
     const logger = type === 'error' ? console.error : type === 'warning' ? console.warn : console.log;
     logger(`[베르바] ${message}`);
+}
+
+function warnTranslationPromptConflicts({
+    oneTimeInstruction = '',
+    includeDialogue = true,
+    includeCharacterDialogue = true,
+} = {}) {
+    if (!settings.developerMode) return [];
+    const conflicts = findTranslationPromptConflicts({
+        settings,
+        oneTimeInstruction,
+        includeDialogue,
+        includeCharacterDialogue,
+    });
+    if (!conflicts.length) return conflicts;
+    const first = conflicts[0];
+    const remainder = conflicts.length > 1 ? ` 외 ${conflicts.length - 1}건` : '';
+    notify(
+        `번역 규칙 충돌${remainder}: ${first.left.label}의 “${first.left.directive}”와 ${first.right.label}의 “${first.right.directive}”를 함께 적용할 수 없어요. 현재 우선순위상 ${first.winner.label}을 먼저 적용합니다.`,
+        'warning',
+    );
+    return conflicts;
 }
 
 function showBottomError(message) {
@@ -1820,6 +1847,145 @@ function applyTranslation(messageId, message, source, translation, chatReference
     scheduleChatSave(chatReference);
 }
 
+function cloneTranslationRecord(record) {
+    if (!record || typeof record !== 'object') return null;
+    return {
+        ...record,
+        sourceMap: normalizedSourceMap(record.sourceMap),
+        lockedSegments: normalizedLockedSegments(record.lockedSegments),
+    };
+}
+
+function dismissRetranslationUndoNotice() {
+    clearTimeout(retranslationUndoTimer);
+    retranslationUndoTimer = null;
+    document.querySelector('#verba-retranslation-undo')?.remove();
+}
+
+function historyEntryStillCurrent(entry, expectedRecord) {
+    const context = liveContext();
+    const message = context.chat?.[entry.messageId];
+    if (
+        context.chat !== entry.chatReference
+        || message !== entry.message
+        || currentSwipeId(message) !== entry.swipeId
+        || hashText(messageSource(message)) !== entry.sourceHash
+    ) return false;
+    const record = currentRecord(message);
+    return expectedRecord ? sameTranslationRecord(record, expectedRecord) : !record;
+}
+
+function applyRetranslationHistorySnapshot(entry, record) {
+    const context = liveContext();
+    const message = context.chat?.[entry.messageId];
+    if (!record) {
+        clearOwnedDisplay(message);
+        updateMessageBlock(entry.messageId, message);
+        scheduleChatSave(entry.chatReference);
+    } else {
+        applyTranslation(
+            entry.messageId,
+            message,
+            entry.source,
+            record.translation,
+            entry.chatReference,
+            {
+                sourceMap: record.sourceMap,
+                lockedSegments: record.lockedSegments,
+            },
+        );
+    }
+    clearTransientTranslationSelections();
+    refreshRetranslateButton();
+}
+
+function showRetranslationUndoNotice(status = 'applied') {
+    dismissRetranslationUndoNotice();
+    const notice = document.createElement('div');
+    notice.id = 'verba-retranslation-undo';
+    notice.className = 'verba-bottom-notice verba-retranslation-undo';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+    const text = document.createElement('span');
+    text.textContent = status === 'undone' ? '재번역을 되돌렸어요.' : '재번역을 적용했어요.';
+    const actions = document.createElement('span');
+    actions.className = 'verba-history-actions';
+    if (retranslationHistoryIndex >= 0) {
+        const undo = document.createElement('button');
+        undo.type = 'button';
+        undo.className = 'menu_button';
+        undo.textContent = '되돌리기';
+        undo.addEventListener('click', undoLatestRetranslation);
+        actions.append(undo);
+    }
+    if (retranslationHistoryIndex + 1 < retranslationHistory.length) {
+        const redo = document.createElement('button');
+        redo.type = 'button';
+        redo.className = 'menu_button';
+        redo.textContent = '다시 적용';
+        redo.addEventListener('click', redoLatestRetranslation);
+        actions.append(redo);
+    }
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'verba-notice-close';
+    close.textContent = '✕';
+    close.setAttribute('aria-label', '재번역 실행 취소 알림 닫기');
+    close.addEventListener('click', dismissRetranslationUndoNotice);
+    notice.append(text, actions, close);
+    document.documentElement.append(notice);
+    retranslationUndoTimer = setTimeout(dismissRetranslationUndoNotice, 12000);
+}
+
+function rememberRetranslationChange(messageId, message, source, chatReference, beforeRecord) {
+    if (!settings.developerMode) return;
+    const afterRecord = cloneTranslationRecord(currentRecord(message));
+    const before = cloneTranslationRecord(beforeRecord);
+    if (afterRecord) afterRecord.lockedSegments = [];
+    if (before) before.lockedSegments = [];
+    if (!afterRecord || (before && sameTranslationRecord(before, afterRecord))) return;
+    if (retranslationHistoryIndex < retranslationHistory.length - 1) {
+        retranslationHistory = retranslationHistory.slice(0, retranslationHistoryIndex + 1);
+    }
+    retranslationHistory.push({
+        messageId: Number(messageId),
+        message,
+        chatReference,
+        source,
+        sourceHash: hashText(source),
+        swipeId: currentSwipeId(message),
+        before,
+        after: afterRecord,
+    });
+    if (retranslationHistory.length > 5) retranslationHistory.shift();
+    retranslationHistoryIndex = retranslationHistory.length - 1;
+    showRetranslationUndoNotice('applied');
+}
+
+function undoLatestRetranslation() {
+    const entry = retranslationHistory[retranslationHistoryIndex];
+    if (!entry || !historyEntryStillCurrent(entry, entry.after)) {
+        dismissRetranslationUndoNotice();
+        notify('현재 메시지가 바뀌어 이 재번역은 되돌릴 수 없어요.', 'warning');
+        return;
+    }
+    applyRetranslationHistorySnapshot(entry, entry.before);
+    retranslationHistoryIndex -= 1;
+    showRetranslationUndoNotice('undone');
+}
+
+function redoLatestRetranslation() {
+    const entry = retranslationHistory[retranslationHistoryIndex + 1];
+    if (!entry || !historyEntryStillCurrent(entry, entry.before)) {
+        dismissRetranslationUndoNotice();
+        notify('현재 메시지가 바뀌어 이 재번역을 다시 적용할 수 없어요.', 'warning');
+        return;
+    }
+    applyRetranslationHistorySnapshot(entry, entry.after);
+    retranslationHistoryIndex += 1;
+    showRetranslationUndoNotice('applied');
+}
+
 function sourceViewRequested(message, record) {
     if (!message || !record) return false;
     const signature = storedRecordSignature(record);
@@ -1997,6 +2163,15 @@ async function translateMessage(messageId, options = {}) {
                     lockedSegments: [],
                 },
             );
+            if (options.force) {
+                rememberRetranslationChange(
+                    id,
+                    latest,
+                    source,
+                    snapshot.chatReference,
+                    snapshot.previousRecord,
+                );
+            }
             clearTransientTranslationSelections();
             failedOutputSignatures.delete(id);
             outputJobSuccess = true;
@@ -2752,9 +2927,16 @@ async function retranslateLatestOutput() {
         refreshRetranslateButton();
         return;
     }
+    const oneTimeInstruction = typeof request === 'object' ? request.instruction : String(request || '');
+    const sourceHasDialogue = selectionTouchesDialogue(source, 0, source.length);
+    warnTranslationPromptConflicts({
+        oneTimeInstruction,
+        includeDialogue: sourceHasDialogue,
+        includeCharacterDialogue: sourceHasDialogue,
+    });
     await translateMessage(target.id, {
         force: true,
-        oneTimeInstruction: typeof request === 'object' ? request.instruction : String(request || ''),
+        oneTimeInstruction,
         tuning: typeof request === 'object' ? request.tuning : null,
     });
 }
@@ -3973,6 +4155,17 @@ async function retranslateSelectionBundle() {
         return;
     }
 
+    const bundleHasDialogue = state.ranges.some(range => selectionTouchesDialogue(
+        state.translation,
+        range.start,
+        range.end,
+    ));
+    warnTranslationPromptConflicts({
+        oneTimeInstruction: instruction,
+        includeDialogue: bundleHasDialogue,
+        includeCharacterDialogue: bundleHasDialogue,
+    });
+
     const selections = state.ranges.map((range, index) => ({
         ...range,
         id: `multi_${String(index).padStart(4, '0')}`,
@@ -4041,10 +4234,18 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
             );
         }
         const context = liveContext();
+        const beforeRecord = cloneTranslationRecord(currentRecord(state.message));
         applyTranslation(state.messageId, state.message, state.source, updated, context.chat, {
             sourceMap,
             lockedSegments: [],
         });
+        rememberRetranslationChange(
+            state.messageId,
+            state.message,
+            state.source,
+            context.chat,
+            beforeRecord,
+        );
         clearTransientTranslationSelections();
         notify(`${replacements.length}개 구간을 한꺼번에 교체했어요.`, 'success');
     } catch (error) {
@@ -4196,6 +4397,17 @@ async function retranslateSelection(snapshot) {
         return;
     }
 
+    const selectionHasDialogue = selectionTouchesDialogue(
+        snapshot.translation,
+        snapshot.start,
+        snapshot.end,
+    );
+    warnTranslationPromptConflicts({
+        oneTimeInstruction: instruction,
+        includeDialogue: selectionHasDialogue,
+        includeCharacterDialogue: selectionHasDialogue,
+    });
+
     const controller = new AbortController();
     const candidateMode = Boolean(settings.selectionCandidates);
     const prompt = buildSelectionPrompt({
@@ -4266,6 +4478,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             + snapshot.translation.slice(snapshot.end);
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
+        const beforeRecord = cloneTranslationRecord(currentRecord(message));
         const sourceMap = sourceMapAfterSelection(
             snapshot.sourceMap,
             snapshot.start,
@@ -4276,6 +4489,13 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             sourceMap,
             lockedSegments: [],
         });
+        rememberRetranslationChange(
+            snapshot.messageId,
+            message,
+            snapshot.source,
+            context.chat,
+            beforeRecord,
+        );
         clearTransientTranslationSelections();
         globalThis.getSelection?.()?.removeAllRanges?.();
         notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');

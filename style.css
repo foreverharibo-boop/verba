@@ -544,6 +544,42 @@ html.verba-developer-mode > * .verba-developer-only {
     opacity: 0.8 !important;
 }
 
+#verba-retranslation-undo {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    white-space: nowrap !important;
+}
+
+#verba-retranslation-undo .menu_button {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: auto !important;
+    padding: 3px 9px !important;
+    border-radius: 999px !important;
+    font: inherit !important;
+    line-height: 1.2 !important;
+}
+
+#verba-retranslation-undo .verba-history-actions {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+}
+
+#verba-retranslation-undo .verba-notice-close {
+    min-width: 20px !important;
+    width: 20px !important;
+    height: 20px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    font: inherit !important;
+    line-height: 20px !important;
+    cursor: pointer !important;
+}
+
 .mes.verba-swipe-hold-active .mes_text:not(.verba-swipe-hold-content) {
     display: none !important;
 }

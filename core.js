@@ -550,6 +550,142 @@ function normalizedTranslationRuleOrder(settings = {}) {
     return order;
 }
 
+const TRANSLATION_PROMPT_SOURCE_LABELS = {
+    oneTime: '이번 번역 요구사항',
+    characterDialogue: '캐릭터 대사 프롬프트',
+    allDialogue: '모든 대사 공통 프롬프트',
+    global: '전체 번역 전역 프롬프트',
+};
+
+const TRANSLATION_PROMPT_CONFLICT_RULES = [
+    {
+        id: 'speech-level',
+        label: '말투',
+        leftLabel: '존댓말',
+        rightLabel: '반말',
+        left: [/(?:존댓말|높임말|경어체|하십시오체|해요체)/iu, /\b(?:honorific|formal|polite)\b/iu],
+        right: [/(?:반말|해체|비격식체)/iu, /\b(?:banmal|informal|casual)\b/iu],
+    },
+    {
+        id: 'output-language',
+        label: '출력 언어',
+        leftLabel: '한국어만',
+        rightLabel: '한영 병기',
+        left: [/(?:한국어|한글)(?:로)?\s*(?:만|단독)/iu, /\bkorean\s+only\b/iu, /(?:영어|원문).{0,12}(?:넣지|포함하지|쓰지|제외)/iu],
+        right: [/(?:한영|영한)\s*병기/iu, /(?:영어|원문).{0,12}(?:한국어|번역).{0,12}(?:병기|함께|괄호)/iu, /\bbilingual\b/iu, /\bboth\s+english\s+and\s+korean\b/iu],
+    },
+    {
+        id: 'translation-distance',
+        label: '번역 방식',
+        leftLabel: '직역·원문 유지',
+        rightLabel: '의역·현지화',
+        left: [/(?:직역|원문.{0,8}(?:유지|충실)|원어.{0,8}유지)/iu, /\b(?:literal|source[- ]faithful|verbatim)\b/iu],
+        right: [/(?:의역|한국어화|현지화|자연스럽게\s*바꿔)/iu, /\b(?:free translation|naturalize|localize|adaptation)\b/iu],
+    },
+];
+
+function promptHasDirective(text, patterns) {
+    return patterns.some(pattern => pattern.test(String(text || '')));
+}
+
+function explicitPromptMappings(text) {
+    const mappings = new Map();
+    const lines = String(text || '').split(/\r?\n/u);
+    for (const line of lines) {
+        const match = line.match(/^\s*([A-Za-z][A-Za-z0-9 .'_-]{0,48}?)\s*(?:=|->|→|:)\s*([^,;\n]{1,80})\s*$/u);
+        if (!match) continue;
+        const source = match[1].trim();
+        const target = match[2].trim();
+        if (!source || !target) continue;
+        mappings.set(source.toLocaleLowerCase(), { source, target });
+    }
+    return mappings;
+}
+
+/**
+ * Conservatively identifies only directly opposing user-configured prompt rules.
+ * It never guesses at vague stylistic differences, so callers can stay silent
+ * when there is no clear conflict.
+ */
+export function findTranslationPromptConflicts({
+    settings = {},
+    oneTimeInstruction = '',
+    includeDialogue = true,
+    includeCharacterDialogue = true,
+} = {}) {
+    const sources = [
+        { key: 'oneTime', text: oneTimeInstruction },
+        ...(includeCharacterDialogue ? [{ key: 'characterDialogue', text: settings.dialoguePrompt }] : []),
+        ...(includeDialogue ? [{ key: 'allDialogue', text: settings.allDialoguePrompt }] : []),
+        { key: 'global', text: settings.globalPrompt },
+    ].filter(source => String(source.text || '').trim());
+    const priority = normalizedTranslationRuleOrder(settings);
+    const priorityOf = key => {
+        const index = priority.indexOf(key);
+        return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+    };
+    const conflicts = [];
+
+    for (let leftIndex = 0; leftIndex < sources.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < sources.length; rightIndex += 1) {
+            const leftSource = sources[leftIndex];
+            const rightSource = sources[rightIndex];
+            const winner = priorityOf(leftSource.key) <= priorityOf(rightSource.key) ? leftSource : rightSource;
+            for (const rule of TRANSLATION_PROMPT_CONFLICT_RULES) {
+                const leftHasLeft = promptHasDirective(leftSource.text, rule.left);
+                const leftHasRight = promptHasDirective(leftSource.text, rule.right);
+                const rightHasLeft = promptHasDirective(rightSource.text, rule.left);
+                const rightHasRight = promptHasDirective(rightSource.text, rule.right);
+                if (!((leftHasLeft && rightHasRight) || (leftHasRight && rightHasLeft))) continue;
+                conflicts.push({
+                    id: rule.id,
+                    label: rule.label,
+                    left: {
+                        key: leftSource.key,
+                        label: TRANSLATION_PROMPT_SOURCE_LABELS[leftSource.key],
+                        directive: leftHasLeft ? rule.leftLabel : rule.rightLabel,
+                    },
+                    right: {
+                        key: rightSource.key,
+                        label: TRANSLATION_PROMPT_SOURCE_LABELS[rightSource.key],
+                        directive: rightHasLeft ? rule.leftLabel : rule.rightLabel,
+                    },
+                    winner: {
+                        key: winner.key,
+                        label: TRANSLATION_PROMPT_SOURCE_LABELS[winner.key],
+                    },
+                });
+            }
+
+            const leftMappings = explicitPromptMappings(leftSource.text);
+            const rightMappings = explicitPromptMappings(rightSource.text);
+            for (const [key, leftMapping] of leftMappings) {
+                const rightMapping = rightMappings.get(key);
+                if (!rightMapping || leftMapping.target === rightMapping.target) continue;
+                conflicts.push({
+                    id: `mapping:${key}`,
+                    label: `${leftMapping.source} 표기`,
+                    left: {
+                        key: leftSource.key,
+                        label: TRANSLATION_PROMPT_SOURCE_LABELS[leftSource.key],
+                        directive: leftMapping.target,
+                    },
+                    right: {
+                        key: rightSource.key,
+                        label: TRANSLATION_PROMPT_SOURCE_LABELS[rightSource.key],
+                        directive: rightMapping.target,
+                    },
+                    winner: {
+                        key: winner.key,
+                        label: TRANSLATION_PROMPT_SOURCE_LABELS[winner.key],
+                    },
+                });
+            }
+        }
+    }
+    return conflicts;
+}
+
 function orderedTranslationRuleBlocks(settings = {}, {
     oneTimeInstruction = '',
     tuning = null,

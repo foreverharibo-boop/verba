@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.63';
+const EXTENSION_VERSION = '0.3.65';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3151,9 +3151,21 @@ function previousAssistantMessages(beforeId = Number.POSITIVE_INFINITY) {
     return rows;
 }
 
-function requestRetranslateTargetChoice(button = document.querySelector('#verba-retranslate-latest')) {
+function requestRetranslateTargetChoice(target, button = document.querySelector('#verba-retranslate-latest')) {
     document.querySelector('#verba-retranslate-target-menu')?.remove();
-    if (!button) return Promise.resolve(null);
+    if (!button || !target?.message) return Promise.resolve(null);
+
+    const record = currentRecord(target.message);
+    const swipeExtra = currentSwipeExtra(target.message, false);
+    const showingTranslation = Boolean(
+        record
+        && !sourceViewRequested(target.message, record)
+        && (
+            target.message.extra?.display_text === record.translation
+            || swipeExtra?.display_text === record.translation
+        )
+    );
+    const viewLabel = showingTranslation ? '원문' : '번역본';
 
     return new Promise(resolve => {
         const menu = document.createElement('div');
@@ -3162,7 +3174,8 @@ function requestRetranslateTargetChoice(button = document.querySelector('#verba-
         menu.setAttribute('role', 'menu');
         menu.innerHTML = `
             <button type="button" class="menu_button" data-target="recent">최근</button>
-            <button type="button" class="menu_button" data-target="previous">이전</button>`;
+            <button type="button" class="menu_button" data-target="previous">이전</button>
+            <button type="button" class="menu_button" data-target="toggle-view">${viewLabel}</button>`;
         (document.body || document.documentElement).append(menu);
 
         const buttonRect = button.getBoundingClientRect();
@@ -3171,7 +3184,7 @@ function requestRetranslateTargetChoice(button = document.querySelector('#verba-
         const viewportTop = viewport?.offsetTop || 0;
         const viewportWidth = viewport?.width || innerWidth;
         const menuRect = menu.getBoundingClientRect();
-        const width = menuRect.width || 112;
+        const width = menuRect.width || 156;
         const height = menuRect.height || 38;
         const centered = buttonRect.left + buttonRect.width / 2 - width / 2;
         const left = Math.min(
@@ -3214,7 +3227,6 @@ function requestRetranslateTargetChoice(button = document.querySelector('#verba-
     });
 }
 
-
 const PREVIOUS_OUTPUT_PAGE_SIZE = 20;
 
 function visiblePreviousOutputPreview(target) {
@@ -3256,12 +3268,9 @@ function visiblePreviousOutputPreview(target) {
 }
 
 function previousOutputOptionMarkup(target, index) {
-    const record = currentRecord(target.message);
-    const failed = failedOutputSignatures.get(target.id) === messageVersionSignature(target.message);
-    const status = record ? '번역됨' : failed ? '번역 실패' : '미번역';
     const preview = visiblePreviousOutputPreview(target).slice(0, 180) || '(표시할 내용 없음)';
     return `<button type="button" class="menu_button verba-previous-output-option" data-target-index="${index}">
-        <span class="verba-previous-output-meta"><b>#${target.id}</b><small>${escapeHtml(status)}</small></span>
+        <span class="verba-previous-output-meta"><b>#${target.id}</b></span>
         <span>${escapeHtml(preview)}</span>
     </button>`;
 }
@@ -3278,7 +3287,7 @@ function requestPreviousOutputTarget(beforeId) {
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.id = 'verba-request-overlay';
-        overlay.className = 'verba-overlay';
+        overlay.className = 'verba-overlay verba-previous-output-overlay';
         if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
         overlay.innerHTML = `
             <section class="verba-modal verba-previous-output-modal" role="dialog" aria-modal="true">
@@ -3457,7 +3466,26 @@ async function retranslateLatestOutput() {
         return;
     }
 
-    const choice = await requestRetranslateTargetChoice();
+    const choice = await requestRetranslateTargetChoice(target);
+    if (choice === 'toggle-view') {
+        const record = currentRecord(target.message);
+        if (!record) {
+            notify('전환할 저장 번역본을 찾지 못했어요.', 'warning');
+            return;
+        }
+        const swipeExtra = currentSwipeExtra(target.message, false);
+        const showingTranslation = Boolean(
+            !sourceViewRequested(target.message, record)
+            && (
+                target.message.extra?.display_text === record.translation
+                || swipeExtra?.display_text === record.translation
+            )
+        );
+        if (showingTranslation) showOriginalDisplay(target.id, target.message, record);
+        else showTranslationDisplay(target.id, target.message, record);
+        refreshRetranslateButton();
+        return;
+    }
     if (choice === 'recent') {
         await retranslateOutputTarget(target, '최근 아웃풋 전체 재번역');
         return;

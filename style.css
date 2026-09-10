@@ -1416,3 +1416,20 @@
 .verba-previous-output-more[hidden] {
     display: none !important;
 }
+
+
+/* v0.3.64: compact recent/previous/source-view menu */
+.verba-retranslate-target-menu {
+    display: flex !important;
+    gap: 4px !important;
+    width: max-content !important;
+    max-width: calc(100vw - 16px) !important;
+}
+
+.verba-retranslate-target-menu > button {
+    width: auto !important;
+    min-width: 46px !important;
+    padding: 5px 9px !important;
+    white-space: nowrap !important;
+}
+\n\n/* v0.3.65: center the previous-output picker on phones while keeping its list scrollable */\n@media (max-width: 600px) {\n    #verba-request-overlay.verba-previous-output-overlay {\n        align-items: center !important;\n        justify-content: center !important;\n        padding: max(8px, env(safe-area-inset-top, 0px)) 9px max(8px, env(safe-area-inset-bottom, 0px)) !important;\n    }\n\n    #verba-request-overlay.verba-previous-output-overlay .verba-previous-output-modal {\n        width: 100% !important;\n        max-height: min(82dvh, 680px) !important;\n        margin: auto !important;\n    }\n\n    #verba-request-overlay.verba-previous-output-overlay .verba-previous-output-list {\n        min-height: 0 !important;\n        max-height: min(60dvh, 520px) !important;\n        overflow-y: auto !important;\n        -webkit-overflow-scrolling: touch;\n    }\n}\n

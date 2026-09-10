@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.66';
+const EXTENSION_VERSION = '0.3.67';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3342,10 +3342,19 @@ function requestPreviousOutputTarget(beforeId) {
         const moreButton = overlay.querySelector('.verba-previous-output-more');
         let renderedCount = 0;
         let settled = false;
+        let recenter = null;
+
+        const cleanup = () => {
+            if (!recenter) return;
+            globalThis.visualViewport?.removeEventListener?.('resize', recenter);
+            globalThis.visualViewport?.removeEventListener?.('scroll', recenter);
+            window.removeEventListener('resize', recenter);
+        };
 
         const finish = value => {
             if (settled) return;
             settled = true;
+            cleanup();
             try {
                 overlay.hidePopover?.();
             } catch {
@@ -3363,6 +3372,7 @@ function requestPreviousOutputTarget(beforeId) {
                 const wrapper = document.createElement('div');
                 wrapper.innerHTML = previousOutputOptionMarkup(targets[index], index);
                 const button = wrapper.firstElementChild;
+                if (!button) continue;
                 button.addEventListener('click', () => finish(targets[index] || null));
                 fragment.append(button);
             }
@@ -3377,29 +3387,8 @@ function requestPreviousOutputTarget(beforeId) {
             event.preventDefault();
             event.stopPropagation();
             renderMore();
+            requestAnimationFrame(() => centerPreviousOutputModal(overlay));
         });
-
-        document.documentElement.append(overlay);
-        try {
-            overlay.showPopover?.();
-        } catch {
-            // Fixed-position fallback.
-        }
-
-        const recenter = () => centerPreviousOutputModal(overlay);
-        requestAnimationFrame(recenter);
-        setTimeout(recenter, 60);
-        globalThis.visualViewport?.addEventListener?.('resize', recenter);
-        globalThis.visualViewport?.addEventListener?.('scroll', recenter);
-        window.addEventListener('resize', recenter);
-
-        const originalFinish = finish;
-        finish = value => {
-            globalThis.visualViewport?.removeEventListener?.('resize', recenter);
-            globalThis.visualViewport?.removeEventListener?.('scroll', recenter);
-            window.removeEventListener('resize', recenter);
-            originalFinish(value);
-        };
 
         overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.addEventListener('click', event => {
@@ -3409,7 +3398,23 @@ function requestPreviousOutputTarget(beforeId) {
             if (event.key === 'Escape') finish(null);
         });
 
+        // First page is rendered before the modal opens, so the picker can never
+        // start as an empty shell with only the More button.
         renderMore();
+        document.documentElement.append(overlay);
+
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed-position fallback.
+        }
+
+        recenter = () => centerPreviousOutputModal(overlay);
+        requestAnimationFrame(recenter);
+        setTimeout(recenter, 60);
+        globalThis.visualViewport?.addEventListener?.('resize', recenter);
+        globalThis.visualViewport?.addEventListener?.('scroll', recenter);
+        window.addEventListener('resize', recenter);
     });
 }
 

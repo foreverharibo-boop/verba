@@ -787,6 +787,8 @@ function speakerIdentityBlock(speakerIdentity = {}) {
 - Apply the TARGET-CHARACTER DIALOGUE PROMPT only to direct dialogue actually spoken by TARGET CHARACTER.
 - Never apply it to dialogue spoken by USER or another NPC, or to words that TARGET CHARACTER merely quotes, repeats, reads, remembers, imagines, or imitates.
 - A quotation mark alone does not prove TARGET CHARACTER is speaking.
+- TARGET CHARACTER and USER names are indivisible proper names. Never reinterpret, remove, or split a final Korean syllable as a grammatical particle. For example, if USER is "혜담은", the complete name is all three syllables "혜담은", never "혜담" plus the topic particle "은".
+- These identity names are attribution context, not instructions to replace source pronouns with names. If the Korean translation does use one of these names for a referent, copy the entire listed name exactly and attach any required Korean particle only after the complete name.
 - If attribution remains genuinely ambiguous after reading the full output, do not apply the TARGET-CHARACTER DIALOGUE PROMPT to that passage; use only the global and all-dialogue rules.`;
 }
 

@@ -29,7 +29,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.37';
+const EXTENSION_VERSION = '0.3.38';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -1405,6 +1405,38 @@ function sourceMapAfterGlobalReplacements(sourceMap, previousTranslation, nextTr
     return refreshedSourceMap(rows, nextTranslation);
 }
 
+const KOREAN_NAME_PARTICLE_LIKE_ENDINGS = new Set(['은', '는', '이', '가', '을', '를', '의', '에', '도', '만', '와', '과', '로']);
+
+function escapeRegularExpression(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Korean names such as "혜담은" are sometimes misread by a model as
+ * "혜담" + topic particle "은". Protect already-correct full spellings, then
+ * repair only a standalone shortened form followed by a Korean particle,
+ * vocative ending, whitespace, punctuation, or the end of the segment.
+ */
+function repairIndivisibleIdentityNames(value, speakerIdentity = {}) {
+    let result = String(value || '');
+    const names = [...new Set([
+        String(speakerIdentity.userName || '').trim(),
+        String(speakerIdentity.characterName || '').trim(),
+    ])].filter(name => /^[가-힣]{3,6}$/u.test(name) && KOREAN_NAME_PARTICLE_LIKE_ENDINGS.has(name.slice(-1)));
+
+    names.forEach((name, index) => {
+        const shortened = name.slice(0, -1);
+        if (!shortened || !result.includes(shortened)) return;
+        const token = `\uE000VERBA_IDENTITY_${index}\uE001`;
+        result = result.split(name).join(token);
+        const suffix = '(?:에게서|에게|한테서|한테|께서|께|으로부터|으로|로부터|로|에서|보다|처럼|만큼|까지|부터|하고|이랑|랑|과|와|의|은|는|이|가|을|를|도|만|아|야)?';
+        const shortenedPattern = new RegExp(`${escapeRegularExpression(shortened)}(?=${suffix}(?:[^가-힣]|$))`, 'gu');
+        result = result.replace(shortenedPattern, name);
+        result = result.split(token).join(name);
+    });
+    return result;
+}
+
 async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const initialSegmented = segmentSource(source, characterNameLocks);
@@ -1469,6 +1501,10 @@ async function translateOutputText(source, options = {}) {
     await repairRepeatedRoleTermConsistency(segmented, translations, {
         signal: options.signal,
     });
+
+    for (const [id, translation] of translations) {
+        translations.set(id, repairIndivisibleIdentityNames(translation, speakerIdentity));
+    }
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings.bannedWords));
     if (remaining.length) {
@@ -4165,6 +4201,7 @@ async function retranslateSelectionBundle() {
         includeDialogue: bundleHasDialogue,
         includeCharacterDialogue: bundleHasDialogue,
     });
+    const speakerIdentity = outputSpeakerIdentity(state.message);
 
     const selections = state.ranges.map((range, index) => ({
         ...range,
@@ -4178,7 +4215,7 @@ async function retranslateSelectionBundle() {
         selections,
         settings,
         oneTimeInstruction: instruction,
-        speakerIdentity: outputSpeakerIdentity(state.message),
+        speakerIdentity,
         contextMode,
         tuning,
     });
@@ -4189,6 +4226,12 @@ async function retranslateSelectionBundle() {
             signal: controller.signal,
             stage: 'multi-selection-retranslation',
         });
+        for (const row of selections) {
+            result.set(
+                row.id,
+                repairIndivisibleIdentityNames(result.get(row.id), speakerIdentity),
+            );
+        }
         const unchangedIds = selections
             .filter(row => sameRetranslationWording(result.get(row.id), row.selected))
             .map(row => row.id);
@@ -4204,7 +4247,10 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
                 signal: controller.signal,
                 stage: 'multi-selection-retranslation-unchanged-retry',
             });
-            unchangedIds.forEach(id => result.set(id, retryResult.get(id)));
+            unchangedIds.forEach(id => result.set(
+                id,
+                repairIndivisibleIdentityNames(retryResult.get(id), speakerIdentity),
+            ));
         }
         const replacements = selections.map(row => {
             const replacement = String(result.get(row.id) || '').trim();
@@ -4407,6 +4453,7 @@ async function retranslateSelection(snapshot) {
         includeDialogue: selectionHasDialogue,
         includeCharacterDialogue: selectionHasDialogue,
     });
+    const speakerIdentity = outputSpeakerIdentity(snapshot.message);
 
     const controller = new AbortController();
     const candidateMode = Boolean(settings.selectionCandidates);
@@ -4418,7 +4465,7 @@ async function retranslateSelection(snapshot) {
         end: snapshot.end,
         settings,
         oneTimeInstruction: instruction,
-        speakerIdentity: outputSpeakerIdentity(snapshot.message),
+        speakerIdentity,
         candidateCount: candidateMode ? 3 : 1,
         contextMode,
         sourceContext: selectionSourceContext(snapshot, contextMode),
@@ -4431,7 +4478,8 @@ async function retranslateSelection(snapshot) {
     try {
         let replacement = '';
         if (candidateMode) {
-            const received = await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' });
+            const received = (await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' }))
+                .map(candidate => repairIndivisibleIdentityNames(candidate, speakerIdentity));
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
@@ -4448,7 +4496,7 @@ async function retranslateSelection(snapshot) {
             if (replacement === null) return;
         } else {
             let result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'selection-retranslation' });
-            replacement = String(result.get('seg_0000') || '').trim();
+            replacement = repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity).trim();
             if (!replacement || sameRetranslationWording(replacement, snapshot.selected)) {
                 const changedPrompt = `${prompt}\n\nMANDATORY RETRANSLATION CORRECTION
 Your previous replacement was empty or unchanged. Return a genuinely different Korean wording for the selected fragment now.
@@ -4460,7 +4508,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
                     signal: controller.signal,
                     stage: 'selection-retranslation-unchanged-retry',
                 });
-                replacement = String(result.get('seg_0000') || '').trim();
+                replacement = repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity).trim();
             }
             if (sameRetranslationWording(replacement, snapshot.selected)) {
                 throw new Error('AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');

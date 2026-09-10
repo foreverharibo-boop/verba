@@ -1818,3 +1818,62 @@
     outline: 1px solid color-mix(in srgb, currentColor 10%, transparent);
     outline-offset: 2px;
 }
+
+
+/* v0.3.90: hidden developer mode + QA lab */
+.verba-version-tap-target {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+.verba-developer-password-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483647 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 12px !important;
+    background: rgba(0,0,0,.28) !important;
+}
+
+.verba-developer-password-modal {
+    width: min(360px, calc(100vw - 24px)) !important;
+}
+
+.verba-developer-lab {
+    border-style: dashed !important;
+}
+
+.verba-developer-lab > summary {
+    font-weight: 600 !important;
+}
+
+#verba-quality-audit-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 3px !important;
+}
+
+.verba-quality-audit-status-row {
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    gap: 10px !important;
+    margin-top: 8px !important;
+    padding: 7px 8px !important;
+    border-radius: 7px !important;
+    background: color-mix(in srgb, currentColor 5%, transparent) !important;
+    font-size: .82em !important;
+}
+
+.verba-quality-audit-status-row > span {
+    opacity: .66 !important;
+    flex: 0 0 auto !important;
+}
+
+.verba-quality-audit-status-row > b {
+    text-align: right !important;
+    font-weight: 500 !important;
+    overflow-wrap: anywhere !important;
+}

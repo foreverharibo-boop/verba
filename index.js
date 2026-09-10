@@ -9,6 +9,7 @@ import {
     buildNameMatchPrompt,
     buildOutputPrompt,
     buildProtectedTokenRepairPrompt,
+    buildQualityAuditPrompt,
     buildRoleTermPlanPrompt,
     buildScopedOutputPrompt,
     buildSpeakerAttributionPrompt,
@@ -34,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.89';
+const EXTENSION_VERSION = '0.3.90';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -69,6 +70,13 @@ const DEFAULT_SETTINGS = {
     activeProfileSlot: 'A',
     autoProfileFallback: true,
     debugMode: false,
+    developerMode: false,
+    qualityAuditEnabled: false,
+    qualityAuditMeaning: true,
+    qualityAuditReferent: true,
+    qualityAuditVoice: true,
+    qualityAuditTranslationese: true,
+    qualityAuditContinuity: true,
     autoInput: false,
     selectionCandidates: false,
     selectionQuickCount: 2,
@@ -112,7 +120,13 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 const settings = extension_settings[EXTENSION_KEY];
 settings.profileStats = normalizeProfileStats(settings.profileStats);
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
-delete settings.developerMode;
+settings.developerMode = settings.developerMode === true;
+settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
+settings.qualityAuditMeaning = settings.qualityAuditMeaning !== false;
+settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
+settings.qualityAuditVoice = settings.qualityAuditVoice !== false;
+settings.qualityAuditTranslationese = settings.qualityAuditTranslationese !== false;
+settings.qualityAuditContinuity = settings.qualityAuditContinuity !== false;
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
 settings.dialoguePrompt = typeof settings.dialoguePrompt === 'string' ? settings.dialoguePrompt : '';
@@ -190,6 +204,9 @@ const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
 const scopedParallelRequestQueue = [];
 let scopedParallelRequestActive = 0;
 let requestTail = Promise.resolve();
+let developerTapCount = 0;
+let developerTapResetTimer = null;
+let lastQualityAuditSummary = '아직 실행되지 않음';
 let chatSaveTimer = null;
 let uiRefreshTimer = null;
 let inputBusy = false;
@@ -2182,6 +2199,255 @@ async function repairProtectedTokenIntegrity(segmented, translations, options = 
     }
 }
 
+
+function normalizedNumberTokens(value) {
+    return (String(value || '').match(/(?<![\p{L}\p{N}_])[-+]?\d+(?:[.,]\d+)*(?![\p{L}\p{N}_])/gu) || [])
+        .map(item => item.replace(/,/g, ''))
+        .sort();
+}
+
+function sameStringArray(left, right) {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function addQualitySuspicion(map, segment, check, reason) {
+    if (!segment?.id) return;
+    if (!map.has(segment.id)) {
+        map.set(segment.id, {
+            segment,
+            checks: new Set(),
+            reasons: [],
+        });
+    }
+    const row = map.get(segment.id);
+    row.checks.add(check);
+    if (reason && !row.reasons.includes(reason)) row.reasons.push(reason);
+}
+
+function koreanPoliteEndingCount(value) {
+    return (String(value || '').match(/(?:요|습니다|습니까|세요|십시오)(?=[.!?…。？！"'”’)\]}]*\s*(?:$|\n))/gmu) || []).length;
+}
+
+function koreanCasualEndingCount(value) {
+    return (String(value || '').match(/(?:잖아|거든|구나|군|냐|니|네|지|어|아|야|해|래|대|데|거야|겠어)(?=[.!?…。？！"'”’)\]}]*\s*(?:$|\n))/gmu) || []).length;
+}
+
+function localQualityAuditCandidates(segmented, translations, speakerScopes) {
+    const enabled = new Set(enabledQualityAuditChecks());
+    const suspects = new Map();
+    if (!enabled.size) return suspects;
+
+    const charStyle = `${settings.dialoguePrompt || ''}\n${settings.allDialoguePrompt || ''}`.toLocaleLowerCase();
+
+    for (const segment of segmented.segments || []) {
+        const source = String(segment.text || '');
+        const translation = String(translations.get(segment.id) || '');
+        const scope = speakerScopes?.[segment.id] || (
+            segment.type === 'dialogue_candidate' ? 'other_dialogue' : 'narration'
+        );
+
+        if (enabled.has('meaning')) {
+            const sourceNumbers = normalizedNumberTokens(source);
+            const targetNumbers = normalizedNumberTokens(translation);
+            if (!sameStringArray(sourceNumbers, targetNumbers)) {
+                addQualitySuspicion(suspects, segment, 'meaning', '숫자/수치 대응 확인 필요');
+            }
+
+            const strongNegation = /\b(?:not|never|no|nothing|nobody|nowhere|without|cannot|can't|won't|wouldn't|shouldn't|mustn't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't|refuse(?:d|s|ing)?|forbid(?:den|s|ding)?)\b/iu.test(source);
+            const koreanNegation = /(?:안\s|않|못\s|없|아니|말(?:아|라고|라|자|지)|금지|거절|절대)/u.test(translation);
+            if (strongNegation && !koreanNegation) {
+                addQualitySuspicion(suspects, segment, 'meaning', '부정/금지 극성 확인 필요');
+            }
+
+            if (/\b(?:allow|permission|permit|consent|refuse|forbid|don't dare|do not dare|must not|mustn't)\b/iu.test(source)) {
+                addQualitySuspicion(suspects, segment, 'meaning', '허락·거절·금지 발화 의도 확인 필요');
+            }
+        }
+
+        if (enabled.has('referent')) {
+            const hasHe = /\b(?:he|him|his|himself)\b/iu.test(source);
+            const hasShe = /\b(?:she|her|hers|herself)\b/iu.test(source);
+            const hasThey = /\b(?:they|them|their|theirs|themselves)\b/iu.test(source);
+            const distinctPronounGroups = [hasHe, hasShe, hasThey].filter(Boolean).length;
+            const properNames = new Set(
+                (source.match(/\b[A-Z][a-z]{2,}\b/g) || [])
+                    .filter(name => !/^(?:The|This|That|When|Then|But|And|He|She|They|His|Her|Their)$/u.test(name)),
+            );
+
+            if (
+                distinctPronounGroups >= 2
+                || (properNames.size >= 2 && (hasHe || hasShe || hasThey))
+            ) {
+                addQualitySuspicion(suspects, segment, 'referent', '여러 인물·대명사 지칭 확인 필요');
+            }
+        }
+
+        if (enabled.has('voice') && scope === 'target_dialogue') {
+            const polite = koreanPoliteEndingCount(translation);
+            const casual = koreanCasualEndingCount(translation);
+            const wantsBanmal = /(?:\bbanmal\b|반말|casual\s+korean)/iu.test(charStyle);
+            const wantsPolite = /(?:존댓말|\bjondaetmal\b|polite\s+(?:speech|korean)|honorific)/iu.test(charStyle);
+
+            if (wantsBanmal && polite >= 2) {
+                addQualitySuspicion(suspects, segment, 'voice', '반말 지시 대비 존댓말 종결 다수');
+            } else if (wantsPolite && casual >= 2 && polite === 0) {
+                addQualitySuspicion(suspects, segment, 'voice', '존댓말 지시 대비 반말 종결 다수');
+            } else if (polite >= 2 && casual >= 2) {
+                addQualitySuspicion(suspects, segment, 'voice', '대사 안 존댓말·반말 혼재');
+            }
+        }
+
+        if (enabled.has('translationese')) {
+            const patterns = [
+                /그것에\s*대해/u,
+                /그것은\s+내가/u,
+                /나는\s+.+?(?:하기를|되는\s*것을)\s*원/u,
+                /무엇을\s+.+?원하/u,
+                /그가\s+그녀를\s+바라보/u,
+                /그녀가\s+그를\s+바라보/u,
+                /(?:것이다|것이었다)(?:[.!?…。？！]|$)/u,
+            ];
+            if (patterns.some(pattern => pattern.test(translation))) {
+                addQualitySuspicion(suspects, segment, 'translationese', '직역투/영어식 문장 구조 의심');
+            }
+        }
+
+        if (enabled.has('continuity')) {
+            const checks = [
+                [/\bleft\b/iu, /왼/u, 'left/왼쪽'],
+                [/\bright\b/iu, /오른/u, 'right/오른쪽'],
+                [/\binside\b/iu, /(?:안|속|내부)/u, 'inside/안쪽'],
+                [/\boutside\b/iu, /(?:밖|바깥|외부)/u, 'outside/바깥'],
+                [/\bbefore\b/iu, /(?:전|앞서|이전)/u, 'before/이전'],
+                [/\bafter\b/iu, /(?:후|뒤|나서|이후)/u, 'after/이후'],
+                [/\bopen(?:ed|ing)?\b/iu, /(?:열|벌어)/u, 'open/열림'],
+                [/\bclos(?:e|ed|ing)\b/iu, /(?:닫|감)/u, 'close/닫힘'],
+            ];
+            for (const [sourcePattern, targetPattern, label] of checks) {
+                if (sourcePattern.test(source) && !targetPattern.test(translation)) {
+                    addQualitySuspicion(suspects, segment, 'continuity', `${label} 방향·상태 확인 필요`);
+                    break;
+                }
+            }
+        }
+    }
+
+    return suspects;
+}
+
+async function runExperimentalQualityAudit({
+    segmented,
+    translations,
+    speakerScopes,
+    speakerIdentity,
+    options,
+}) {
+    if (!settings.developerMode || !settings.qualityAuditEnabled) return { checked: 0, changed: 0 };
+
+    const suspects = localQualityAuditCandidates(segmented, translations, speakerScopes);
+    if (!suspects.size) {
+        lastQualityAuditSummary = '로컬 이상 없음 · AI 검수 생략';
+        renderQualityAuditStatus();
+        return { checked: 0, changed: 0 };
+    }
+
+    const rows = [...suspects.values()];
+    const candidates = rows.map(row => ({
+        ...row.segment,
+        qualityChecks: [...row.checks],
+        qualityReasons: [...row.reasons],
+        outputScope: speakerScopes?.[row.segment.id] || (
+            row.segment.type === 'dialogue_candidate' ? 'other_dialogue' : 'narration'
+        ),
+    }));
+    const categories = [...new Set(rows.flatMap(row => [...row.checks]))];
+
+    lastQualityAuditSummary = `의심 ${candidates.length}구간 · ${categories.join('/')}`;
+    renderQualityAuditStatus();
+
+    try {
+        const prompt = buildQualityAuditPrompt({
+            segments: candidates,
+            currentTranslations: translations,
+            sourceContext: segmented.protectedText,
+            settings,
+            speakerIdentity,
+            nameTokens: nameTokensForSegments(segmented, candidates),
+            tuning: options.tuning || null,
+            enabledChecks: enabledQualityAuditChecks(),
+        });
+        const reviewed = await requestSegments(prompt, candidates, {
+            ...options,
+            stage: 'quality-audit',
+        });
+
+        const changed = [];
+        for (const segment of candidates) {
+            const before = String(translations.get(segment.id) || '');
+            const after = String(reviewed.get(segment.id) || '');
+            if (!after.trim() || after === before) continue;
+            translations.set(segment.id, after);
+            changed.push(segment);
+        }
+
+        if (changed.length) {
+            for (const [id, translation] of translations) {
+                translations.set(
+                    id,
+                    repairKoreanParticleAlternatives(
+                        repairIndivisibleIdentityNames(translation, speakerIdentity),
+                    ),
+                );
+            }
+
+            const banned = changed.filter(segment =>
+                findBannedWords(translations.get(segment.id), settings.bannedWords).length,
+            );
+            if (banned.length) {
+                await repairSegmentsByOutputScope({
+                    invalid: banned,
+                    segmented,
+                    translations,
+                    speakerScopes,
+                    options: { ...options, speakerIdentity },
+                    buildPrompt: buildBannedRepairPrompt,
+                    stage: 'quality-audit-banned-repair',
+                });
+            }
+
+            const untranslated = findUntranslatedSegments(changed, translations, settings, speakerScopes);
+            if (untranslated.length) {
+                await repairSegmentsByOutputScope({
+                    invalid: untranslated,
+                    segmented,
+                    translations,
+                    speakerScopes,
+                    options: { ...options, speakerIdentity },
+                    buildPrompt: buildUntranslatedRepairPrompt,
+                    stage: 'quality-audit-untranslated-repair',
+                });
+            }
+
+            await repairProtectedTokenIntegrity(segmented, translations, {
+                ...options,
+                speakerIdentity,
+                speakerScopes,
+            });
+        }
+
+        lastQualityAuditSummary = `AI 통합 검수 ${candidates.length}구간 · 수정 ${changed.length}구간 · ${categories.join('/')}`;
+        renderQualityAuditStatus();
+        console.info(`[베르바] 품질 검수 완료: ${lastQualityAuditSummary}`);
+        return { checked: candidates.length, changed: changed.length };
+    } catch (error) {
+        if (isAbort(error, options.signal)) throw error;
+        lastQualityAuditSummary = '검수 실패 · 원래 번역 유지';
+        renderQualityAuditStatus();
+        console.warn('[베르바] 개발자 품질 검수 실패 — 기존 번역을 그대로 유지합니다.', error);
+        return { checked: candidates.length, changed: 0, error };
+    }
+}
+
 async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const initialSegmented = segmentSource(source, characterNameLocks);
@@ -2255,6 +2521,14 @@ async function translateOutputText(source, options = {}) {
     for (const [id, translation] of translations) {
         translations.set(id, repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(translation, speakerIdentity)));
     }
+
+    await runExperimentalQualityAudit({
+        segmented,
+        translations,
+        speakerScopes,
+        speakerIdentity,
+        options,
+    });
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings.bannedWords));
     if (remaining.length) {
@@ -6795,6 +7069,135 @@ function renderNameLockManager() {
     });
 }
 
+
+function refreshSettingsPanelForDeveloperMode() {
+    document.querySelector('#verba-settings')?.remove();
+    injectSettingsPanel();
+
+    const drawer = document.querySelector('#verba-settings .inline-drawer-content');
+    const icon = document.querySelector('#verba-settings .verba-drawer-header .inline-drawer-icon');
+    if (drawer) drawer.style.display = '';
+    icon?.classList?.remove('down');
+    icon?.classList?.add('up');
+}
+
+function requestDeveloperPassword() {
+    if (document.querySelector('#verba-developer-password-overlay')) return Promise.resolve(false);
+
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'verba-developer-password-overlay';
+        overlay.className = 'verba-overlay verba-developer-password-overlay';
+        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+        overlay.innerHTML = `
+            <section class="verba-modal verba-developer-password-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
+                    <strong>개발자 모드</strong>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
+                </header>
+                <label for="verba-developer-password">비밀번호</label>
+                <input id="verba-developer-password" class="text_pole" type="password"
+                    inputmode="numeric" autocomplete="off" maxlength="12">
+                <div class="verba-modal-actions">
+                    <button type="button" class="menu_button verba-submit">확인</button>
+                </div>
+            </section>`;
+
+        (document.body || document.documentElement).append(overlay);
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed overlay fallback.
+        }
+
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            try {
+                overlay.hidePopover?.();
+            } catch {
+                // Already closed.
+            }
+            overlay.remove();
+            resolve(value);
+        };
+
+        const input = overlay.querySelector('#verba-developer-password');
+        const submit = () => {
+            if (String(input?.value || '') !== '130918') {
+                if (input) {
+                    input.value = '';
+                    input.focus();
+                }
+                notify('개발자 모드 비밀번호가 맞지 않아요.', 'error');
+                return;
+            }
+            finish(true);
+        };
+
+        overlay.querySelector('.verba-close')?.addEventListener('click', () => finish(false));
+        overlay.querySelector('.verba-submit')?.addEventListener('click', submit);
+        overlay.addEventListener('keydown', event => {
+            if (event.key === 'Escape') finish(false);
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                submit();
+            }
+        });
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) finish(false);
+        });
+
+        requestAnimationFrame(() => input?.focus());
+    });
+}
+
+async function handleDeveloperTap(event) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    clearTimeout(developerTapResetTimer);
+    developerTapCount += 1;
+    developerTapResetTimer = setTimeout(() => {
+        developerTapCount = 0;
+    }, 2600);
+
+    if (developerTapCount < 7) return;
+
+    developerTapCount = 0;
+    clearTimeout(developerTapResetTimer);
+    developerTapResetTimer = null;
+
+    if (settings.developerMode) {
+        notify('개발자 모드는 이미 활성화되어 있어요.', 'info');
+        return;
+    }
+
+    const unlocked = await requestDeveloperPassword();
+    if (!unlocked) return;
+
+    settings.developerMode = true;
+    saveSettings();
+    refreshSettingsPanelForDeveloperMode();
+    notify('개발자 모드를 활성화했어요.', 'success');
+}
+
+function enabledQualityAuditChecks() {
+    const checks = [];
+    if (settings.qualityAuditMeaning !== false) checks.push('meaning');
+    if (settings.qualityAuditReferent !== false) checks.push('referent');
+    if (settings.qualityAuditVoice !== false) checks.push('voice');
+    if (settings.qualityAuditTranslationese !== false) checks.push('translationese');
+    if (settings.qualityAuditContinuity !== false) checks.push('continuity');
+    return checks;
+}
+
+function renderQualityAuditStatus() {
+    const target = document.querySelector('#verba-quality-audit-status');
+    if (target) target.textContent = lastQualityAuditSummary;
+}
+
 function injectSettingsPanel() {
     if (document.querySelector('#verba-settings')) return;
     const host = document.querySelector('#extensions_settings');
@@ -6805,7 +7208,7 @@ function injectSettingsPanel() {
     panel.innerHTML = `
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header verba-drawer-header">
-                <div><b>베르바</b> <small>v${EXTENSION_VERSION}</small></div>
+                <div><b>베르바</b> <small class="verba-version-tap-target">v${EXTENSION_VERSION}</small></div>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content" style="display: none;">
@@ -6842,6 +7245,49 @@ function injectSettingsPanel() {
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${lastDebugDiagnostic ? '' : 'disabled'}>최근 오류 진단 복사</button>
                     </div>
                 </details>
+
+                ${settings.developerMode ? `
+                <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
+                    <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
+                            <span>품질 검수 사용</span>
+                        </label>
+                        <div class="verba-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
+
+                        <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}>
+                                <span>의미 보존 검사</span>
+                            </label>
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}>
+                                <span>대명사·지칭 대상 검사</span>
+                            </label>
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}>
+                                <span>캐릭터 말투 유지 검사</span>
+                            </label>
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}>
+                                <span>번역투 검사</span>
+                            </label>
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}>
+                                <span>문맥 모순 검사</span>
+                            </label>
+                        </div>
+
+                        <div class="verba-quality-audit-status-row">
+                            <span>최근 검수</span>
+                            <b id="verba-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
+                        </div>
+                        <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
+                        <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
+                    </div>
+                </details>
+                ` : ''}
 
                 <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
@@ -6991,6 +7437,55 @@ function injectSettingsPanel() {
     renderProfileStats();
     renderTranslationRuleOrder();
     renderPromptConflictInspector();
+    renderQualityAuditStatus();
+
+    panel.querySelector('.verba-version-tap-target')?.addEventListener('click', handleDeveloperTap);
+
+    if (settings.developerMode) {
+        const qualityMaster = panel.querySelector('#verba-quality-audit-enabled');
+        const qualityControls = panel.querySelector('#verba-quality-audit-controls');
+        const syncQualityControls = () => {
+            const enabled = Boolean(qualityMaster?.checked);
+            qualityControls?.classList.toggle('verba-control-disabled', !enabled);
+            qualityControls?.querySelectorAll('input').forEach(input => {
+                input.disabled = !enabled;
+            });
+        };
+
+        qualityMaster?.addEventListener('change', event => {
+            settings.qualityAuditEnabled = event.target.checked;
+            saveSettings();
+            syncQualityControls();
+            lastQualityAuditSummary = settings.qualityAuditEnabled
+                ? '활성화됨 · 다음 아웃풋부터 검사'
+                : '비활성화됨';
+            renderQualityAuditStatus();
+        });
+
+        [
+            ['#verba-quality-audit-meaning', 'qualityAuditMeaning'],
+            ['#verba-quality-audit-referent', 'qualityAuditReferent'],
+            ['#verba-quality-audit-voice', 'qualityAuditVoice'],
+            ['#verba-quality-audit-translationese', 'qualityAuditTranslationese'],
+            ['#verba-quality-audit-continuity', 'qualityAuditContinuity'],
+        ].forEach(([selector, key]) => {
+            panel.querySelector(selector)?.addEventListener('change', event => {
+                settings[key] = event.target.checked;
+                saveSettings();
+            });
+        });
+
+        panel.querySelector('#verba-developer-mode-off')?.addEventListener('click', () => {
+            settings.developerMode = false;
+            settings.qualityAuditEnabled = false;
+            saveSettings();
+            lastQualityAuditSummary = '개발자 모드 비활성화';
+            refreshSettingsPanelForDeveloperMode();
+            notify('개발자 모드를 껐어요.', 'info');
+        });
+
+        syncQualityControls();
+    }
 
     panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();

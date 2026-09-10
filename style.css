@@ -563,14 +563,35 @@
     overflow-wrap: anywhere;
 }
 
-.verba-bottom-error button {
+.verba-error-actions {
     flex: 0 0 auto;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: inherit;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.verba-bottom-error .verba-debug-copy {
+    width: auto !important;
+    min-width: 72px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 3px 9px !important;
+    border-radius: 999px !important;
+    white-space: nowrap !important;
+    font: inherit !important;
+    line-height: 1.1 !important;
+}
+
+.verba-bottom-error .verba-error-close {
+    flex: 0 0 auto;
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
     cursor: pointer;
 }
 

@@ -7,6 +7,7 @@ import {
     buildNameHistoryFormsPrompt,
     buildNameMatchPrompt,
     buildOutputPrompt,
+    buildProtectedTokenRepairPrompt,
     buildRoleTermPlanPrompt,
     buildSelectionPrompt,
     buildTermConsistencyRepairPrompt,
@@ -14,6 +15,7 @@ import {
     detectCharacterGender,
     extractResponseText,
     findBannedWords,
+    findProtectedTokenIntegrityProblems,
     findTranslationPromptConflicts,
     findUntranslatedSegments,
     hasForeignText,
@@ -29,7 +31,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.55';
+const EXTENSION_VERSION = '0.3.57';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -62,6 +64,7 @@ const DEFAULT_SETTINGS = {
     thirdProfileId: '',
     activeProfileSlot: 'A',
     autoProfileFallback: true,
+    debugMode: false,
     autoInput: false,
     selectionCandidates: false,
     selectionQuickCount: 2,
@@ -119,7 +122,7 @@ delete settings.preserveRoles;
 delete settings.preserveNumbers;
 delete settings.preservePerspective;
 delete settings.preserveFormatting;
-delete settings.debugMode;
+settings.debugMode = settings.debugMode === true;
 if (settings.maxTokens !== 15000) {
     settings.maxTokens = 15000;
     liveContext().saveSettingsDebounced?.();
@@ -158,6 +161,7 @@ let preservedGestureSelection = null;
 let lastTouchSelectionAt = 0;
 let lastDesktopSelectionPlacement = null;
 let lastDesktopSelectionAt = 0;
+let lastDebugDiagnostic = null;
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -165,7 +169,11 @@ function liveContext() {
 
 function notify(message, type = 'info') {
     if (type === 'error') {
-        showBottomError(message);
+        const diagnostic = settings.debugMode
+            ? createDebugDiagnostic('generic-error', null, String(message || '오류가 발생했습니다.'))
+            : null;
+        if (diagnostic) lastDebugDiagnostic = diagnostic;
+        showBottomError(message, diagnostic);
         console.error(`[베르바] ${message}`);
         return;
     }
@@ -176,6 +184,108 @@ function notify(message, type = 'info') {
     }
     const logger = type === 'error' ? console.error : type === 'warning' ? console.warn : console.log;
     logger(`[베르바] ${message}`);
+}
+
+function sanitizeDebugValue(value, limit = 6000) {
+    return String(value ?? '')
+        .replace(/Bearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer [REDACTED]')
+        .replace(/((?:api[-_ ]?key|authorization|token|secret|password)\s*[:=]\s*["']?)[^\s"',}]+/gi, '$1[REDACTED]')
+        .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED_KEY]')
+        .slice(0, Math.max(200, Number(limit) || 6000));
+}
+
+function debugErrorChain(error) {
+    const chain = [];
+    const seen = new Set();
+    let current = error;
+    while (current && !seen.has(current) && chain.length < 6) {
+        seen.add(current);
+        chain.push({
+            name: sanitizeDebugValue(current?.name || '', 120),
+            message: sanitizeDebugValue(current?.message || String(current || ''), 1800),
+            code: sanitizeDebugValue(current?.code || '', 200),
+            status: sanitizeDebugValue(current?.status ?? current?.statusCode ?? current?.response?.status ?? '', 120),
+            statusText: sanitizeDebugValue(current?.response?.statusText || '', 300),
+            details: sanitizeDebugValue(current?.details || current?.response?.data?.error?.message || current?.response?.data?.message || '', 1800),
+            stack: sanitizeDebugValue(current?.stack || '', 4500),
+        });
+        current = current?.cause;
+    }
+    return chain;
+}
+
+function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage = '') {
+    const context = liveContext();
+    const latest = (() => {
+        const chat = Array.isArray(context.chat) ? context.chat : [];
+        for (let id = chat.length - 1; id >= 0; id -= 1) {
+            const message = chat[id];
+            if (message && !message.is_user && !message.is_system) return { id, message };
+        }
+        return null;
+    })();
+    const source = latest ? messageSource(latest.message) : '';
+    const configured = configuredProfiles();
+    const viewport = globalThis.visualViewport;
+    return {
+        report: 'VERBA_DEBUG_DIAGNOSTIC',
+        verbaVersion: EXTENSION_VERSION,
+        time: new Date().toISOString(),
+        stage: sanitizeDebugValue(stage, 160),
+        displayMessage: sanitizeDebugValue(displayMessage, 2200),
+        errorChain: debugErrorChain(error),
+        environment: {
+            userAgent: sanitizeDebugValue(globalThis.navigator?.userAgent || '', 1000),
+            viewport: {
+                width: Math.round(viewport?.width || globalThis.innerWidth || 0),
+                height: Math.round(viewport?.height || globalThis.innerHeight || 0),
+                offsetTop: Math.round(viewport?.offsetTop || 0),
+                offsetLeft: Math.round(viewport?.offsetLeft || 0),
+            },
+            touch: Boolean(globalThis.matchMedia?.('(pointer: coarse)')?.matches),
+        },
+        profileState: {
+            activeSlot: activeProfileSlot(),
+            configuredSlots: configured.map(profile => profile.slot),
+            autoProfileFallback: settings.autoProfileFallback !== false,
+        },
+        translationState: latest ? {
+            messageId: latest.id,
+            swipeId: currentSwipeId(latest.message),
+            sourceHash: source ? hashText(source) : '',
+            sourceLength: source.length,
+            hasStoredTranslation: Boolean(currentRecord(latest.message)),
+        } : null,
+        settingsState: {
+            autoInput: Boolean(settings.autoInput),
+            selectionCandidates: Boolean(settings.selectionCandidates),
+            relationTemperatureEnabled: settings.relationTemperatureEnabled !== false,
+            relationTemperature: String(settings.relationTemperature || ''),
+            narrationLocalizationLevel: String(settings.narrationLocalizationLevel || ''),
+            dialogueLocalizationLevel: String(settings.dialogueLocalizationLevel || ''),
+            maxTokens: Number(settings.maxTokens) || 0,
+            timeoutSeconds: Number(settings.timeoutSeconds) || 0,
+        },
+        privacy: '메시지 원문·번역문·프롬프트·프로필 ID·API 키는 포함하지 않음',
+    };
+}
+
+function debugDiagnosticText(diagnostic) {
+    if (!diagnostic) return '';
+    return `베르바 오류 진단\n${JSON.stringify(diagnostic, null, 2)}`;
+}
+
+async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
+    if (!diagnostic) throw new Error('복사할 최근 오류 진단이 없습니다.');
+    await copyText(debugDiagnosticText(diagnostic));
+}
+
+function reportError(stage, error, displayMessage = '') {
+    const message = String(displayMessage || errorText(error) || '오류가 발생했습니다.');
+    const diagnostic = settings.debugMode ? createDebugDiagnostic(stage, error, message) : null;
+    if (diagnostic) lastDebugDiagnostic = diagnostic;
+    showBottomError(message, diagnostic);
+    console.error(`[베르바] ${stage}`, error || message);
 }
 
 function warnTranslationPromptConflicts({
@@ -199,7 +309,7 @@ function warnTranslationPromptConflicts({
     return conflicts;
 }
 
-function showBottomError(message) {
+function showBottomError(message, diagnostic = null) {
     clearTimeout(bottomErrorTimer);
     document.querySelector('#verba-bottom-error')?.remove();
     const notice = document.createElement('div');
@@ -207,19 +317,48 @@ function showBottomError(message) {
     notice.className = 'verba-bottom-notice verba-bottom-error';
     notice.setAttribute('role', 'alert');
     const text = document.createElement('span');
+    text.className = 'verba-error-text';
     text.textContent = `베르바 · ${String(message || '오류가 발생했습니다.')}`;
+    const actions = document.createElement('div');
+    actions.className = 'verba-error-actions';
+    if (settings.debugMode && diagnostic) {
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.className = 'menu_button verba-debug-copy';
+        copy.textContent = '진단 복사';
+        copy.setAttribute('aria-label', '오류 진단 정보 복사');
+        copy.addEventListener('click', async () => {
+            const previous = copy.textContent;
+            copy.disabled = true;
+            try {
+                await copyDebugDiagnostic(diagnostic);
+                copy.textContent = '복사됨';
+            } catch (error) {
+                copy.textContent = '복사 실패';
+                console.error('[베르바] 오류 진단 복사 실패', error);
+            } finally {
+                setTimeout(() => {
+                    if (!copy.isConnected) return;
+                    copy.disabled = false;
+                    copy.textContent = previous;
+                }, 1200);
+            }
+        });
+        actions.append(copy);
+    }
     const close = document.createElement('button');
     close.type = 'button';
+    close.className = 'verba-error-close';
     close.textContent = '✕';
     close.setAttribute('aria-label', '오류 알림 닫기');
     close.addEventListener('click', () => {
         clearTimeout(bottomErrorTimer);
         notice.remove();
     });
-    notice.append(text);
-    notice.append(close);
+    actions.append(close);
+    notice.append(text, actions);
     document.documentElement.append(notice);
-    bottomErrorTimer = setTimeout(() => notice.remove(), 12000);
+    bottomErrorTimer = setTimeout(() => notice.remove(), settings.debugMode && diagnostic ? 30000 : 12000);
 }
 
 function updateServerRetryIndicator() {
@@ -1462,6 +1601,33 @@ function repairKoreanParticleAlternatives(value) {
     return result;
 }
 
+async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
+    const speakerIdentity = options.speakerIdentity || {};
+    for (let repairAttempt = 0; repairAttempt < 3; repairAttempt += 1) {
+        const invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
+        if (!invalid.length) return;
+        const prompt = buildProtectedTokenRepairPrompt(
+            invalid,
+            translations,
+            settings,
+            speakerIdentity,
+            segmented.nameTokens,
+            options.tuning || null,
+        );
+        const repaired = await requestSegments(prompt, invalid, {
+            ...options,
+            stage: 'protected-token-repair',
+        });
+        for (const segment of invalid) translations.set(segment.id, repaired.get(segment.id));
+    }
+
+    const remaining = findProtectedTokenIntegrityProblems(segmented.segments, translations);
+    if (remaining.length) {
+        console.error('[베르바] 보호 요소 자동 복구 실패', remaining.map(row => row.id));
+        throw new Error('보호 요소 자동 복구에 실패했습니다. 다시 번역해 주세요.');
+    }
+}
+
 async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const initialSegmented = segmentSource(source, characterNameLocks);
@@ -1525,6 +1691,14 @@ async function translateOutputText(source, options = {}) {
     // not be planned, without touching already locked terminology.
     await repairRepeatedRoleTermConsistency(segmented, translations, {
         signal: options.signal,
+    });
+
+    // Validate against the original protected source, not merely against the
+    // previous repair result. A missing NAME token can otherwise survive every
+    // post-processing pass and only fail during final assembly.
+    await repairProtectedTokenIntegrity(segmented, translations, {
+        ...options,
+        speakerIdentity,
     });
 
     for (const [id, translation] of translations) {
@@ -2098,20 +2272,20 @@ async function translateMessage(messageId, options = {}) {
                     failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                     const reasonMessage = String(reason?.message || error?.message || '알 수 없는 이유');
                     console.warn('[베르바] 출력 번역 중단', reason || error);
-                    notify(`출력 번역 중단: ${reasonMessage}`, 'error');
+                    reportError('output-aborted', reason || error, `출력 번역 중단: ${reasonMessage}`);
                 }
             } else {
                 outputJobSuccess = false;
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                 console.error('[베르바] 출력 번역 실패', error);
-                notify(`출력 번역 실패: ${errorText(error)}`, 'error');
+                reportError(options.force ? 'output-retranslation' : 'output-translation', error, `출력 번역 실패: ${errorText(error)}`);
             }
         } finally {
             if (outputJobSuccess === null && !controller.signal.aborted) {
                 outputJobSuccess = false;
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                 console.error('[베르바] 출력 번역이 결과 없이 종료되었습니다.');
-                notify('출력 번역 실패: 작업이 결과 없이 종료되었습니다. 다시 시도해 주세요.', 'error');
+                reportError('output-no-result', new Error('출력 번역 작업이 결과 없이 종료되었습니다.'), '출력 번역 실패: 작업이 결과 없이 종료되었습니다. 다시 시도해 주세요.');
             }
             if (outputJobSuccess !== null) {
                 recordOutputTranslation(outputJobSlot, {
@@ -2881,7 +3055,7 @@ async function translateInputAndSend(textarea, sendButton, source) {
     } catch (error) {
         if (!isAbort(error)) {
             console.error('[베르바] 인풋 번역 실패', error);
-            notify(`인풋 번역 실패로 전송하지 않았어요: ${errorText(error)}`, 'error');
+            reportError('input-translate-and-send', error, `인풋 번역 실패로 전송하지 않았어요: ${errorText(error)}`);
         }
     } finally {
         clearProgress(toast);
@@ -2925,7 +3099,7 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
     } catch (error) {
         if (!isAbort(error)) {
             console.error('[베르바] 생성 전 인풋 번역 실패', error);
-            notify(`인풋 번역 실패로 생성을 중단했어요: ${errorText(error)}`, 'error');
+            reportError('input-before-generation', error, `인풋 번역 실패로 생성을 중단했어요: ${errorText(error)}`);
         }
         blockGenerationAndRestore(textarea, source);
     } finally {
@@ -2957,7 +3131,7 @@ async function translateSentInputMessage(payload) {
         } catch (error) {
             if (!isAbort(error)) {
                 console.error('[베르바] 전송된 인풋 번역 실패', error);
-                notify(`인풋 번역 실패로 뒤따르는 생성을 중단했어요: ${errorText(error)}`, 'error');
+                reportError('sent-input-translation', error, `인풋 번역 실패로 뒤따르는 생성을 중단했어요: ${errorText(error)}`);
             }
             try {
                 await liveContext().executeSlashCommandsWithOptions?.('/abort quiet=true verba-input-translation-failed');
@@ -3326,7 +3500,7 @@ function showSelectionSource(snapshot) {
             await copyText(source);
             notify('선택 구간의 원문을 복사했어요.', 'success');
         } catch (error) {
-            notify(`원문 복사 실패: ${errorText(error)}`, 'error');
+            reportError('source-copy', error, `원문 복사 실패: ${errorText(error)}`);
         }
     });
     overlay.addEventListener('click', event => {
@@ -4233,7 +4407,7 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
             console.error('[베르바] 묶음 재번역 실패', error);
-            notify(`묶음 재번역 실패: ${errorText(error)}`, 'error');
+            reportError('bundle-retranslation', error, `묶음 재번역 실패: ${errorText(error)}`);
         }
     } finally {
         clearProgress(toast);
@@ -4334,7 +4508,7 @@ async function lockSelectionName(snapshot) {
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
             console.error('[베르바] 이름 고정 실패', error);
-            notify(`이름 고정 실패: ${errorText(error)}`, 'error');
+            reportError('name-lock', error, `이름 고정 실패: ${errorText(error)}`);
         }
     } finally {
         clearProgress(toast);
@@ -4478,7 +4652,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
             console.error('[베르바] 선택 부분 재번역 실패', error);
-            notify(`선택 부분 재번역 실패: ${errorText(error)}`, 'error');
+            reportError('selection-retranslation', error, `선택 부분 재번역 실패: ${errorText(error)}`);
         }
     } finally {
         clearProgress(toast);
@@ -4708,7 +4882,7 @@ function showMessageCopyMenu(messageId) {
                 close();
                 notify('메시지를 복사했어요.', 'success');
             } catch (error) {
-                notify(`메시지 복사 실패: ${errorText(error)}`, 'error');
+                reportError('message-copy', error, `메시지 복사 실패: ${errorText(error)}`);
             }
         });
     });
@@ -4983,7 +5157,7 @@ async function testConnection(button) {
         notify(`프로필 ${profileSlot} 연결 성공: ${translated}`, 'success');
     } catch (error) {
         if (!isAbort(error)) {
-            notify(`프로필 ${profileSlot} “${profileDisplayName(profileId)}” 연결 실패: ${errorText(error)}`, 'error');
+            reportError('connection-test', error, `프로필 ${profileSlot} “${profileDisplayName(profileId)}” 연결 실패: ${errorText(error)}`);
         }
     } finally {
         button.disabled = false;
@@ -5048,7 +5222,7 @@ function renderNameLockManager() {
                         : '';
                     notify(`${group.characterName} · ${row.source}의 표기를 “${targetName}”로 수정했어요.${historyNotice}`, 'success');
                 } catch (error) {
-                    notify(`이름 수정 실패: ${errorText(error)}`, 'error');
+                    reportError('name-lock-edit', error, `이름 수정 실패: ${errorText(error)}`);
                 } finally {
                     if (saveButton.isConnected) saveButton.disabled = false;
                     if (deleteButton.isConnected) deleteButton.disabled = false;
@@ -5069,7 +5243,7 @@ function renderNameLockManager() {
                     renderNameLockManager();
                     notify(`${group.characterName} · ${row.source}의 이름 고정을 삭제했어요.`, 'success');
                 } catch (error) {
-                    notify(`이름 삭제 실패: ${errorText(error)}`, 'error');
+                    reportError('name-lock-delete', error, `이름 삭제 실패: ${errorText(error)}`);
                 } finally {
                     if (saveButton.isConnected) saveButton.disabled = false;
                     if (deleteButton.isConnected) deleteButton.disabled = false;
@@ -5114,6 +5288,18 @@ function injectSettingsPanel() {
                     <span>번역 실패 시 다른 프로필 자동 사용</span>
                 </label>
                 <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
+
+                <details id="verba-debug-settings" class="verba-tool-details">
+                    <summary>디버그 <small>오류 진단 복사</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
+                            <span>디버그 모드</span>
+                        </label>
+                        <div class="verba-help">켜면 베르바 오류 알림에 ‘진단 복사’ 버튼이 생깁니다. 복사한 내용을 그대로 제보하면 오류 단계·코드·스택·기기 환경을 확인할 수 있어요. 메시지 내용·번역문·프롬프트·프로필 ID·API 키는 넣지 않습니다.</div>
+                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${lastDebugDiagnostic ? '' : 'disabled'}>최근 오류 진단 복사</button>
+                    </div>
+                </details>
 
                 <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
@@ -5280,6 +5466,28 @@ function injectSettingsPanel() {
         settings.autoProfileFallback = event.target.checked;
         saveSettings();
     });
+    const debugModeInput = panel.querySelector('#verba-debug-mode');
+    const debugCopyButton = panel.querySelector('#verba-copy-last-debug');
+    const syncDebugCopyButton = () => {
+        if (!debugCopyButton) return;
+        debugCopyButton.disabled = !settings.debugMode || !lastDebugDiagnostic;
+    };
+    debugModeInput?.addEventListener('change', event => {
+        settings.debugMode = event.target.checked;
+        saveSettings();
+        syncDebugCopyButton();
+        notify(settings.debugMode ? '디버그 모드를 켰어요. 다음 오류부터 진단 복사를 사용할 수 있어요.' : '디버그 모드를 껐어요.', 'info');
+    });
+    debugCopyButton?.addEventListener('click', async () => {
+        try {
+            await copyDebugDiagnostic();
+            notify('최근 오류 진단을 복사했어요.', 'success');
+        } catch (error) {
+            console.error('[베르바] 최근 오류 진단 복사 실패', error);
+            notify('복사할 최근 오류 진단이 없어요.', 'warning');
+        }
+    });
+    syncDebugCopyButton();
     panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
         if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
         settings.profileStats = normalizeProfileStats(null);

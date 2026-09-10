@@ -551,6 +551,32 @@ export function parseSelectionCandidateResponse(raw, expectedCount = 3) {
     return candidates;
 }
 
+function protectedTokenCounts(value) {
+    const counts = new Map();
+    for (const token of String(value || '').match(/@@VERBA_(?:NAME_)?\d{4}@@/g) || []) {
+        counts.set(token, (counts.get(token) || 0) + 1);
+    }
+    return counts;
+}
+
+export function findProtectedTokenIntegrityProblems(segments, translations) {
+    const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
+    const invalid = [];
+    for (const segment of segments || []) {
+        const expected = protectedTokenCounts(segment?.text);
+        const actual = protectedTokenCounts(map.get(segment?.id));
+        const tokens = new Set([...expected.keys(), ...actual.keys()]);
+        const damaged = [...tokens].filter(token => (expected.get(token) || 0) !== (actual.get(token) || 0));
+        if (!damaged.length) continue;
+        invalid.push({
+            ...segment,
+            expectedProtectedTokens: [...expected.entries()].map(([token, count]) => ({ token, count })),
+            damagedProtectedTokens: damaged,
+        });
+    }
+    return invalid;
+}
+
 function instructionBlock(title, value, fallback = '(없음)') {
     const text = String(value || '').trim();
     return `${title}\n${text || fallback}`;
@@ -1056,6 +1082,34 @@ Return exactly this schema:
 
 SEGMENTS TO REPAIR
 ${JSON.stringify(payload)}\n\nBANNED WORDS\n${bannedWords.join(', ')}`;
+}
+
+export function buildProtectedTokenRepairPrompt(segments, currentTranslations, settings, speakerIdentity = {}, nameTokens = [], tuning = null) {
+    const payload = segments.map(segment => ({
+        id: segment.id,
+        type: segment.type,
+        source: segment.text,
+        current_translation: currentTranslations.get(segment.id) || '',
+        expected_protected_tokens: segment.expectedProtectedTokens || [],
+    }));
+    return `${sharedOutputRules(settings, '', speakerIdentity, nameTokens, tuning)}
+
+TASK
+Repair only the supplied Korean translations because one or more protected tokens were removed, duplicated, or altered.
+- Return a complete corrected Korean translation for every supplied segment id.
+- Every token listed in expected_protected_tokens MUST appear exactly the listed number of times in that segment's returned translation.
+- Do not invent any protected token that is not present in the source segment.
+- Treat every protected token as an opaque indivisible placeholder. Copy it character-for-character exactly; never translate, spell out, split, shorten, decorate, or omit it.
+- If the current translation lost a token, use SOURCE to determine where that referent belongs and restore the token there while preserving the current Korean wording as much as possible.
+- Do not expose the token's hidden target wording. The app will restore it after validation.
+- Preserve meaning, tone, speaker attribution, paragraph structure, formatting, and all already-correct Korean wording.
+- Do not change or return any segment that was not supplied.
+
+Return exactly this schema:
+{"segments":[{"id":"seg_0000","translation":"수정된 한국어 번역"}]}
+
+SEGMENTS TO REPAIR
+${JSON.stringify(payload)}`;
 }
 
 export function buildUntranslatedRepairPrompt(segments, currentTranslations, settings, speakerIdentity = {}, nameTokens = [], tuning = null) {

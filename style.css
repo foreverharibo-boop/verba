@@ -1628,50 +1628,80 @@
     cursor: pointer !important;
 }
 
-/* v0.3.73: return to the position seen before jumping to an old output */
+@media (max-width: 600px) {
+    .verba-request-history-chip {
+        max-width: min(100%, 250px) !important;
+    }
+}
+
+
+/* v0.3.75: softer ST-like return chip + reliable mobile placement */
 #verba-return-position.verba-return-position {
     position: fixed !important;
-    left: 50% !important;
-    bottom: max(78px, calc(env(safe-area-inset-bottom) + 70px)) !important;
-    transform: translateX(-50%) !important;
-    z-index: 2147483645 !important;
-    display: flex !important;
+    z-index: 2147483646 !important;
+    display: inline-flex !important;
     align-items: center !important;
     gap: 4px !important;
-    max-width: calc(100vw - 18px) !important;
-    padding: 4px !important;
-    border-radius: 999px !important;
-    background: var(--SmartThemeBlurTintColor, rgba(20, 20, 20, .88)) !important;
-    box-shadow: 0 4px 18px rgba(0, 0, 0, .28) !important;
+    width: auto !important;
+    max-width: calc(100vw - 20px) !important;
+    min-height: 0 !important;
+    padding: 5px !important;
+    border: 1px solid color-mix(in srgb, currentColor 14%, transparent) !important;
+    border-radius: 16px !important;
+    background: var(--SmartThemeBlurTintColor, rgba(255,255,255,.94)) !important;
+    color: inherit !important;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .12) !important;
     backdrop-filter: blur(8px);
 }
 
 #verba-return-position .verba-return-position-main {
-    min-height: 34px !important;
+    appearance: none !important;
+    border: 1px solid color-mix(in srgb, currentColor 14%, transparent) !important;
+    border-radius: 12px !important;
+    background: transparent !important;
+    color: inherit !important;
     width: auto !important;
-    padding: 5px 10px !important;
+    max-width: calc(100vw - 74px) !important;
+    min-height: 34px !important;
+    padding: 6px 12px !important;
+    box-shadow: none !important;
     white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    line-height: 1.2 !important;
+}
+
+#verba-return-position .verba-return-position-main:disabled {
+    opacity: 0.68 !important;
 }
 
 #verba-return-position .verba-return-position-close {
     appearance: none !important;
-    width: 30px !important;
-    height: 30px !important;
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
     border: 0 !important;
-    border-radius: 50% !important;
+    border-radius: 10px !important;
     background: transparent !important;
     color: inherit !important;
     padding: 0 !important;
-    font-size: 0.82em !important;
+    font-size: 0.9em !important;
+    line-height: 1 !important;
     cursor: pointer !important;
+    opacity: 0.78 !important;
 }
 
 @media (max-width: 600px) {
     #verba-return-position.verba-return-position {
-        bottom: max(72px, calc(env(safe-area-inset-bottom) + 66px)) !important;
+        max-width: calc(100vw - 14px) !important;
+        padding: 4px !important;
+        border-radius: 15px !important;
     }
 
-    .verba-request-history-chip {
-        max-width: min(100%, 250px) !important;
+    #verba-return-position .verba-return-position-main {
+        min-height: 32px !important;
+        padding: 6px 10px !important;
+        max-width: calc(100vw - 68px) !important;
+        font-size: 0.93em !important;
     }
 }

@@ -34,7 +34,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.74';
+const EXTENSION_VERSION = '0.3.75';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -3760,10 +3760,8 @@ async function retranslateOutputTarget(target, title = '아웃풋 전체 재번�
 
 
 function captureChatViewportPosition() {
-    const viewport = globalThis.visualViewport;
-    const viewportTop = viewport?.offsetTop || 0;
-    const viewportHeight = viewport?.height || innerHeight;
-    const centerY = viewportTop + (viewportHeight / 2);
+    const viewportHeight = globalThis.visualViewport?.height || innerHeight;
+    const centerY = viewportHeight / 2;
 
     const candidates = [...document.querySelectorAll('#chat .mes[mesid], .mes[mesid]')]
         .map(element => {
@@ -3774,8 +3772,8 @@ function captureChatViewportPosition() {
         .filter(item =>
             Number.isInteger(item.id)
             && item.rect.height > 0
-            && item.rect.bottom >= viewportTop
-            && item.rect.top <= viewportTop + viewportHeight
+            && item.rect.bottom >= 0
+            && item.rect.top <= viewportHeight
         );
 
     if (!candidates.length) return null;
@@ -3792,8 +3790,26 @@ function captureChatViewportPosition() {
     };
 }
 
+function positionPreviousOutputReturnButton(host) {
+    if (!host) return;
+    const viewport = globalThis.visualViewport;
+    const viewportWidth = viewport?.width || innerWidth;
+    const compact = viewportWidth <= 600;
+
+    // Keep the chip clearly above mobile bottom bars / input dock.
+    const bottomOffset = compact ? 112 : 26;
+    host.style.setProperty('left', '50%', 'important');
+    host.style.setProperty('bottom', `${bottomOffset}px`, 'important');
+    host.style.setProperty('transform', 'translateX(-50%)', 'important');
+}
+
 function dismissPreviousOutputReturnButton() {
-    document.querySelector('#verba-return-position')?.remove();
+    const host = document.querySelector('#verba-return-position');
+    if (!host) return;
+
+    host.__verbaCleanup?.();
+    delete host.__verbaCleanup;
+    host.remove();
 }
 
 async function restorePreviousOutputReturnPosition(position) {
@@ -3801,8 +3817,6 @@ async function restorePreviousOutputReturnPosition(position) {
     const id = Number(position.messageId);
     let element = document.querySelector(`.mes[mesid="${id}"]`);
 
-    // The original position should normally still be loaded, but give the DOM
-    // a moment in case SillyTavern is finishing a render after deep paging.
     for (let attempt = 0; !element && attempt < 8; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 80));
         element = document.querySelector(`.mes[mesid="${id}"]`);
@@ -3831,7 +3845,22 @@ function showPreviousOutputReturnButton(position) {
     host.innerHTML = `
         <button type="button" class="menu_button verba-return-position-main">↩ 원래 위치로 돌아가기</button>
         <button type="button" class="verba-return-position-close" aria-label="닫기">✕</button>`;
-    document.documentElement.append(host);
+
+    (document.body || document.documentElement).append(host);
+
+    const recalc = () => positionPreviousOutputReturnButton(host);
+    recalc();
+    requestAnimationFrame(recalc);
+    setTimeout(recalc, 50);
+
+    globalThis.visualViewport?.addEventListener?.('resize', recalc);
+    globalThis.visualViewport?.addEventListener?.('scroll', recalc);
+    window.addEventListener('resize', recalc);
+    host.__verbaCleanup = () => {
+        globalThis.visualViewport?.removeEventListener?.('resize', recalc);
+        globalThis.visualViewport?.removeEventListener?.('scroll', recalc);
+        window.removeEventListener('resize', recalc);
+    };
 
     host.querySelector('.verba-return-position-main')?.addEventListener('click', async () => {
         const button = host.querySelector('.verba-return-position-main');
@@ -3842,6 +3871,7 @@ function showPreviousOutputReturnButton(position) {
     });
     host.querySelector('.verba-return-position-close')?.addEventListener('click', dismissPreviousOutputReturnButton);
 }
+
 
 async function jumpToOutputMessage(messageId) {
     const id = Number(messageId);

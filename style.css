@@ -1219,3 +1219,17 @@
         background: var(--verba-surface) !important;
     }
 }
+
+/* v0.3.51 — tablet/desktop-layout retranslation request field */
+@media (min-width: 601px) {
+    #verba-request-overlay #verba-request-text {
+        box-sizing: border-box !important;
+        height: clamp(104px, 13dvh, 150px) !important;
+        min-height: 104px !important;
+        max-height: 180px !important;
+        padding: 10px 12px !important;
+        line-height: 1.45 !important;
+        resize: vertical !important;
+    }
+}
+

@@ -1879,53 +1879,52 @@
 }
 
 
-/* v0.3.91: robust hidden developer-mode gesture */
-.verba-drawer-header {
-    touch-action: manipulation !important;
-    -webkit-tap-highlight-color: transparent !important;
+
+
+/* v0.3.94: explicit developer mode section */
+.verba-developer-settings {
+    margin-top: 14px !important;
 }
 
-.verba-version-tap-target {
-    display: inline-block !important;
-    padding: 2px 3px !important;
-    margin: -2px -3px !important;
-    pointer-events: none !important;
+.verba-developer-code-row {
+    display: flex !important;
+    align-items: center !important;
+    gap: 7px !important;
+    width: 100% !important;
 }
 
-#verba-developer-password-overlay.verba-developer-password-overlay {
-    box-sizing: border-box !important;
-    margin: 0 !important;
-    transform: none !important;
+.verba-developer-code-row > input {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
 }
 
-#verba-developer-password-overlay .verba-developer-password-modal {
-    position: relative !important;
-    inset: auto !important;
-    margin: 0 auto !important;
-    transform: none !important;
+.verba-developer-code-row > button {
+    flex: 0 0 auto !important;
+    min-width: 72px !important;
 }
 
-
-/* v0.3.92: dedicated 7-tap target on the literal 베르바 title */
-.verba-developer-tap-target {
-    display: inline-block !important;
-    padding: 4px 5px !important;
-    margin: -4px -5px !important;
-    touch-action: manipulation !important;
-    -webkit-user-select: none !important;
-    user-select: none !important;
-    -webkit-tap-highlight-color: transparent !important;
-    cursor: default !important;
+.verba-developer-enabled-note {
+    padding: 7px 9px !important;
+    margin-bottom: 8px !important;
+    border-radius: 7px !important;
+    background: color-mix(in srgb, currentColor 5%, transparent) !important;
+    font-size: .84em !important;
+    opacity: .82 !important;
 }
 
+.verba-developer-lab {
+    margin: 6px 0 10px !important;
+    border-style: dashed !important;
+}
 
-/* v0.3.93: hidden developer gesture uses document-level hit detection */
-.verba-developer-tap-target {
-    display: inline-block !important;
-    padding: 5px 8px !important;
-    margin: -5px -8px !important;
-    touch-action: manipulation !important;
-    -webkit-user-select: none !important;
-    user-select: none !important;
-    -webkit-tap-highlight-color: transparent !important;
+@media (max-width: 600px) {
+    .verba-developer-code-row {
+        gap: 6px !important;
+    }
+
+    .verba-developer-code-row > button {
+        min-width: 68px !important;
+        padding-left: 9px !important;
+        padding-right: 9px !important;
+    }
 }

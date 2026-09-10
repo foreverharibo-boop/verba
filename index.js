@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.3.93';
+const EXTENSION_VERSION = '0.3.94';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -204,8 +204,6 @@ const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
 const scopedParallelRequestQueue = [];
 let scopedParallelRequestActive = 0;
 let requestTail = Promise.resolve();
-let developerTapCount = 0;
-let developerTapResetTimer = null;
 let lastQualityAuditSummary = '아직 실행되지 않음';
 let chatSaveTimer = null;
 let uiRefreshTimer = null;
@@ -7081,196 +7079,6 @@ function refreshSettingsPanelForDeveloperMode() {
     icon?.classList?.add('up');
 }
 
-function requestDeveloperPassword() {
-    if (document.querySelector('#verba-developer-password-overlay')) return Promise.resolve(false);
-
-    return new Promise(resolve => {
-        const overlay = document.createElement('div');
-        overlay.id = 'verba-developer-password-overlay';
-        overlay.className = 'verba-overlay verba-developer-password-overlay';
-        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
-        overlay.innerHTML = `
-            <section class="verba-modal verba-developer-password-modal" role="dialog" aria-modal="true">
-                <header class="verba-modal-header">
-                    <strong>개발자 모드</strong>
-                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
-                </header>
-                <label for="verba-developer-password">비밀번호</label>
-                <input id="verba-developer-password" class="text_pole" type="password"
-                    inputmode="numeric" autocomplete="off" maxlength="12">
-                <div class="verba-modal-actions">
-                    <button type="button" class="menu_button verba-submit">확인</button>
-                </div>
-            </section>`;
-
-        (document.body || document.documentElement).append(overlay);
-
-        const forceDeveloperOverlayGeometry = () => {
-            const viewport = globalThis.visualViewport;
-            const width = viewport?.width || innerWidth;
-            const height = viewport?.height || innerHeight;
-            const left = viewport?.offsetLeft || 0;
-            const top = viewport?.offsetTop || 0;
-
-            overlay.style.setProperty('position', 'fixed', 'important');
-            overlay.style.setProperty('left', `${left}px`, 'important');
-            overlay.style.setProperty('top', `${top}px`, 'important');
-            overlay.style.setProperty('right', 'auto', 'important');
-            overlay.style.setProperty('bottom', 'auto', 'important');
-            overlay.style.setProperty('width', `${width}px`, 'important');
-            overlay.style.setProperty('height', `${height}px`, 'important');
-            overlay.style.setProperty('display', 'flex', 'important');
-            overlay.style.setProperty('align-items', 'center', 'important');
-            overlay.style.setProperty('justify-content', 'center', 'important');
-            overlay.style.setProperty('z-index', '2147483647', 'important');
-        };
-
-        forceDeveloperOverlayGeometry();
-        try {
-            overlay.showPopover?.();
-        } catch {
-            // Fixed overlay fallback.
-        }
-        requestAnimationFrame(forceDeveloperOverlayGeometry);
-
-        globalThis.visualViewport?.addEventListener?.('resize', forceDeveloperOverlayGeometry);
-        globalThis.visualViewport?.addEventListener?.('scroll', forceDeveloperOverlayGeometry);
-        window.addEventListener('resize', forceDeveloperOverlayGeometry);
-
-        let settled = false;
-        const finish = value => {
-            if (settled) return;
-            settled = true;
-            globalThis.visualViewport?.removeEventListener?.('resize', forceDeveloperOverlayGeometry);
-            globalThis.visualViewport?.removeEventListener?.('scroll', forceDeveloperOverlayGeometry);
-            window.removeEventListener('resize', forceDeveloperOverlayGeometry);
-            try {
-                overlay.hidePopover?.();
-            } catch {
-                // Already closed.
-            }
-            overlay.remove();
-            resolve(value);
-        };
-
-        const input = overlay.querySelector('#verba-developer-password');
-        const submit = () => {
-            if (String(input?.value || '') !== '130918') {
-                if (input) {
-                    input.value = '';
-                    input.focus();
-                }
-                notify('개발자 모드 비밀번호가 맞지 않아요.', 'error');
-                return;
-            }
-            finish(true);
-        };
-
-        overlay.querySelector('.verba-close')?.addEventListener('click', () => finish(false));
-        overlay.querySelector('.verba-submit')?.addEventListener('click', submit);
-        overlay.addEventListener('keydown', event => {
-            if (event.key === 'Escape') finish(false);
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                submit();
-            }
-        });
-        overlay.addEventListener('click', event => {
-            if (event.target === overlay) finish(false);
-        });
-
-        requestAnimationFrame(() => input?.focus());
-    });
-}
-
-async function handleDeveloperTap(event) {
-    if (event?.pointerType === 'mouse' && event.button !== 0) return;
-
-    clearTimeout(developerTapResetTimer);
-    developerTapCount += 1;
-    console.debug(`[베르바] 개발자 모드 제목 탭 ${developerTapCount}/7`);
-
-    developerTapResetTimer = setTimeout(() => {
-        developerTapCount = 0;
-        developerTapResetTimer = null;
-    }, 5000);
-
-    if (developerTapCount < 7) return;
-
-    developerTapCount = 0;
-    clearTimeout(developerTapResetTimer);
-    developerTapResetTimer = null;
-
-    if (settings.developerMode) {
-        notify('개발자 모드는 이미 활성화되어 있어요.', 'info');
-        return;
-    }
-
-    // Only stop the 7th event. The first 6 taps may still toggle the drawer,
-    // but the header remains present and the hidden gesture keeps counting.
-    event?.preventDefault?.();
-    event?.stopPropagation?.();
-    event?.stopImmediatePropagation?.();
-
-    const unlocked = await requestDeveloperPassword();
-    if (!unlocked) return;
-
-    settings.developerMode = true;
-    saveSettings();
-    refreshSettingsPanelForDeveloperMode();
-    notify('개발자 모드를 활성화했어요.', 'success');
-}
-
-function isDeveloperHeaderTap(event) {
-    const target = event?.target;
-    if (!(target instanceof Element)) return false;
-
-    const header = target.closest('#verba-settings .verba-drawer-header');
-    if (!header) return false;
-
-    // Treat the visible "베르바" title area as the gesture target even if the
-    // theme inserts wrappers/overlays and the original <b> does not receive
-    // the pointer event directly.
-    const title = header.querySelector('.verba-developer-tap-target, b');
-    if (!title) return false;
-
-    const rect = title.getBoundingClientRect();
-    const x = Number(event.clientX);
-    const y = Number(event.clientY);
-
-    if (Number.isFinite(x) && Number.isFinite(y) && rect.width > 0 && rect.height > 0) {
-        const padX = 26;
-        const padY = 12;
-        return (
-            x >= rect.left - padX
-            && x <= rect.right + padX
-            && y >= rect.top - padY
-            && y <= rect.bottom + padY
-        );
-    }
-
-    return Boolean(target.closest('.verba-developer-tap-target, #verba-settings .verba-drawer-header > div:first-child'));
-}
-
-function setupDeveloperModeGesture() {
-    if (globalThis.__verbaDeveloperGestureInstalled) return;
-    globalThis.__verbaDeveloperGestureInstalled = true;
-
-    const listener = event => {
-        if (!isDeveloperHeaderTap(event)) return;
-        handleDeveloperTap(event);
-    };
-
-    // Delegated document-level capture survives SillyTavern/theme DOM rebuilds.
-    if ('PointerEvent' in globalThis) {
-        document.addEventListener('pointerdown', listener, true);
-    } else if ('ontouchstart' in globalThis) {
-        document.addEventListener('touchstart', listener, { capture: true, passive: false });
-    } else {
-        document.addEventListener('mousedown', listener, true);
-    }
-}
-
 function enabledQualityAuditChecks() {
     const checks = [];
     if (settings.qualityAuditMeaning !== false) checks.push('meaning');
@@ -7296,7 +7104,7 @@ function injectSettingsPanel() {
     panel.innerHTML = `
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header verba-drawer-header">
-                <div><b class="verba-developer-tap-target">베르바</b> <small>v${EXTENSION_VERSION}</small></div>
+                <div><b>베르바</b> <small>v${EXTENSION_VERSION}</small></div>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content" style="display: none;">
@@ -7333,50 +7141,6 @@ function injectSettingsPanel() {
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${lastDebugDiagnostic ? '' : 'disabled'}>최근 오류 진단 복사</button>
                     </div>
                 </details>
-
-                ${settings.developerMode ? `
-                <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
-                    <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
-                    <div class="verba-tool-details-content">
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
-                            <span>품질 검수 사용</span>
-                        </label>
-                        <div class="verba-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
-
-                        <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}>
-                                <span>의미 보존 검사</span>
-                            </label>
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}>
-                                <span>대명사·지칭 대상 검사</span>
-                            </label>
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}>
-                                <span>캐릭터 말투 유지 검사</span>
-                            </label>
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}>
-                                <span>번역투 검사</span>
-                            </label>
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}>
-                                <span>문맥 모순 검사</span>
-                            </label>
-                        </div>
-
-                        <div class="verba-quality-audit-status-row">
-                            <span>최근 검수</span>
-                            <b id="verba-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
-                        </div>
-                        <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
-                        <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
-                    </div>
-                </details>
-                ` : ''}
-
                 <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
                     <div class="verba-tool-details-content">
@@ -7517,6 +7281,66 @@ function injectSettingsPanel() {
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
                 <div class="verba-help">금지어가 나오면 해당 문단만 다시 요청하고 정상 문단은 유지해요.</div>
 
+                <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings">
+                    <summary>개발자 모드 <small>${settings.developerMode ? '활성화됨' : '번호 입력'}</small></summary>
+                    <div class="verba-tool-details-content">
+                        ${settings.developerMode ? `
+                            <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+
+                            <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab" open>
+                                <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
+                                <div class="verba-tool-details-content">
+                                    <label class="verba-check-row">
+                                        <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
+                                        <span>품질 검수 사용</span>
+                                    </label>
+                                    <div class="verba-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
+
+                                    <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
+                                        <label class="verba-check-row">
+                                            <input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}>
+                                            <span>의미 보존 검사</span>
+                                        </label>
+                                        <label class="verba-check-row">
+                                            <input type="checkbox" id="verba-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}>
+                                            <span>대명사·지칭 대상 검사</span>
+                                        </label>
+                                        <label class="verba-check-row">
+                                            <input type="checkbox" id="verba-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}>
+                                            <span>캐릭터 말투 유지 검사</span>
+                                        </label>
+                                        <label class="verba-check-row">
+                                            <input type="checkbox" id="verba-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}>
+                                            <span>번역투 검사</span>
+                                        </label>
+                                        <label class="verba-check-row">
+                                            <input type="checkbox" id="verba-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}>
+                                            <span>문맥 모순 검사</span>
+                                        </label>
+                                    </div>
+
+                                    <div class="verba-quality-audit-status-row">
+                                        <span>최근 검수</span>
+                                        <b id="verba-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
+                                    </div>
+                                    <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
+                                </div>
+                            </details>
+
+                            <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
+                        ` : `
+                            <label for="verba-developer-code">개발자 번호</label>
+                            <div class="verba-developer-code-row">
+                                <input id="verba-developer-code" class="text_pole" type="password"
+                                    inputmode="numeric" autocomplete="off" maxlength="12"
+                                    placeholder="번호 입력">
+                                <button type="button" id="verba-developer-mode-on" class="menu_button">활성화</button>
+                            </div>
+                            <div class="verba-help">개발자 번호를 입력한 뒤 활성화를 눌러 주세요.</div>
+                        `}
+                    </div>
+                </details>
+
             </div>
         </div>`;
     host.append(panel);
@@ -7526,6 +7350,33 @@ function injectSettingsPanel() {
     renderTranslationRuleOrder();
     renderPromptConflictInspector();
     renderQualityAuditStatus();
+
+    const activateDeveloperMode = () => {
+        const input = panel.querySelector('#verba-developer-code');
+        const code = String(input?.value || '').trim();
+
+        if (code !== '130918') {
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+            notify('개발자 번호가 맞지 않아요.', 'error');
+            return;
+        }
+
+        settings.developerMode = true;
+        saveSettings();
+        lastQualityAuditSummary = '활성화됨 · 품질 검수는 기본 OFF';
+        refreshSettingsPanelForDeveloperMode();
+        notify('개발자 모드를 활성화했어요.', 'success');
+    };
+
+    panel.querySelector('#verba-developer-mode-on')?.addEventListener('click', activateDeveloperMode);
+    panel.querySelector('#verba-developer-code')?.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        activateDeveloperMode();
+    });
 
     if (settings.developerMode) {
         const qualityMaster = panel.querySelector('#verba-quality-audit-enabled');
@@ -8298,7 +8149,6 @@ function initialize() {
     setupAutoInput();
     setupMessageCopyHold();
     setupSelection();
-    setupDeveloperModeGesture();
     setupEvents();
     setupObserver();
     setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 300);

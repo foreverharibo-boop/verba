@@ -2294,3 +2294,107 @@
 .verba-prompt-backup-preview-modal {
     transition: opacity 60ms linear;
 }
+
+
+/* v0.4.23: prompt preset duplicate/favorite + current applied rules */
+#verba-prompt-preset-favorite.is-favorite {
+    font-weight: 700 !important;
+}
+
+.verba-current-rules {
+    margin: 2px 0 !important;
+}
+
+.verba-current-rules #verba-current-rules-content {
+    display: grid;
+    gap: 8px;
+}
+
+.verba-current-rules-note {
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--verba-text) 6%, transparent);
+    font-size: .82em;
+    line-height: 1.4;
+    opacity: .78;
+}
+
+.verba-current-rule-grid {
+    display: grid;
+    gap: 7px;
+}
+
+.verba-current-rule-card {
+    display: grid;
+    gap: 6px;
+    padding: 8px 9px;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #888) 42%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--verba-text) 3%, transparent);
+}
+
+.verba-current-rule-card.is-muted {
+    opacity: .58;
+}
+
+.verba-current-rule-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.verba-current-rule-card-head > b {
+    font-size: .9em;
+}
+
+.verba-current-rule-card-head > span {
+    flex: 0 0 auto;
+    font-size: .72em;
+    opacity: .72;
+}
+
+.verba-current-rule-card pre {
+    margin: 0;
+    padding: 7px 8px;
+    max-height: 150px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--verba-text) 5%, transparent);
+    color: inherit;
+    font: inherit;
+    font-size: .8em;
+    line-height: 1.4;
+}
+
+.verba-current-rule-lines {
+    display: grid;
+    gap: 4px;
+}
+
+.verba-current-rule-lines > div {
+    display: grid;
+    grid-template-columns: minmax(92px, auto) minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    font-size: .8em;
+    line-height: 1.35;
+}
+
+.verba-current-rule-lines span {
+    opacity: .65;
+}
+
+.verba-current-rule-lines b {
+    min-width: 0;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+}
+
+@media (min-width: 760px) {
+    .verba-current-rule-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

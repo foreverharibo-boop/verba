@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.22';
+const EXTENSION_VERSION = '0.4.23';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -173,6 +173,7 @@ settings.promptPresets = Array.isArray(settings.promptPresets)
             dialoguePromptEnabled: preset?.dialoguePromptEnabled !== false,
             otherDialoguePrompt: String(preset?.otherDialoguePrompt || ''),
             otherDialoguePromptEnabled: preset?.otherDialoguePromptEnabled !== false,
+            favorite: preset?.favorite === true,
             updatedAt: String(preset?.updatedAt || ''),
         }))
         .filter(preset => preset.name)
@@ -747,6 +748,7 @@ function normalizedPromptPresets() {
             dialoguePromptEnabled: raw?.dialoguePromptEnabled !== false,
             otherDialoguePrompt: String(raw?.otherDialoguePrompt || ''),
             otherDialoguePromptEnabled: raw?.otherDialoguePromptEnabled !== false,
+            favorite: raw?.favorite === true,
             updatedAt: String(raw?.updatedAt || ''),
         });
         if (result.length >= 100) break;
@@ -1087,13 +1089,38 @@ function promptPresetById(id) {
     return normalizedPromptPresets().find(preset => preset.id === key) || null;
 }
 
+function promptPresetDuplicateName(baseName, rows = normalizedPromptPresets()) {
+    const base = normalizedPromptPresetName(baseName) || '프롬프트 프리셋';
+    const used = new Set((rows || []).map(row => String(row?.name || '').toLocaleLowerCase()));
+    const first = normalizedPromptPresetName(`${base} 복사본`);
+    if (first && !used.has(first.toLocaleLowerCase())) return first;
+
+    for (let index = 2; index <= 999; index += 1) {
+        const suffix = ` 복사본 ${index}`;
+        const trimmedBase = base.slice(0, Math.max(1, 60 - suffix.length)).trim();
+        const candidate = normalizedPromptPresetName(`${trimmedBase}${suffix}`);
+        if (candidate && !used.has(candidate.toLocaleLowerCase())) return candidate;
+    }
+    return normalizedPromptPresetName(`${base.slice(0, 42)} ${Date.now()}`);
+}
+
+function promptPresetDisplayRows() {
+    return normalizedPromptPresets()
+        .map((preset, index) => ({ preset, index }))
+        .sort((left, right) => {
+            const favoriteDiff = Number(right.preset.favorite === true) - Number(left.preset.favorite === true);
+            return favoriteDiff || left.index - right.index;
+        })
+        .map(entry => entry.preset);
+}
+
 function promptPresetSelectMarkup(selectedId = '') {
     const selected = String(selectedId || '');
-    const rows = normalizedPromptPresets();
+    const rows = promptPresetDisplayRows();
     return [
         '<option value="">저장된 프롬프트 프리셋 선택</option>',
         ...rows.map(preset => (
-            `<option value="${escapeHtml(preset.id)}" ${preset.id === selected ? 'selected' : ''}>${escapeHtml(preset.name)}</option>`
+            `<option value="${escapeHtml(preset.id)}" ${preset.id === selected ? 'selected' : ''}>${preset.favorite ? '★ ' : ''}${escapeHtml(preset.name)}</option>`
         )),
     ].join('');
 }
@@ -1108,12 +1135,25 @@ function renderPromptPresetManager(selectedId = '') {
     const count = document.querySelector('#verba-prompt-preset-count');
     if (count) count.textContent = `${normalizedPromptPresets().length}개 저장`;
 
-    const hasSelection = Boolean(promptPresetById(select.value));
-    ['#verba-prompt-preset-load', '#verba-prompt-preset-overwrite', '#verba-prompt-preset-rename', '#verba-prompt-preset-delete']
-        .forEach(selector => {
-            const button = document.querySelector(selector);
-            if (button) button.disabled = !hasSelection;
-        });
+    const selectedPreset = promptPresetById(select.value);
+    const hasSelection = Boolean(selectedPreset);
+    [
+        '#verba-prompt-preset-load',
+        '#verba-prompt-preset-overwrite',
+        '#verba-prompt-preset-rename',
+        '#verba-prompt-preset-duplicate',
+        '#verba-prompt-preset-favorite',
+        '#verba-prompt-preset-delete',
+    ].forEach(selector => {
+        const button = document.querySelector(selector);
+        if (button) button.disabled = !hasSelection;
+    });
+
+    const favoriteButton = document.querySelector('#verba-prompt-preset-favorite');
+    if (favoriteButton) {
+        favoriteButton.textContent = selectedPreset?.favorite ? '★ 즐겨찾기 해제' : '☆ 즐겨찾기';
+        favoriteButton.classList.toggle('is-favorite', selectedPreset?.favorite === true);
+    }
 
     renderPromptPresetBackups();
 }
@@ -1162,6 +1202,145 @@ function setPromptFieldsFromPreset(preset) {
     syncPromptSlotUi();
     saveSettings();
     renderPromptConflictInspector();
+}
+
+function optionLabel(options, value, fallback = '기본') {
+    return options.find(option => option.value === value)?.label || fallback;
+}
+
+function compactLines(value) {
+    return String(value || '')
+        .split(/\r?\n/u)
+        .map(line => line.trim())
+        .filter(Boolean);
+}
+
+function currentRulesPromptSlotMarkup(label, text, enabled) {
+    const content = String(text || '').trim();
+    const actuallyApplied = enabled && Boolean(content);
+    const state = !enabled ? 'OFF · 제외' : content ? 'ON · 적용' : 'ON · 비어 있음';
+    return `<section class="verba-current-rule-card ${actuallyApplied ? 'is-active' : 'is-muted'}">
+        <div class="verba-current-rule-card-head">
+            <b>${escapeHtml(label)}</b>
+            <span>${escapeHtml(state)}</span>
+        </div>
+        ${content ? `<pre>${escapeHtml(content)}</pre>` : ''}
+    </section>`;
+}
+
+function currentRulesSimpleCard(title, rows = []) {
+    const valid = rows.filter(row => row && row[1] !== undefined && row[1] !== null && String(row[1]) !== '');
+    return `<section class="verba-current-rule-card">
+        <div class="verba-current-rule-card-head"><b>${escapeHtml(title)}</b></div>
+        <div class="verba-current-rule-lines">
+            ${valid.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join('')}
+        </div>
+    </section>`;
+}
+
+function renderCurrentAppliedRules() {
+    const host = document.querySelector('#verba-current-rules-content');
+    if (!host) return;
+
+    const relationEnabled = settings.relationTemperatureEnabled !== false;
+    const relationLabel = optionLabel(RELATION_TEMPERATURE_OPTIONS, settings.relationTemperature);
+    const narrationLocalization = optionLabel(LOCALIZATION_LEVEL_OPTIONS, settings.narrationLocalizationLevel);
+    const dialogueLocalization = optionLabel(LOCALIZATION_LEVEL_OPTIONS, settings.dialogueLocalizationLevel);
+
+    const emphasisLabels = {
+        default: '기본 · 추가 지시 없음',
+        source: '원문대로',
+        natural: '자연스럽게',
+        active: '적극적으로',
+    };
+    const disfluencyLabels = {
+        default: '기본 · 추가 지시 없음',
+        clean: '정리해서 번역',
+        natural: '자연스럽게 보존',
+        active: '적극 보존',
+    };
+    const idiomLabels = {
+        default: '기본 · 추가 지시 없음',
+        meaning: '뜻 중심',
+        balanced: '균형',
+        koreanized: '한국식 네이티브화',
+        sourceCulture: '원문화·비유 결 보존',
+    };
+
+    const koreanRhythm = { default: '기본', short: '짧고 툭툭', balanced: '자연스러운 보통', smooth: '길고 매끄럽게' };
+    const koreanPronoun = { default: '기본', preserve: '원문 지칭 비교적 유지', natural: '자연스러우면 생략', active: '한국어답게 적극 생략' };
+    const koreanProfanity = { default: '기본', dry: '건조하게', blunt: '직설적·거칠게', lowSlang: '인터넷식 표현 적게', restrained: '비속어 최소화' };
+    const interjection = { default: '기본', natural: '자연스럽게', restrained: '담백하게', lively: '생동감 있게' };
+    const meme = { default: '기본', light: '살짝', natural: '자연스럽게', active: '적극적으로' };
+
+    const englishRhythm = { default: '기본', short: '짧고 툭툭', balanced: '자연스러운 보통', smooth: '길고 매끄럽게' };
+    const englishConversation = { default: '기본', natural: '자연스럽게', active: '적극적으로' };
+    const englishSlang = { default: '기본', low: '적게', natural: '자연스럽게', active: '적극적으로' };
+    const englishProfanity = { default: '기본', dry: '건조하게', blunt: '직설적·거칠게', everyday: '일상적인 영어권 느낌', lowSlang: '인터넷·밈식 표현 적게', restrained: '비속어 최소화' };
+
+    const endingPreferred = compactLines(settings.dialogueEndingPreferred);
+    const endingAvoid = compactLines(settings.dialogueEndingAvoid);
+    const banned = compactLines(settings.bannedWords);
+    const priority = normalizeTranslationRuleOrder(settings.translationRuleOrder)
+        .map(key => TRANSLATION_RULE_DEFINITIONS.find(item => item.key === key)?.label || key)
+        .join(' → ');
+
+    host.innerHTML = `
+        <div class="verba-current-rules-note">현재 저장값을 기준으로 실제 번역에 적용되는 사용자 규칙을 정리해서 보여줍니다. API 호출은 하지 않습니다.</div>
+
+        <div class="verba-current-rule-grid">
+            ${currentRulesPromptSlotMarkup('전체 번역 전역 프롬프트', settings.globalPrompt, settings.globalPromptEnabled !== false)}
+            ${currentRulesPromptSlotMarkup('모든 대사 공통 프롬프트', settings.allDialoguePrompt, settings.allDialoguePromptEnabled !== false)}
+            ${currentRulesPromptSlotMarkup('캐릭터 대사 전용 프롬프트', settings.dialoguePrompt, settings.dialoguePromptEnabled !== false)}
+            ${currentRulesPromptSlotMarkup('NPC·USER 대사 전용 프롬프트', settings.otherDialoguePrompt, settings.otherDialoguePromptEnabled !== false)}
+
+            ${currentRulesSimpleCard('관계·현지화', [
+                ['상태', relationEnabled ? 'ON' : 'OFF'],
+                ['관계 온도', relationEnabled ? relationLabel : '적용 안 함'],
+                ['서술 현지화', relationEnabled ? narrationLocalization : '적용 안 함'],
+                ['대사 현지화', relationEnabled ? dialogueLocalization : '적용 안 함'],
+            ])}
+
+            ${currentRulesSimpleCard('대사 말끝 취향 · 캐릭터 대사', [
+                ['선호 표현', endingPreferred.length ? endingPreferred.join(' / ') : '없음'],
+                ['회피 표현', endingAvoid.length ? endingAvoid.join(' / ') : '없음'],
+                ['적용 강도', ({ light: '약하게', normal: '보통', strong: '강하게' })[settings.dialogueEndingStrength] || '보통'],
+                ['반복 줄이기', settings.dialogueEndingRepetitionReduction !== false ? 'ON' : 'OFF'],
+            ])}
+
+            ${currentRulesSimpleCard('표현 디테일', [
+                ['강조 표현', emphasisLabels[settings.expressionEmphasisTaste] || '기본 · 추가 지시 없음'],
+                ['말더듬·늘임·끊김', disfluencyLabels[settings.expressionDisfluencyTaste] || '기본 · 추가 지시 없음'],
+                ['관용구·비유', idiomLabels[settings.expressionIdiomMetaphorTaste] || '기본 · 추가 지시 없음'],
+            ])}
+
+            ${currentRulesSimpleCard('한캐의 맛', settings.koreanFlavorEnabled === true ? [
+                ['상태', 'ON'],
+                ['대사 호흡', koreanRhythm[settings.koreanFlavorDialogueRhythm] || '기본'],
+                ['주어·대명사', koreanPronoun[settings.koreanFlavorPronounOmission] || '기본'],
+                ['욕설 결', koreanProfanity[settings.koreanFlavorProfanityTone] || '기본'],
+                ['감탄사', interjection[settings.koreanFlavorInterjectionTone] || '기본'],
+                ['인터넷 밈', meme[settings.koreanFlavorMemeDensity] || '기본'],
+                ['반복 지칭 줄이기', settings.koreanFlavorReduceReferentRepetition !== false ? 'ON' : 'OFF'],
+            ] : [['상태', 'OFF']])}
+
+            ${currentRulesSimpleCard('영캐의 맛', settings.englishFlavorEnabled === true ? [
+                ['상태', 'ON'],
+                ['대사 호흡', englishRhythm[settings.englishFlavorDialogueRhythm] || '기본'],
+                ['영어권 회화 자연화', englishConversation[settings.englishFlavorConversationNaturalization] || '기본'],
+                ['슬랭·구어체', englishSlang[settings.englishFlavorSlangDensity] || '기본'],
+                ['욕설 결', englishProfanity[settings.englishFlavorProfanityTone] || '기본'],
+                ['감탄사', interjection[settings.englishFlavorInterjectionTone] || '기본'],
+                ['인터넷 밈', meme[settings.englishFlavorMemeDensity] || '기본'],
+                ['지칭 반복 줄이기', settings.englishFlavorReduceReferentRepetition !== false ? 'ON' : 'OFF'],
+            ] : [['상태', 'OFF']])}
+
+            ${currentRulesSimpleCard('기타 적용 규칙', [
+                ['금지어', banned.length ? `${banned.length}개 · ${banned.join(' / ')}` : '없음'],
+                ['우선순위', priority],
+                ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
+            ])}
+        </div>`;
 }
 
 function currentCharacterReference() {
@@ -7854,6 +8033,8 @@ function injectSettingsPanel() {
                             <button type="button" id="verba-prompt-preset-save" class="menu_button">새로 저장</button>
                             <button type="button" id="verba-prompt-preset-load" class="menu_button" disabled>불러오기</button>
                             <button type="button" id="verba-prompt-preset-overwrite" class="menu_button" disabled>덮어쓰기</button>
+                            <button type="button" id="verba-prompt-preset-duplicate" class="menu_button" disabled>복제</button>
+                            <button type="button" id="verba-prompt-preset-favorite" class="menu_button" disabled>☆ 즐겨찾기</button>
                             <button type="button" id="verba-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
                             <button type="button" id="verba-prompt-preset-delete" class="menu_button" disabled>삭제</button>
                         </div>
@@ -7871,6 +8052,13 @@ function injectSettingsPanel() {
                                 <div id="verba-prompt-preset-backup-list" class="verba-prompt-preset-backup-list"></div>
                             </div>
                         </details>
+                    </div>
+                </details>
+
+                <details id="verba-current-rules" class="verba-tool-details verba-current-rules">
+                    <summary>현재 적용 규칙 <small>API 호출 없음</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-current-rules-content"></div>
                     </div>
                 </details>
 
@@ -8642,6 +8830,7 @@ function injectSettingsPanel() {
             id: `prompt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             name,
             ...currentPromptPresetSnapshot(),
+            favorite: false,
             updatedAt: new Date().toISOString(),
         };
         settings.promptPresets = [...presets, preset];
@@ -8649,6 +8838,57 @@ function injectSettingsPanel() {
         renderPromptPresetManager(preset.id);
         if (promptPresetSelect) promptPresetSelect.value = preset.id;
         notify(`프롬프트 프리셋 “${name}”을 저장했어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-duplicate')?.addEventListener('click', () => {
+        const sourcePreset = promptPresetById(promptPresetSelect?.value);
+        if (!sourcePreset) {
+            notify('복제할 프롬프트 프리셋을 선택해 주세요.', 'warning');
+            return;
+        }
+        const presets = normalizedPromptPresets();
+        if (presets.length >= 100) {
+            notify('프롬프트 프리셋은 최대 100개까지 저장할 수 있어요.', 'warning');
+            return;
+        }
+
+        const name = promptPresetDuplicateName(sourcePreset.name, presets);
+        const duplicated = {
+            ...sourcePreset,
+            id: `prompt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            name,
+            favorite: false,
+            updatedAt: new Date().toISOString(),
+        };
+        settings.promptPresets = [...presets, duplicated];
+        saveSettings();
+        renderPromptPresetManager(duplicated.id);
+        if (promptPresetSelect) promptPresetSelect.value = duplicated.id;
+        if (promptPresetName) promptPresetName.value = duplicated.name;
+        notify(`프롬프트 프리셋 “${sourcePreset.name}”을 “${duplicated.name}”으로 복제했어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-favorite')?.addEventListener('click', () => {
+        const id = String(promptPresetSelect?.value || '');
+        const preset = promptPresetById(id);
+        if (!preset) {
+            notify('즐겨찾기를 바꿀 프롬프트 프리셋을 선택해 주세요.', 'warning');
+            return;
+        }
+
+        const nextFavorite = preset.favorite !== true;
+        settings.promptPresets = normalizedPromptPresets().map(row => (
+            row.id === id ? { ...row, favorite: nextFavorite } : row
+        ));
+        saveSettings();
+        renderPromptPresetManager(id);
+        if (promptPresetSelect) promptPresetSelect.value = id;
+        notify(
+            nextFavorite
+                ? `프롬프트 프리셋 “${preset.name}”을 즐겨찾기에 추가했어요.`
+                : `프롬프트 프리셋 “${preset.name}”의 즐겨찾기를 해제했어요.`,
+            'success',
+        );
     });
 
     panel.querySelector('#verba-prompt-preset-load')?.addEventListener('click', () => {
@@ -8779,6 +9019,17 @@ function injectSettingsPanel() {
         settings.bannedWords = event.target.value;
         saveSettings();
     });
+
+    const currentRulesDetails = panel.querySelector('#verba-current-rules');
+    currentRulesDetails?.addEventListener('toggle', () => {
+        if (currentRulesDetails.open) renderCurrentAppliedRules();
+    });
+    const refreshCurrentRulesIfOpen = () => {
+        if (!currentRulesDetails?.open) return;
+        setTimeout(renderCurrentAppliedRules, 0);
+    };
+    panel.addEventListener('input', refreshCurrentRulesIfOpen);
+    panel.addEventListener('change', refreshCurrentRulesIfOpen);
 }
 
 function clearStaleCurrentTranslation(messageId) {

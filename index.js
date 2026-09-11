@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.29';
+const EXTENSION_VERSION = '0.4.31';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2646,6 +2646,7 @@ function repairKoreanParticleAlternatives(value) {
 
 
 function outputScopeForSegment(segment, speakerScopes = {}) {
+    if (segment?.type === 'info_block') return 'info_block';
     if (segment?.type !== 'dialogue_candidate') return 'narration';
     return speakerScopes?.[segment.id] === 'target_dialogue'
         ? 'target_dialogue'

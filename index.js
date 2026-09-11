@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.25';
+const EXTENSION_VERSION = '0.4.29';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -907,98 +907,44 @@ function promptBackupPreviewSlotMarkup(label, text, enabled) {
     </section>`;
 }
 
-function openPromptEditorBackupPreview(backup) {
-    if (!backup?.snapshot) {
+function togglePromptEditorBackupPreview(row, backup, button) {
+    if (!row || !backup?.snapshot) {
         notify('미리볼 프롬프트 백업을 찾지 못했어요.', 'warning');
         return;
     }
 
-    document.querySelector('#verba-prompt-backup-preview-overlay')?.remove();
+    const existing = row.querySelector('.verba-prompt-preset-backup-inline-preview');
+    if (existing) {
+        existing.remove();
+        if (button) button.textContent = '미리보기';
+        return;
+    }
+
+    // 한 번에 하나의 백업만 펼칩니다.
+    document.querySelectorAll('.verba-prompt-preset-backup-inline-preview').forEach(preview => {
+        const otherRow = preview.closest('.verba-prompt-preset-backup-row');
+        const otherButton = otherRow?.querySelector('.verba-prompt-preset-backup-preview');
+        if (otherButton) otherButton.textContent = '미리보기';
+        preview.remove();
+    });
 
     const snapshot = normalizedPromptEditorSnapshot(backup.snapshot);
-    const overlay = document.createElement('div');
-    overlay.id = 'verba-prompt-backup-preview-overlay';
-    overlay.className = 'verba-overlay verba-prompt-backup-preview-overlay';
+    const preview = document.createElement('div');
+    preview.className = 'verba-prompt-preset-backup-inline-preview';
+    preview.innerHTML = `
+        <div class="verba-backup-inline-preview-head">
+            <b>백업 내용</b>
+            <small>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))} · ${escapeHtml(backup.reason)}</small>
+        </div>
+        <div class="verba-backup-preview-list">
+            ${promptBackupPreviewSlotMarkup('전체 번역 전역 프롬프트', snapshot.globalPrompt, snapshot.globalPromptEnabled)}
+            ${promptBackupPreviewSlotMarkup('모든 대사 공통 프롬프트', snapshot.allDialoguePrompt, snapshot.allDialoguePromptEnabled)}
+            ${promptBackupPreviewSlotMarkup('캐릭터 대사 전용 프롬프트', snapshot.dialoguePrompt, snapshot.dialoguePromptEnabled)}
+            ${promptBackupPreviewSlotMarkup('NPC·USER 대사 전용 프롬프트', snapshot.otherDialoguePrompt, snapshot.otherDialoguePromptEnabled)}
+        </div>`;
 
-    overlay.innerHTML = `
-        <section class="verba-modal verba-prompt-backup-preview-modal" role="dialog" aria-modal="true">
-            <header class="verba-modal-header">
-                <div>
-                    <strong>프롬프트 백업 미리보기</strong>
-                    <small>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))} · ${escapeHtml(backup.reason)}</small>
-                </div>
-                <button type="button" class="verba-backup-preview-close" aria-label="닫기">✕</button>
-            </header>
-
-            <div class="verba-backup-preview-list">
-                ${promptBackupPreviewSlotMarkup('전체 번역 전역 프롬프트', snapshot.globalPrompt, snapshot.globalPromptEnabled)}
-                ${promptBackupPreviewSlotMarkup('모든 대사 공통 프롬프트', snapshot.allDialoguePrompt, snapshot.allDialoguePromptEnabled)}
-                ${promptBackupPreviewSlotMarkup('캐릭터 대사 전용 프롬프트', snapshot.dialoguePrompt, snapshot.dialoguePromptEnabled)}
-                ${promptBackupPreviewSlotMarkup('NPC·USER 대사 전용 프롬프트', snapshot.otherDialoguePrompt, snapshot.otherDialoguePromptEnabled)}
-            </div>
-        </section>`;
-
-    let closing = false;
-    let removeTimer = null;
-
-    const swallow = event => {
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        event.stopImmediatePropagation?.();
-    };
-
-    const finishClose = () => {
-        clearTimeout(removeTimer);
-        removeTimer = null;
-        overlay.remove();
-    };
-
-    const closeSafely = event => {
-        if (event) swallow(event);
-        if (closing || !overlay.isConnected) return;
-        closing = true;
-
-        // Keep a full-screen shield mounted for a short time after the modal
-        // visually disappears. Android/mobile browsers may emit a delayed
-        // synthesized click after touchend; without this shield that click can
-        // land on SillyTavern's extension drawer behind the modal.
-        overlay.classList.add('verba-prompt-backup-preview-closing');
-        removeTimer = setTimeout(finishClose, 550);
-    };
-
-    // Capture the complete pointer/touch/click sequence locally.
-    // Because this overlay is mounted inside #verba-settings, SillyTavern's
-    // document-level "outside settings" logic also sees it as part of Verba.
-    ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click'].forEach(type => {
-        overlay.addEventListener(type, event => {
-            if (closing) {
-                swallow(event);
-                return;
-            }
-            const closeButton = event.target?.closest?.('.verba-backup-preview-close');
-            if (closeButton && (type === 'pointerup' || type === 'touchend' || type === 'click')) {
-                closeSafely(event);
-                return;
-            }
-            if (event.target === overlay && (type === 'pointerup' || type === 'touchend' || type === 'click')) {
-                closeSafely(event);
-                return;
-            }
-            event.stopPropagation?.();
-        }, true);
-    });
-
-    overlay.addEventListener('keydown', event => {
-        event.stopPropagation();
-        if (event.key !== 'Escape') return;
-        closeSafely(event);
-    });
-
-    // IMPORTANT: keep the modal inside Verba's extension container rather than
-    // document.body/documentElement. Some SillyTavern/mobile themes close the
-    // extension drawer when a click target is outside its DOM subtree.
-    const mount = document.querySelector('#verba-settings') || document.body || document.documentElement;
-    mount.append(overlay);
+    row.append(preview);
+    if (button) button.textContent = '미리보기 닫기';
 }
 
 function renderPromptPresetBackups() {
@@ -1027,7 +973,9 @@ function renderPromptPresetBackups() {
         : '<div class="verba-prompt-preset-backup-empty">아직 자동 백업이 없어요.</div>';
 
     list.querySelectorAll('.verba-prompt-preset-backup-preview').forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
             const row = button.closest('[data-backup-id]');
             const backup = promptPresetBackupById(row?.dataset?.backupId);
             if (!backup) {
@@ -1035,7 +983,7 @@ function renderPromptPresetBackups() {
                 renderPromptPresetBackups();
                 return;
             }
-            openPromptEditorBackupPreview(backup);
+            togglePromptEditorBackupPreview(row, backup, button);
         });
     });
 
@@ -1138,8 +1086,6 @@ function renderPromptPresetManager(selectedId = '') {
     const selectedPreset = promptPresetById(select.value);
     const hasSelection = Boolean(selectedPreset);
     [
-        '#verba-prompt-preset-load',
-        '#verba-prompt-preset-overwrite',
         '#verba-prompt-preset-rename',
         '#verba-prompt-preset-duplicate',
         '#verba-prompt-preset-favorite',
@@ -7984,17 +7930,12 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
 
-                <details id="verba-debug-settings" class="verba-tool-details">
-                    <summary>디버그 <small>오류 진단 복사</small></summary>
-                    <div class="verba-tool-details-content">
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
-                            <span>디버그 모드</span>
-                        </label>
-                        <div class="verba-help">켜면 베르바 오류 알림에 ‘진단 복사’ 버튼이 생깁니다. 복사한 내용을 그대로 제보하면 오류 단계·코드·스택·기기 환경을 확인할 수 있어요. 메시지 내용·번역문·프롬프트·프로필 ID·API 키는 넣지 않습니다.</div>
-                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${lastDebugDiagnostic ? '' : 'disabled'}>최근 오류 진단 복사</button>
-                    </div>
-                </details>
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
+                    <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
+                </label>
+                <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
+
                 <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
                     <div class="verba-tool-details-content">
@@ -8004,11 +7945,10 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
-                <label class="verba-check-row">
-                    <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
-                    <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
-                </label>
-                <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
+                <details id="verba-name-lock-manager" class="verba-name-lock-manager">
+                    <summary>이름 고정 관리 <small>캐릭터별 저장</small></summary>
+                    <div id="verba-name-lock-manager-content" class="verba-name-lock-manager-content"></div>
+                </details>
 
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-selection-candidates" ${settings.selectionCandidates ? 'checked' : ''}>
@@ -8017,10 +7957,48 @@ function injectSettingsPanel() {
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
 
+                <details id="verba-selection-menu-settings" class="verba-tool-details">
+                    <summary>드래그 메뉴 구성 <small>버튼 수·기능 선택</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label for="verba-selection-quick-count">바로 표시할 버튼 수</label>
+                        <select id="verba-selection-quick-count" class="text_pole">
+                            ${[2, 3, 4, 5].map(count => `
+                                <option value="${count}" ${settings.selectionQuickCount === count ? 'selected' : ''}>${count}개</option>
+                            `).join('')}
+                        </select>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-name" ${settings.showSelectionName !== false ? 'checked' : ''}>
+                            <span>이름으로 고정 메뉴에 포함</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-source" ${settings.showSelectionSource !== false ? 'checked' : ''}>
+                            <span>원문 보기 메뉴에 포함</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-lock" ${settings.showSelectionLock !== false ? 'checked' : ''}>
+                            <span>구간 잠금 메뉴에 포함</span>
+                        </label>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-bundle" ${settings.showSelectionBundle !== false ? 'checked' : ''}>
+                            <span>묶음 추가 메뉴에 포함</span>
+                        </label>
+                        <div class="verba-help">선택 부분 재번역을 포함해 지정한 개수까지만 바로 표시하고, 남은 기능은 ⋯을 누르면 세로로 열려요. 5개를 선택하면 모두 한 줄에 표시할 수 있습니다.</div>
+                    </div>
+                </details>
+
+
+
+                <details id="verba-current-rules" class="verba-tool-details verba-current-rules">
+                    <summary>현재 적용 규칙 <small>API 호출 없음</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-current-rules-content"></div>
+                    </div>
+                </details>
+
                 <details id="verba-prompt-presets" class="verba-tool-details verba-prompt-presets">
                     <summary>프롬프트 프리셋 <small id="verba-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
                     <div class="verba-tool-details-content">
-                        <div class="verba-help">아래 4개 프롬프트의 내용과 각 슬롯 ON/OFF 상태를 한 세트로 저장합니다. 이름 고정·금지어·현지화·말맛·기타 설정은 저장하거나 바꾸지 않습니다.</div>
+                        <div class="verba-help">아래 4개 프롬프트의 내용과 각 슬롯 ON/OFF 상태를 한 세트로 저장합니다. 프리셋을 선택하면 즉시 현재 프롬프트로 적용됩니다. 이름 고정·금지어·현지화·말맛·기타 설정은 저장하거나 바꾸지 않습니다.</div>
 
                         <select id="verba-prompt-preset-select" class="text_pole">
                             ${promptPresetSelectMarkup()}
@@ -8031,8 +8009,6 @@ function injectSettingsPanel() {
 
                         <div class="verba-prompt-preset-actions">
                             <button type="button" id="verba-prompt-preset-save" class="menu_button">새로 저장</button>
-                            <button type="button" id="verba-prompt-preset-load" class="menu_button" disabled>불러오기</button>
-                            <button type="button" id="verba-prompt-preset-overwrite" class="menu_button" disabled>덮어쓰기</button>
                             <button type="button" id="verba-prompt-preset-duplicate" class="menu_button" disabled>복제</button>
                             <button type="button" id="verba-prompt-preset-favorite" class="menu_button" disabled>☆ 즐겨찾기</button>
                             <button type="button" id="verba-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
@@ -8053,18 +8029,6 @@ function injectSettingsPanel() {
                             </div>
                         </details>
                     </div>
-                </details>
-
-                <details id="verba-current-rules" class="verba-tool-details verba-current-rules">
-                    <summary>현재 적용 규칙 <small>API 호출 없음</small></summary>
-                    <div class="verba-tool-details-content">
-                        <div id="verba-current-rules-content"></div>
-                    </div>
-                </details>
-
-                <details id="verba-name-lock-manager" class="verba-name-lock-manager">
-                    <summary>이름 고정 관리 <small>캐릭터별 저장</small></summary>
-                    <div id="verba-name-lock-manager-content" class="verba-name-lock-manager-content"></div>
                 </details>
 
                 <div class="verba-prompt-slot ${settings.globalPromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="global">
@@ -8119,6 +8083,24 @@ function injectSettingsPanel() {
                 <div class="verba-help">금지어가 나오면 해당 문단만 다시 요청하고 정상 문단은 유지해요.</div>
 
 
+                <details id="verba-rule-priority-settings" class="verba-tool-details">
+                    <summary>번역 규칙 우선순위 <small>위·아래로 정렬</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-rule-priority-list" class="verba-rule-priority-list"></div>
+                        <div class="verba-help">위에 있는 규칙이 서로 충돌할 때 먼저 적용됩니다. 원문 정확성·보호 요소·금지어 규칙은 이 순서와 관계없이 항상 최우선이에요.</div>
+                        <button type="button" id="verba-reset-rule-priority" class="menu_button verba-wide">기본 순서로 되돌리기</button>
+                    </div>
+                </details>
+
+                <details id="verba-prompt-conflict-settings" class="verba-tool-details">
+                    <summary>프롬프트 충돌 확인 <small id="verba-prompt-conflict-count">충돌 없음</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-prompt-conflict-content" class="verba-prompt-conflict-content"></div>
+                        <div class="verba-help">전역·모든 대사 공통·캐릭터 전용·NPC·USER 전용 프롬프트에서 베르바가 명백한 충돌로 판단한 실제 문구를 보여줘요. 검사는 로컬에서만 하며 API를 호출하지 않습니다.</div>
+                        <button type="button" id="verba-refresh-prompt-conflicts" class="menu_button verba-wide">지금 다시 확인</button>
+                    </div>
+                </details>
+
                 <details id="verba-translation-tuning" class="verba-tool-details">
                     <summary>번역 미세 조정 <small>관계 온도·현지화</small></summary>
                     <div class="verba-tool-details-content">
@@ -8166,55 +8148,6 @@ function injectSettingsPanel() {
                         <div class="verba-help">현재 캐릭터 대사 안에서 같은 말끝이 몰리지 않도록 지시하고, 최근 캐릭터 대사 번역에서 반복된 말끝이 있으면 다음 번역에서 의존도를 낮춰요. NPC·USER 대사는 분석·적용 대상에서 제외하며 후처리 치환은 하지 않습니다.</div>
                     </div>
                 </details>
-
-                <details id="verba-rule-priority-settings" class="verba-tool-details">
-                    <summary>번역 규칙 우선순위 <small>위·아래로 정렬</small></summary>
-                    <div class="verba-tool-details-content">
-                        <div id="verba-rule-priority-list" class="verba-rule-priority-list"></div>
-                        <div class="verba-help">위에 있는 규칙이 서로 충돌할 때 먼저 적용됩니다. 원문 정확성·보호 요소·금지어 규칙은 이 순서와 관계없이 항상 최우선이에요.</div>
-                        <button type="button" id="verba-reset-rule-priority" class="menu_button verba-wide">기본 순서로 되돌리기</button>
-                    </div>
-                </details>
-
-                <details id="verba-prompt-conflict-settings" class="verba-tool-details">
-                    <summary>프롬프트 충돌 확인 <small id="verba-prompt-conflict-count">충돌 없음</small></summary>
-                    <div class="verba-tool-details-content">
-                        <div id="verba-prompt-conflict-content" class="verba-prompt-conflict-content"></div>
-                        <div class="verba-help">전역·모든 대사 공통·캐릭터 전용·NPC·USER 전용 프롬프트에서 베르바가 명백한 충돌로 판단한 실제 문구를 보여줘요. 검사는 로컬에서만 하며 API를 호출하지 않습니다.</div>
-                        <button type="button" id="verba-refresh-prompt-conflicts" class="menu_button verba-wide">지금 다시 확인</button>
-                    </div>
-                </details>
-
-                <details id="verba-selection-menu-settings" class="verba-tool-details">
-                    <summary>드래그 메뉴 구성 <small>버튼 수·기능 선택</small></summary>
-                    <div class="verba-tool-details-content">
-                        <label for="verba-selection-quick-count">바로 표시할 버튼 수</label>
-                        <select id="verba-selection-quick-count" class="text_pole">
-                            ${[2, 3, 4, 5].map(count => `
-                                <option value="${count}" ${settings.selectionQuickCount === count ? 'selected' : ''}>${count}개</option>
-                            `).join('')}
-                        </select>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-show-selection-name" ${settings.showSelectionName !== false ? 'checked' : ''}>
-                            <span>이름으로 고정 메뉴에 포함</span>
-                        </label>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-show-selection-source" ${settings.showSelectionSource !== false ? 'checked' : ''}>
-                            <span>원문 보기 메뉴에 포함</span>
-                        </label>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-show-selection-lock" ${settings.showSelectionLock !== false ? 'checked' : ''}>
-                            <span>구간 잠금 메뉴에 포함</span>
-                        </label>
-                        <label class="verba-check-row">
-                            <input type="checkbox" id="verba-show-selection-bundle" ${settings.showSelectionBundle !== false ? 'checked' : ''}>
-                            <span>묶음 추가 메뉴에 포함</span>
-                        </label>
-                        <div class="verba-help">선택 부분 재번역을 포함해 지정한 개수까지만 바로 표시하고, 남은 기능은 ⋯을 누르면 세로로 열려요. 5개를 선택하면 모두 한 줄에 표시할 수 있습니다.</div>
-                    </div>
-                </details>
-
-
 
                 <details id="verba-expression-detail" class="verba-tool-details verba-expression-detail">
                     <summary>표현 디테일 <small>강조·말끊김·비유</small></summary>
@@ -8392,6 +8325,17 @@ function injectSettingsPanel() {
                         </div>
                     </details>
 
+                <details id="verba-debug-settings" class="verba-tool-details">
+                    <summary>디버그 <small>오류 진단 복사</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
+                            <span>디버그 모드</span>
+                        </label>
+                        <div class="verba-help">켜면 베르바 오류 알림에 ‘진단 복사’ 버튼이 생깁니다. 복사한 내용을 그대로 제보하면 오류 단계·코드·스택·기기 환경을 확인할 수 있어요. 메시지 내용·번역문·프롬프트·프로필 ID·API 키는 넣지 않습니다.</div>
+                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${lastDebugDiagnostic ? '' : 'disabled'}>최근 오류 진단 복사</button>
+                    </div>
+                </details>
                 ${developerSettingsMarkup()}
 
             </div>
@@ -8805,8 +8749,18 @@ function injectSettingsPanel() {
 
     promptPresetSelect?.addEventListener('change', event => {
         const preset = promptPresetById(event.target.value);
-        if (preset && promptPresetName) promptPresetName.value = preset.name;
-        renderPromptPresetManager(event.target.value);
+        if (!preset) {
+            if (promptPresetName) promptPresetName.value = '';
+            renderPromptPresetManager('');
+            return;
+        }
+
+        clearTimeout(promptEditorBackupTimer);
+        promptEditorBackupTimer = null;
+        setPromptFieldsFromPreset(preset);
+        if (promptPresetName) promptPresetName.value = preset.name;
+        renderPromptPresetManager(preset.id);
+        notify(`프롬프트 프리셋 “${preset.name}”을 적용했어요.`, 'success');
     });
 
     panel.querySelector('#verba-prompt-preset-save')?.addEventListener('click', () => {
@@ -8818,7 +8772,7 @@ function injectSettingsPanel() {
         }
         const presets = normalizedPromptPresets();
         if (presets.some(preset => preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
-            notify('같은 이름의 프롬프트 프리셋이 이미 있어요. 기존 프리셋을 선택해 덮어쓰거나 다른 이름을 사용해 주세요.', 'warning');
+            notify('같은 이름의 프롬프트 프리셋이 이미 있어요. 다른 이름을 사용해 주세요.', 'warning');
             return;
         }
         if (presets.length >= 100) {
@@ -8889,34 +8843,6 @@ function injectSettingsPanel() {
                 : `프롬프트 프리셋 “${preset.name}”의 즐겨찾기를 해제했어요.`,
             'success',
         );
-    });
-
-    panel.querySelector('#verba-prompt-preset-load')?.addEventListener('click', () => {
-        const preset = promptPresetById(promptPresetSelect?.value);
-        if (!preset) {
-            notify('불러올 프롬프트 프리셋을 선택해 주세요.', 'warning');
-            return;
-        }
-        setPromptFieldsFromPreset(preset);
-        if (promptPresetName) promptPresetName.value = preset.name;
-        notify(`프롬프트 프리셋 “${preset.name}”을 불러왔어요.`, 'success');
-    });
-
-    panel.querySelector('#verba-prompt-preset-overwrite')?.addEventListener('click', () => {
-        const id = String(promptPresetSelect?.value || '');
-        const preset = promptPresetById(id);
-        if (!preset) {
-            notify('덮어쓸 프롬프트 프리셋을 선택해 주세요.', 'warning');
-            return;
-        }
-        settings.promptPresets = normalizedPromptPresets().map(row => (
-            row.id === id
-                ? { ...row, ...currentPromptPresetSnapshot(), updatedAt: new Date().toISOString() }
-                : row
-        ));
-        saveSettings();
-        renderPromptPresetManager(id);
-        notify(`프롬프트 프리셋 “${preset.name}”을 현재 프롬프트로 덮어썼어요.`, 'success');
     });
 
     panel.querySelector('#verba-prompt-preset-rename')?.addEventListener('click', () => {

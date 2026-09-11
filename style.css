@@ -2398,3 +2398,47 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
+
+
+/* v0.4.29: reliable inline backup preview */
+.verba-prompt-preset-backup-inline-preview {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 7px;
+    margin-top: 2px;
+    padding-top: 7px;
+    border-top: 1px dashed color-mix(in srgb, var(--SmartThemeBorderColor, #888) 42%, transparent);
+}
+
+.verba-backup-inline-preview-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.verba-backup-inline-preview-head b {
+    font-size: .84em;
+}
+
+.verba-backup-inline-preview-head small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: .62;
+    font-size: .74em;
+}
+
+.verba-prompt-preset-backup-inline-preview .verba-backup-preview-list {
+    display: grid;
+    gap: 6px;
+}
+
+.verba-prompt-preset-backup-inline-preview .verba-backup-preview-slot {
+    padding: 7px 8px;
+}
+
+.verba-prompt-preset-backup-inline-preview .verba-backup-preview-slot pre {
+    max-height: 140px;
+}

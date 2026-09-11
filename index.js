@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.32';
+const EXTENSION_VERSION = '0.4.33';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -1232,7 +1232,7 @@ function renderCurrentAppliedRules() {
         .join(' → ');
 
     host.innerHTML = `
-        <div class="verba-current-rules-note">현재 저장값을 기준으로 실제 번역에 적용되는 사용자 규칙을 정리해서 보여줍니다. API 호출은 하지 않습니다.</div>
+        <div class="verba-current-rules-note">현재 아웃풋 E→K 번역에 적용되는 사용자 규칙을 정리해서 보여줍니다. 인풋 K→E 자동번역 규칙은 포함하지 않으며 API 호출도 하지 않습니다.</div>
 
         <div class="verba-current-rule-grid">
             ${currentRulesPromptSlotMarkup('전체 번역 전역 프롬프트', settings.globalPrompt, settings.globalPromptEnabled !== false)}
@@ -8040,7 +8040,8 @@ function injectSettingsPanel() {
                             <span>${settings.globalPromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
-                    <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
+                    <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="아웃풋 번역의 서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
+                    <div class="verba-help">아웃풋 E→K 번역에만 적용됩니다. 인풋 K→E 자동번역에는 이 프롬프트를 보내지 않습니다.</div>
                 </div>
 
                 <div class="verba-prompt-slot ${settings.allDialoguePromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="all-dialogue">

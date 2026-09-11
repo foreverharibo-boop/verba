@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.20';
+const EXTENSION_VERSION = '0.4.22';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -838,14 +838,14 @@ function createPromptEditorBackup(reason = '자동 백업', { force = false } = 
     return true;
 }
 
-function schedulePromptEditorBackup(delay = 5000) {
+function schedulePromptEditorBackup(delay = 10 * 60 * 1000) {
     clearTimeout(promptEditorBackupTimer);
     promptEditorBackupTimer = setTimeout(() => {
         promptEditorBackupTimer = null;
-        if (!createPromptEditorBackup('5초 입력 멈춤 자동 백업')) return;
+        if (!createPromptEditorBackup('10분 입력 멈춤 자동 백업')) return;
         saveSettings();
         renderPromptPresetBackups();
-    }, Math.max(500, Number(delay) || 5000));
+    }, Math.max(1000, Number(delay) || 10 * 60 * 1000));
 }
 
 function formatPromptPresetBackupTime(timestamp) {
@@ -936,44 +936,67 @@ function openPromptEditorBackupPreview(backup) {
             </div>
         </section>`;
 
-    const close = () => {
-        if (!overlay.isConnected) return;
+    let closing = false;
+    let removeTimer = null;
+
+    const swallow = event => {
+        event.preventDefault?.();
+        event.stopPropagation?.();
+        event.stopImmediatePropagation?.();
+    };
+
+    const finishClose = () => {
+        clearTimeout(removeTimer);
+        removeTimer = null;
         overlay.remove();
     };
 
-    const closeButton = overlay.querySelector('.verba-backup-preview-close');
-    closeButton?.addEventListener('pointerdown', event => {
-        event.stopPropagation();
-    });
-    closeButton?.addEventListener('click', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation?.();
-        // Remove after this click has fully finished so mobile browsers cannot
-        // retarget the same tap to the extension drawer underneath.
-        setTimeout(close, 0);
+    const closeSafely = event => {
+        if (event) swallow(event);
+        if (closing || !overlay.isConnected) return;
+        closing = true;
+
+        // Keep a full-screen shield mounted for a short time after the modal
+        // visually disappears. Android/mobile browsers may emit a delayed
+        // synthesized click after touchend; without this shield that click can
+        // land on SillyTavern's extension drawer behind the modal.
+        overlay.classList.add('verba-prompt-backup-preview-closing');
+        removeTimer = setTimeout(finishClose, 550);
+    };
+
+    // Capture the complete pointer/touch/click sequence locally.
+    // Because this overlay is mounted inside #verba-settings, SillyTavern's
+    // document-level "outside settings" logic also sees it as part of Verba.
+    ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click'].forEach(type => {
+        overlay.addEventListener(type, event => {
+            if (closing) {
+                swallow(event);
+                return;
+            }
+            const closeButton = event.target?.closest?.('.verba-backup-preview-close');
+            if (closeButton && (type === 'pointerup' || type === 'touchend' || type === 'click')) {
+                closeSafely(event);
+                return;
+            }
+            if (event.target === overlay && (type === 'pointerup' || type === 'touchend' || type === 'click')) {
+                closeSafely(event);
+                return;
+            }
+            event.stopPropagation?.();
+        }, true);
     });
 
-    overlay.addEventListener('pointerdown', event => {
-        event.stopPropagation();
-    });
-    overlay.addEventListener('click', event => {
-        event.stopPropagation();
-        if (event.target !== overlay) return;
-        event.preventDefault();
-        setTimeout(close, 0);
-    });
     overlay.addEventListener('keydown', event => {
         event.stopPropagation();
         if (event.key !== 'Escape') return;
-        event.preventDefault();
-        close();
+        closeSafely(event);
     });
 
-    // Do NOT use the Popover API here. SillyTavern's extension/settings UI can
-    // itself live in an overlay/top-layer stack; opening/closing another popover
-    // may collapse that parent UI on some mobile browsers.
-    (document.body || document.documentElement).append(overlay);
+    // IMPORTANT: keep the modal inside Verba's extension container rather than
+    // document.body/documentElement. Some SillyTavern/mobile themes close the
+    // extension drawer when a click target is outside its DOM subtree.
+    const mount = document.querySelector('#verba-settings') || document.body || document.documentElement;
+    mount.append(overlay);
 }
 
 function renderPromptPresetBackups() {
@@ -7843,7 +7866,7 @@ function injectSettingsPanel() {
                         <details id="verba-prompt-preset-backups" class="verba-prompt-preset-backups">
                             <summary>최근 프롬프트 백업 <small id="verba-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
                             <div class="verba-prompt-preset-backup-content">
-                                <div class="verba-help">4개 프롬프트를 수정한 뒤 5초 동안 추가 입력이 없으면 현재 내용과 슬롯 ON/OFF 상태를 자동으로 백업해요. 최근 5개만 보관하며, 복원하면 현재 4개 프롬프트가 해당 상태로 돌아갑니다.</div>
+                                <div class="verba-help">4개 프롬프트를 수정한 뒤 10분 동안 추가 입력이 없으면 현재 내용과 슬롯 ON/OFF 상태를 자동으로 백업해요. 최근 5개만 보관하며, 복원하면 현재 4개 프롬프트가 해당 상태로 돌아갑니다.</div>
                                 <button type="button" id="verba-prompt-preset-backup-now" class="menu_button verba-wide">지금 백업</button>
                                 <div id="verba-prompt-preset-backup-list" class="verba-prompt-preset-backup-list"></div>
                             </div>

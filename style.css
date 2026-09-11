@@ -2266,3 +2266,31 @@
     line-height: 1 !important;
     touch-action: manipulation;
 }
+
+
+/* v0.4.21: prevent backup-preview close from collapsing Verba drawer */
+#verba-settings > .verba-prompt-backup-preview-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    z-index: 2147483647 !important;
+    pointer-events: auto !important;
+}
+
+.verba-prompt-backup-preview-overlay.verba-prompt-backup-preview-closing {
+    background: transparent !important;
+    pointer-events: auto !important;
+}
+
+.verba-prompt-backup-preview-overlay.verba-prompt-backup-preview-closing
+.verba-prompt-backup-preview-modal {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+.verba-prompt-backup-preview-modal {
+    transition: opacity 60ms linear;
+}

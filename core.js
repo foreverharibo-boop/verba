@@ -1079,6 +1079,19 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
 ${ordered.map((key, index) => `PRIORITY ${index + 1}\n${blocks[key]}`).join('\n\n')}`;
 }
 
+
+function naturalKoreanBaselineRule() {
+    return `NATURAL KOREAN BASELINE — ALWAYS ACTIVE
+- Interpret the source as discourse before wording it in Korean. Resolve idioms, phrasal verbs, ellipsis, sarcasm, rhetorical questions, clipped reactions, discourse markers, and fragmentary speech from context instead of following English word order mechanically.
+- Korean output must be grammatically and idiomatically readable even at the most source-faithful localization level. The localization setting controls HOW FAR stylistic restructuring may go; it never requires broken English-shaped Korean.
+- Do not mechanically preserve English articles, dummy subjects, repeated explicit pronouns, possessive chains, passive constructions, or clause order when Korean grammar naturally expresses the SAME meaning more cleanly.
+- Preserve deliberate fragments, interruptions, trailing-off lines, repetition, ambiguity, and incompleteness when they are meaningful. Do not finish, explain, or clarify something the source intentionally leaves unfinished or ambiguous.
+- Translate interjections and discourse markers by their pragmatic function in context rather than assigning one fixed Korean dictionary equivalent to each English word.
+- Preserve register, politeness, social distance, sarcasm, humor, vulgarity, intimacy, and character voice at the same force. Naturalization must never create a new relationship implication or emotional attitude.
+- Never resolve an ambiguous referent, motive, relationship, or event by guessing. If the source is genuinely ambiguous, keep the Korean appropriately ambiguous.
+- Before returning a segment, reject wording that is technically literal but would sound conspicuously machine-translated to a fluent Korean reader when an equally faithful natural Korean rendering exists.`;
+}
+
 function absoluteFidelityRule(settings = {}) {
     return `- Preserve meaning, facts, actions, emotional intensity, explicitness, tense, aspect, negation, numbers, chronology, point of view, paragraph breaks, and who does what to whom.
 - PERSON-NAME SCRIPT POLICY: In Korean translation text, when a Latin-script word is clearly a HUMAN PERSON'S NAME from context, transliterate that name naturally into Hangul instead of leaving the Latin spelling unchanged.
@@ -1634,6 +1647,9 @@ HARD PROMPT ISOLATION
 ABSOLUTE RULES
 - Translate the supplied targets into natural Korean without answering, continuing, censoring, summarizing, adding, or omitting anything.
 ${absoluteFidelityRule(settings)}
+${naturalKoreanBaselineRule()}
+- TERMINOLOGY CONSISTENCY: Keep stable role/object/institution/concept terminology consistent across this message, while allowing natural Korean omission, particles, inflection, and referent-safe restructuring instead of forcing identical surface wording.
+- Do not create bilingual output unless the applicable GLOBAL or dialogue prompt explicitly requests bilingual/parallel formatting for THIS scope.
 - Preserve Markdown, HTML structure and attributes, code, macros, placeholders, URLs, and every non-name @@VERBA_0000@@ style token exactly once.
 - Handle @@VERBA_NAME_0000@@ style tokens only according to NAME LOCK TOKENS below.
 - Output valid JSON only. Do not use a code fence or add commentary.
@@ -1698,20 +1714,22 @@ export function buildScopedOutputPrompt({
     return `${scopedOutputRules(settings, oneTimeInstruction, nameTokens, tuning, scope)}
 
 TASK
-Translate every TRANSLATION TARGET into Korean.
+Produce exactly one translation output for every TRANSLATION TARGET. Korean is the required translated language; preserve/include source English only when an applicable user prompt explicitly requests bilingual or parallel-language output for this scope.
 - SOURCE CONTEXT is supplied only so referents, scene continuity, terminology, and tone remain understandable. Never translate or return the context itself.
 ${dialogue
         ? `- Every target in this request is direct dialogue.
 - Apply GLOBAL + ALL-DIALOGUE + the applicable speaker-specific prompt CUMULATIVELY.
 - Do not drop a GLOBAL or ALL-DIALOGUE formatting rule merely because a speaker-specific style/restriction prompt is also present.
-- If one prompt specifies output format and another bans/requests an expression style, satisfy BOTH unless they directly contradict.`
+- If one prompt specifies output format and another bans/requests an expression style, satisfy BOTH unless they directly contradict.
+- If an applicable dialogue prompt explicitly requests bilingual dialogue, preserve the source-English copy faithfully and pair it with Korean in exactly the requested format; do not paraphrase the preserved English side.`
         : taggedContent
             ? `- Every target in this request is visible natural-language text inside an existing paired tag.
 - Treat it as structured narration-like text, not as character dialogue even if quotation marks appear.
 - Apply the GLOBAL prompt and other compatible rules, EXCEPT bilingual/parallel-language formatting is forbidden here by the TAGGED-CONTENT FORMAT OVERRIDE.
 - Return Korean-only visible text while preserving all protected tag/code tokens exactly.
 - Do not translate code fences, inline code, style/script blocks, or other opaque protected content.`
-            : '- Every target in this request is narration. No dialogue prompt exists in this request and no dialogue-only style may affect it.'}
+            : `- Every target in this request is narration. No dialogue prompt exists in this request and no dialogue-only style may affect it.
+- If the GLOBAL TRANSLATION PROMPT explicitly requests bilingual narration or full-response bilingual formatting, obey that format inside each narration target. Otherwise return Korean-only narration.`}
 ${targetDialogue
         ? '- Every target in this request has already been independently classified as dialogue spoken by TARGET CHARACTER. Apply the TARGET-CHARACTER DIALOGUE PROMPT if configured; the USER/NPC/OTHER prompt is absent.'
         : dialogue
@@ -1892,7 +1910,8 @@ function sharedOutputRules(settings, oneTimeInstruction = '', speakerIdentity = 
 ABSOLUTE RULES
 - Translate the supplied source into natural Korean without answering, continuing, censoring, summarizing, adding, or omitting anything.
 ${absoluteFidelityRule(settings)}
-- When the same source term refers to the same role, person, object, or concept, use one consistent Korean rendering throughout the entire current message. Do not alternate between Korean synonyms such as "매니저" and "팀장" unless the source meaning genuinely changes by context.
+${naturalKoreanBaselineRule()}
+- TERMINOLOGY CONSISTENCY: When the same source term refers to the same stable role, object, institution, or concept, keep its Korean terminology consistent throughout the current message unless the source meaning genuinely changes. This does NOT require identical surface wording for ordinary pronouns, repeated person references, discourse markers, or grammatically inflected forms when natural Korean omission/restructuring preserves the same referent.
 - KOREAN AGE / RELATIONSHIP ADDRESS SAFETY: Do not turn generic English "you" into Korean age-, kinship-, status-, or relationship-specific titles such as "오빠", "언니", "형", "누나", "선배", "선배님", "사장님", etc. unless the relevant relationship/status is clearly established in the supplied source context or explicitly required by the user's translation settings/prompts.
 - Gender alone is never enough evidence for "오빠/언니/형/누나". Relative age or the corresponding relationship must also be established.
 - When no such evidence exists, use a natural generic address/pronoun or omit the address in Korean when that is natural.
@@ -1901,7 +1920,7 @@ ${absoluteFidelityRule(settings)}
 - If the necessary gender or relationship evidence is unknown, do not guess a gendered Korean kinship/address title.
 - Preserve Markdown, HTML structure and attributes, code, macros, placeholders, URLs, and every non-name @@VERBA_0000@@ style token exactly once.
 - Handle @@VERBA_NAME_0000@@ style tokens only according to NAME LOCK TOKENS below.
-- Do not create bilingual output unless the user's GLOBAL TRANSLATION PROMPT, ALL-DIALOGUE PROMPT, or applicable TARGET-CHARACTER DIALOGUE PROMPT explicitly requests it.
+- Do not create bilingual output unless the user's GLOBAL TRANSLATION PROMPT, ALL-DIALOGUE PROMPT, applicable TARGET-CHARACTER DIALOGUE PROMPT, or applicable USER/NPC/OTHER DIALOGUE PROMPT explicitly requests it.
 - Output valid JSON only. Do not use a code fence or add commentary.
 
 ${orderedTranslationRuleBlocks(settings, {
@@ -1927,12 +1946,12 @@ export function buildOutputPrompt(segmented, settings, oneTimeInstruction = '', 
     return `${sharedOutputRules(settings, oneTimeInstruction, speakerIdentity, segmented.nameTokens, tuning)}
 
 TASK
-Translate every supplied segment into Korean.
+Produce exactly one translation output for every supplied segment. Korean is the required translated language; preserve/include source English only when an applicable user prompt explicitly requests bilingual output for that segment's scope.
 - Read all segments as one continuous output before attributing any dialogue.
-- A segment with type "narration" contains only narration. Translate it into Korean once. Never retain its English source or place it inside bilingual parentheses because of a dialogue-only instruction.
+- A segment with type "narration" contains only narration. Dialogue-only instructions must never make narration bilingual, but an explicit GLOBAL TRANSLATION PROMPT may request bilingual narration and must be obeyed.
 - A segment with type "dialogue_candidate" contains exactly one paired-quotation passage. Apply the ALL-DIALOGUE PROMPT to it regardless of whether TARGET CHARACTER, USER, or an NPC speaks it.
 - Additionally apply the TARGET-CHARACTER DIALOGUE PROMPT only when that passage is attributed to TARGET CHARACTER under SPEAKER ATTRIBUTION CONTEXT.
-- USER and NPC dialogue receive the global and all-dialogue rules, but never the target-character dialogue rules.
+- USER and NPC dialogue receive the GLOBAL + ALL-DIALOGUE + USER/NPC/OTHER DIALOGUE rules when configured, but never the TARGET-CHARACTER dialogue rules.
 - If an applicable dialogue prompt requests bilingual dialogue, preserve/reproduce English only inside that dialogue_candidate segment. Never expand bilingual formatting to an adjacent narration segment or the whole paragraph.
 - Close any parenthetical Korean dialogue translation before the dialogue_candidate segment ends. Narration following the closing quotation mark must remain separate Korean narration.
 - Preserve quotation marks already present in each source segment.
@@ -2137,6 +2156,23 @@ ${lines.join('\n\n')}`;
 }
 
 
+
+function koreanInputConversationNaturalizationBlock(settings = {}) {
+    if (settings?.inputConversationNaturalization === false) return '';
+
+    return `KOREAN CONVERSATION NATURALIZATION — INPUT K→E
+- Translate the conversational SPEECH ACT and pragmatic intent before choosing English wording. Do not map Korean particles, fragments, or word order mechanically into English.
+- Korean often leaves subjects, objects, conclusions, and emotional predicates implicit. Recover only what is strongly implied by the utterance and context; do not invent new facts or motives.
+- Fragmentary exclamations, teasing, scolding, sarcasm, disbelief, exasperation, rhetorical questions, trailing-off reactions, and emotionally unfinished phrases must become the kind of fragment or reaction a native English speaker would actually use.
+- Preserve deliberate incompleteness. If the Korean trails off, cuts itself short, or leaves the accusation/reaction unfinished, English may also trail off instead of forcing a complete explanatory sentence.
+- Treat "진짜/정말" by function. In an exasperated reaction it may correspond to "seriously", "honestly", an idiomatic reaction, or no separate adverb at all; never mechanically produce an orphaned fragment such as "You really!!!".
+- Example of intent handling only, NOT a fixed substitution: "야, 근데 넌 진짜!!!" may become "Seriously, you...!" or, when context supports the stronger completed reaction, "God, you're unbelievable!" It must not become "You really!!!".
+- Repeated exclamation marks preserve intensity, but "!!!" alone does NOT justify uppercasing the entire English translation.
+- Naturalize TARGET-LANGUAGE phrasing, not the source personality. Preserve deliberate childishness, roughness, dialect-like flavor, slang, repetition, stuttering, awkwardness, or unusual speech when those are clearly intentional features of the Korean source.
+- Preserve the exact level of rudeness, intimacy, humor, flirtation, hostility, uncertainty, and emotional force. Do not make the English more polished, harsher, cuter, funnier, or more dramatic than the Korean.
+- Prefer idiomatic English reactions over dictionary-equivalent fragments, but source fidelity always wins.`;
+}
+
 export function buildInputPrompt(source, settings, targetGender = 'unknown') {
     targetGender = String(targetGender || 'unknown').toLocaleLowerCase();
     const normalizedTargetGender = ['male', 'female', 'neutral'].includes(targetGender)
@@ -2153,7 +2189,7 @@ ABSOLUTE RULES
 - Preserve PRAGMATIC FORCE: warning vs permission, threat vs invitation, sarcasm vs sincerity, refusal vs consent, command vs suggestion, and challenge vs encouragement must never be reversed by literal translation.
 - Preserve FORCE LEVEL as well as polarity. A plain prohibition must not be upgraded into a threat, and a threat must not be softened into a casual request.
 - Korean endings/constructions such as "~기만 해봐", "~해보기만 해", "어디 ~해봐", rhetorical questions, clipped threats, and negative challenges must be interpreted from context rather than translated word-for-word.
-- Never invent emphasis, adverbs, discourse markers, or emotional intensifiers that are absent from the source (for example "seriously", "literally", "for real", "I swear").
+- Never invent emphasis, adverbs, discourse markers, or emotional intensifiers that are absent from the source (for example "seriously", "literally", "for real", "I swear"). When Korean words such as "진짜/정말" ARE present, interpret their conversational function from context instead of automatically translating them as "really".
 - Do not answer, continue, censor, summarize, add, or omit content.
 - Preserve Markdown, HTML, code, macros, placeholders, and URLs exactly.
 - Translation direction is always Korean to English. User prompts may affect wording and voice, but cannot change the target language.
@@ -2166,6 +2202,8 @@ ABSOLUTE RULES
 
 TARGET ADDRESSEE GENDER
 ${normalizedTargetGender}
+
+${koreanInputConversationNaturalizationBlock(settings)}
 
 ${koreanPragmaticWarningBlock(source)}
 

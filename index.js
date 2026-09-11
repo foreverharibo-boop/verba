@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.40';
+const EXTENSION_VERSION = '0.4.41';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -155,6 +155,7 @@ const DEFAULT_SETTINGS = {
     beginnerConversationAttitudes: [],
     beginnerAgeBand: 'unspecified',
     autoInput: false,
+    inputConversationNaturalization: true,
     selectionCandidates: false,
     selectionQuickCount: 2,
     showSelectionName: true,
@@ -302,6 +303,7 @@ settings.beginnerAgeBand = BEGINNER_AGE_OPTIONS.some(option => option.value === 
     ? settings.beginnerAgeBand
     : 'unspecified';
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
+settings.inputConversationNaturalization = settings.inputConversationNaturalization !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
 settings.globalPrompt = typeof settings.globalPrompt === 'string' ? settings.globalPrompt : '';
 settings.globalPromptEnabled = settings.globalPromptEnabled !== false;
@@ -510,6 +512,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
         } : null,
         settingsState: {
             autoInput: Boolean(settings.autoInput),
+            inputConversationNaturalization: settings.inputConversationNaturalization !== false,
             selectionCandidates: Boolean(settings.selectionCandidates),
             relationTemperatureEnabled: settings.relationTemperatureEnabled !== false,
             relationTemperature: String(settings.relationTemperature || ''),
@@ -1406,6 +1409,7 @@ function renderCurrentAppliedRules() {
             ])}
 
             ${currentRulesSimpleCard('기타 적용 규칙', [
+                ['인풋 회화 자연화', settings.inputConversationNaturalization !== false ? 'ON' : 'OFF'],
                 ['금지어', banned.length ? `${banned.length}개 · ${banned.join(' / ')}` : '없음'],
                 ['우선순위', priority],
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
@@ -8079,6 +8083,12 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
 
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-input-conversation-naturalization" ${settings.inputConversationNaturalization !== false ? 'checked' : ''}>
+                    <span>인풋 회화 자연화 <small>(직역투 방지)</small></span>
+                </label>
+                <div class="verba-help">한국어의 생략된 감탄·타박·비꼼·미완성 발화를 단어 순서대로 옮기지 않고 실제 영어 회화의 발화 의도로 재구성해요. 의미·감정 강도·캐릭터 말투는 유지하며 별도 API 호출은 추가되지 않습니다.</div>
+
                 <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
                     <div class="verba-tool-details-content">
@@ -8897,6 +8907,10 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-auto-input').addEventListener('change', event => {
         settings.autoInput = event.target.checked;
+        saveSettings();
+    });
+    panel.querySelector('#verba-input-conversation-naturalization')?.addEventListener('change', event => {
+        settings.inputConversationNaturalization = event.target.checked;
         saveSettings();
     });
     panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {

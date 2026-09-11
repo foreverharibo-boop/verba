@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.8';
+const EXTENSION_VERSION = '0.4.11';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -101,9 +101,15 @@ const DEFAULT_SETTINGS = {
     showSelectionBundle: true,
     profileStats: null,
     globalPrompt: '',
+    globalPromptEnabled: true,
     allDialoguePrompt: '',
+    allDialoguePromptEnabled: true,
     dialoguePrompt: '',
+    dialoguePromptEnabled: true,
     otherDialoguePrompt: '',
+    otherDialoguePromptEnabled: true,
+    promptPresets: [],
+    promptPresetBackups: [],
     dialogueEndingPreferred: '',
     dialogueEndingAvoid: '',
     dialogueEndingStrength: 'normal',
@@ -142,6 +148,25 @@ settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
 settings.qualityAuditVoice = settings.qualityAuditVoice !== false;
 settings.qualityAuditTranslationese = settings.qualityAuditTranslationese !== false;
 settings.qualityAuditContinuity = settings.qualityAuditContinuity !== false;
+settings.promptPresets = Array.isArray(settings.promptPresets)
+    ? settings.promptPresets
+        .map((preset, index) => ({
+            id: String(preset?.id || `preset_${index}_${Date.now()}`).slice(0, 120),
+            name: String(preset?.name || '').trim().slice(0, 60),
+            globalPrompt: String(preset?.globalPrompt || ''),
+            globalPromptEnabled: preset?.globalPromptEnabled !== false,
+            allDialoguePrompt: String(preset?.allDialoguePrompt || ''),
+            allDialoguePromptEnabled: preset?.allDialoguePromptEnabled !== false,
+            dialoguePrompt: String(preset?.dialoguePrompt || ''),
+            dialoguePromptEnabled: preset?.dialoguePromptEnabled !== false,
+            otherDialoguePrompt: String(preset?.otherDialoguePrompt || ''),
+            otherDialoguePromptEnabled: preset?.otherDialoguePromptEnabled !== false,
+            updatedAt: String(preset?.updatedAt || ''),
+        }))
+        .filter(preset => preset.name)
+        .slice(0, 100)
+    : [];
+settings.promptPresetBackups = normalizedPromptPresetBackups(settings.promptPresetBackups);
 settings.koreanFlavorEnabled = settings.koreanFlavorEnabled === true;
 settings.koreanFlavorDialogueRhythm = ['default', 'short', 'balanced', 'smooth'].includes(settings.koreanFlavorDialogueRhythm)
     ? settings.koreanFlavorDialogueRhythm
@@ -181,9 +206,14 @@ settings.englishFlavorConversationNaturalization = ['default', 'natural', 'activ
     : 'natural';
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
+settings.globalPrompt = typeof settings.globalPrompt === 'string' ? settings.globalPrompt : '';
+settings.globalPromptEnabled = settings.globalPromptEnabled !== false;
 settings.dialoguePrompt = typeof settings.dialoguePrompt === 'string' ? settings.dialoguePrompt : '';
+settings.dialoguePromptEnabled = settings.dialoguePromptEnabled !== false;
 settings.allDialoguePrompt = typeof settings.allDialoguePrompt === 'string' ? settings.allDialoguePrompt : '';
+settings.allDialoguePromptEnabled = settings.allDialoguePromptEnabled !== false;
 settings.otherDialoguePrompt = typeof settings.otherDialoguePrompt === 'string' ? settings.otherDialoguePrompt : '';
+settings.otherDialoguePromptEnabled = settings.otherDialoguePromptEnabled !== false;
 settings.dialogueEndingPreferred = typeof settings.dialogueEndingPreferred === 'string' ? settings.dialogueEndingPreferred : '';
 settings.dialogueEndingAvoid = typeof settings.dialogueEndingAvoid === 'string' ? settings.dialogueEndingAvoid : '';
 settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(settings.dialogueEndingStrength)
@@ -664,6 +694,257 @@ function isAbort(error, signal) {
 
 function saveSettings() {
     liveContext().saveSettingsDebounced?.();
+}
+
+function normalizedPromptPresetName(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
+function currentPromptPresetSnapshot() {
+    return {
+        globalPrompt: String(settings.globalPrompt || ''),
+        globalPromptEnabled: settings.globalPromptEnabled !== false,
+        allDialoguePrompt: String(settings.allDialoguePrompt || ''),
+        allDialoguePromptEnabled: settings.allDialoguePromptEnabled !== false,
+        dialoguePrompt: String(settings.dialoguePrompt || ''),
+        dialoguePromptEnabled: settings.dialoguePromptEnabled !== false,
+        otherDialoguePrompt: String(settings.otherDialoguePrompt || ''),
+        otherDialoguePromptEnabled: settings.otherDialoguePromptEnabled !== false,
+    };
+}
+
+function normalizedPromptPresets() {
+    const rows = Array.isArray(settings.promptPresets) ? settings.promptPresets : [];
+    const seenIds = new Set();
+    const result = [];
+    for (const [index, raw] of rows.entries()) {
+        const name = normalizedPromptPresetName(raw?.name);
+        if (!name) continue;
+        let id = String(raw?.id || `preset_${index}_${Date.now()}`).slice(0, 120);
+        if (!id || seenIds.has(id)) id = `preset_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+        seenIds.add(id);
+        result.push({
+            id,
+            name,
+            globalPrompt: String(raw?.globalPrompt || ''),
+            globalPromptEnabled: raw?.globalPromptEnabled !== false,
+            allDialoguePrompt: String(raw?.allDialoguePrompt || ''),
+            allDialoguePromptEnabled: raw?.allDialoguePromptEnabled !== false,
+            dialoguePrompt: String(raw?.dialoguePrompt || ''),
+            dialoguePromptEnabled: raw?.dialoguePromptEnabled !== false,
+            otherDialoguePrompt: String(raw?.otherDialoguePrompt || ''),
+            otherDialoguePromptEnabled: raw?.otherDialoguePromptEnabled !== false,
+            updatedAt: String(raw?.updatedAt || ''),
+        });
+        if (result.length >= 100) break;
+    }
+    settings.promptPresets = result;
+    return result;
+}
+
+
+function clonePromptPresetRows(rows = normalizedPromptPresets()) {
+    return (Array.isArray(rows) ? rows : []).map((raw, index) => ({
+        id: String(raw?.id || `preset_${index}_${Date.now()}`).slice(0, 120),
+        name: normalizedPromptPresetName(raw?.name),
+        globalPrompt: String(raw?.globalPrompt || ''),
+        globalPromptEnabled: raw?.globalPromptEnabled !== false,
+        allDialoguePrompt: String(raw?.allDialoguePrompt || ''),
+        allDialoguePromptEnabled: raw?.allDialoguePromptEnabled !== false,
+        dialoguePrompt: String(raw?.dialoguePrompt || ''),
+        dialoguePromptEnabled: raw?.dialoguePromptEnabled !== false,
+        otherDialoguePrompt: String(raw?.otherDialoguePrompt || ''),
+        otherDialoguePromptEnabled: raw?.otherDialoguePromptEnabled !== false,
+        updatedAt: String(raw?.updatedAt || ''),
+    })).filter(row => row.name).slice(0, 100);
+}
+
+function normalizedPromptPresetBackups(value = settings?.promptPresetBackups) {
+    const rows = Array.isArray(value) ? value : [];
+    return rows.map((raw, index) => {
+        const createdAt = Number(raw?.createdAt);
+        return {
+            id: String(raw?.id || `backup_${Date.now()}_${index}`).slice(0, 140),
+            createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now(),
+            reason: String(raw?.reason || '자동 백업').trim().slice(0, 80) || '자동 백업',
+            presets: clonePromptPresetRows(raw?.presets || []),
+        };
+    })
+        .filter(row => row.presets.length || rows.length === 1)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 5);
+}
+
+function promptPresetBackupSignature(presets) {
+    return JSON.stringify(clonePromptPresetRows(presets));
+}
+
+function createPromptPresetBackup(reason = '자동 백업', { force = false } = {}) {
+    const presets = clonePromptPresetRows(normalizedPromptPresets());
+    // 첫 프리셋을 만들기 전의 빈 상태는 복원 가치가 거의 없어서 자동 백업하지 않음.
+    if (!presets.length && !force) return false;
+
+    const backups = normalizedPromptPresetBackups(settings.promptPresetBackups);
+    const signature = promptPresetBackupSignature(presets);
+    if (!force && backups[0] && promptPresetBackupSignature(backups[0].presets) === signature) {
+        return false;
+    }
+
+    const backup = {
+        id: `prompt_backup_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        createdAt: Date.now(),
+        reason: String(reason || '자동 백업').trim().slice(0, 80) || '자동 백업',
+        presets,
+    };
+    settings.promptPresetBackups = [backup, ...backups].slice(0, 5);
+    return true;
+}
+
+function formatPromptPresetBackupTime(timestamp) {
+    const date = new Date(Number(timestamp) || Date.now());
+    try {
+        return date.toLocaleString('ko-KR', {
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    } catch {
+        return date.toISOString().slice(5, 16).replace('T', ' ');
+    }
+}
+
+function promptPresetBackupById(id) {
+    const key = String(id || '');
+    return normalizedPromptPresetBackups(settings.promptPresetBackups)
+        .find(backup => backup.id === key) || null;
+}
+
+function renderPromptPresetBackups() {
+    const list = document.querySelector('#verba-prompt-preset-backup-list');
+    const count = document.querySelector('#verba-prompt-preset-backup-count');
+    const backups = normalizedPromptPresetBackups(settings.promptPresetBackups);
+    settings.promptPresetBackups = backups;
+
+    if (count) count.textContent = `${backups.length}/5`;
+    if (!list) return;
+
+    list.innerHTML = backups.length
+        ? backups.map(backup => `
+            <div class="verba-prompt-preset-backup-row" data-backup-id="${escapeHtml(backup.id)}">
+                <div class="verba-prompt-preset-backup-meta">
+                    <b>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))}</b>
+                    <small>${escapeHtml(backup.reason)} · 프리셋 ${backup.presets.length}개</small>
+                </div>
+                <button type="button" class="menu_button verba-prompt-preset-backup-restore">복원</button>
+            </div>
+        `).join('')
+        : '<div class="verba-prompt-preset-backup-empty">아직 자동 백업이 없어요.</div>';
+
+    list.querySelectorAll('.verba-prompt-preset-backup-restore').forEach(button => {
+        button.addEventListener('click', () => {
+            const row = button.closest('[data-backup-id]');
+            const backup = promptPresetBackupById(row?.dataset?.backupId);
+            if (!backup) {
+                notify('복원할 프롬프트 프리셋 백업을 찾지 못했어요.', 'warning');
+                renderPromptPresetBackups();
+                return;
+            }
+            if (!globalThis.confirm?.(
+                `${formatPromptPresetBackupTime(backup.createdAt)} 백업으로 프롬프트 프리셋 목록 전체를 복원할까요?\n현재 프리셋 목록은 복원 직전에 자동 백업됩니다.`,
+            )) return;
+
+            createPromptPresetBackup('백업 복원 전');
+            settings.promptPresets = clonePromptPresetRows(backup.presets);
+            saveSettings();
+
+            const select = document.querySelector('#verba-prompt-preset-select');
+            const name = document.querySelector('#verba-prompt-preset-name');
+            if (select) select.value = '';
+            if (name) name.value = '';
+            renderPromptPresetManager('');
+            renderPromptPresetBackups();
+            notify(`프롬프트 프리셋 ${backup.presets.length}개를 백업에서 복원했어요.`, 'success');
+        });
+    });
+}
+
+function promptPresetById(id) {
+    const key = String(id || '');
+    return normalizedPromptPresets().find(preset => preset.id === key) || null;
+}
+
+function promptPresetSelectMarkup(selectedId = '') {
+    const selected = String(selectedId || '');
+    const rows = normalizedPromptPresets();
+    return [
+        '<option value="">저장된 프롬프트 프리셋 선택</option>',
+        ...rows.map(preset => (
+            `<option value="${escapeHtml(preset.id)}" ${preset.id === selected ? 'selected' : ''}>${escapeHtml(preset.name)}</option>`
+        )),
+    ].join('');
+}
+
+function renderPromptPresetManager(selectedId = '') {
+    const select = document.querySelector('#verba-prompt-preset-select');
+    if (!select) return;
+    const keep = selectedId || select.value;
+    select.innerHTML = promptPresetSelectMarkup(keep);
+    if (keep && [...select.options].some(option => option.value === keep)) select.value = keep;
+
+    const count = document.querySelector('#verba-prompt-preset-count');
+    if (count) count.textContent = `${normalizedPromptPresets().length}개 저장`;
+
+    const hasSelection = Boolean(promptPresetById(select.value));
+    ['#verba-prompt-preset-load', '#verba-prompt-preset-overwrite', '#verba-prompt-preset-rename', '#verba-prompt-preset-delete']
+        .forEach(selector => {
+            const button = document.querySelector(selector);
+            if (button) button.disabled = !hasSelection;
+        });
+
+    renderPromptPresetBackups();
+}
+
+function syncPromptSlotUi() {
+    const slots = [
+        ['global', 'globalPromptEnabled'],
+        ['all-dialogue', 'allDialoguePromptEnabled'],
+        ['dialogue', 'dialoguePromptEnabled'],
+        ['other-dialogue', 'otherDialoguePromptEnabled'],
+    ];
+    for (const [slot, key] of slots) {
+        const wrapper = document.querySelector(`[data-verba-prompt-slot="${slot}"]`);
+        const checkbox = document.querySelector(`#verba-${slot}-prompt-enabled`);
+        const enabled = settings[key] !== false;
+        if (wrapper) wrapper.classList.toggle('verba-prompt-slot-off', !enabled);
+        if (checkbox) checkbox.checked = enabled;
+    }
+}
+
+function setPromptFieldsFromPreset(preset) {
+    if (!preset) return;
+    settings.globalPrompt = String(preset.globalPrompt || '');
+    settings.globalPromptEnabled = preset.globalPromptEnabled !== false;
+    settings.allDialoguePrompt = String(preset.allDialoguePrompt || '');
+    settings.allDialoguePromptEnabled = preset.allDialoguePromptEnabled !== false;
+    settings.dialoguePrompt = String(preset.dialoguePrompt || '');
+    settings.dialoguePromptEnabled = preset.dialoguePromptEnabled !== false;
+    settings.otherDialoguePrompt = String(preset.otherDialoguePrompt || '');
+    settings.otherDialoguePromptEnabled = preset.otherDialoguePromptEnabled !== false;
+
+    const values = {
+        '#verba-global-prompt': settings.globalPrompt,
+        '#verba-all-dialogue-prompt': settings.allDialoguePrompt,
+        '#verba-dialogue-prompt': settings.dialoguePrompt,
+        '#verba-other-dialogue-prompt': settings.otherDialoguePrompt,
+    };
+    for (const [selector, value] of Object.entries(values)) {
+        const field = document.querySelector(selector);
+        if (field) field.value = value;
+    }
+    syncPromptSlotUi();
+    saveSettings();
+    renderPromptConflictInspector();
 }
 
 function currentCharacterReference() {
@@ -2069,8 +2350,8 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
     const scopes = Object.fromEntries(dialogueSegments.map(segment => [segment.id, 'other_dialogue']));
 
     const needsSpeakerIsolation = Boolean(
-        String(settings.dialoguePrompt || '').trim()
-        || String(settings.otherDialoguePrompt || '').trim()
+        (settings.dialoguePromptEnabled !== false && String(settings.dialoguePrompt || '').trim())
+        || (settings.otherDialoguePromptEnabled !== false && String(settings.otherDialoguePrompt || '').trim())
         || String(settings.dialogueEndingPreferred || '').trim()
         || String(settings.dialogueEndingAvoid || '').trim()
         || settings.dialogueEndingRepetitionReduction !== false
@@ -2170,8 +2451,8 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
     const translations = new Map();
     const groups = segmentsGroupedByOutputScope(segmented.segments, speakerScopes);
     const strictIsolationNeeded = Boolean(
-        String(settings.dialoguePrompt || '').trim()
-        || String(settings.otherDialoguePrompt || '').trim()
+        (settings.dialoguePromptEnabled !== false && String(settings.dialoguePrompt || '').trim())
+        || (settings.otherDialoguePromptEnabled !== false && String(settings.otherDialoguePrompt || '').trim())
         || String(settings.dialogueEndingPreferred || '').trim()
         || String(settings.dialogueEndingAvoid || '').trim()
         || settings.dialogueEndingRepetitionReduction !== false
@@ -7339,25 +7620,94 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
+
+                <details id="verba-prompt-presets" class="verba-tool-details verba-prompt-presets">
+                    <summary>💾 프롬프트 프리셋 <small id="verba-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div class="verba-help">아래 4개 프롬프트의 내용과 각 슬롯 ON/OFF 상태를 한 세트로 저장합니다. 이름 고정·금지어·현지화·말맛·기타 설정은 저장하거나 바꾸지 않습니다.</div>
+
+                        <select id="verba-prompt-preset-select" class="text_pole">
+                            ${promptPresetSelectMarkup()}
+                        </select>
+
+                        <label for="verba-prompt-preset-name">프리셋 이름</label>
+                        <input id="verba-prompt-preset-name" class="text_pole" type="text" maxlength="60" autocomplete="off" placeholder="예: 한국캐 기본 말투">
+
+                        <div class="verba-prompt-preset-actions">
+                            <button type="button" id="verba-prompt-preset-save" class="menu_button">새로 저장</button>
+                            <button type="button" id="verba-prompt-preset-load" class="menu_button" disabled>불러오기</button>
+                            <button type="button" id="verba-prompt-preset-overwrite" class="menu_button" disabled>덮어쓰기</button>
+                            <button type="button" id="verba-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
+                            <button type="button" id="verba-prompt-preset-delete" class="menu_button" disabled>삭제</button>
+                        </div>
+
+                        <div class="verba-prompt-preset-fields">
+                            <small>저장 대상</small>
+                            <span>전체 번역 전역 · 모든 대사 공통 · 캐릭터 대사 전용 · NPC·USER 대사 전용 + 각 슬롯 ON/OFF</span>
+                        </div>
+
+                        <details id="verba-prompt-preset-backups" class="verba-prompt-preset-backups">
+                            <summary>🛟 최근 프리셋 백업 <small id="verba-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
+                            <div class="verba-prompt-preset-backup-content">
+                                <div class="verba-help">프리셋을 새로 저장·덮어쓰기·이름 변경·삭제하기 직전의 전체 프리셋 목록을 자동으로 최대 5개 보관해요. 백업을 복원해도 현재 입력 중인 4개 프롬프트 내용은 건드리지 않습니다.</div>
+                                <button type="button" id="verba-prompt-preset-backup-now" class="menu_button verba-wide">지금 백업</button>
+                                <div id="verba-prompt-preset-backup-list" class="verba-prompt-preset-backup-list"></div>
+                            </div>
+                        </details>
+                    </div>
+                </details>
+
                 <details id="verba-name-lock-manager" class="verba-name-lock-manager">
                     <summary>이름 고정 관리 <small>캐릭터별 저장</small></summary>
                     <div id="verba-name-lock-manager-content" class="verba-name-lock-manager-content"></div>
                 </details>
 
-                <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
-                <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
+                <div class="verba-prompt-slot ${settings.globalPromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="global">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-global-prompt-enabled" ${settings.globalPromptEnabled !== false ? 'checked' : ''}>
+                            <span>ON</span>
+                        </label>
+                    </div>
+                    <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
+                </div>
 
-                <label for="verba-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
-                <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="모든 직접 대사에 공통 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
-                <div class="verba-help">캐릭터·NPC·USER의 모든 직접 대사에 항상 적용해요. 대사 한영병기, 따옴표 형식처럼 화자와 무관한 공통 규칙은 여기에 입력하세요.</div>
+                <div class="verba-prompt-slot ${settings.allDialoguePromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="all-dialogue">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-all-dialogue-prompt-enabled" ${settings.allDialoguePromptEnabled !== false ? 'checked' : ''}>
+                            <span>ON</span>
+                        </label>
+                    </div>
+                    <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="모든 직접 대사에 공통 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
+                    <div class="verba-help">캐릭터·NPC·USER의 모든 직접 대사에 항상 적용해요. 대사 한영병기, 따옴표 형식처럼 화자와 무관한 공통 규칙은 여기에 입력하세요.</div>
+                </div>
 
-                <label for="verba-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
-                <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
-                <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 추가 적용해요. 캐릭터 고유 말투는 여기에 입력하세요.</div>
+                <div class="verba-prompt-slot ${settings.dialoguePromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="dialogue">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-dialogue-prompt-enabled" ${settings.dialoguePromptEnabled !== false ? 'checked' : ''}>
+                            <span>ON</span>
+                        </label>
+                    </div>
+                    <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
+                    <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 추가 적용해요. 캐릭터 고유 말투는 여기에 입력하세요.</div>
+                </div>
 
-                <label for="verba-other-dialogue-prompt">NPC·USER 대사 전용 프롬프트</label>
-                <textarea id="verba-other-dialogue-prompt" class="text_pole" rows="5" placeholder="NPC·USER·기타 화자 대사에만 적용할 말투 규칙">${escapeHtml(settings.otherDialoguePrompt)}</textarea>
-                <div class="verba-help">현재 캐릭터가 아닌 NPC·USER·기타 화자의 직접 대사에만 추가 적용해요. 캐릭터와 다른 말투를 주고 싶을 때 사용하세요.</div>
+                <div class="verba-prompt-slot ${settings.otherDialoguePromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="other-dialogue">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-other-dialogue-prompt">NPC·USER 대사 전용 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-other-dialogue-prompt-enabled" ${settings.otherDialoguePromptEnabled !== false ? 'checked' : ''}>
+                            <span>ON</span>
+                        </label>
+                    </div>
+                    <textarea id="verba-other-dialogue-prompt" class="text_pole" rows="5" placeholder="NPC·USER·기타 화자 대사에만 적용할 말투 규칙">${escapeHtml(settings.otherDialoguePrompt)}</textarea>
+                    <div class="verba-help">현재 캐릭터가 아닌 NPC·USER·기타 화자의 직접 대사에만 추가 적용해요. 캐릭터와 다른 말투를 주고 싶을 때 사용하세요.</div>
+                </div>
 
                 <label for="verba-banned-words">번역 금지어</label>
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
@@ -7991,6 +8341,148 @@ function injectSettingsPanel() {
             saveSettings();
         });
     });
+    const promptPresetSelect = panel.querySelector('#verba-prompt-preset-select');
+    const promptPresetName = panel.querySelector('#verba-prompt-preset-name');
+
+    promptPresetSelect?.addEventListener('change', event => {
+        const preset = promptPresetById(event.target.value);
+        if (preset && promptPresetName) promptPresetName.value = preset.name;
+        renderPromptPresetManager(event.target.value);
+    });
+
+    panel.querySelector('#verba-prompt-preset-save')?.addEventListener('click', () => {
+        const name = normalizedPromptPresetName(promptPresetName?.value);
+        if (!name) {
+            notify('프롬프트 프리셋 이름을 입력해 주세요.', 'warning');
+            promptPresetName?.focus();
+            return;
+        }
+        const presets = normalizedPromptPresets();
+        if (presets.some(preset => preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            notify('같은 이름의 프롬프트 프리셋이 이미 있어요. 기존 프리셋을 선택해 덮어쓰거나 다른 이름을 사용해 주세요.', 'warning');
+            return;
+        }
+        if (presets.length >= 100) {
+            notify('프롬프트 프리셋은 최대 100개까지 저장할 수 있어요.', 'warning');
+            return;
+        }
+
+        createPromptPresetBackup('새 프리셋 저장 전');
+
+        const preset = {
+            id: `prompt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+            name,
+            ...currentPromptPresetSnapshot(),
+            updatedAt: new Date().toISOString(),
+        };
+        settings.promptPresets = [...presets, preset];
+        saveSettings();
+        renderPromptPresetManager(preset.id);
+        if (promptPresetSelect) promptPresetSelect.value = preset.id;
+        notify(`프롬프트 프리셋 “${name}”을 저장했어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-load')?.addEventListener('click', () => {
+        const preset = promptPresetById(promptPresetSelect?.value);
+        if (!preset) {
+            notify('불러올 프롬프트 프리셋을 선택해 주세요.', 'warning');
+            return;
+        }
+        setPromptFieldsFromPreset(preset);
+        if (promptPresetName) promptPresetName.value = preset.name;
+        notify(`프롬프트 프리셋 “${preset.name}”을 불러왔어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-overwrite')?.addEventListener('click', () => {
+        const id = String(promptPresetSelect?.value || '');
+        const preset = promptPresetById(id);
+        if (!preset) {
+            notify('덮어쓸 프롬프트 프리셋을 선택해 주세요.', 'warning');
+            return;
+        }
+        createPromptPresetBackup(`“${preset.name}” 덮어쓰기 전`);
+        settings.promptPresets = normalizedPromptPresets().map(row => (
+            row.id === id
+                ? { ...row, ...currentPromptPresetSnapshot(), updatedAt: new Date().toISOString() }
+                : row
+        ));
+        saveSettings();
+        renderPromptPresetManager(id);
+        notify(`프롬프트 프리셋 “${preset.name}”을 현재 프롬프트로 덮어썼어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-rename')?.addEventListener('click', () => {
+        const id = String(promptPresetSelect?.value || '');
+        const preset = promptPresetById(id);
+        if (!preset) {
+            notify('이름을 바꿀 프롬프트 프리셋을 선택해 주세요.', 'warning');
+            return;
+        }
+        const name = normalizedPromptPresetName(promptPresetName?.value);
+        if (!name) {
+            notify('새 프리셋 이름을 입력해 주세요.', 'warning');
+            promptPresetName?.focus();
+            return;
+        }
+        if (normalizedPromptPresets().some(row => row.id !== id && row.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            notify('같은 이름의 다른 프롬프트 프리셋이 이미 있어요.', 'warning');
+            return;
+        }
+        createPromptPresetBackup(`“${preset.name}” 이름 변경 전`);
+        settings.promptPresets = normalizedPromptPresets().map(row => (
+            row.id === id ? { ...row, name, updatedAt: new Date().toISOString() } : row
+        ));
+        saveSettings();
+        renderPromptPresetManager(id);
+        if (promptPresetName) promptPresetName.value = name;
+        notify(`프롬프트 프리셋 이름을 “${name}”으로 바꿨어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-delete')?.addEventListener('click', () => {
+        const id = String(promptPresetSelect?.value || '');
+        const preset = promptPresetById(id);
+        if (!preset) {
+            notify('삭제할 프롬프트 프리셋을 선택해 주세요.', 'warning');
+            return;
+        }
+        if (!globalThis.confirm?.(`프롬프트 프리셋 “${preset.name}”을 삭제할까요?`)) return;
+        createPromptPresetBackup(`“${preset.name}” 삭제 전`);
+        settings.promptPresets = normalizedPromptPresets().filter(row => row.id !== id);
+        saveSettings();
+        if (promptPresetName) promptPresetName.value = '';
+        renderPromptPresetManager('');
+        notify(`프롬프트 프리셋 “${preset.name}”을 삭제했어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-backup-now')?.addEventListener('click', () => {
+        const presets = normalizedPromptPresets();
+        if (!presets.length) {
+            notify('백업할 프롬프트 프리셋이 아직 없어요.', 'warning');
+            return;
+        }
+        createPromptPresetBackup('수동 백업', { force: true });
+        saveSettings();
+        renderPromptPresetBackups();
+        notify(`현재 프롬프트 프리셋 ${presets.length}개를 백업했어요.`, 'success');
+    });
+
+    renderPromptPresetManager();
+
+    [
+        ['#verba-global-prompt-enabled', 'globalPromptEnabled'],
+        ['#verba-all-dialogue-prompt-enabled', 'allDialoguePromptEnabled'],
+        ['#verba-dialogue-prompt-enabled', 'dialoguePromptEnabled'],
+        ['#verba-other-dialogue-prompt-enabled', 'otherDialoguePromptEnabled'],
+    ].forEach(([selector, key]) => {
+        panel.querySelector(selector)?.addEventListener('change', event => {
+            settings[key] = event.target.checked;
+            syncPromptSlotUi();
+            saveSettings();
+            renderPromptConflictInspector();
+        });
+    });
+    syncPromptSlotUi();
+
     panel.querySelector('#verba-global-prompt').addEventListener('input', event => {
         settings.globalPrompt = event.target.value;
         saveSettings();

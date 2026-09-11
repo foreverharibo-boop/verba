@@ -95,15 +95,15 @@ function allowsIntentionalForeignText(segment, settings = {}, speakerScopes = nu
         const prompt = String(value || '');
         return !NO_BILINGUAL_PROMPT_PATTERN.test(prompt) && BILINGUAL_PROMPT_PATTERN.test(prompt);
     };
-    if (requestsBilingual(settings.globalPrompt)) return true;
+    if (requestsBilingual(enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled'))) return true;
     if (segment?.type !== 'dialogue_candidate') return false;
-    if (requestsBilingual(settings.allDialoguePrompt)) return true;
+    if (requestsBilingual(enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled'))) return true;
 
     const scoped = speakerScopes && typeof speakerScopes === 'object'
         ? speakerScopes[segment.id]
         : null;
-    if (scoped === 'target_dialogue') return requestsBilingual(settings.dialoguePrompt);
-    if (scoped === 'other_dialogue') return requestsBilingual(settings.otherDialoguePrompt);
+    if (scoped === 'target_dialogue') return requestsBilingual(enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled'));
+    if (scoped === 'other_dialogue') return requestsBilingual(enabledPromptValue(settings, 'otherDialoguePrompt', 'otherDialoguePromptEnabled'));
 
     // Without attribution, do not let a speaker-specific prompt relax foreign-
     // text validation for every dialogue segment.
@@ -658,6 +658,12 @@ function instructionBlock(title, value, fallback = '(없음)') {
     return `${title}\n${text || fallback}`;
 }
 
+function enabledPromptValue(settings = {}, promptKey, enabledKey) {
+    if (settings?.[enabledKey] === false) return '';
+    return String(settings?.[promptKey] || '');
+}
+
+
 const RELATION_TEMPERATURE_RULES = {
     cold: `COLD
 - Render direct dialogue with restrained, clipped, and emotionally cool Korean wording.
@@ -831,12 +837,12 @@ export function findTranslationPromptConflicts({
 } = {}) {
     const sources = [
         { key: 'oneTime', text: oneTimeInstruction },
-        ...(includeCharacterDialogue ? [{ key: 'characterDialogue', text: settings.dialoguePrompt }] : []),
+        ...(includeCharacterDialogue ? [{ key: 'characterDialogue', text: enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled') }] : []),
         ...(includeDialogue ? [
-            { key: 'otherDialogue', text: settings.otherDialoguePrompt },
-            { key: 'allDialogue', text: settings.allDialoguePrompt },
+            { key: 'otherDialogue', text: enabledPromptValue(settings, 'otherDialoguePrompt', 'otherDialoguePromptEnabled') },
+            { key: 'allDialogue', text: enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled') },
         ] : []),
-        { key: 'global', text: settings.globalPrompt },
+        { key: 'global', text: enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled') },
     ].filter(source => String(source.text || '').trim());
     const priority = normalizedTranslationRuleOrder(settings);
     const priorityOf = key => {
@@ -934,20 +940,20 @@ function orderedTranslationRuleBlocks(settings = {}, {
 ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
         characterDialogue: instructionBlock(
             'TARGET-CHARACTER DIALOGUE PROMPT — only direct speech by TARGET CHARACTER',
-            includeCharacterDialogue ? settings.dialoguePrompt : '',
+            includeCharacterDialogue ? enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled') : '',
             '(적용 대상 캐릭터 대사 없음)',
         ),
         otherDialogue: instructionBlock(
             'USER/NPC/OTHER DIALOGUE PROMPT — only direct speech NOT spoken by TARGET CHARACTER',
-            includeDialogue ? settings.otherDialoguePrompt : '',
+            includeDialogue ? enabledPromptValue(settings, 'otherDialoguePrompt', 'otherDialoguePromptEnabled') : '',
             '(적용 대상 USER/NPC/기타 대사 없음)',
         ),
         allDialogue: instructionBlock(
             'ALL-DIALOGUE COMMON PROMPT — every direct dialogue passage, never narration',
-            includeDialogue ? settings.allDialoguePrompt : '',
+            includeDialogue ? enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled') : '',
             '(적용 대상 대사 없음)',
         ),
-        global: instructionBlock('GLOBAL TRANSLATION PROMPT — narration and dialogue', settings.globalPrompt),
+        global: instructionBlock('GLOBAL TRANSLATION PROMPT — narration and dialogue', enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled')),
         fineTuning: translationTuningBlock(settings, tuning),
     };
     const ordered = normalizedTranslationRuleOrder(settings);
@@ -1339,8 +1345,8 @@ function scopedTranslationRuleBlocks(settings = {}, {
     const dialogue = scope === 'target_dialogue' || scope === 'other_dialogue';
     const targetDialogue = scope === 'target_dialogue';
     const otherDialogue = scope === 'other_dialogue';
-    const hasCharacterDialoguePrompt = Boolean(String(settings.dialoguePrompt || '').trim());
-    const hasOtherDialoguePrompt = Boolean(String(settings.otherDialoguePrompt || '').trim());
+    const hasCharacterDialoguePrompt = Boolean(enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled').trim());
+    const hasOtherDialoguePrompt = Boolean(enabledPromptValue(settings, 'otherDialoguePrompt', 'otherDialoguePromptEnabled').trim());
     const available = new Set(['oneTime', 'global', 'fineTuning']);
 
     // Common dialogue rules (bilingual format, quotation format, etc.) always
@@ -1356,17 +1362,17 @@ function scopedTranslationRuleBlocks(settings = {}, {
 ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
         characterDialogue: instructionBlock(
             'TARGET-CHARACTER DIALOGUE PROMPT — applies ONLY to TARGET-CHARACTER dialogue',
-            settings.dialoguePrompt,
+            enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled'),
         ),
         otherDialogue: instructionBlock(
             'USER/NPC/OTHER DIALOGUE PROMPT — applies ONLY to dialogue NOT spoken by TARGET CHARACTER',
-            settings.otherDialoguePrompt,
+            enabledPromptValue(settings, 'otherDialoguePrompt', 'otherDialoguePromptEnabled'),
         ),
         allDialogue: instructionBlock(
             'ALL-DIALOGUE COMMON PROMPT — applies to EVERY direct dialogue passage, never narration',
-            settings.allDialoguePrompt,
+            enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled'),
         ),
-        global: instructionBlock('GLOBAL TRANSLATION PROMPT — applies to this request', settings.globalPrompt),
+        global: instructionBlock('GLOBAL TRANSLATION PROMPT — applies to this request', enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled')),
         fineTuning: scopedTranslationTuningBlock(settings, tuning, scope),
     };
 
@@ -1791,7 +1797,7 @@ ${koreanPragmaticWarningBlock(source)}
 ${koreanSexualLexicalFidelityBlock(source)}
 
 
-${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', settings.globalPrompt)}
+${instructionBlock('GLOBAL TRANSLATION PROMPT — applies to narration and dialogue', enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled'))}
 
 ALL-DIALOGUE PROMPT
 (Not applied: this setting is reserved for dialogue inside assistant outputs.)
@@ -1964,16 +1970,16 @@ SPEAKER SCOPE REFERENCE
 
 USER STYLE RULES — reference only
 GLOBAL TRANSLATION PROMPT
-${String(settings.globalPrompt || '').trim() || '(없음)'}
+${enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled').trim() || '(없음)'}
 
 ALL-DIALOGUE COMMON PROMPT
-${String(settings.allDialoguePrompt || '').trim() || '(없음)'}
+${enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled').trim() || '(없음)'}
 
 TARGET-CHARACTER DIALOGUE PROMPT
-${String(settings.dialoguePrompt || '').trim() || '(없음)'}
+${enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled').trim() || '(없음)'}
 
 USER/NPC/OTHER DIALOGUE PROMPT
-${String(settings.otherDialoguePrompt || '').trim() || '(없음)'}
+${enabledPromptValue(settings, 'otherDialoguePrompt', 'otherDialoguePromptEnabled').trim() || '(없음)'}
 
 TARGET-CHARACTER FINE TUNING
 ${scopedTranslationTuningBlock(settings, tuning, 'target_dialogue')}

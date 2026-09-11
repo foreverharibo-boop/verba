@@ -1968,3 +1968,150 @@
 #verba-english-flavor-controls select {
     width: 100% !important;
 }
+
+
+/* v0.4.9: prompt-only presets */
+.verba-prompt-presets {
+    margin: 2px 0 !important;
+}
+
+.verba-prompt-preset-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.verba-prompt-preset-actions .menu_button {
+    width: 100% !important;
+    min-width: 0 !important;
+}
+
+.verba-prompt-preset-actions #verba-prompt-preset-save {
+    grid-column: 1 / -1;
+}
+
+.verba-prompt-preset-fields {
+    display: grid;
+    gap: 3px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--verba-text) 6%, transparent);
+    line-height: 1.35;
+}
+
+.verba-prompt-preset-fields small {
+    opacity: .62;
+}
+
+@media (max-width: 520px) {
+    .verba-prompt-preset-actions {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+
+/* v0.4.10: prompt-slot ON/OFF */
+.verba-prompt-slot {
+    margin: 8px 0 10px;
+}
+
+.verba-prompt-slot-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+.verba-prompt-slot-head > label:first-child {
+    margin: 0 !important;
+}
+
+.verba-prompt-slot-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 !important;
+    font-size: .78em;
+    font-weight: 600;
+    opacity: .78;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.verba-prompt-slot-toggle input {
+    margin: 0;
+}
+
+.verba-prompt-slot-off .verba-prompt-slot-head > label:first-child,
+.verba-prompt-slot-off textarea,
+.verba-prompt-slot-off .verba-help {
+    opacity: .48;
+}
+
+.verba-prompt-slot-off .verba-prompt-slot-toggle {
+    opacity: 1;
+}
+
+.verba-prompt-slot-off .verba-prompt-slot-toggle span::after {
+    content: ' · OFF';
+}
+
+
+/* v0.4.11: recent prompt-preset backups */
+.verba-prompt-preset-backups {
+    margin-top: 8px;
+}
+
+.verba-prompt-preset-backups > summary {
+    cursor: pointer;
+    font-size: .9em;
+}
+
+.verba-prompt-preset-backup-content {
+    display: grid;
+    gap: 6px;
+    padding-top: 6px;
+}
+
+.verba-prompt-preset-backup-list {
+    display: grid;
+    gap: 5px;
+}
+
+.verba-prompt-preset-backup-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 7px;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #888) 42%, transparent);
+    border-radius: 8px;
+}
+
+.verba-prompt-preset-backup-meta {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.verba-prompt-preset-backup-meta b,
+.verba-prompt-preset-backup-meta small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.verba-prompt-preset-backup-meta small,
+.verba-prompt-preset-backup-empty {
+    opacity: .68;
+    font-size: .8em;
+}
+
+.verba-prompt-preset-backup-restore {
+    width: auto !important;
+    min-width: 52px !important;
+    margin: 0 !important;
+    padding: 4px 7px !important;
+    font-size: .78em !important;
+}

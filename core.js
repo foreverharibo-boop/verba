@@ -1180,6 +1180,76 @@ ${lines.join('\n\n')}`;
 }
 
 
+function outputExpressionDetailBlock(settings = {}, scope = 'mixed') {
+    const dialogue = scope === 'mixed' || scope === 'target_dialogue' || scope === 'other_dialogue';
+    const lines = [];
+
+    const emphasis = {
+        default: '',
+        source: `SOURCE EMPHASIS — SOURCE-ALIGNED
+- Preserve emphasis that is explicitly present in the source as closely as natural Korean permits.
+- Keep meaningful italics, bolding, repeated punctuation, abrupt short-beat emphasis, stretched spelling, and other visible stress cues when they carry tone or force.
+- English ALL CAPS has no direct Korean uppercase equivalent: preserve the same emphasis through the nearest natural Korean typographic or rhythmic cue instead of inventing extra intensity.
+- Do not add emphasis, punctuation, repetition, or dramatic beats that are absent from the source.`,
+        natural: `SOURCE EMPHASIS — NATURAL KOREAN
+- Preserve the source's emphasis strength, but adapt the surface form to what feels natural in Korean rather than mechanically copying English typography.
+- You may convert ALL CAPS, italics/bold, repeated punctuation, stretched spelling, or abrupt emphasis into natural Korean wording, punctuation, spacing, or sentence rhythm when that carries the same force more cleanly.
+- Keep the degree and target of emphasis unchanged. Never create a new emphasis or make an existing emphasis stronger than the source.`,
+        active: `SOURCE EMPHASIS — ACTIVE PRESERVATION
+- Actively keep the source's emphatic energy visible in Korean when the source clearly marks emphasis through ALL CAPS, italics/bold, !!!, ?!, stretched spelling, repeated words, or deliberately clipped emphatic beats.
+- Use strong but natural Korean typographic, punctuation, lexical, or rhythmic equivalents so the emphasis is not flattened during translation.
+- You may restructure the Korean more boldly to preserve the SAME stress pattern and emotional force, but never add new emphasis, new emotion, or greater intensity than the source.`,
+    }[settings.expressionEmphasisTaste] || '';
+    if (emphasis) lines.push(emphasis);
+
+    if (dialogue) {
+        const disfluency = {
+            default: '',
+            clean: `DIALOGUE DISFLUENCY — CLEANED
+- Translate direct dialogue into clean natural Korean while smoothing orthographic stutters, stretched spellings, and broken false starts when they are merely surface disfluency.
+- Preserve the underlying hesitation, panic, disbelief, interruption, or emotional force if it is semantically important, but do not mechanically reproduce every repeated letter or syllable.
+- Never delete actual words, denials, corrections, or interrupted semantic content.`,
+            natural: `DIALOGUE DISFLUENCY — NATURAL PRESERVATION
+- Preserve meaningful stutters, stretched sounds, self-interruptions, false starts, and abrupt breaks from the source when they contribute to character voice or emotion.
+- Adapt them to natural Korean sound/syllable patterns instead of copying English letters mechanically.
+- Keep the amount of disfluency proportionate to the source; do not create new stutters, elongations, or interruptions.`,
+            active: `DIALOGUE DISFLUENCY — ACTIVE PRESERVATION
+- Actively retain clearly marked stutters, stretched sounds, repeated starts, cut-off words, and interruptions in direct dialogue so the source's spoken texture remains strongly perceptible in Korean.
+- Rebuild the visible disfluency using natural Korean syllables, punctuation, ellipses, dashes, or repeated fragments as appropriate.
+- Preserve the SAME amount and emotional function of disruption. Never invent extra stuttering, panic, hesitation, or broken speech that the source does not contain.`,
+        }[settings.expressionDisfluencyTaste] || '';
+        if (disfluency) lines.push(disfluency);
+    }
+
+    const idiom = {
+        default: '',
+        meaning: `IDIOMS / METAPHORS — MEANING FIRST
+- Prioritize the actual intended meaning of English idioms and figurative language over preserving their literal source image.
+- Use clear, natural Korean wording or a genuinely equivalent expression when a literal rendering would sound opaque or awkward.
+- Preserve any factual cultural reference that matters to the scene; do not replace it with an unrelated Korean proverb, meme, or cultural reference.`,
+        balanced: `IDIOMS / METAPHORS — BALANCED
+- Preserve both the intended meaning and the source's figurative image when they can coexist naturally in Korean.
+- If the original image would become confusing or strongly translation-like, choose a natural Korean rendering that keeps as much of the metaphorical flavor as possible without obscuring meaning.
+- Do not invent a new metaphor, proverb, joke, or cultural reference.`,
+        sourceCulture: `IDIOMS / METAPHORS — SOURCE-CULTURE / IMAGE PRESERVATION
+- When an English idiom, metaphor, or culture-shaped image contributes to character voice, humor, atmosphere, or cultural identity, preserve that source image and cultural flavor as much as natural Korean allows.
+- Do not automatically domesticate it into a distinctly Korean proverb, saying, meme, or unrelated local image.
+- Final Korean must remain readable and natural: preserve the source image without producing an incomprehensible word-for-word calque when a natural Korean restructuring can keep the same image and meaning.
+- Never invent cultural references or figurative meaning absent from the source.`,
+    }[settings.expressionIdiomMetaphorTaste] || '';
+    if (idiom) lines.push(idiom);
+
+    if (!lines.length) return '';
+
+    return `EXPRESSION DETAIL — KOREAN OUTPUT
+- These preferences apply only to source expression that is actually present.
+- Preserve source meaning, referents, intensity, chronology, explicitness, speaker attribution, and character voice.
+- Do not invent emphasis, disfluency, idioms, metaphors, cultural references, jokes, or emotional cues merely to satisfy a style setting.
+
+${lines.join('\n\n')}`;
+}
+
+
 function outputCharacterTasteConflictNote(settings = {}) {
     if (settings.koreanFlavorEnabled !== true || settings.englishFlavorEnabled !== true) return '';
     return `CHARACTER TASTE OVERLAP NOTE
@@ -1197,6 +1267,7 @@ function translationTuningBlock(settings = {}, override = null) {
     const koreanOutputTaste = koreanOutputTasteBlock(settings, 'mixed');
     const englishCharacterTaste = englishCharacterKoreanTasteBlock(settings, 'mixed');
     const characterTasteConflictNote = outputCharacterTasteConflictNote(settings);
+    const expressionDetail = outputExpressionDetailBlock(settings, 'mixed');
 
     if (!relationTemperatureEnabled) {
         return `TRANSLATION FINE TUNING
@@ -1204,6 +1275,8 @@ RELATION TEMPERATURE / LOCALIZATION
 (비활성화)
 
 ${endingPreferences}
+
+${expressionDetail}
 
 ${koreanOutputTaste}
 
@@ -1243,6 +1316,8 @@ DIALOGUE LOCALIZATION — applies only to direct-dialogue segments, never narrat
 ${LOCALIZATION_RULES[dialogueLocalizationKey]}
 
 ${endingPreferences}
+
+${expressionDetail}
 
 ${koreanOutputTaste}
 
@@ -1288,6 +1363,8 @@ function scopedTranslationTuningBlock(settings = {}, override = null, scope = 'n
 RELATION TEMPERATURE / LOCALIZATION
 (비활성화)
 
+${outputExpressionDetailBlock(settings, 'narration')}
+
 ${koreanOutputTasteBlock(settings, 'narration')}
 
 ${englishCharacterKoreanTasteBlock(settings, 'narration')}
@@ -1296,6 +1373,8 @@ ${outputCharacterTasteConflictNote(settings)}`;
         }
         return `TRANSLATION FINE TUNING — NARRATION ONLY
 ${LOCALIZATION_RULES[narrationLocalizationKey]}
+
+${outputExpressionDetailBlock(settings, 'narration')}
 
 ${koreanOutputTasteBlock(settings, 'narration')}
 
@@ -1325,6 +1404,8 @@ ${dialogueEndingPreferenceBlock(settings, requested)}`
 
     return `TRANSLATION FINE TUNING — DIALOGUE ONLY
 ${relationAndLocalization}${characterEndingPreferences}
+
+${outputExpressionDetailBlock(settings, scope)}
 
 ${koreanOutputTasteBlock(settings, scope)}
 

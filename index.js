@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.13';
+const EXTENSION_VERSION = '0.4.15';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -77,6 +77,9 @@ const DEFAULT_SETTINGS = {
     qualityAuditVoice: true,
     qualityAuditTranslationese: true,
     qualityAuditContinuity: true,
+    expressionEmphasisTaste: 'default',
+    expressionDisfluencyTaste: 'default',
+    expressionIdiomMetaphorTaste: 'default',
     koreanFlavorEnabled: false,
     koreanFlavorDialogueRhythm: 'balanced',
     koreanFlavorPronounOmission: 'natural',
@@ -148,6 +151,15 @@ settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
 settings.qualityAuditVoice = settings.qualityAuditVoice !== false;
 settings.qualityAuditTranslationese = settings.qualityAuditTranslationese !== false;
 settings.qualityAuditContinuity = settings.qualityAuditContinuity !== false;
+settings.expressionEmphasisTaste = ['default', 'source', 'natural', 'active'].includes(settings.expressionEmphasisTaste)
+    ? settings.expressionEmphasisTaste
+    : 'default';
+settings.expressionDisfluencyTaste = ['default', 'clean', 'natural', 'active'].includes(settings.expressionDisfluencyTaste)
+    ? settings.expressionDisfluencyTaste
+    : 'default';
+settings.expressionIdiomMetaphorTaste = ['default', 'meaning', 'balanced', 'sourceCulture'].includes(settings.expressionIdiomMetaphorTaste)
+    ? settings.expressionIdiomMetaphorTaste
+    : 'default';
 settings.promptPresets = Array.isArray(settings.promptPresets)
     ? settings.promptPresets
         .map((preset, index) => ({
@@ -955,7 +967,11 @@ function syncPromptSlotUi() {
         const checkbox = document.querySelector(`#verba-${slot}-prompt-enabled`);
         const enabled = settings[key] !== false;
         if (wrapper) wrapper.classList.toggle('verba-prompt-slot-off', !enabled);
-        if (checkbox) checkbox.checked = enabled;
+        if (checkbox) {
+            checkbox.checked = enabled;
+            const label = checkbox.closest('.verba-prompt-slot-toggle')?.querySelector('span');
+            if (label) label.textContent = enabled ? 'ON' : 'OFF';
+        }
     }
 }
 
@@ -7705,7 +7721,7 @@ function injectSettingsPanel() {
                         <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
                         <label class="verba-prompt-slot-toggle">
                             <input type="checkbox" id="verba-global-prompt-enabled" ${settings.globalPromptEnabled !== false ? 'checked' : ''}>
-                            <span>ON</span>
+                            <span>${settings.globalPromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
                     <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
@@ -7716,7 +7732,7 @@ function injectSettingsPanel() {
                         <label for="verba-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
                         <label class="verba-prompt-slot-toggle">
                             <input type="checkbox" id="verba-all-dialogue-prompt-enabled" ${settings.allDialoguePromptEnabled !== false ? 'checked' : ''}>
-                            <span>ON</span>
+                            <span>${settings.allDialoguePromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
                     <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="모든 직접 대사에 공통 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
@@ -7728,7 +7744,7 @@ function injectSettingsPanel() {
                         <label for="verba-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
                         <label class="verba-prompt-slot-toggle">
                             <input type="checkbox" id="verba-dialogue-prompt-enabled" ${settings.dialoguePromptEnabled !== false ? 'checked' : ''}>
-                            <span>ON</span>
+                            <span>${settings.dialoguePromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
                     <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
@@ -7740,7 +7756,7 @@ function injectSettingsPanel() {
                         <label for="verba-other-dialogue-prompt">NPC·USER 대사 전용 프롬프트</label>
                         <label class="verba-prompt-slot-toggle">
                             <input type="checkbox" id="verba-other-dialogue-prompt-enabled" ${settings.otherDialoguePromptEnabled !== false ? 'checked' : ''}>
-                            <span>ON</span>
+                            <span>${settings.otherDialoguePromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
                     <textarea id="verba-other-dialogue-prompt" class="text_pole" rows="5" placeholder="NPC·USER·기타 화자 대사에만 적용할 말투 규칙">${escapeHtml(settings.otherDialoguePrompt)}</textarea>
@@ -7847,6 +7863,41 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+
+
+                <details id="verba-expression-detail" class="verba-tool-details verba-expression-detail">
+                    <summary>표현 디테일 <small>강조·말끊김·비유</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div class="verba-help">영어 아웃풋을 한국어로 옮길 때 원문에 이미 있는 강조 방식·말더듬·늘임·끊김·관용구·비유의 결을 어떻게 처리할지 정합니다. 아웃풋 E→K에만 적용되며 기본값은 모두 추가 지시 없음입니다.</div>
+
+                        <label for="verba-expression-emphasis">강조 표현의 맛</label>
+                        <select id="verba-expression-emphasis" class="text_pole">
+                            <option value="default" ${settings.expressionEmphasisTaste === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                            <option value="source" ${settings.expressionEmphasisTaste === 'source' ? 'selected' : ''}>원문대로</option>
+                            <option value="natural" ${settings.expressionEmphasisTaste === 'natural' ? 'selected' : ''}>자연스럽게</option>
+                            <option value="active" ${settings.expressionEmphasisTaste === 'active' ? 'selected' : ''}>적극적으로</option>
+                        </select>
+                        <div class="verba-help">ALL CAPS, italics·bold, !!!, ?!, 반복 글자, 짧게 끊어 강조하는 리듬처럼 원문에 이미 있는 강세를 얼마나 또렷하게 살릴지 조절합니다. 원문에 없는 강조는 새로 만들지 않습니다.</div>
+
+                        <label for="verba-expression-disfluency">말더듬·늘임·끊김 보존</label>
+                        <select id="verba-expression-disfluency" class="text_pole">
+                            <option value="default" ${settings.expressionDisfluencyTaste === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                            <option value="clean" ${settings.expressionDisfluencyTaste === 'clean' ? 'selected' : ''}>정리해서 번역</option>
+                            <option value="natural" ${settings.expressionDisfluencyTaste === 'natural' ? 'selected' : ''}>자연스럽게 보존</option>
+                            <option value="active" ${settings.expressionDisfluencyTaste === 'active' ? 'selected' : ''}>적극 보존</option>
+                        </select>
+                        <div class="verba-help">"I-I didn't…", "Nooo…", "Wait—what?" 같은 직접 대사의 말더듬·늘임·중간 끊김을 한국어에서 얼마나 남길지 정합니다. 원문에 없는 말더듬이나 끊김은 추가하지 않습니다.</div>
+
+                        <label for="verba-expression-idiom">관용구·비유 처리 취향</label>
+                        <select id="verba-expression-idiom" class="text_pole">
+                            <option value="default" ${settings.expressionIdiomMetaphorTaste === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
+                            <option value="meaning" ${settings.expressionIdiomMetaphorTaste === 'meaning' ? 'selected' : ''}>뜻 중심</option>
+                            <option value="balanced" ${settings.expressionIdiomMetaphorTaste === 'balanced' ? 'selected' : ''}>균형</option>
+                            <option value="sourceCulture" ${settings.expressionIdiomMetaphorTaste === 'sourceCulture' ? 'selected' : ''}>원문화·비유 결 보존</option>
+                        </select>
+                        <div class="verba-help">영어 관용구·비유의 실제 뜻과 원래 이미지·문화적 결 사이에서 어느 쪽을 더 우선할지 정합니다. 원문에 없는 한국식 속담이나 새로운 비유로 임의 교체하지 않습니다.</div>
+                    </div>
+                </details>
 
 
                 <details id="verba-korean-flavor" class="verba-tool-details verba-korean-flavor">
@@ -8073,6 +8124,24 @@ function injectSettingsPanel() {
         const key = map[target.id];
         if (key && target instanceof HTMLInputElement) {
             settings[key] = target.checked;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-expression-emphasis' && target instanceof HTMLSelectElement) {
+            settings.expressionEmphasisTaste = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-expression-disfluency' && target instanceof HTMLSelectElement) {
+            settings.expressionDisfluencyTaste = target.value;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-expression-idiom' && target instanceof HTMLSelectElement) {
+            settings.expressionIdiomMetaphorTaste = target.value;
             saveSettings();
             return;
         }

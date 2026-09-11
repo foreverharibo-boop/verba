@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.33';
+const EXTENSION_VERSION = '0.4.37';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -54,6 +54,44 @@ const LOCALIZATION_LEVEL_OPTIONS = [
     { value: 'naturalized', label: '자연스러운 한국어' },
     { value: 'native', label: '네이티브 한국어' },
 ];
+const BEGINNER_PERSONALITY_OPTIONS = [
+    { value: 'playful', label: '장난기 많음' },
+    { value: 'sly', label: '능글맞음' },
+    { value: 'cynical', label: '냉소적' },
+    { value: 'arrogant', label: '오만함' },
+    { value: 'warm', label: '다정함' },
+    { value: 'detached', label: '무심함' },
+    { value: 'shy', label: '소심함' },
+    { value: 'calm', label: '차분함' },
+    { value: 'lively', label: '활발함' },
+    { value: 'blunt', label: '직설적' },
+    { value: 'reserved', label: '과묵함' },
+    { value: 'sensitive', label: '예민함' },
+];
+
+const BEGINNER_SPEECH_STYLE_OPTIONS = [
+    { value: 'short', label: '짧고 툭툭' },
+    { value: 'smooth', label: '길고 유려하게' },
+    { value: 'dry', label: '건조하게' },
+    { value: 'sly', label: '능글맞은 말투' },
+    { value: 'soft', label: '부드럽고 다정하게' },
+    { value: 'sarcastic', label: '비꼬듯' },
+    { value: 'teasing', label: '장난스럽게' },
+    { value: 'rough', label: '직설적이고 거칠게' },
+    { value: 'polite', label: '공손하고 단정하게' },
+    { value: 'casual', label: '편한 구어체로' },
+    { value: 'expressive', label: '반응을 생동감 있게' },
+];
+
+const BEGINNER_AGE_OPTIONS = [
+    { value: 'unspecified', label: '미지정' },
+    { value: 'teen', label: '10대' },
+    { value: 'early20s', label: '20대 초반' },
+    { value: 'late20s', label: '20대 후반' },
+    { value: 'thirties', label: '30대' },
+    { value: 'fortiesPlus', label: '40대 이상' },
+];
+
 const TRANSLATION_RULE_DEFINITIONS = [
     { key: 'oneTime', label: '이번 번역 요구사항' },
     { key: 'characterDialogue', label: '캐릭터 대사 전용 프롬프트' },
@@ -95,6 +133,12 @@ const DEFAULT_SETTINGS = {
     englishFlavorMemeDensity: 'default',
     englishFlavorReduceReferentRepetition: true,
     englishFlavorConversationNaturalization: 'natural',
+    beginnerCharacterGuideEnabled: false,
+    beginnerPersonalityTraits: [],
+    beginnerPersonalityCustom: '',
+    beginnerSpeechStyles: [],
+    beginnerSpeechCustom: '',
+    beginnerAgeBand: 'unspecified',
     autoInput: false,
     selectionCandidates: false,
     selectionQuickCount: 2,
@@ -217,6 +261,26 @@ settings.englishFlavorReduceReferentRepetition = settings.englishFlavorReduceRef
 settings.englishFlavorConversationNaturalization = ['default', 'natural', 'active'].includes(settings.englishFlavorConversationNaturalization)
     ? settings.englishFlavorConversationNaturalization
     : 'natural';
+settings.beginnerCharacterGuideEnabled = settings.beginnerCharacterGuideEnabled === true;
+settings.beginnerPersonalityTraits = Array.isArray(settings.beginnerPersonalityTraits)
+    ? [...new Set(settings.beginnerPersonalityTraits
+        .map(String)
+        .filter(value => BEGINNER_PERSONALITY_OPTIONS.some(option => option.value === value)))]
+    : [];
+settings.beginnerPersonalityCustom = typeof settings.beginnerPersonalityCustom === 'string'
+    ? settings.beginnerPersonalityCustom.trim().slice(0, 240)
+    : '';
+settings.beginnerSpeechStyles = Array.isArray(settings.beginnerSpeechStyles)
+    ? [...new Set(settings.beginnerSpeechStyles
+        .map(String)
+        .filter(value => BEGINNER_SPEECH_STYLE_OPTIONS.some(option => option.value === value)))]
+    : [];
+settings.beginnerSpeechCustom = typeof settings.beginnerSpeechCustom === 'string'
+    ? settings.beginnerSpeechCustom.trim().slice(0, 240)
+    : '';
+settings.beginnerAgeBand = BEGINNER_AGE_OPTIONS.some(option => option.value === settings.beginnerAgeBand)
+    ? settings.beginnerAgeBand
+    : 'unspecified';
 settings.relationTemperatureEnabled = settings.relationTemperatureEnabled !== false;
 settings.selectionQuickCount = Math.min(5, Math.max(2, Number(settings.selectionQuickCount) || 2));
 settings.globalPrompt = typeof settings.globalPrompt === 'string' ? settings.globalPrompt : '';
@@ -1104,6 +1168,17 @@ function renderPromptPresetManager(selectedId = '') {
     renderPromptPresetBackups();
 }
 
+function syncBeginnerCharacterGuideUi(root = document) {
+    const master = root?.querySelector?.('#verba-beginner-character-enabled');
+    const controls = root?.querySelector?.('#verba-beginner-character-controls');
+    if (!controls) return;
+    const enabled = Boolean(master?.checked);
+    controls.classList.toggle('verba-control-disabled', !enabled);
+    controls.querySelectorAll('input, select').forEach(control => {
+        control.disabled = !enabled;
+    });
+}
+
 function syncPromptSlotUi() {
     const slots = [
         ['global', 'globalPromptEnabled'],
@@ -1280,6 +1355,30 @@ function renderCurrentAppliedRules() {
                 ['인터넷 밈', meme[settings.englishFlavorMemeDensity] || '기본'],
                 ['지칭 반복 줄이기', settings.englishFlavorReduceReferentRepetition !== false ? 'ON' : 'OFF'],
             ] : [['상태', 'OFF']])}
+
+            ${currentRulesSimpleCard('신입 챗시 전용', [
+                ['상태', settings.beginnerCharacterGuideEnabled ? 'ON' : 'OFF'],
+                ['성격', settings.beginnerCharacterGuideEnabled
+                    ? ([
+                        settings.beginnerPersonalityTraits
+                            .map(value => BEGINNER_PERSONALITY_OPTIONS.find(option => option.value === value)?.label)
+                            .filter(Boolean).join(' · '),
+                        settings.beginnerPersonalityCustom ? `직접 입력: ${settings.beginnerPersonalityCustom}` : '',
+                    ].filter(Boolean).join(' / ') || '선택 없음')
+                    : '적용 안 함'],
+                ['말투', settings.beginnerCharacterGuideEnabled
+                    ? ([
+                        settings.beginnerSpeechStyles
+                            .map(value => BEGINNER_SPEECH_STYLE_OPTIONS.find(option => option.value === value)?.label)
+                            .filter(Boolean).join(' · '),
+                        settings.beginnerSpeechCustom ? `직접 입력: ${settings.beginnerSpeechCustom}` : '',
+                    ].filter(Boolean).join(' / ') || '선택 없음')
+                    : '적용 안 함'],
+                ['연령대', settings.beginnerCharacterGuideEnabled
+                    ? (BEGINNER_AGE_OPTIONS.find(option => option.value === settings.beginnerAgeBand)?.label || '미지정')
+                    : '적용 안 함'],
+                ['적용 범위', settings.beginnerCharacterGuideEnabled ? '현재 캐릭터 직접 대사만' : '적용 안 함'],
+            ])}
 
             ${currentRulesSimpleCard('기타 적용 규칙', [
                 ['금지어', banned.length ? `${banned.length}개 · ${banned.join(' / ')}` : '없음'],
@@ -8327,6 +8426,63 @@ function injectSettingsPanel() {
                         </div>
                     </details>
 
+                <details id="verba-beginner-character-guide" class="verba-tool-details verba-beginner-character-guide">
+                    <summary>신입 챗시 전용 <small>캐릭터 간편 설정 · 기본 OFF</small></summary>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-beginner-character-enabled" ${settings.beginnerCharacterGuideEnabled ? 'checked' : ''}>
+                            <span>신입 챗시용 캐릭터 설정 사용</span>
+                        </label>
+                        <div class="verba-help">캐시트를 읽지 않고, 아래에서 고른 성격·말투·연령대만 현재 캐릭터 직접 대사 번역에 보조 프롬프트로 넣습니다. 기본은 꺼져 있어 기존 번역에는 영향이 없습니다.</div>
+
+                        <div id="verba-beginner-character-controls" class="${settings.beginnerCharacterGuideEnabled ? '' : 'verba-control-disabled'}">
+                            <section class="verba-beginner-group">
+                                <b>캐릭터 성격 <small>복수 선택</small></b>
+                                <div class="verba-beginner-choice-grid">
+                                    ${BEGINNER_PERSONALITY_OPTIONS.map(option => `
+                                        <label class="verba-beginner-choice">
+                                            <input type="checkbox" data-verba-beginner-personality="${option.value}" ${settings.beginnerPersonalityTraits.includes(option.value) ? 'checked' : ''}>
+                                            <span>${option.label}</span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                                <div class="verba-help">여러 개를 같이 골라도 됩니다. 서로 다른 면이 함께 선택되면 원문 상황에 맞는 성격 면을 우선해 말투에 반영합니다.</div>
+                                <label for="verba-beginner-personality-custom">성격 직접 입력 <small>선택 보완용</small></label>
+                                <textarea id="verba-beginner-personality-custom" class="text_pole" rows="2" maxlength="240" placeholder="예: 까칠하지만 은근히 정이 많고, 자존심이 세며 감정 표현이 서툼">${escapeHtml(settings.beginnerPersonalityCustom)}</textarea>
+                                <div class="verba-help">프롬프트 문법 없이 평범한 문장으로 적으면 됩니다. 베르바가 말투 참고용 설명으로만 감싸서 사용합니다.</div>
+                            </section>
+
+                            <section class="verba-beginner-group">
+                                <b>말투 <small>복수 선택</small></b>
+                                <div class="verba-beginner-choice-grid">
+                                    ${BEGINNER_SPEECH_STYLE_OPTIONS.map(option => `
+                                        <label class="verba-beginner-choice">
+                                            <input type="checkbox" data-verba-beginner-speech="${option.value}" ${settings.beginnerSpeechStyles.includes(option.value) ? 'checked' : ''}>
+                                            <span>${option.label}</span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                                <div class="verba-help">문장 길이·건조함·부드러움·비꼼·구어체 같은 표면 화법을 고릅니다. 원문에 없는 감정이나 관계는 새로 만들지 않습니다.</div>
+                                <label for="verba-beginner-speech-custom">말투 직접 입력 <small>선택 보완용</small></label>
+                                <textarea id="verba-beginner-speech-custom" class="text_pole" rows="2" maxlength="240" placeholder="예: 말끝을 살짝 흘리듯 능글맞고 여유 있게, 너무 애교스럽지는 않게">${escapeHtml(settings.beginnerSpeechCustom)}</textarea>
+                                <div class="verba-help">말투 느낌만 자연어로 적으면 됩니다. 원문 의미를 바꾸는 명령으로 사용하지 않습니다.</div>
+                            </section>
+
+                            <section class="verba-beginner-group">
+                                <label for="verba-beginner-age-band"><b>연령대</b></label>
+                                <select id="verba-beginner-age-band" class="text_pole">
+                                    ${BEGINNER_AGE_OPTIONS.map(option => `
+                                        <option value="${option.value}" ${settings.beginnerAgeBand === option.value ? 'selected' : ''}>${option.label}</option>
+                                    `).join('')}
+                                </select>
+                                <div class="verba-help">어휘의 성숙도와 대사 호흡만 참고합니다. 실제 나이·호칭·서열·관계 사실을 새로 만들지 않습니다.</div>
+                            </section>
+
+                            <div class="verba-help">사용자가 직접 적은 캐릭터 대사 전용 프롬프트가 가장 우선하며, 한캐의 맛·영캐의 맛은 문화권 표현 방식을 담당하고 이 설정은 성격과 화법만 담당합니다.</div>
+                        </div>
+                    </div>
+                </details>
+
                 <details id="verba-debug-settings" class="verba-tool-details">
                     <summary>디버그 <small>오류 진단 복사</small></summary>
                     <div class="verba-tool-details-content">
@@ -8400,6 +8556,55 @@ function injectSettingsPanel() {
     panel.addEventListener('change', event => {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
+
+        if (target.id === 'verba-beginner-character-enabled' && target instanceof HTMLInputElement) {
+            settings.beginnerCharacterGuideEnabled = target.checked;
+            syncBeginnerCharacterGuideUi(panel);
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.matches?.('[data-verba-beginner-personality]') && target instanceof HTMLInputElement) {
+            settings.beginnerPersonalityTraits = [...panel.querySelectorAll('[data-verba-beginner-personality]:checked')]
+                .map(input => String(input.dataset.verbaBeginnerPersonality || ''))
+                .filter(value => BEGINNER_PERSONALITY_OPTIONS.some(option => option.value === value));
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.matches?.('[data-verba-beginner-speech]') && target instanceof HTMLInputElement) {
+            settings.beginnerSpeechStyles = [...panel.querySelectorAll('[data-verba-beginner-speech]:checked')]
+                .map(input => String(input.dataset.verbaBeginnerSpeech || ''))
+                .filter(value => BEGINNER_SPEECH_STYLE_OPTIONS.some(option => option.value === value));
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-beginner-personality-custom' && target instanceof HTMLTextAreaElement) {
+            settings.beginnerPersonalityCustom = String(target.value || '').trim().slice(0, 240);
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-beginner-speech-custom' && target instanceof HTMLTextAreaElement) {
+            settings.beginnerSpeechCustom = String(target.value || '').trim().slice(0, 240);
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-beginner-age-band' && target instanceof HTMLSelectElement) {
+            settings.beginnerAgeBand = BEGINNER_AGE_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'unspecified';
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
 
         if (target.id === 'verba-quality-audit-enabled') {
             settings.qualityAuditEnabled = target.checked;
@@ -8537,6 +8742,7 @@ function injectSettingsPanel() {
     });
 
     syncDeveloperQualityControls(panel);
+    syncBeginnerCharacterGuideUi(panel);
 
     panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();

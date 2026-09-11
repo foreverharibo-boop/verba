@@ -2442,3 +2442,81 @@
 .verba-prompt-preset-backup-inline-preview .verba-backup-preview-slot pre {
     max-height: 140px;
 }
+
+
+/* v0.4.36: beginner chat user character guide */
+.verba-beginner-character-guide {
+    margin: 2px 0 !important;
+}
+
+#verba-beginner-character-controls {
+    display: grid;
+    gap: 8px;
+}
+
+.verba-beginner-group {
+    display: grid;
+    gap: 6px;
+    padding: 8px 9px;
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, #888) 40%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--verba-text) 3%, transparent);
+}
+
+.verba-beginner-group > b,
+.verba-beginner-group > label > b {
+    font-size: .9em;
+}
+
+.verba-beginner-group small {
+    opacity: .58;
+    font-weight: 500;
+}
+
+.verba-beginner-choice-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+}
+
+.verba-beginner-choice {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 5px !important;
+    min-width: 0;
+    margin: 0 !important;
+    padding: 5px 6px;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--verba-text) 5%, transparent);
+    cursor: pointer;
+}
+
+.verba-beginner-choice input[type="checkbox"] {
+    width: 15px !important;
+    height: 15px !important;
+    min-width: 15px !important;
+    flex: 0 0 15px !important;
+    margin: 0 !important;
+}
+
+.verba-beginner-choice span {
+    min-width: 0;
+    font-size: .78em;
+    line-height: 1.25;
+}
+
+@media (max-width: 420px) {
+    .verba-beginner-choice-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+
+/* v0.4.37: beginner custom personality/speech notes */
+.verba-beginner-group textarea {
+    width: 100%;
+    min-height: 54px;
+    resize: vertical;
+    font-size: .82em;
+}

@@ -1755,29 +1755,35 @@ function englishCharacterKoreanTasteBlock(settings = {}, scope = 'mixed') {
 
         const naturalization = {
             default: '',
-            natural: `ENGLISH-SPEAKING CONVERSATION CHARACTER — NATURAL
+            natural: `ENGLISH-SPEAKING CONVERSATION CHARACTER — NATURAL / BALANCED
 - Interpret the source first as natural English conversation: recover its actual speech act, idiom, understatement, sarcasm, teasing, directness, and conversational implication.
-- Then render that meaning naturally in Korean while preserving the sense that this is an English-speaking character, not a Korean-native character whose dialogue was originally written in Korean.
-- Do not invent foreignness, awkward translationese, or unnecessary English words.`,
-            active: `ENGLISH-SPEAKING CONVERSATION CHARACTER — ACTIVE
-- Actively preserve distinctive English-speaking conversational character when translating into Korean: directness, understatement, dry humor, teasing structure, idiomatic reactions, and pragmatic rhythm may remain perceptible when supported by the source.
-- Rebuild Korean syntax freely enough to stay readable, but do not domesticate the line into distinctly Korean-native social phrasing, age hierarchy, or relationship language that the source did not establish.
-- Never add jokes, flirting, hostility, intimacy, or cultural references that are absent from the source.`,
+- Render it as fluent Korean while preserving a balanced trace of the source character's English-speaking conversational identity.
+- Natural Korean phrasing may take priority when preserving English structure would sound awkward, but do not erase meaningful English-speaking pragmatic differences.`,
+            active: `ENGLISH-SPEAKING CONVERSATION CHARACTER — ACTIVE / MAXIMUM SOURCE FLAVOR
+- Preserve distinctive English-speaking conversational character as strongly as possible: directness, understatement, dry humor, teasing structure, idiomatic reactions, turn-taking style, and pragmatic rhythm should remain clearly perceptible when supported by the source.
+- Keep Korean syntax readable, but avoid smoothing the line so thoroughly that it feels like dialogue originally written by a Korean-native character.
+- Preserve English-speaking social distance and conversational logic instead of introducing Korean age hierarchy, relationship titles, or culturally Korean politeness assumptions not established by the source.
+- Never add jokes, flirting, hostility, intimacy, or cultural references absent from the source.`,
         }[settings.englishFlavorConversationNaturalization] || '';
         if (naturalization) lines.push(naturalization);
 
         const slang = {
             default: '',
             low: `ENGLISH SLANG / COLLOQUIAL REGISTER — LOW
-- Preserve the meaning and attitude of source slang, but translate it into relatively plain natural Korean.
-- Keep slang light and avoid niche Korean internet replacements.`,
-            natural: `ENGLISH SLANG / COLLOQUIAL REGISTER — NATURAL
-- Preserve ordinary English slang, contractions, phrasal-verb attitude, and colloquial register through natural Korean equivalents with the same social force.
-- Do not automatically replace English slang with unrelated Korean-native memes or community jargon.`,
-            active: `ENGLISH SLANG / COLLOQUIAL REGISTER — ACTIVE
-- Strongly preserve the source's English colloquial/slang identity in Korean when context supports it.
-- Prefer Korean wording that carries the same casual, irreverent, playful, or street-level force; a broadly recognizable English-derived expression may be retained/transliterated only when it sounds natural for the character and scene.
-- Do not invent slang that is absent from the source.`,
+- Preserve the source slang's meaning and attitude, but prioritize smooth, plain, natural Korean over visibly retaining English-speaking slang texture.
+- A close Korean colloquial equivalent is allowed when it carries the same force and social meaning without changing character relationships or factual culture.
+- Keep source-specific cultural references when they matter, but otherwise minimize overt English-slang flavor.`,
+            natural: `ENGLISH SLANG / COLLOQUIAL REGISTER — NATURAL / BALANCED
+- Balance natural Korean readability with the source's English-speaking slang identity.
+- Preserve contractions, phrasal-verb attitude, casualness, irreverence, and social register while freely using natural Korean equivalents when they carry the same function.
+- If a source expression or cultural reference is important to character identity, keep its English-speaking flavor visible rather than flattening it into generic Korean speech.
+- Do not over-domesticate into unrelated Korean memes or niche community jargon.`,
+            active: `ENGLISH SLANG / COLLOQUIAL REGISTER — ACTIVE / MAXIMUM SOURCE FLAVOR
+- Preserve the source's English colloquial/slang identity as strongly as possible while keeping the final Korean readable.
+- Keep English-speaking casualness, irreverence, playfulness, street-level force, culture-specific slang cues, and recognizable source expressions clearly perceptible.
+- Prefer retention, selective transliteration, or meaning-faithful Korean rendering of the SOURCE slang over domesticating it into distinctly Korean-native slang.
+- Korean wording may be used for readability, but the character should still feel unmistakably English-speaking in register and cultural texture.
+- Do not invent slang absent from the source.`,
         }[settings.englishFlavorSlangDensity] || '';
         if (slang) lines.push(slang);
     }
@@ -1785,20 +1791,24 @@ function englishCharacterKoreanTasteBlock(settings = {}, scope = 'mixed') {
     const profanity = {
         default: '',
         dry: `ENGLISH-CHARACTER PROFANITY — DRY
-- Preserve the exact profanity intensity, hostility, vulgarity, and target from the English source.
-- In Korean, favor terse, dry roughness that keeps the source character's English-speaking bite rather than expanding it into colorful Korean-native swearing.`,
+- Preserve the exact profanity intensity, hostility, vulgarity, and target.
+- Use terse, dry Korean roughness with the same force. A Korean profanity equivalent is allowed when it is functionally close and does not add relationship, hierarchy, or cultural implications absent from the source.`,
         blunt: `ENGLISH-CHARACTER PROFANITY — BLUNT
-- Preserve exact force and target.
-- Use direct contemporary Korean that reflects the source character's blunt English profanity without making it harsher, more obscene, or more relationship-specific than the source.`,
-        everyday: `ENGLISH-CHARACTER PROFANITY — EVERYDAY ENGLISH-SPEAKING FEEL
-- Preserve the source's everyday English profanity feel in Korean: casual swearing should feel casual, not ceremonially harsh or unusually dramatic.
+- Preserve exact force, target, and bluntness.
+- Use direct contemporary Korean, including a close Korean profanity equivalent when it matches the same force, without adding stronger obscenity, relationship hierarchy, or culture-specific insult meaning.`,
+        everyday: `ENGLISH-CHARACTER PROFANITY — EVERYDAY ENGLISH-SPEAKING FEEL / STRONG SOURCE FLAVOR
+- Preserve the source's everyday English profanity culture and conversational feel as strongly as possible in Korean.
+- Casual English swearing should still feel like casual English-speaking behavior rather than being fully domesticated into Korean-native curse style.
+- Use Korean wording for readability when needed, but preserve the source's frequency, casualness, pragmatic role, and cultural feel.
 - Keep equivalent intensity and never add or sanitize profanity.`,
         lowSlang: `ENGLISH-CHARACTER PROFANITY — LOW MEME / INTERNET SLANG
-- Preserve profanity strength and aggression while avoiding unrelated Korean meme slang or niche community replacements.
-- Prefer straightforward Korean that still carries the original English-speaking character's tone.`,
+- Preserve profanity strength and aggression while minimizing decorative internet slang.
+- Prefer straightforward natural Korean equivalents and avoid unnecessary meme-heavy rendering.
+- Keep source-specific cultural references when they materially matter.`,
         restrained: `ENGLISH-CHARACTER PROFANITY — RESTRAINED
-- Preserve the source's hostility and vulgar force while minimizing decorative Korean slang.
-- Explicit profanity must still retain equivalent force; do not soften it into politeness.`,
+- Preserve the source's hostility and vulgar force while minimizing decorative slang in Korean.
+- A plain Korean equivalent is allowed, but explicit profanity must retain equivalent force and must not be softened into politeness.
+- Do not add culture-specific relationship insults or hierarchy absent from the source.`,
     }[settings.englishFlavorProfanityTone] || '';
     if (profanity) lines.push(profanity);
 
@@ -1806,15 +1816,18 @@ function englishCharacterKoreanTasteBlock(settings = {}, scope = 'mixed') {
         const interjection = {
             default: '',
             natural: `ENGLISH-CHARACTER INTERJECTIONS — NATURAL
-- When the source contains an English interjection, reaction, or filler, translate the actual emotional/pragmatic function into natural Korean while preserving its English-speaking character flavor.
-- Do not mechanically replace every "oh", "ugh", "Jesus", "damn", "God", etc. with the same Korean word.
-- A recognizable English-derived reaction may remain/transliterate only when it is natural for the character and context.`,
+- Render English interjections, reactions, and fillers into the most natural Korean form that preserves the same emotional/pragmatic function.
+- A Korean reaction equivalent is allowed when culturally neutral and functionally close.
+- Keep or transliterate a recognizable English-derived reaction when its source-culture flavor matters to the character or scene.`,
             restrained: `ENGLISH-CHARACTER INTERJECTIONS — RESTRAINED
-- Preserve source reactions but keep the Korean relatively understated when the source intensity allows.
-- Do not add extra Korean fillers or exclamations merely to make the line feel more Korean.`,
-            lively: `ENGLISH-CHARACTER INTERJECTIONS — LIVELY
-- Preserve vivid English-speaking reaction energy in Korean when the source actually contains it.
-- Keep the reaction character-specific and contemporary without inventing extra emotion or unrelated Korean catchphrases.`,
+- Preserve the source reaction while rendering it relatively understated when intensity allows.
+- Prefer simple natural Korean equivalents unless a recognizable English-derived reaction is important to character identity or source culture.
+- Do not add extra reactions absent from the source.`,
+            lively: `ENGLISH-CHARACTER INTERJECTIONS — LIVELY / STRONG SOURCE FLAVOR
+- Preserve vivid English-speaking reaction energy and recognizable source-culture flavor strongly when the source contains it.
+- Keep the Korean readable while allowing recognizable English-derived reactions, transliteration, or source-shaped reaction rhythm to remain perceptible.
+- Use a Korean equivalent only when it preserves the same energy and does not flatten a meaningful English-speaking cultural cue.
+- Never invent extra emotion or reactions absent from the source.`,
         }[settings.englishFlavorInterjectionTone] || '';
         if (interjection) lines.push(interjection);
     }
@@ -1822,16 +1835,18 @@ function englishCharacterKoreanTasteBlock(settings = {}, scope = 'mixed') {
     const meme = {
         default: '',
         light: `ENGLISH INTERNET / MEME FLAVOR — LIGHT
-- When the English source clearly has online-native or meme-adjacent tone, preserve a light trace of that internet culture in Korean.
-- Do not replace it with an unrelated Korean meme just because a Korean meme sounds funny.`,
-        natural: `ENGLISH INTERNET / MEME FLAVOR — NATURAL
-- Preserve broadly recognizable English-internet humor, reaction structure, meme cadence, or online irony in natural Korean when it is genuinely present in the source.
-- Translate the meme's function and tone rather than blindly substituting a Korean-native meme.
-- Keep cultural references that matter to the joke instead of domesticating them away.`,
-        active: `ENGLISH INTERNET / MEME FLAVOR — ACTIVE
-- Actively preserve English-internet/meme character in Korean when the source itself supports it.
-- You may use bold Korean restructuring, selective transliteration, or a close Korean online equivalent when that best preserves the SAME joke/reaction/irony.
-- Never inject an unrelated Korean meme, new punch line, new insult, or new cultural reference.`,
+- When the source has online-native or meme-adjacent tone, preserve the intended joke/reaction but prioritize smooth Korean readability.
+- A close Korean online phrasing is allowed when it conveys the same function without altering a specific English-cultural reference.
+- Keep only a light trace of English-internet texture.`,
+        natural: `ENGLISH INTERNET / MEME FLAVOR — NATURAL / BALANCED
+- Balance natural Korean internet readability with the source's English-internet humor, reaction structure, meme cadence, online irony, and cultural references.
+- A close Korean online equivalent may be used when it preserves the same joke/reaction and does not erase a source-specific cultural reference.
+- Keep recognizable English-internet identity when it materially contributes to character voice or the joke.`,
+        active: `ENGLISH INTERNET / MEME FLAVOR — ACTIVE / MAXIMUM SOURCE FLAVOR
+- Preserve English-internet/meme character, reference structure, cadence, and cultural identity as strongly as possible when the source supports it.
+- Prefer retaining, selectively transliterating, or explaining through natural Korean structure while keeping the original English-internet reference recognizable.
+- Avoid replacing source memes with Korean-native memes when that would erase the original cultural identity.
+- Never inject a new punch line, insult, meme, or cultural reference absent from the source.`,
     }[settings.englishFlavorMemeDensity] || '';
     if (meme) lines.push(meme);
 
@@ -1845,10 +1860,13 @@ function englishCharacterKoreanTasteBlock(settings = {}, scope = 'mixed') {
 
     return `ENGLISH-SPEAKING CHARACTER TASTE — KOREAN OUTPUT
 - FINAL OUTPUT MUST REMAIN KOREAN.
-- This mode is for translating an English-speaking character's English output into Korean while preserving that character's English-speaking conversational identity.
-- Keep the Korean natural and readable; do NOT intentionally create awkward "foreigner Korean" or translationese.
-- Preserve source meaning, facts, chronology, tense, explicitness, consent, negation, emotional intensity, relationships, speaker attribution, and who does what to whom.
-- Do not invent nationality, cultural background, slang, memes, honorifics, kinship titles, jokes, or personality traits.
+- This mode translates an English-speaking character into natural Korean while controlling HOW STRONGLY the source's English-speaking conversational and cultural flavor remains perceptible.
+- The strength is determined by each selected option below. Weaker settings may favor smoother Korean naturalization; balanced settings preserve both readability and source-culture flavor; stronger/ACTIVE settings must preserve English-speaking cultural identity most strongly.
+- Natural Korean is the target-language surface. Do not intentionally create awkward "foreigner Korean" or stiff translationese.
+- A close Korean expression may be used when it preserves the SAME function, tone, intensity, and social meaning and does not erase a source-specific cultural reference.
+- When a selected option is ACTIVE / strongest, prefer preserving, retaining, or selectively transliterating source-culture slang, reactions, internet expressions, or rhythm rather than domesticating them into distinctly Korean-native culture.
+- Proper nouns, explicit cultural references, setting facts, named institutions, relationship facts, chronology, tense, explicitness, consent, negation, emotional intensity, speaker attribution, and who does what to whom must remain faithful at every strength.
+- Do not invent nationality, cultural background, slang, memes, honorifics, kinship titles, jokes, personality traits, or new cultural facts.
 - If a style preference conflicts with source fidelity, character-specific user prompts, or established relationship facts, source fidelity and explicit user rules win.
 
 ${lines.join('\n\n')}`;

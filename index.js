@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.19';
+const EXTENSION_VERSION = '0.4.20';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -769,6 +769,16 @@ function normalizedPromptEditorSnapshot(value = {}) {
     };
 }
 
+function promptEditorSnapshotHasContent(snapshot = {}) {
+    const normalized = normalizedPromptEditorSnapshot(snapshot);
+    return [
+        normalized.globalPrompt,
+        normalized.allDialoguePrompt,
+        normalized.dialoguePrompt,
+        normalized.otherDialoguePrompt,
+    ].some(value => String(value || '').trim().length > 0);
+}
+
 function normalizedPromptPresetBackups(value = settings?.promptPresetBackups) {
     const rows = Array.isArray(value) ? value : [];
     return rows.map((raw, index) => {
@@ -782,11 +792,14 @@ function normalizedPromptPresetBackups(value = settings?.promptPresetBackups) {
         if (!snapshotSource) return null;
 
         const createdAt = Number(raw?.createdAt);
+        const snapshot = normalizedPromptEditorSnapshot(snapshotSource);
+        if (!promptEditorSnapshotHasContent(snapshot)) return null;
+
         return {
             id: String(raw?.id || `editor_backup_${Date.now()}_${index}`).slice(0, 140),
             createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now(),
             reason: String(raw?.reason || '자동 백업').trim().slice(0, 80) || '자동 백업',
-            snapshot: normalizedPromptEditorSnapshot(snapshotSource),
+            snapshot,
         };
     })
         .filter(Boolean)
@@ -801,6 +814,14 @@ function promptEditorBackupSignature(snapshot = currentPromptPresetSnapshot()) {
 function createPromptEditorBackup(reason = '자동 백업', { force = false } = {}) {
     const snapshot = normalizedPromptEditorSnapshot(currentPromptPresetSnapshot());
     const backups = normalizedPromptPresetBackups(settings.promptPresetBackups);
+
+    // Never keep a backup whose four prompt fields are all empty.
+    // ON/OFF state by itself is not useful enough to create a backup.
+    if (!promptEditorSnapshotHasContent(snapshot)) {
+        settings.promptPresetBackups = backups;
+        return false;
+    }
+
     const signature = promptEditorBackupSignature(snapshot);
 
     if (!force && backups[0] && promptEditorBackupSignature(backups[0].snapshot) === signature) {
@@ -895,8 +916,7 @@ function openPromptEditorBackupPreview(backup) {
     const snapshot = normalizedPromptEditorSnapshot(backup.snapshot);
     const overlay = document.createElement('div');
     overlay.id = 'verba-prompt-backup-preview-overlay';
-    overlay.className = 'verba-overlay';
-    if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+    overlay.className = 'verba-overlay verba-prompt-backup-preview-overlay';
 
     overlay.innerHTML = `
         <section class="verba-modal verba-prompt-backup-preview-modal" role="dialog" aria-modal="true">
@@ -905,7 +925,7 @@ function openPromptEditorBackupPreview(backup) {
                     <strong>프롬프트 백업 미리보기</strong>
                     <small>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))} · ${escapeHtml(backup.reason)}</small>
                 </div>
-                <button type="button" class="verba-close" aria-label="닫기">✕</button>
+                <button type="button" class="verba-backup-preview-close" aria-label="닫기">✕</button>
             </header>
 
             <div class="verba-backup-preview-list">
@@ -917,28 +937,43 @@ function openPromptEditorBackupPreview(backup) {
         </section>`;
 
     const close = () => {
-        try {
-            overlay.hidePopover?.();
-        } catch {
-            // Already closed.
-        }
+        if (!overlay.isConnected) return;
         overlay.remove();
     };
 
-    overlay.querySelector('.verba-close')?.addEventListener('click', close);
-    overlay.addEventListener('click', event => {
-        if (event.target === overlay) close();
+    const closeButton = overlay.querySelector('.verba-backup-preview-close');
+    closeButton?.addEventListener('pointerdown', event => {
+        event.stopPropagation();
     });
-    overlay.addEventListener('keydown', event => {
-        if (event.key === 'Escape') close();
+    closeButton?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        // Remove after this click has fully finished so mobile browsers cannot
+        // retarget the same tap to the extension drawer underneath.
+        setTimeout(close, 0);
     });
 
-    document.documentElement.append(overlay);
-    try {
-        overlay.showPopover?.();
-    } catch {
-        // Fixed-position fallback.
-    }
+    overlay.addEventListener('pointerdown', event => {
+        event.stopPropagation();
+    });
+    overlay.addEventListener('click', event => {
+        event.stopPropagation();
+        if (event.target !== overlay) return;
+        event.preventDefault();
+        setTimeout(close, 0);
+    });
+    overlay.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        close();
+    });
+
+    // Do NOT use the Popover API here. SillyTavern's extension/settings UI can
+    // itself live in an overlay/top-layer stack; opening/closing another popover
+    // may collapse that parent UI on some mobile browsers.
+    (document.body || document.documentElement).append(overlay);
 }
 
 function renderPromptPresetBackups() {
@@ -8665,7 +8700,11 @@ function injectSettingsPanel() {
     panel.querySelector('#verba-prompt-preset-backup-now')?.addEventListener('click', () => {
         clearTimeout(promptEditorBackupTimer);
         promptEditorBackupTimer = null;
-        createPromptEditorBackup('수동 백업', { force: true });
+        if (!createPromptEditorBackup('수동 백업', { force: true })) {
+            renderPromptPresetBackups();
+            notify('프롬프트 4칸이 모두 비어 있어 백업하지 않았어요.', 'warning');
+            return;
+        }
         saveSettings();
         renderPromptPresetBackups();
         notify('현재 4개 프롬프트 상태를 백업했어요.', 'success');

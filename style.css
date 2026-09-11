@@ -2243,3 +2243,26 @@
         justify-content: flex-end;
     }
 }
+
+
+/* v0.4.20: backup preview must not collapse the extension drawer */
+.verba-prompt-backup-preview-overlay {
+    touch-action: manipulation;
+}
+
+.verba-backup-preview-close {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 7px !important;
+    background: transparent !important;
+    color: inherit !important;
+    cursor: pointer;
+    font: inherit !important;
+    line-height: 1 !important;
+    touch-action: manipulation;
+}

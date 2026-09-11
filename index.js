@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.18';
+const EXTENSION_VERSION = '0.4.19';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -874,6 +874,73 @@ function applyPromptEditorSnapshot(snapshot) {
     renderPromptConflictInspector();
 }
 
+function promptBackupPreviewSlotMarkup(label, text, enabled) {
+    return `<section class="verba-backup-preview-slot">
+        <div class="verba-backup-preview-slot-head">
+            <b>${escapeHtml(label)}</b>
+            <span class="verba-backup-preview-state ${enabled ? 'is-on' : 'is-off'}">${enabled ? 'ON' : 'OFF'}</span>
+        </div>
+        <pre>${escapeHtml(String(text || '').trim() || '(비어 있음)')}</pre>
+    </section>`;
+}
+
+function openPromptEditorBackupPreview(backup) {
+    if (!backup?.snapshot) {
+        notify('미리볼 프롬프트 백업을 찾지 못했어요.', 'warning');
+        return;
+    }
+
+    document.querySelector('#verba-prompt-backup-preview-overlay')?.remove();
+
+    const snapshot = normalizedPromptEditorSnapshot(backup.snapshot);
+    const overlay = document.createElement('div');
+    overlay.id = 'verba-prompt-backup-preview-overlay';
+    overlay.className = 'verba-overlay';
+    if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+
+    overlay.innerHTML = `
+        <section class="verba-modal verba-prompt-backup-preview-modal" role="dialog" aria-modal="true">
+            <header class="verba-modal-header">
+                <div>
+                    <strong>프롬프트 백업 미리보기</strong>
+                    <small>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))} · ${escapeHtml(backup.reason)}</small>
+                </div>
+                <button type="button" class="verba-close" aria-label="닫기">✕</button>
+            </header>
+
+            <div class="verba-backup-preview-list">
+                ${promptBackupPreviewSlotMarkup('전체 번역 전역 프롬프트', snapshot.globalPrompt, snapshot.globalPromptEnabled)}
+                ${promptBackupPreviewSlotMarkup('모든 대사 공통 프롬프트', snapshot.allDialoguePrompt, snapshot.allDialoguePromptEnabled)}
+                ${promptBackupPreviewSlotMarkup('캐릭터 대사 전용 프롬프트', snapshot.dialoguePrompt, snapshot.dialoguePromptEnabled)}
+                ${promptBackupPreviewSlotMarkup('NPC·USER 대사 전용 프롬프트', snapshot.otherDialoguePrompt, snapshot.otherDialoguePromptEnabled)}
+            </div>
+        </section>`;
+
+    const close = () => {
+        try {
+            overlay.hidePopover?.();
+        } catch {
+            // Already closed.
+        }
+        overlay.remove();
+    };
+
+    overlay.querySelector('.verba-close')?.addEventListener('click', close);
+    overlay.addEventListener('click', event => {
+        if (event.target === overlay) close();
+    });
+    overlay.addEventListener('keydown', event => {
+        if (event.key === 'Escape') close();
+    });
+
+    document.documentElement.append(overlay);
+    try {
+        overlay.showPopover?.();
+    } catch {
+        // Fixed-position fallback.
+    }
+}
+
 function renderPromptPresetBackups() {
     const list = document.querySelector('#verba-prompt-preset-backup-list');
     const count = document.querySelector('#verba-prompt-preset-backup-count');
@@ -890,10 +957,27 @@ function renderPromptPresetBackups() {
                     <b>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))}</b>
                     <small>${escapeHtml(backup.reason)}</small>
                 </div>
-                <button type="button" class="menu_button verba-prompt-preset-backup-restore">복원</button>
+                <div class="verba-prompt-preset-backup-actions">
+                    <button type="button" class="menu_button verba-prompt-preset-backup-preview">미리보기</button>
+                    <button type="button" class="menu_button verba-prompt-preset-backup-restore">복원</button>
+                    <button type="button" class="menu_button verba-prompt-preset-backup-delete">삭제</button>
+                </div>
             </div>
         `).join('')
         : '<div class="verba-prompt-preset-backup-empty">아직 자동 백업이 없어요.</div>';
+
+    list.querySelectorAll('.verba-prompt-preset-backup-preview').forEach(button => {
+        button.addEventListener('click', () => {
+            const row = button.closest('[data-backup-id]');
+            const backup = promptPresetBackupById(row?.dataset?.backupId);
+            if (!backup) {
+                notify('미리볼 프롬프트 백업을 찾지 못했어요.', 'warning');
+                renderPromptPresetBackups();
+                return;
+            }
+            openPromptEditorBackupPreview(backup);
+        });
+    });
 
     list.querySelectorAll('.verba-prompt-preset-backup-restore').forEach(button => {
         button.addEventListener('click', () => {
@@ -915,6 +999,27 @@ function renderPromptPresetBackups() {
             saveSettings();
             renderPromptPresetBackups();
             notify('현재 프롬프트를 백업 상태로 복원했어요.', 'success');
+        });
+    });
+
+    list.querySelectorAll('.verba-prompt-preset-backup-delete').forEach(button => {
+        button.addEventListener('click', () => {
+            const row = button.closest('[data-backup-id]');
+            const backup = promptPresetBackupById(row?.dataset?.backupId);
+            if (!backup) {
+                notify('삭제할 프롬프트 백업을 찾지 못했어요.', 'warning');
+                renderPromptPresetBackups();
+                return;
+            }
+            if (!globalThis.confirm?.(
+                `${formatPromptPresetBackupTime(backup.createdAt)} 프롬프트 백업을 삭제할까요?`,
+            )) return;
+
+            settings.promptPresetBackups = normalizedPromptPresetBackups(settings.promptPresetBackups)
+                .filter(item => item.id !== backup.id);
+            saveSettings();
+            renderPromptPresetBackups();
+            notify('프롬프트 백업을 삭제했어요.', 'success');
         });
     });
 }

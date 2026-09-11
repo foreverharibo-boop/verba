@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.12';
+const EXTENSION_VERSION = '0.4.13';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -288,6 +288,7 @@ let scopedParallelRequestActive = 0;
 let requestTail = Promise.resolve();
 let lastQualityAuditSummary = '아직 실행되지 않음';
 let chatSaveTimer = null;
+let promptEditorBackupTimer = null;
 let uiRefreshTimer = null;
 let inputBusy = false;
 let bypassSendClick = false;
@@ -743,61 +744,75 @@ function normalizedPromptPresets() {
 }
 
 
-function clonePromptPresetRows(rows = normalizedPromptPresets()) {
-    return (Array.isArray(rows) ? rows : []).map((raw, index) => ({
-        id: String(raw?.id || `preset_${index}_${Date.now()}`).slice(0, 120),
-        name: normalizedPromptPresetName(raw?.name),
-        globalPrompt: String(raw?.globalPrompt || ''),
-        globalPromptEnabled: raw?.globalPromptEnabled !== false,
-        allDialoguePrompt: String(raw?.allDialoguePrompt || ''),
-        allDialoguePromptEnabled: raw?.allDialoguePromptEnabled !== false,
-        dialoguePrompt: String(raw?.dialoguePrompt || ''),
-        dialoguePromptEnabled: raw?.dialoguePromptEnabled !== false,
-        otherDialoguePrompt: String(raw?.otherDialoguePrompt || ''),
-        otherDialoguePromptEnabled: raw?.otherDialoguePromptEnabled !== false,
-        updatedAt: String(raw?.updatedAt || ''),
-    })).filter(row => row.name).slice(0, 100);
+function normalizedPromptEditorSnapshot(value = {}) {
+    return {
+        globalPrompt: String(value?.globalPrompt || ''),
+        globalPromptEnabled: value?.globalPromptEnabled !== false,
+        allDialoguePrompt: String(value?.allDialoguePrompt || ''),
+        allDialoguePromptEnabled: value?.allDialoguePromptEnabled !== false,
+        dialoguePrompt: String(value?.dialoguePrompt || ''),
+        dialoguePromptEnabled: value?.dialoguePromptEnabled !== false,
+        otherDialoguePrompt: String(value?.otherDialoguePrompt || ''),
+        otherDialoguePromptEnabled: value?.otherDialoguePromptEnabled !== false,
+    };
 }
 
 function normalizedPromptPresetBackups(value = settings?.promptPresetBackups) {
     const rows = Array.isArray(value) ? value : [];
     return rows.map((raw, index) => {
+        // v0.4.12 stored whole preset-list backups. Those old rows have no
+        // editor snapshot and are intentionally skipped by the new editor backup system.
+        const snapshotSource = raw?.snapshot && typeof raw.snapshot === 'object'
+            ? raw.snapshot
+            : raw?.editor && typeof raw.editor === 'object'
+                ? raw.editor
+                : null;
+        if (!snapshotSource) return null;
+
         const createdAt = Number(raw?.createdAt);
         return {
-            id: String(raw?.id || `backup_${Date.now()}_${index}`).slice(0, 140),
+            id: String(raw?.id || `editor_backup_${Date.now()}_${index}`).slice(0, 140),
             createdAt: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : Date.now(),
             reason: String(raw?.reason || '자동 백업').trim().slice(0, 80) || '자동 백업',
-            presets: clonePromptPresetRows(raw?.presets || []),
+            snapshot: normalizedPromptEditorSnapshot(snapshotSource),
         };
     })
-        .filter(row => row.presets.length || rows.length === 1)
+        .filter(Boolean)
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 5);
 }
 
-function promptPresetBackupSignature(presets) {
-    return JSON.stringify(clonePromptPresetRows(presets));
+function promptEditorBackupSignature(snapshot = currentPromptPresetSnapshot()) {
+    return JSON.stringify(normalizedPromptEditorSnapshot(snapshot));
 }
 
-function createPromptPresetBackup(reason = '자동 백업', { force = false } = {}) {
-    const presets = clonePromptPresetRows(normalizedPromptPresets());
-    // 첫 프리셋을 만들기 전의 빈 상태는 복원 가치가 거의 없어서 자동 백업하지 않음.
-    if (!presets.length && !force) return false;
-
+function createPromptEditorBackup(reason = '자동 백업', { force = false } = {}) {
+    const snapshot = normalizedPromptEditorSnapshot(currentPromptPresetSnapshot());
     const backups = normalizedPromptPresetBackups(settings.promptPresetBackups);
-    const signature = promptPresetBackupSignature(presets);
-    if (!force && backups[0] && promptPresetBackupSignature(backups[0].presets) === signature) {
+    const signature = promptEditorBackupSignature(snapshot);
+
+    if (!force && backups[0] && promptEditorBackupSignature(backups[0].snapshot) === signature) {
         return false;
     }
 
     const backup = {
-        id: `prompt_backup_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        id: `prompt_editor_backup_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
         createdAt: Date.now(),
         reason: String(reason || '자동 백업').trim().slice(0, 80) || '자동 백업',
-        presets,
+        snapshot,
     };
     settings.promptPresetBackups = [backup, ...backups].slice(0, 5);
     return true;
+}
+
+function schedulePromptEditorBackup(delay = 5000) {
+    clearTimeout(promptEditorBackupTimer);
+    promptEditorBackupTimer = setTimeout(() => {
+        promptEditorBackupTimer = null;
+        if (!createPromptEditorBackup('5초 입력 멈춤 자동 백업')) return;
+        saveSettings();
+        renderPromptPresetBackups();
+    }, Math.max(500, Number(delay) || 5000));
 }
 
 function formatPromptPresetBackupTime(timestamp) {
@@ -820,6 +835,33 @@ function promptPresetBackupById(id) {
         .find(backup => backup.id === key) || null;
 }
 
+function applyPromptEditorSnapshot(snapshot) {
+    const next = normalizedPromptEditorSnapshot(snapshot);
+    settings.globalPrompt = next.globalPrompt;
+    settings.globalPromptEnabled = next.globalPromptEnabled;
+    settings.allDialoguePrompt = next.allDialoguePrompt;
+    settings.allDialoguePromptEnabled = next.allDialoguePromptEnabled;
+    settings.dialoguePrompt = next.dialoguePrompt;
+    settings.dialoguePromptEnabled = next.dialoguePromptEnabled;
+    settings.otherDialoguePrompt = next.otherDialoguePrompt;
+    settings.otherDialoguePromptEnabled = next.otherDialoguePromptEnabled;
+
+    const values = {
+        '#verba-global-prompt': settings.globalPrompt,
+        '#verba-all-dialogue-prompt': settings.allDialoguePrompt,
+        '#verba-dialogue-prompt': settings.dialoguePrompt,
+        '#verba-other-dialogue-prompt': settings.otherDialoguePrompt,
+    };
+    for (const [selector, value] of Object.entries(values)) {
+        const field = document.querySelector(selector);
+        if (field) field.value = value;
+    }
+
+    syncPromptSlotUi();
+    saveSettings();
+    renderPromptConflictInspector();
+}
+
 function renderPromptPresetBackups() {
     const list = document.querySelector('#verba-prompt-preset-backup-list');
     const count = document.querySelector('#verba-prompt-preset-backup-count');
@@ -834,7 +876,7 @@ function renderPromptPresetBackups() {
             <div class="verba-prompt-preset-backup-row" data-backup-id="${escapeHtml(backup.id)}">
                 <div class="verba-prompt-preset-backup-meta">
                     <b>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))}</b>
-                    <small>${escapeHtml(backup.reason)} · 프리셋 ${backup.presets.length}개</small>
+                    <small>${escapeHtml(backup.reason)}</small>
                 </div>
                 <button type="button" class="menu_button verba-prompt-preset-backup-restore">복원</button>
             </div>
@@ -846,25 +888,21 @@ function renderPromptPresetBackups() {
             const row = button.closest('[data-backup-id]');
             const backup = promptPresetBackupById(row?.dataset?.backupId);
             if (!backup) {
-                notify('복원할 프롬프트 프리셋 백업을 찾지 못했어요.', 'warning');
+                notify('복원할 프롬프트 백업을 찾지 못했어요.', 'warning');
                 renderPromptPresetBackups();
                 return;
             }
             if (!globalThis.confirm?.(
-                `${formatPromptPresetBackupTime(backup.createdAt)} 백업으로 프롬프트 프리셋 목록 전체를 복원할까요?\n현재 프리셋 목록은 복원 직전에 자동 백업됩니다.`,
+                `${formatPromptPresetBackupTime(backup.createdAt)} 백업으로 현재 4개 프롬프트를 복원할까요?\n현재 상태는 복원 직전에 한 번 더 백업됩니다.`,
             )) return;
 
-            createPromptPresetBackup('백업 복원 전');
-            settings.promptPresets = clonePromptPresetRows(backup.presets);
+            clearTimeout(promptEditorBackupTimer);
+            promptEditorBackupTimer = null;
+            createPromptEditorBackup('백업 복원 전', { force: true });
+            applyPromptEditorSnapshot(backup.snapshot);
             saveSettings();
-
-            const select = document.querySelector('#verba-prompt-preset-select');
-            const name = document.querySelector('#verba-prompt-preset-name');
-            if (select) select.value = '';
-            if (name) name.value = '';
-            renderPromptPresetManager('');
             renderPromptPresetBackups();
-            notify(`프롬프트 프리셋 ${backup.presets.length}개를 백업에서 복원했어요.`, 'success');
+            notify('현재 프롬프트를 백업 상태로 복원했어요.', 'success');
         });
     });
 }
@@ -7647,9 +7685,9 @@ function injectSettingsPanel() {
                         </div>
 
                         <details id="verba-prompt-preset-backups" class="verba-prompt-preset-backups">
-                            <summary>최근 프리셋 백업 <small id="verba-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
+                            <summary>최근 프롬프트 백업 <small id="verba-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
                             <div class="verba-prompt-preset-backup-content">
-                                <div class="verba-help">프리셋을 새로 저장·덮어쓰기·이름 변경·삭제하기 직전의 전체 프리셋 목록을 자동으로 최대 5개 보관해요. 백업을 복원해도 현재 입력 중인 4개 프롬프트 내용은 건드리지 않습니다.</div>
+                                <div class="verba-help">4개 프롬프트를 수정한 뒤 5초 동안 추가 입력이 없으면 현재 내용과 슬롯 ON/OFF 상태를 자동으로 백업해요. 최근 5개만 보관하며, 복원하면 현재 4개 프롬프트가 해당 상태로 돌아갑니다.</div>
                                 <button type="button" id="verba-prompt-preset-backup-now" class="menu_button verba-wide">지금 백업</button>
                                 <div id="verba-prompt-preset-backup-list" class="verba-prompt-preset-backup-list"></div>
                             </div>
@@ -8367,8 +8405,6 @@ function injectSettingsPanel() {
             return;
         }
 
-        createPromptPresetBackup('새 프리셋 저장 전');
-
         const preset = {
             id: `prompt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             name,
@@ -8400,7 +8436,6 @@ function injectSettingsPanel() {
             notify('덮어쓸 프롬프트 프리셋을 선택해 주세요.', 'warning');
             return;
         }
-        createPromptPresetBackup(`“${preset.name}” 덮어쓰기 전`);
         settings.promptPresets = normalizedPromptPresets().map(row => (
             row.id === id
                 ? { ...row, ...currentPromptPresetSnapshot(), updatedAt: new Date().toISOString() }
@@ -8428,7 +8463,6 @@ function injectSettingsPanel() {
             notify('같은 이름의 다른 프롬프트 프리셋이 이미 있어요.', 'warning');
             return;
         }
-        createPromptPresetBackup(`“${preset.name}” 이름 변경 전`);
         settings.promptPresets = normalizedPromptPresets().map(row => (
             row.id === id ? { ...row, name, updatedAt: new Date().toISOString() } : row
         ));
@@ -8446,7 +8480,6 @@ function injectSettingsPanel() {
             return;
         }
         if (!globalThis.confirm?.(`프롬프트 프리셋 “${preset.name}”을 삭제할까요?`)) return;
-        createPromptPresetBackup(`“${preset.name}” 삭제 전`);
         settings.promptPresets = normalizedPromptPresets().filter(row => row.id !== id);
         saveSettings();
         if (promptPresetName) promptPresetName.value = '';
@@ -8455,15 +8488,12 @@ function injectSettingsPanel() {
     });
 
     panel.querySelector('#verba-prompt-preset-backup-now')?.addEventListener('click', () => {
-        const presets = normalizedPromptPresets();
-        if (!presets.length) {
-            notify('백업할 프롬프트 프리셋이 아직 없어요.', 'warning');
-            return;
-        }
-        createPromptPresetBackup('수동 백업', { force: true });
+        clearTimeout(promptEditorBackupTimer);
+        promptEditorBackupTimer = null;
+        createPromptEditorBackup('수동 백업', { force: true });
         saveSettings();
         renderPromptPresetBackups();
-        notify(`현재 프롬프트 프리셋 ${presets.length}개를 백업했어요.`, 'success');
+        notify('현재 4개 프롬프트 상태를 백업했어요.', 'success');
     });
 
     renderPromptPresetManager();
@@ -8479,6 +8509,7 @@ function injectSettingsPanel() {
             syncPromptSlotUi();
             saveSettings();
             renderPromptConflictInspector();
+            schedulePromptEditorBackup();
         });
     });
     syncPromptSlotUi();
@@ -8487,21 +8518,25 @@ function injectSettingsPanel() {
         settings.globalPrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
+        schedulePromptEditorBackup();
     });
     panel.querySelector('#verba-all-dialogue-prompt').addEventListener('input', event => {
         settings.allDialoguePrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
+        schedulePromptEditorBackup();
     });
     panel.querySelector('#verba-dialogue-prompt').addEventListener('input', event => {
         settings.dialoguePrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
+        schedulePromptEditorBackup();
     });
     panel.querySelector('#verba-other-dialogue-prompt').addEventListener('input', event => {
         settings.otherDialoguePrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
+        schedulePromptEditorBackup();
     });
     panel.querySelector('#verba-banned-words').addEventListener('input', event => {
         settings.bannedWords = event.target.value;

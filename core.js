@@ -376,16 +376,79 @@ function repairLockedTokenParticles(value, nameTokens = []) {
                 ? (info.jong === 0 || info.jong === 8 ? '로' : '으로')
                 : (info.hasBatchim ? withBatchim : withoutBatchim);
 
+            const tokenEscaped = escapeRegExp(token);
+            const left = escapeRegExp(withBatchim);
+            const right = escapeRegExp(withoutBatchim);
+            const boundary = '(?=$|[\\s\\p{P}\\p{S}]|(?:도|만|까지|부터|조차|마저)(?=$|[\\s\\p{P}\\p{S}]))';
+
+            // Resolve literal model placeholders BEFORE restoring the opaque token.
+            // Examples:
+            // TOKEN이(가), TOKEN은(는), TOKEN(은)는, TOKEN(이)가, TOKEN(은/는)
+            const wrappedPatterns = [
+                new RegExp(`${tokenEscaped}\\s*${left}\\s*\\(\\s*${right}\\s*\\)${boundary}`, 'gu'),
+                new RegExp(`${tokenEscaped}\\s*${right}\\s*\\(\\s*${left}\\s*\\)${boundary}`, 'gu'),
+                new RegExp(`${tokenEscaped}\\s*\\(\\s*${left}\\s*\\)\\s*${right}${boundary}`, 'gu'),
+                new RegExp(`${tokenEscaped}\\s*\\(\\s*${right}\\s*\\)\\s*${left}${boundary}`, 'gu'),
+                new RegExp(`${tokenEscaped}\\s*${left}\\s*\\/\\s*${right}${boundary}`, 'gu'),
+                new RegExp(`${tokenEscaped}\\s*${right}\\s*\\/\\s*${left}${boundary}`, 'gu'),
+                new RegExp(`${tokenEscaped}\\s*\\(\\s*${left}\\s*\\/\\s*${right}\\s*\\)${boundary}`, 'gu'),
+                new RegExp(`${tokenEscaped}\\s*\\(\\s*${right}\\s*\\/\\s*${left}\\s*\\)${boundary}`, 'gu'),
+            ];
+            for (const matcher of wrappedPatterns) {
+                result = result.replace(matcher, `${token}${desired}`);
+            }
+
             const alternatives = [withBatchim, withoutBatchim]
-                .sort((left, right) => right.length - left.length)
+                .sort((a, b) => b.length - a.length)
                 .map(escapeRegExp)
                 .join('|');
 
             // Only a standalone postposition directly after the token.
             // Do not rewrite copular forms such as 이다/이고/이면.
-            const boundary = '(?=$|[\\s\\p{P}\\p{S}]|(?:도|만|까지|부터|조차|마저)(?=$|[\\s\\p{P}\\p{S}]))';
-            const matcher = new RegExp(`${escapeRegExp(token)}(?:${alternatives})${boundary}`, 'gu');
+            const matcher = new RegExp(`${tokenEscaped}(?:${alternatives})${boundary}`, 'gu');
             result = result.replace(matcher, `${token}${desired}`);
+        }
+    }
+
+    return result;
+}
+
+function repairRenderedKoreanParticleAlternatives(value) {
+    let result = String(value || '');
+    const particlePairs = [
+        ['이랑', '랑'],
+        ['으로', '로'],
+        ['과', '와'],
+        ['을', '를'],
+        ['은', '는'],
+        ['이', '가'],
+    ];
+
+    const desiredParticle = (noun, withBatchim, withoutBatchim) => {
+        const info = koreanFinalConsonantInfo(noun);
+        if (!info) return null;
+        if (withBatchim === '으로') return info.jong === 0 || info.jong === 8 ? '로' : '으로';
+        return info.hasBatchim ? withBatchim : withoutBatchim;
+    };
+
+    for (const [withBatchim, withoutBatchim] of particlePairs) {
+        const left = escapeRegExp(withBatchim);
+        const right = escapeRegExp(withoutBatchim);
+        const variants = [
+            new RegExp(`([가-힣]+)\\s*${left}\\s*\\(\\s*${right}\\s*\\)`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*${right}\\s*\\(\\s*${left}\\s*\\)`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${left}\\s*\\)\\s*${right}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${right}\\s*\\)\\s*${left}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*${left}\\s*\\/\\s*${right}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*${right}\\s*\\/\\s*${left}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${left}\\s*\\/\\s*${right}\\s*\\)`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${right}\\s*\\/\\s*${left}\\s*\\)`, 'gu'),
+        ];
+        for (const matcher of variants) {
+            result = result.replace(matcher, (whole, noun) => {
+                const desired = desiredParticle(noun, withBatchim, withoutBatchim);
+                return desired ? noun + desired : whole;
+            });
         }
     }
 
@@ -500,7 +563,11 @@ export function assembleTranslation(segmented, translations) {
     }).join('');
     const particlesRepaired = repairLockedTokenParticles(joined, segmented.nameTokens);
     const namesRestored = restoreProtected(particlesRepaired, segmented.nameTokens, { strict: true });
-    return restoreProtected(namesRestored, segmented.tokens, { strict: true });
+    const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: true });
+
+    // Critical final surface pass: malformed alternatives can become visible
+    // only after an opaque NAME token is restored, which is AFTER AI QA.
+    return repairRenderedKoreanParticleAlternatives(fullyRestored);
 }
 
 export function replaceOutsideProtected(value, search, replacement) {

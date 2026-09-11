@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.7';
+const EXTENSION_VERSION = '0.4.8';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -1516,7 +1516,8 @@ function restoredSegmentText(value, segmented, useSourceNames = false) {
         value: useSourceNames ? entry.source : entry.value,
     }));
     const namesRestored = restoreProtected(value, nameTokens, { strict: false });
-    return restoreProtected(namesRestored, segmented.tokens, { strict: false });
+    const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: false });
+    return useSourceNames ? fullyRestored : repairKoreanParticleAlternatives(fullyRestored);
 }
 
 function buildSourceMap(segmented, translations, completeTranslation) {
@@ -1971,24 +1972,52 @@ function hasKoreanFinalConsonant(value) {
 
 function repairKoreanParticleAlternatives(value) {
     const particlePairs = [
-        ['이', '가'], ['은', '는'], ['을', '를'], ['과', '와'], ['으로', '로'],
+        ['이랑', '랑'],
+        ['으로', '로'],
+        ['과', '와'],
+        ['을', '를'],
+        ['은', '는'],
+        ['이', '가'],
     ];
     let result = String(value || '');
+
+    const desiredParticle = (noun, withBatchim, withoutBatchim) => {
+        const hasBatchim = hasKoreanFinalConsonant(noun);
+        if (hasBatchim === null) return null;
+        if (withBatchim === '으로' && withoutBatchim === '로') {
+            const last = [...noun].at(-1);
+            const jong = (last.charCodeAt(0) - 0xAC00) % 28;
+            return jong === 0 || jong === 8 ? '로' : '으로';
+        }
+        return hasBatchim ? withBatchim : withoutBatchim;
+    };
+
     for (const [withBatchim, withoutBatchim] of particlePairs) {
-        const escapedLeft = escapeRegularExpression(withBatchim);
-        const escapedRight = escapeRegularExpression(withoutBatchim);
-        const pattern = new RegExp(`([가-힣]+)\\s*${escapedLeft}\\s*\\(\\s*${escapedRight}\\s*\\)`, 'gu');
-        result = result.replace(pattern, (whole, noun) => {
-            const hasBatchim = hasKoreanFinalConsonant(noun);
-            if (hasBatchim === null) return whole;
-            if (withBatchim === '으로' && withoutBatchim === '로') {
-                const last = [...noun].at(-1);
-                const jong = (last.charCodeAt(0) - 0xAC00) % 28;
-                return noun + (jong === 0 || jong === 8 ? '로' : '으로');
-            }
-            return noun + (hasBatchim ? withBatchim : withoutBatchim);
-        });
+        const left = escapeRegularExpression(withBatchim);
+        const right = escapeRegularExpression(withoutBatchim);
+
+        // Models sometimes return grammar placeholders literally:
+        // 담은이(가), 매니저은(는), 담은(은)는, 매니저(은)는,
+        // or slash variants such as 담은(은/는).
+        const variants = [
+            new RegExp(`([가-힣]+)\\s*${left}\\s*\\(\\s*${right}\\s*\\)`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*${right}\\s*\\(\\s*${left}\\s*\\)`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${left}\\s*\\)\\s*${right}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${right}\\s*\\)\\s*${left}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*${left}\\s*\\/\\s*${right}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*${right}\\s*\\/\\s*${left}`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${left}\\s*\\/\\s*${right}\\s*\\)`, 'gu'),
+            new RegExp(`([가-힣]+)\\s*\\(\\s*${right}\\s*\\/\\s*${left}\\s*\\)`, 'gu'),
+        ];
+
+        for (const pattern of variants) {
+            result = result.replace(pattern, (whole, noun) => {
+                const desired = desiredParticle(noun, withBatchim, withoutBatchim);
+                return desired ? noun + desired : whole;
+            });
+        }
     }
+
     return result;
 }
 

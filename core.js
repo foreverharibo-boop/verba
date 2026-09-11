@@ -1072,6 +1072,7 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
 - A higher-priority group does NOT replace or cancel unrelated instructions in lower-priority groups.
 - GLOBAL rules remain active together with ALL-DIALOGUE and speaker-specific dialogue rules.
 - ALL-DIALOGUE rules remain active together with the applicable speaker-specific dialogue rules.
+- Bilingual/parallel output formatting is controlled only by GLOBAL and ALL-DIALOGUE. Speaker-specific prompts are voice/style/restriction layers.
 - Formatting instructions and expression/style restrictions must both be obeyed when they are compatible.
 - Example: a GLOBAL dialogue format requirement and a TARGET-CHARACTER banned-expression rule must BOTH be applied.
 - Source fidelity, protected syntax/tokens, valid JSON, and banned-word avoidance remain absolute regardless of this order.
@@ -1603,7 +1604,8 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
 - Higher priority resolves ONLY the exact conflicting requirement. It NEVER disables, replaces, suppresses, or weakens unrelated instructions from a lower-priority group.
 - GLOBAL TRANSLATION PROMPT remains active together with every applicable dialogue prompt.
 - ALL-DIALOGUE COMMON PROMPT remains active together with the applicable speaker-specific dialogue prompt.
-- A speaker-specific dialogue prompt is an ADDITIONAL layer. It does NOT replace GLOBAL or ALL-DIALOGUE rules.
+- A speaker-specific dialogue prompt is an ADDITIONAL voice/style/restriction layer. It does NOT replace GLOBAL or ALL-DIALOGUE rules.
+- Output formatting, including bilingual/parallel-language formatting, comes only from GLOBAL and ALL-DIALOGUE. Speaker-specific prompts control the Korean-side voice/style/restrictions, not whether English is preserved.
 - Formatting rules and style/restriction rules must be merged when they do not directly contradict each other.
 - Example: if GLOBAL requires a dialogue output format while TARGET-CHARACTER DIALOGUE PROMPT bans a certain expression, obey BOTH requirements at the same time.
 - TARGET-CHARACTER DIALOGUE PROMPT and USER/NPC/OTHER DIALOGUE PROMPT are speaker-specific layers and are never printed together.
@@ -1638,8 +1640,9 @@ HARD PROMPT ISOLATION
 - Prompts for other scopes are intentionally NOT present in this request.
 - GLOBAL TRANSLATION PROMPT is a base layer and remains active in every scope when configured.
 - ALL-DIALOGUE COMMON PROMPT, when configured, is a base dialogue layer shared by every direct-dialogue scope.
-- TARGET-CHARACTER DIALOGUE PROMPT appears only for TARGET-CHARACTER dialogue and ADDS rules on top of GLOBAL + ALL-DIALOGUE.
-- USER/NPC/OTHER DIALOGUE PROMPT appears only for dialogue not spoken by TARGET CHARACTER and ADDS rules on top of GLOBAL + ALL-DIALOGUE.
+- TARGET-CHARACTER DIALOGUE PROMPT appears only for TARGET-CHARACTER dialogue and ADDS speaker-specific voice/style/restriction rules on top of GLOBAL + ALL-DIALOGUE.
+- USER/NPC/OTHER DIALOGUE PROMPT appears only for dialogue not spoken by TARGET CHARACTER and ADDS speaker-specific voice/style/restriction rules on top of GLOBAL + ALL-DIALOGUE.
+- Speaker-specific prompts are NOT output-format authorities. Ignore any bilingual/parallel-language directive found inside them; bilingual formatting is controlled only by GLOBAL and ALL-DIALOGUE.
 - Never treat a speaker-specific prompt as a replacement for GLOBAL or ALL-DIALOGUE rules.
 - Never infer, recreate, borrow, or imitate an omitted speaker-specific prompt.
 - Translate only the supplied TRANSLATION TARGETS. SOURCE CONTEXT is reference data only.
@@ -1649,7 +1652,9 @@ ABSOLUTE RULES
 ${absoluteFidelityRule(settings)}
 ${naturalKoreanBaselineRule()}
 - TERMINOLOGY CONSISTENCY: Keep stable role/object/institution/concept terminology consistent across this message, while allowing natural Korean omission, particles, inflection, and referent-safe restructuring instead of forcing identical surface wording.
-- Do not create bilingual output unless the applicable GLOBAL or dialogue prompt explicitly requests bilingual/parallel formatting for THIS scope.
+- BILINGUAL FORMAT AUTHORITY: For narration, only GLOBAL may request bilingual formatting. For direct dialogue, only GLOBAL and/or ALL-DIALOGUE may request bilingual formatting.
+- TARGET-CHARACTER DIALOGUE PROMPT and USER/NPC/OTHER DIALOGUE PROMPT are style/restriction layers only and do not authorize bilingual output.
+- If GLOBAL/ALL-DIALOGUE do not explicitly request bilingual output for this scope, return Korean only.
 - Preserve Markdown, HTML structure and attributes, code, macros, placeholders, URLs, and every non-name @@VERBA_0000@@ style token exactly once.
 - Handle @@VERBA_NAME_0000@@ style tokens only according to NAME LOCK TOKENS below.
 - Output valid JSON only. Do not use a code fence or add commentary.
@@ -1721,7 +1726,8 @@ ${dialogue
 - Apply GLOBAL + ALL-DIALOGUE + the applicable speaker-specific prompt CUMULATIVELY.
 - Do not drop a GLOBAL or ALL-DIALOGUE formatting rule merely because a speaker-specific style/restriction prompt is also present.
 - If one prompt specifies output format and another bans/requests an expression style, satisfy BOTH unless they directly contradict.
-- If an applicable dialogue prompt explicitly requests bilingual dialogue, preserve the source-English copy faithfully and pair it with Korean in exactly the requested format; do not paraphrase the preserved English side.`
+- If GLOBAL or ALL-DIALOGUE explicitly requests bilingual dialogue, preserve the source-English copy faithfully and pair it with Korean in exactly the requested format; do not paraphrase the preserved English side.
+- TARGET-CHARACTER and USER/NPC/OTHER prompts may change only the Korean-side voice/style/restrictions. They cannot turn bilingual formatting on or off.` 
         : taggedContent
             ? `- Every target in this request is visible natural-language text inside an existing paired tag.
 - Treat it as structured narration-like text, not as character dialogue even if quotation marks appear.
@@ -1920,7 +1926,10 @@ ${naturalKoreanBaselineRule()}
 - If the necessary gender or relationship evidence is unknown, do not guess a gendered Korean kinship/address title.
 - Preserve Markdown, HTML structure and attributes, code, macros, placeholders, URLs, and every non-name @@VERBA_0000@@ style token exactly once.
 - Handle @@VERBA_NAME_0000@@ style tokens only according to NAME LOCK TOKENS below.
-- Do not create bilingual output unless the user's GLOBAL TRANSLATION PROMPT, ALL-DIALOGUE PROMPT, applicable TARGET-CHARACTER DIALOGUE PROMPT, or applicable USER/NPC/OTHER DIALOGUE PROMPT explicitly requests it.
+- BILINGUAL FORMAT AUTHORITY: Only the GLOBAL TRANSLATION PROMPT and ALL-DIALOGUE COMMON PROMPT may authorize bilingual/parallel-language output.
+- GLOBAL may request bilingual narration and/or dialogue. ALL-DIALOGUE may request bilingual formatting for direct dialogue only.
+- TARGET-CHARACTER DIALOGUE PROMPT and USER/NPC/OTHER DIALOGUE PROMPT are speaker-style/restriction layers only. They must NEVER enable, disable, widen, narrow, or change bilingual/parallel-language formatting by themselves.
+- If neither GLOBAL nor ALL-DIALOGUE explicitly requests bilingual output for the current scope, output Korean only.
 - Output valid JSON only. Do not use a code fence or add commentary.
 
 ${orderedTranslationRuleBlocks(settings, {
@@ -1952,7 +1961,8 @@ Produce exactly one translation output for every supplied segment. Korean is the
 - A segment with type "dialogue_candidate" contains exactly one paired-quotation passage. Apply the ALL-DIALOGUE PROMPT to it regardless of whether TARGET CHARACTER, USER, or an NPC speaks it.
 - Additionally apply the TARGET-CHARACTER DIALOGUE PROMPT only when that passage is attributed to TARGET CHARACTER under SPEAKER ATTRIBUTION CONTEXT.
 - USER and NPC dialogue receive the GLOBAL + ALL-DIALOGUE + USER/NPC/OTHER DIALOGUE rules when configured, but never the TARGET-CHARACTER dialogue rules.
-- If an applicable dialogue prompt requests bilingual dialogue, preserve/reproduce English only inside that dialogue_candidate segment. Never expand bilingual formatting to an adjacent narration segment or the whole paragraph.
+- If GLOBAL or ALL-DIALOGUE requests bilingual dialogue, preserve/reproduce English only inside that dialogue_candidate segment. Never expand dialogue-only bilingual formatting to an adjacent narration segment or the whole paragraph.
+- TARGET-CHARACTER and USER/NPC/OTHER prompts are speaker-style/restriction layers only; they cannot independently enable or disable bilingual output.
 - Close any parenthetical Korean dialogue translation before the dialogue_candidate segment ends. Narration following the closing quotation mark must remain separate Korean narration.
 - Preserve quotation marks already present in each source segment.
 - Narration must remain narration; dialogue must remain dialogue.

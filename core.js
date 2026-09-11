@@ -1231,6 +1231,15 @@ function outputExpressionDetailBlock(settings = {}, scope = 'mixed') {
 - Preserve both the intended meaning and the source's figurative image when they can coexist naturally in Korean.
 - If the original image would become confusing or strongly translation-like, choose a natural Korean rendering that keeps as much of the metaphorical flavor as possible without obscuring meaning.
 - Do not invent a new metaphor, proverb, joke, or cultural reference.`,
+        koreanized: `IDIOMS / METAPHORS — KOREAN NATIVE LOCALIZATION
+- Actively rewrite English idioms, proverbs, figurative turns, and culturally shaped stock expressions into the Korean proverb, idiom, saying, or familiar figurative expression a native Korean speaker would most naturally use in the SAME situation.
+- Prefer a genuinely native Korean equivalent over preserving the English surface image whenever the Korean expression carries the SAME intended meaning, emotional force, register, relationship tone, pragmatic function, and scene-level implication.
+- If a well-matched Korean proverb or idiom exists, USE IT rather than paraphrasing the English image literally.
+- If no close native Korean equivalent exists, fall back to clear meaning-first Korean instead of forcing an unrelated proverb or inventing a new metaphor.
+- Do NOT preserve an English metaphorical image merely out of source-form loyalty when a natural Korean-native equivalent expresses the same function better.
+- Never invent a new joke, meme, cultural fact, relationship implication, insult, flirtation, stronger/weaker emotion, or factual claim.
+- Proper nouns, concrete cultural references, setting facts, named institutions, source-specific objects, and actual events must NOT be Koreanized merely because this option is enabled.
+- This option changes figurative EXPRESSION, not story facts or cultural setting.`,
         sourceCulture: `IDIOMS / METAPHORS — SOURCE-CULTURE / IMAGE PRESERVATION
 - When an English idiom, metaphor, or culture-shaped image contributes to character voice, humor, atmosphere, or cultural identity, preserve that source image and cultural flavor as much as natural Korean allows.
 - Do not automatically domesticate it into a distinctly Korean proverb, saying, meme, or unrelated local image.

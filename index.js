@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.39';
+const EXTENSION_VERSION = '0.4.40';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -4071,6 +4071,7 @@ async function translateMessage(messageId, options = {}) {
     const outputJobStartedAt = performance.now();
     const outputJobSlot = activeProfileSlot();
     let outputJobSuccess = null;
+    let outputJobSuperseded = false;
     const controller = new AbortController();
     const snapshot = {
         chatReference,
@@ -4100,26 +4101,38 @@ async function translateMessage(messageId, options = {}) {
             if (controller.signal.aborted) throw controller.signal.reason || abortError();
             const latestContext = liveContext();
             const latest = latestContext.chat?.[id];
-            if (
-                latestContext.chat !== snapshot.chatReference
-                || latest !== snapshot.message
-                || currentSwipeId(latest) !== snapshot.swipeId
-                || hashText(messageSource(latest)) !== snapshot.sourceHash
-            ) {
-                const stillSameChat = latestContext.chat === snapshot.chatReference;
-                const canRetryLatest = stillSameChat
+            const latestSource = messageSource(latest);
+            const chatChanged = latestContext.chat !== snapshot.chatReference;
+            const swipeChanged = currentSwipeId(latest) !== snapshot.swipeId;
+            const sourceChanged = hashText(latestSource) !== snapshot.sourceHash;
+
+            // SillyTavern may replace a message object during its own save/render
+            // finalization without changing the actual active swipe or source text.
+            // Object identity alone must NOT invalidate a completed translation.
+            if (chatChanged || swipeChanged || sourceChanged) {
+                const canRetryLatest = !chatChanged
                     && latest
                     && !latest.is_user
                     && !latest.is_system
-                    && messageSource(latest).trim();
+                    && latestSource.trim();
                 const staleRetryCount = Math.max(0, Number(options.staleRetryCount) || 0);
-                if (canRetryLatest && staleRetryCount < 1) {
-                    scheduleAutomaticTranslation(id, 180, { staleRetryCount: staleRetryCount + 1 });
+                const willRetryLatest = canRetryLatest && staleRetryCount < 2;
+
+                if (willRetryLatest) {
+                    // Give SillyTavern a short settling window before translating
+                    // the newest source. Repeated late finalization is allowed one
+                    // additional retry, but cannot loop forever.
+                    scheduleAutomaticTranslation(id, 320, {
+                        staleRetryCount: staleRetryCount + 1,
+                    });
                 }
-                throw new Error(
-                    canRetryLatest && staleRetryCount < 1
-                        ? '번역 도중 메시지 또는 스와이프가 바뀌어 이전 결과를 폐기하고 최신 답변 번역을 다시 예약했습니다.'
-                        : '번역 도중 메시지 또는 스와이프가 바뀌어 결과를 적용하지 못했습니다.',
+
+                throw outputAbortReason(
+                    'VERBA_OUTPUT_STALE',
+                    willRetryLatest
+                        ? '번역 도중 원문 또는 스와이프의 실제 내용이 바뀌어 이전 결과를 조용히 폐기하고 최신 답변 번역을 다시 예약했습니다.'
+                        : '번역 도중 원문 또는 스와이프의 실제 내용이 바뀌어 이전 결과를 조용히 폐기했습니다.',
+                    true,
                 );
             }
             const finalTranslation = translationWithLockedSegments(
@@ -4153,17 +4166,22 @@ async function translateMessage(messageId, options = {}) {
             notify(options.force ? '전체 재번역을 적용했어요.' : '자동 번역을 적용했어요.', 'success');
         } catch (error) {
             if (isAbort(error, controller.signal)) {
-                const reason = controller.signal.reason;
+                const reason = controller.signal.aborted
+                    ? (controller.signal.reason || error)
+                    : error;
                 const silentCode = String(reason?.verbaCode || '');
                 const allowedSilentAbort = reason?.silent === true && [
                     'VERBA_OUTPUT_REPLACED',
                     'VERBA_SWIPE_CHANGED',
                     'VERBA_CHAT_CHANGED',
+                    'VERBA_OUTPUT_STALE',
                 ].includes(silentCode);
 
                 if (allowedSilentAbort) {
                     console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
+                    outputJobSuperseded = true;
                     outputJobSuccess = false;
+                    failedOutputSignatures.delete(id);
                 } else {
                     outputJobSuccess = false;
                     failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
@@ -4178,13 +4196,13 @@ async function translateMessage(messageId, options = {}) {
                 reportError(options.force ? 'output-retranslation' : 'output-translation', error, `출력 번역 실패: ${errorText(error)}`);
             }
         } finally {
-            if (outputJobSuccess === null && !controller.signal.aborted) {
+            if (outputJobSuccess === null && !controller.signal.aborted && !outputJobSuperseded) {
                 outputJobSuccess = false;
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                 console.error('[베르바] 출력 번역이 결과 없이 종료되었습니다.');
                 reportError('output-no-result', new Error('출력 번역 작업이 결과 없이 종료되었습니다.'), '출력 번역 실패: 작업이 결과 없이 종료되었습니다. 다시 시도해 주세요.');
             }
-            if (outputJobSuccess !== null) {
+            if (outputJobSuccess !== null && !outputJobSuperseded) {
                 recordOutputTranslation(outputJobSlot, {
                     success: outputJobSuccess,
                     elapsedMs: performance.now() - outputJobStartedAt,

@@ -49,11 +49,6 @@ function withoutPairedTagBlocks(value) {
     return replaceRanges(text, pairedTagBlockRanges(text), () => ' ');
 }
 
-const INFO_BLOCK_TAG_NAMES = new Set([
-    'info_block', 'info-block', 'infoblock',
-    'info_panel', 'info-panel', 'infopanel',
-]);
-
 function parsedTagDescriptor(rawValue) {
     const raw = String(rawValue || '').trim();
     const match = raw.match(/^<\s*(\/?)\s*([\p{L}_][\p{L}\p{N}_.:-]*)\b([\s\S]*?)>$/u);
@@ -67,21 +62,7 @@ function parsedTagDescriptor(rawValue) {
     };
 }
 
-function infoBlockOpeningTag(rawValue) {
-    const descriptor = parsedTagDescriptor(rawValue);
-    if (!descriptor || descriptor.closing || descriptor.selfClosing) return false;
-    if (INFO_BLOCK_TAG_NAMES.has(descriptor.tag)) return true;
-
-    // Existing HTML-style info cards are also supported, but only when the
-    // element explicitly identifies itself as an info block/card/panel.
-    const classMatch = descriptor.raw.match(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/iu);
-    const classValue = String(classMatch?.[1] || classMatch?.[2] || classMatch?.[3] || '');
-    return classValue
-        .split(/\s+/u)
-        .some(name => /^(?:info[-_](?:card|block|panel)|infoblock|infopanel)$/iu.test(name));
-}
-
-function infoBlockInnerRangesInProtectedText(protectedText, tokens = []) {
+function taggedInnerRangesInProtectedText(protectedText, tokens = []) {
     const text = String(protectedText || '');
     const tokenValues = new Map((tokens || []).map(entry => [String(entry?.token || ''), String(entry?.value || '')]));
     const matcher = /@@VERBA_\d{4}@@/g;
@@ -97,7 +78,6 @@ function infoBlockInnerRangesInProtectedText(protectedText, tokens = []) {
         if (!descriptor.closing && !descriptor.selfClosing) {
             stack.push({
                 tag: descriptor.tag,
-                info: infoBlockOpeningTag(rawTag),
                 contentStart: matcher.lastIndex,
             });
             continue;
@@ -116,7 +96,7 @@ function infoBlockInnerRangesInProtectedText(protectedText, tokens = []) {
 
         const opening = stack[matchIndex];
         stack.splice(matchIndex);
-        if (opening.info && match.index >= opening.contentStart) {
+        if (match.index >= opening.contentStart) {
             ranges.push({ start: opening.contentStart, end: match.index });
         }
     }
@@ -124,6 +104,8 @@ function infoBlockInnerRangesInProtectedText(protectedText, tokens = []) {
     if (!ranges.length) return [];
     ranges.sort((a, b) => a.start - b.start || a.end - b.end);
 
+    // Merge nested/overlapping tagged regions so any visible text inside at
+    // least one paired tag is treated as tagged content.
     const merged = [];
     for (const range of ranges) {
         const previous = merged.at(-1);
@@ -136,20 +118,21 @@ function infoBlockInnerRangesInProtectedText(protectedText, tokens = []) {
     return merged;
 }
 
-function splitByInfoBlockRanges(value, ranges = []) {
+
+function splitByTaggedRanges(value, ranges = []) {
     const text = String(value || '');
-    if (!ranges.length) return [{ text, insideInfoBlock: false }];
+    if (!ranges.length) return [{ text, insideTaggedContent: false }];
 
     const chunks = [];
     let cursor = 0;
     for (const range of ranges) {
         const start = Math.max(cursor, Math.min(text.length, Number(range.start) || 0));
         const end = Math.max(start, Math.min(text.length, Number(range.end) || start));
-        if (start > cursor) chunks.push({ text: text.slice(cursor, start), insideInfoBlock: false });
-        if (end > start) chunks.push({ text: text.slice(start, end), insideInfoBlock: true });
+        if (start > cursor) chunks.push({ text: text.slice(cursor, start), insideTaggedContent: false });
+        if (end > start) chunks.push({ text: text.slice(start, end), insideTaggedContent: true });
         cursor = end;
     }
-    if (cursor < text.length) chunks.push({ text: text.slice(cursor), insideInfoBlock: false });
+    if (cursor < text.length) chunks.push({ text: text.slice(cursor), insideTaggedContent: false });
     return chunks.filter(chunk => chunk.text);
 }
 
@@ -195,9 +178,9 @@ function validationText(value) {
 }
 
 function allowsIntentionalForeignText(segment, settings = {}, speakerScopes = null) {
-    // Visible text inside an existing info block is always Korean-only.
+    // Visible text inside any existing paired tag is always Korean-only.
     // A global bilingual-format prompt must not relax validation for this scope.
-    if (segment?.type === 'info_block') return false;
+    if (segment?.type === 'tagged_content') return false;
 
     const requestsBilingual = value => {
         const prompt = String(value || '');
@@ -611,12 +594,12 @@ function splitDialogueAndNarration(value) {
 export function segmentSource(value, nameLocks = []) {
     const source = String(value || '');
     const { protectedText, tokens, nameTokens } = protectSource(source, nameLocks);
-    const infoRanges = infoBlockInnerRangesInProtectedText(protectedText, tokens);
-    const regions = splitByInfoBlockRanges(protectedText, infoRanges);
+    const taggedRanges = taggedInnerRangesInProtectedText(protectedText, tokens);
+    const regions = splitByTaggedRanges(protectedText, taggedRanges);
     const parts = [];
     let translatableIndex = 0;
 
-    const appendPiece = (piece, insideInfoBlock = false) => {
+    const appendPiece = (piece, insideTaggedContent = false) => {
         const leading = piece.text.match(/^\s+/u)?.[0] || '';
         const afterLeading = piece.text.slice(leading.length);
         const trailing = afterLeading.match(/\s+$/u)?.[0] || '';
@@ -637,7 +620,7 @@ export function segmentSource(value, nameLocks = []) {
         } else {
             parts.push({
                 id: `seg_${String(translatableIndex).padStart(4, '0')}`,
-                type: insideInfoBlock ? 'info_block' : piece.type,
+                type: insideTaggedContent ? 'tagged_content' : piece.type,
                 text: content,
             });
             translatableIndex += 1;
@@ -654,10 +637,10 @@ export function segmentSource(value, nameLocks = []) {
                 continue;
             }
 
-            if (region.insideInfoBlock) {
-                // Info blocks are structured visible text. Even if they contain
-                // quotation marks, do not route them through dialogue prompts.
-                appendPiece({ type: 'info_block', text: block }, true);
+            if (region.insideTaggedContent) {
+                // Any paired-tag interior is structured visible text. Even if it
+                // contains quotation marks, do not route it through dialogue prompts.
+                appendPiece({ type: 'tagged_content', text: block }, true);
                 continue;
             }
 
@@ -1498,7 +1481,7 @@ function scopedTranslationTuningBlock(settings = {}, override = null, scope = 'n
             ? settings.dialogueLocalizationLevel
             : legacyLocalizationKey || 'balanced';
 
-    if (scope === 'narration' || scope === 'info_block') {
+    if (scope === 'narration' || scope === 'tagged_content') {
         if (!relationTemperatureEnabled) {
             return `TRANSLATION FINE TUNING — NARRATION ONLY
 RELATION TEMPERATURE / LOCALIZATION
@@ -1565,7 +1548,7 @@ function scopedTranslationRuleBlocks(settings = {}, {
     scope = 'narration',
 } = {}) {
     const dialogue = scope === 'target_dialogue' || scope === 'other_dialogue';
-    const infoBlock = scope === 'info_block';
+    const taggedContent = scope === 'tagged_content';
     const targetDialogue = scope === 'target_dialogue';
     const otherDialogue = scope === 'other_dialogue';
     const hasCharacterDialoguePrompt = Boolean(enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled').trim());
@@ -1616,21 +1599,22 @@ ${String(oneTimeInstruction || '').trim() || '(없음)'}`,
 
 ${ordered.map((key, index) => `PRIORITY ${index + 1}\n${blocks[key]}`).join('\n\n')}
 
-${infoBlock ? `INFO-BLOCK FORMAT OVERRIDE — ABSOLUTE
-- These targets are visible text inside an existing info-block tag/card/panel.
+${taggedContent ? `TAGGED-CONTENT FORMAT OVERRIDE — ABSOLUTE
+- These targets are visible natural-language text inside an existing paired tag.
 - Translate the visible inner text into KOREAN ONLY.
-- DO NOT apply bilingual, dual-language, source+translation, English-first, English-in-parentheses, or any equivalent parallel-language formatting inside this info block, even if GLOBAL TRANSLATION PROMPT requests that format elsewhere.
+- DO NOT apply bilingual, dual-language, source+translation, English-first, English-in-parentheses, or any equivalent parallel-language formatting anywhere inside paired tags, even if GLOBAL TRANSLATION PROMPT requests that format elsewhere.
 - Do not repeat or preserve the English source text merely for bilingual display.
 - This exception changes ONLY bilingual/parallel-language formatting. Continue obeying every other compatible GLOBAL, ONE-TIME, fine-tuning, terminology, banned-word, and fidelity rule.
-- Preserve all existing tag tokens, tag structure, attributes, code tokens, macros, placeholders, and URLs exactly.` : ''}`;
+- Preserve all existing tag tokens, tag structure, attributes, code tokens, macros, placeholders, and URLs exactly.
+- Code fences, inline code, style/script blocks, and already-protected opaque content remain untouched and must not be translated.` : ''}`;
 }
 
 function scopedOutputRules(settings, oneTimeInstruction = '', nameTokens = [], tuning = null, scope = 'narration') {
     const bannedWords = parseBannedWords(settings.bannedWords);
     const scopeLabel = scope === 'narration'
         ? 'NARRATION'
-        : scope === 'info_block'
-            ? 'INFO-BLOCK VISIBLE TEXT'
+        : scope === 'tagged_content'
+            ? 'TAGGED VISIBLE TEXT'
             : scope === 'target_dialogue'
                 ? 'TARGET-CHARACTER DIALOGUE'
                 : 'USER/NPC/OTHER DIALOGUE';
@@ -1706,7 +1690,7 @@ export function buildScopedOutputPrompt({
 }) {
     const payload = (segments || []).map(({ id, type, text }) => ({ id, type, text }));
     const dialogue = scope === 'target_dialogue' || scope === 'other_dialogue';
-    const infoBlock = scope === 'info_block';
+    const taggedContent = scope === 'tagged_content';
     const targetDialogue = scope === 'target_dialogue';
 
     return `${scopedOutputRules(settings, oneTimeInstruction, nameTokens, tuning, scope)}
@@ -1719,11 +1703,12 @@ ${dialogue
 - Apply GLOBAL + ALL-DIALOGUE + the applicable speaker-specific prompt CUMULATIVELY.
 - Do not drop a GLOBAL or ALL-DIALOGUE formatting rule merely because a speaker-specific style/restriction prompt is also present.
 - If one prompt specifies output format and another bans/requests an expression style, satisfy BOTH unless they directly contradict.`
-        : infoBlock
-            ? `- Every target in this request is visible text inside an existing info-block tag/card/panel.
+        : taggedContent
+            ? `- Every target in this request is visible natural-language text inside an existing paired tag.
 - Treat it as structured narration-like text, not as character dialogue even if quotation marks appear.
-- Apply the GLOBAL prompt and other compatible rules, EXCEPT bilingual/parallel-language formatting is forbidden here by the INFO-BLOCK FORMAT OVERRIDE.
-- Return Korean-only visible text while preserving all protected tag/code tokens exactly.`
+- Apply the GLOBAL prompt and other compatible rules, EXCEPT bilingual/parallel-language formatting is forbidden here by the TAGGED-CONTENT FORMAT OVERRIDE.
+- Return Korean-only visible text while preserving all protected tag/code tokens exactly.
+- Do not translate code fences, inline code, style/script blocks, or other opaque protected content.`
             : '- Every target in this request is narration. No dialogue prompt exists in this request and no dialogue-only style may affect it.'}
 ${targetDialogue
         ? '- Every target in this request has already been independently classified as dialogue spoken by TARGET CHARACTER. Apply the TARGET-CHARACTER DIALOGUE PROMPT if configured; the USER/NPC/OTHER prompt is absent.'

@@ -1,7 +1,7 @@
 {
   "name": "verba",
   "display_name": "베르바",
-  "version": "0.4.31",
+  "version": "0.4.32",
   "description": "선택 재번역과 캐릭터별 이름 고정을 지원하는 가벼운 자동번역기",
   "author": "담은",
   "js": "index.js",

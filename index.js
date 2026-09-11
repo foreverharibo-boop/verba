@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.11';
+const EXTENSION_VERSION = '0.4.12';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7622,7 +7622,7 @@ function injectSettingsPanel() {
 
 
                 <details id="verba-prompt-presets" class="verba-tool-details verba-prompt-presets">
-                    <summary>💾 프롬프트 프리셋 <small id="verba-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
+                    <summary>프롬프트 프리셋 <small id="verba-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
                     <div class="verba-tool-details-content">
                         <div class="verba-help">아래 4개 프롬프트의 내용과 각 슬롯 ON/OFF 상태를 한 세트로 저장합니다. 이름 고정·금지어·현지화·말맛·기타 설정은 저장하거나 바꾸지 않습니다.</div>
 
@@ -7647,7 +7647,7 @@ function injectSettingsPanel() {
                         </div>
 
                         <details id="verba-prompt-preset-backups" class="verba-prompt-preset-backups">
-                            <summary>🛟 최근 프리셋 백업 <small id="verba-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
+                            <summary>최근 프리셋 백업 <small id="verba-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
                             <div class="verba-prompt-preset-backup-content">
                                 <div class="verba-help">프리셋을 새로 저장·덮어쓰기·이름 변경·삭제하기 직전의 전체 프리셋 목록을 자동으로 최대 5개 보관해요. 백업을 복원해도 현재 입력 중인 4개 프롬프트 내용은 건드리지 않습니다.</div>
                                 <button type="button" id="verba-prompt-preset-backup-now" class="menu_button verba-wide">지금 백업</button>

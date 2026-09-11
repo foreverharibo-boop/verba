@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.17';
+const EXTENSION_VERSION = '0.4.18';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7896,7 +7896,7 @@ function injectSettingsPanel() {
                             <option value="koreanized" ${settings.expressionIdiomMetaphorTaste === 'koreanized' ? 'selected' : ''}>한국식 네이티브화</option>
                             <option value="sourceCulture" ${settings.expressionIdiomMetaphorTaste === 'sourceCulture' ? 'selected' : ''}>원문화·비유 결 보존</option>
                         </select>
-                        <div class="verba-help">영어 관용구·비유의 실제 뜻과 원래 이미지·문화적 결 사이에서 어느 쪽을 더 우선할지 정합니다. `한국식 네이티브화`는 상황에 맞는 한국 속담·관용구·익숙한 비유가 있으면 적극적으로 치환하고, 딱 맞는 대응이 없을 때만 뜻 중심으로 자연스럽게 풉니다.</div>
+                        <div class="verba-help">영어 관용구·비유의 실제 뜻과 원래 이미지·문화적 결 사이에서 어느 쪽을 더 우선할지 정합니다. 한국식 네이티브화는 상황에 맞는 한국 속담·관용구·익숙한 비유가 있으면 적극적으로 치환하고, 딱 맞는 대응이 없을 때만 뜻 중심으로 자연스럽게 풉니다.</div>
                     </div>
                 </details>
 

@@ -2157,9 +2157,7 @@ ${lines.join('\n\n')}`;
 
 
 
-function koreanInputConversationNaturalizationBlock(settings = {}) {
-    if (settings?.inputConversationNaturalization === false) return '';
-
+function koreanInputConversationNaturalizationBlock() {
     return `KOREAN CONVERSATION NATURALIZATION — INPUT K→E
 - Translate the conversational SPEECH ACT and pragmatic intent before choosing English wording. Do not map Korean particles, fragments, or word order mechanically into English.
 - Korean often leaves subjects, objects, conclusions, and emotional predicates implicit. Recover only what is strongly implied by the utterance and context; do not invent new facts or motives.
@@ -2203,7 +2201,7 @@ ABSOLUTE RULES
 TARGET ADDRESSEE GENDER
 ${normalizedTargetGender}
 
-${koreanInputConversationNaturalizationBlock(settings)}
+${koreanInputConversationNaturalizationBlock()}
 
 ${koreanPragmaticWarningBlock(source)}
 

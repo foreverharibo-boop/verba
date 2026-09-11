@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.37';
+const EXTENSION_VERSION = '0.4.39';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -74,6 +74,7 @@ const BEGINNER_SPEECH_STYLE_OPTIONS = [
     { value: 'smooth', label: '길고 유려하게' },
     { value: 'dry', label: '건조하게' },
     { value: 'sly', label: '능글맞은 말투' },
+    { value: 'tsundere', label: '츤데레식 말투' },
     { value: 'soft', label: '부드럽고 다정하게' },
     { value: 'sarcastic', label: '비꼬듯' },
     { value: 'teasing', label: '장난스럽게' },
@@ -81,6 +82,19 @@ const BEGINNER_SPEECH_STYLE_OPTIONS = [
     { value: 'polite', label: '공손하고 단정하게' },
     { value: 'casual', label: '편한 구어체로' },
     { value: 'expressive', label: '반응을 생동감 있게' },
+];
+
+const BEGINNER_CONVERSATION_ATTITUDE_OPTIONS = [
+    { value: 'friendly', label: '친근하게' },
+    { value: 'distant', label: '거리감 있게' },
+    { value: 'polite', label: '예의 있게' },
+    { value: 'rude', label: '무례하게' },
+    { value: 'playful', label: '장난 많이 치는 편' },
+    { value: 'probing', label: '상대를 떠보듯' },
+    { value: 'leading', label: '대화를 주도하는 편' },
+    { value: 'receptive', label: '상대 반응을 받아주는 편' },
+    { value: 'provocative', label: '도발적으로' },
+    { value: 'cautious', label: '조심스럽게' },
 ];
 
 const BEGINNER_AGE_OPTIONS = [
@@ -138,6 +152,7 @@ const DEFAULT_SETTINGS = {
     beginnerPersonalityCustom: '',
     beginnerSpeechStyles: [],
     beginnerSpeechCustom: '',
+    beginnerConversationAttitudes: [],
     beginnerAgeBand: 'unspecified',
     autoInput: false,
     selectionCandidates: false,
@@ -278,6 +293,11 @@ settings.beginnerSpeechStyles = Array.isArray(settings.beginnerSpeechStyles)
 settings.beginnerSpeechCustom = typeof settings.beginnerSpeechCustom === 'string'
     ? settings.beginnerSpeechCustom.trim().slice(0, 240)
     : '';
+settings.beginnerConversationAttitudes = Array.isArray(settings.beginnerConversationAttitudes)
+    ? [...new Set(settings.beginnerConversationAttitudes
+        .map(String)
+        .filter(value => BEGINNER_CONVERSATION_ATTITUDE_OPTIONS.some(option => option.value === value)))]
+    : [];
 settings.beginnerAgeBand = BEGINNER_AGE_OPTIONS.some(option => option.value === settings.beginnerAgeBand)
     ? settings.beginnerAgeBand
     : 'unspecified';
@@ -1373,6 +1393,11 @@ function renderCurrentAppliedRules() {
                             .filter(Boolean).join(' · '),
                         settings.beginnerSpeechCustom ? `직접 입력: ${settings.beginnerSpeechCustom}` : '',
                     ].filter(Boolean).join(' / ') || '선택 없음')
+                    : '적용 안 함'],
+                ['대화 태도', settings.beginnerCharacterGuideEnabled
+                    ? (settings.beginnerConversationAttitudes
+                        .map(value => BEGINNER_CONVERSATION_ATTITUDE_OPTIONS.find(option => option.value === value)?.label)
+                        .filter(Boolean).join(' · ') || '선택 없음')
                     : '적용 안 함'],
                 ['연령대', settings.beginnerCharacterGuideEnabled
                     ? (BEGINNER_AGE_OPTIONS.find(option => option.value === settings.beginnerAgeBand)?.label || '미지정')
@@ -8433,7 +8458,7 @@ function injectSettingsPanel() {
                             <input type="checkbox" id="verba-beginner-character-enabled" ${settings.beginnerCharacterGuideEnabled ? 'checked' : ''}>
                             <span>신입 챗시용 캐릭터 설정 사용</span>
                         </label>
-                        <div class="verba-help">캐시트를 읽지 않고, 아래에서 고른 성격·말투·연령대만 현재 캐릭터 직접 대사 번역에 보조 프롬프트로 넣습니다. 기본은 꺼져 있어 기존 번역에는 영향이 없습니다.</div>
+                        <div class="verba-help">아래에서 고른 성격·말투·대화 태도·연령대를 현재 캐릭터 직접 대사 번역에 보조 프롬프트로 넣습니다. 기본은 꺼져 있어 기존 번역에는 영향이 없습니다.</div>
 
                         <div id="verba-beginner-character-controls" class="${settings.beginnerCharacterGuideEnabled ? '' : 'verba-control-disabled'}">
                             <section class="verba-beginner-group">
@@ -8469,6 +8494,19 @@ function injectSettingsPanel() {
                             </section>
 
                             <section class="verba-beginner-group">
+                                <b>대화 태도 <small>복수 선택</small></b>
+                                <div class="verba-beginner-choice-grid">
+                                    ${BEGINNER_CONVERSATION_ATTITUDE_OPTIONS.map(option => `
+                                        <label class="verba-beginner-choice">
+                                            <input type="checkbox" data-verba-beginner-attitude="${option.value}" ${settings.beginnerConversationAttitudes.includes(option.value) ? 'checked' : ''}>
+                                            <span>${option.label}</span>
+                                        </label>
+                                    `).join('')}
+                                </div>
+                                <div class="verba-help">상대에게 말을 거는 방식과 대화의 거리감만 조절합니다. 실제 친밀도·관계·호감·서열을 새로 만들거나 원문의 명령/질문/거절 강도를 바꾸지 않습니다.</div>
+                            </section>
+
+                            <section class="verba-beginner-group">
                                 <label for="verba-beginner-age-band"><b>연령대</b></label>
                                 <select id="verba-beginner-age-band" class="text_pole">
                                     ${BEGINNER_AGE_OPTIONS.map(option => `
@@ -8478,7 +8516,7 @@ function injectSettingsPanel() {
                                 <div class="verba-help">어휘의 성숙도와 대사 호흡만 참고합니다. 실제 나이·호칭·서열·관계 사실을 새로 만들지 않습니다.</div>
                             </section>
 
-                            <div class="verba-help">사용자가 직접 적은 캐릭터 대사 전용 프롬프트가 가장 우선하며, 한캐의 맛·영캐의 맛은 문화권 표현 방식을 담당하고 이 설정은 성격과 화법만 담당합니다.</div>
+                            <div class="verba-help">사용자가 직접 적은 캐릭터 대사 전용 프롬프트가 가장 우선하며, 한캐의 맛·영캐의 맛은 문화권 표현 방식을 담당하고 이 설정은 성격·화법·대화 태도만 담당합니다.</div>
                         </div>
                     </div>
                 </details>
@@ -8592,6 +8630,15 @@ function injectSettingsPanel() {
 
         if (target.id === 'verba-beginner-speech-custom' && target instanceof HTMLTextAreaElement) {
             settings.beginnerSpeechCustom = String(target.value || '').trim().slice(0, 240);
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.matches?.('[data-verba-beginner-attitude]') && target instanceof HTMLInputElement) {
+            settings.beginnerConversationAttitudes = [...panel.querySelectorAll('[data-verba-beginner-attitude]:checked')]
+                .map(input => String(input.dataset.verbaBeginnerAttitude || ''))
+                .filter(value => BEGINNER_CONVERSATION_ATTITUDE_OPTIONS.some(option => option.value === value));
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;

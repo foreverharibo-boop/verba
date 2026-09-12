@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.68';
+const EXTENSION_VERSION = '0.4.69';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8883,8 +8883,8 @@ function injectSettingsPanel() {
                         <div class="verba-help">기존 프리셋은 ‘프롬프트만’으로 유지됩니다. ‘프롬프트 + 번역 설정’을 선택하면 아래 번역 스타일 설정도 함께 저장·적용합니다.</div>
 
                         <div class="verba-prompt-preset-actions">
-                            <button type="button" id="verba-prompt-preset-new-start" class="menu_button">새로 시작</button>
                             <button type="button" id="verba-prompt-preset-save" class="menu_button">저장</button>
+                            <button type="button" id="verba-prompt-preset-new-start" class="menu_button">새로 시작</button>
                             <button type="button" id="verba-prompt-preset-favorite" class="menu_button" disabled>☆ 즐겨찾기</button>
                             <button type="button" id="verba-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
                             <button type="button" id="verba-prompt-preset-delete" class="menu_button" disabled>삭제</button>

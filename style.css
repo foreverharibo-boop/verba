@@ -2207,8 +2207,8 @@
 
 
 
-/* v0.4.68: prompt preset "새로 시작" chooser */
-.verba-prompt-preset-actions #verba-prompt-preset-new-start,
+/* v0.4.69: Save stays full width.
+   "새로 시작" is a normal always-enabled action placed before Favorite. */
 .verba-prompt-preset-actions #verba-prompt-preset-save {
     grid-column: 1 / -1;
 }

@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.76';
+const EXTENSION_VERSION = '0.4.77';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -522,6 +522,10 @@ const assistantSourceObservation = new Map();
 let assistantObservationReady = false;
 let assistantObservedChatLength = 0;
 let assistantObservationBaselineToken = 0;
+// If chat[] receives a genuinely new assistant before its .mes DOM exists,
+// remember that id until it mounts. This prevents the fallback from consuming
+// the chat-length growth and then missing automatic translation later.
+const pendingFallbackAssistantIds = new Set();
 
 const pendingInputControllers = new Set();
 const transientLockedMessages = new Set();
@@ -10591,6 +10595,7 @@ function resetAssistantSourceObservation({ warmup = true } = {}) {
     assistantObservationBaselineToken += 1;
     const token = assistantObservationBaselineToken;
     assistantObservationReady = !warmup;
+    pendingFallbackAssistantIds.clear();
 
     seedAssistantSourceObservation();
     if (!warmup) return;
@@ -10625,17 +10630,26 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
         const signature = messageVersionSignature(message);
         const previousSignature = assistantSourceObservation.get(id) || '';
 
+        const appendedSinceBaseline = Boolean(
+            !previousSignature
+            && signature
+            && id >= observedLengthBefore
+        );
+        if (appendedSinceBaseline) pendingFallbackAssistantIds.add(id);
+
         if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) {
+            pendingFallbackAssistantIds.delete(id);
             if (signature) assistantSourceObservation.set(id, signature);
             continue;
         }
 
-        // chat[] may update before the .mes node appears. Do not consume the
-        // source/signature before mount, or the next pass can miss translation.
+        // chat[] can update before the actual message node is mounted. Keep a
+        // newly-appended assistant pending instead of consuming its opportunity.
         if (!document.querySelector(`.mes[mesid="${id}"]`)) continue;
 
         const record = currentRecord(message, id);
         if (record) {
+            pendingFallbackAssistantIds.delete(id);
             if (signature) assistantSourceObservation.set(id, signature);
             restoreCurrentDisplay(id, message, record);
             continue;
@@ -10646,18 +10660,14 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
             && signature
             && previousSignature !== signature
         );
-        const genuinelyAppendedAssistant = Boolean(
-            !previousSignature
-            && signature
-            && id >= observedLengthBefore
-            && id >= chat.length - 2
-        );
+        const pendingNewAssistant = pendingFallbackAssistantIds.has(id);
 
-        if (!sourceChangedWhileMounted && !genuinelyAppendedAssistant) {
+        if (!sourceChangedWhileMounted && !pendingNewAssistant) {
             if (signature) assistantSourceObservation.set(id, signature);
             continue;
         }
 
+        pendingFallbackAssistantIds.delete(id);
         if (signature) assistantSourceObservation.set(id, signature);
 
         scheduleAutomaticTranslation(id, Math.max(100, Number(delay) || 180), {
@@ -10667,11 +10677,18 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
         });
     }
 
+    // Advance the chat-length baseline even if a new assistant is not mounted;
+    // pendingFallbackAssistantIds preserves the unresolved new-message intent.
     assistantObservedChatLength = Math.max(assistantObservedChatLength, chat.length);
 
     for (const id of [...assistantSourceObservation.keys()]) {
         if (!Number.isInteger(id) || id < 0 || id >= chat.length) {
             assistantSourceObservation.delete(id);
+        }
+    }
+    for (const id of [...pendingFallbackAssistantIds]) {
+        if (!Number.isInteger(id) || id < 0 || id >= chat.length) {
+            pendingFallbackAssistantIds.delete(id);
         }
     }
 }
@@ -10728,6 +10745,13 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
 
         const signature = messageVersionSignature(message);
         const previousSignature = assistantSourceObservation.get(id) || '';
+        const appendedSinceBaseline = Boolean(
+            !previousSignature
+            && signature
+            && id >= observedLengthBefore
+        );
+        if (appendedSinceBaseline) pendingFallbackAssistantIds.add(id);
+
         const mounted = Boolean(document.querySelector(`.mes[mesid="${id}"]`));
         if (!mounted) return;
 
@@ -10736,26 +10760,23 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
             && signature
             && previousSignature !== signature
         );
-        const genuinelyAppendedAssistant = Boolean(
-            !previousSignature
-            && signature
-            && id >= observedLengthBefore
-            && id >= chat.length - 2
-        );
+        const pendingNewAssistant = pendingFallbackAssistantIds.has(id);
         const staleOwnedFallback = hasStaleOwnedAssistantTranslation(message);
 
-        if (!sourceChangedWhileMounted && !genuinelyAppendedAssistant && !staleOwnedFallback) {
+        if (!sourceChangedWhileMounted && !pendingNewAssistant && !staleOwnedFallback) {
             if (signature) assistantSourceObservation.set(id, signature);
             return;
         }
 
         const existingRecord = currentRecord(message, id);
         if (existingRecord) {
+            pendingFallbackAssistantIds.delete(id);
             if (signature) assistantSourceObservation.set(id, signature);
             restoreCurrentDisplay(id, message, existingRecord);
             return;
         }
 
+        pendingFallbackAssistantIds.delete(id);
         if (signature) assistantSourceObservation.set(id, signature);
 
         const revisionSignature = insteadRevisionSignature(message);
@@ -10775,6 +10796,8 @@ function handleCompletedAssistantMessage(payload, delay = 80) {
     let id = normalizedMessageId(payload);
     if (id < 0) id = latestAssistantMessage()?.id ?? -1;
     if (id < 0) return;
+
+    pendingFallbackAssistantIds.delete(id);
 
     const swipeJob = swipeTranslationJobs.get(id);
     if (swipeJob) {

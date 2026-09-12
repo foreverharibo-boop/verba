@@ -2,9 +2,19 @@
 
 SillyTavern 1.18용 독립 자동번역 확장입니다.
 
-현재 버전: **v0.4.76**
+현재 버전: **v0.4.77**
 
 ## 업데이트 내역
+
+### v0.4.77
+
+- v0.4.76 fallback 검수 중 발견한 `chat[] 먼저 → DOM 나중` 자동번역 누락 엣지 케이스 수정
+- 새 assistant가 chat 배열에 추가됐지만 화면 DOM이 아직 없으면 해당 메시지 ID를 pending 상태로 보존
+- chat 길이 기준선이 먼저 갱신되어도, DOM이 나중에 뜨면 pending 메시지를 정상 자동 번역
+- 채팅 초기 warmup 중 기존 메시지를 새 메시지로 오인하지 않는 v0.4.76 방지 로직 유지
+- 기존 메시지 재노출/설정창/Recent/단순 DOM 변화만으로 자동 번역되지 않음
+- 원문 signature 변경 및 inSTead stale revision 복구는 계속 감지
+- 정상 MESSAGE_RECEIVED / CHARACTER_MESSAGE_RENDERED / GENERATION_ENDED 경로와 중복될 경우 pending 표식을 해제해 중복 예약 방지
 
 ### v0.4.76
 

@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.77';
+const EXTENSION_VERSION = '0.4.78';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -4255,6 +4255,26 @@ function currentRecord(message, explicitId = null) {
     // Third-party revision controllers can restore the source but lose
     // message.extra/swipe_info.extra. Recover only an exact chat+id+source hash.
     return recoveredTranslationRecord(message, messageId);
+}
+
+
+function currentSelectionRecord(message) {
+    const record = currentRecord(message);
+    if (record) return record;
+
+    // A model may already return Korean-English bilingual dialogue. Automatic
+    // translation can then skip the message as Korean-dominant, leaving no Verba
+    // cache record even though the mixed-language text still needs selection tools.
+    const source = messageSource(message);
+    if (!hasKorean(source) || !/[A-Za-z]/.test(source)) return null;
+    return {
+        swipeId: currentSwipeId(message),
+        sourceHash: hashText(source),
+        translation: source,
+        sourceMap: [],
+        lockedSegments: [],
+        rawBilingual: true,
+    };
 }
 
 function currentSwipeExtra(message, create = true) {

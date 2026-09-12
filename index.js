@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.52';
+const EXTENSION_VERSION = '0.4.53';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';

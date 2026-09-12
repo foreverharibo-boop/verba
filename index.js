@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.67';
+const EXTENSION_VERSION = '0.4.68';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -1500,6 +1500,154 @@ function applyPromptPresetTranslationSettings(value) {
 
     syncDeveloperQualityControls(document.querySelector('#verba-settings'));
     if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+}
+
+function defaultPromptPresetTranslationSettingsSnapshot() {
+    return normalizedPromptPresetTranslationSettings(DEFAULT_SETTINGS);
+}
+
+function resetPromptPresetWorkspace(scope = PROMPT_PRESET_SCOPE_PROMPTS) {
+    const resetScope = scope === PROMPT_PRESET_SCOPE_TRANSLATION
+        ? PROMPT_PRESET_SCOPE_TRANSLATION
+        : PROMPT_PRESET_SCOPE_PROMPTS;
+
+    clearTimeout(promptEditorBackupTimer);
+    promptEditorBackupTimer = null;
+
+    const resetPreset = {
+        globalPrompt: '',
+        globalPromptEnabled: DEFAULT_SETTINGS.globalPromptEnabled !== false,
+        allDialoguePrompt: '',
+        allDialoguePromptEnabled: DEFAULT_SETTINGS.allDialoguePromptEnabled !== false,
+        dialoguePrompt: '',
+        dialoguePromptEnabled: DEFAULT_SETTINGS.dialoguePromptEnabled !== false,
+        otherDialoguePrompt: '',
+        otherDialoguePromptEnabled: DEFAULT_SETTINGS.otherDialoguePromptEnabled !== false,
+        saveScope: resetScope,
+        translationSettings: resetScope === PROMPT_PRESET_SCOPE_TRANSLATION
+            ? defaultPromptPresetTranslationSettingsSnapshot()
+            : null,
+    };
+
+    setPromptFieldsFromPreset(resetPreset);
+
+    const select = document.querySelector('#verba-prompt-preset-select');
+    if (select instanceof HTMLSelectElement) select.value = '';
+
+    const name = document.querySelector('#verba-prompt-preset-name');
+    if (
+        name instanceof HTMLInputElement
+        || name instanceof HTMLTextAreaElement
+    ) {
+        name.value = '';
+    }
+
+    const scopeSelect = document.querySelector('#verba-prompt-preset-save-scope');
+    if (scopeSelect instanceof HTMLSelectElement) scopeSelect.value = resetScope;
+
+    renderPromptPresetManager('');
+    renderPromptConflictInspector();
+    if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+
+    notify(
+        resetScope === PROMPT_PRESET_SCOPE_TRANSLATION
+            ? '새로 시작했어요. 프롬프트와 번역 설정을 기본값으로 초기화했습니다.'
+            : '새로 시작했어요. 프롬프트만 비우고 번역 설정은 그대로 유지했습니다.',
+        'success',
+    );
+}
+
+function requestPromptPresetNewStartScope() {
+    if (document.querySelector('#verba-prompt-new-start-overlay')) return Promise.resolve(null);
+
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.id = 'verba-prompt-new-start-overlay';
+        overlay.className = 'verba-overlay verba-prompt-new-start-overlay';
+        if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
+
+        overlay.innerHTML = `
+            <section class="verba-modal verba-prompt-new-start-modal" role="dialog" aria-modal="true" aria-labelledby="verba-prompt-new-start-title">
+                <header class="verba-modal-header">
+                    <strong id="verba-prompt-new-start-title">새로 시작</strong>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
+                </header>
+
+                <div class="verba-help verba-prompt-new-start-help">
+                    현재 편집 중인 값을 기본 상태로 되돌립니다.<br>
+                    저장된 프리셋 자체는 삭제하거나 수정하지 않습니다.
+                </div>
+
+                <div class="verba-prompt-new-start-actions">
+                    <button type="button" class="menu_button" data-verba-new-start-scope="prompts">
+                        <b>프롬프트만 초기화</b>
+                        <small>4개 프롬프트를 비우고 슬롯 ON/OFF만 기본값으로 복원<br>번역 설정은 현재 값 유지</small>
+                    </button>
+
+                    <button type="button" class="menu_button" data-verba-new-start-scope="prompts_translation">
+                        <b>프롬프트 + 번역 설정 초기화</b>
+                        <small>프롬프트 + 규칙 우선순위 · 미세 조정 · 말끝 · 표현 디테일 · 한캐/영캐를 기본값으로 복원</small>
+                    </button>
+                </div>
+            </section>`;
+
+        document.documentElement.append(overlay);
+
+        const forcedOverlayStyles = {
+            position: 'fixed',
+            inset: '0',
+            width: '100vw',
+            height: '100dvh',
+            margin: '0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: 'none',
+            zIndex: '2147483646',
+        };
+        Object.entries(forcedOverlayStyles).forEach(([property, value]) => {
+            overlay.style.setProperty(
+                property.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`),
+                value,
+                'important',
+            );
+        });
+
+        try {
+            overlay.showPopover?.();
+        } catch {
+            // Fixed-position fallback.
+        }
+
+        let settled = false;
+        const finish = value => {
+            if (settled) return;
+            settled = true;
+            try {
+                overlay.hidePopover?.();
+            } catch {
+                // It may already be outside the popover top layer.
+            }
+            overlay.remove();
+            resolve(value);
+        };
+
+        overlay.querySelector('.verba-close')?.addEventListener('click', () => finish(null));
+        overlay.querySelectorAll('[data-verba-new-start-scope]').forEach(button => {
+            button.addEventListener('click', () => {
+                const value = button.dataset.verbaNewStartScope === PROMPT_PRESET_SCOPE_TRANSLATION
+                    ? PROMPT_PRESET_SCOPE_TRANSLATION
+                    : PROMPT_PRESET_SCOPE_PROMPTS;
+                finish(value);
+            });
+        });
+        overlay.addEventListener('click', event => {
+            if (event.target === overlay) finish(null);
+        });
+        overlay.addEventListener('keydown', event => {
+            if (event.key === 'Escape') finish(null);
+        });
+    });
 }
 
 function setPromptFieldsFromPreset(preset) {
@@ -8735,6 +8883,7 @@ function injectSettingsPanel() {
                         <div class="verba-help">기존 프리셋은 ‘프롬프트만’으로 유지됩니다. ‘프롬프트 + 번역 설정’을 선택하면 아래 번역 스타일 설정도 함께 저장·적용합니다.</div>
 
                         <div class="verba-prompt-preset-actions">
+                            <button type="button" id="verba-prompt-preset-new-start" class="menu_button">새로 시작</button>
                             <button type="button" id="verba-prompt-preset-save" class="menu_button">저장</button>
                             <button type="button" id="verba-prompt-preset-favorite" class="menu_button" disabled>☆ 즐겨찾기</button>
                             <button type="button" id="verba-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
@@ -9689,6 +9838,12 @@ function injectSettingsPanel() {
         if (promptPresetName) promptPresetName.value = preset.name;
         renderPromptPresetManager(preset.id);
         notify(`프롬프트 프리셋 “${preset.name}”을 적용했어요.`, 'success');
+    });
+
+    panel.querySelector('#verba-prompt-preset-new-start')?.addEventListener('click', async () => {
+        const scope = await requestPromptPresetNewStartScope();
+        if (!scope) return;
+        resetPromptPresetWorkspace(scope);
     });
 
     panel.querySelector('#verba-prompt-preset-save')?.addEventListener('click', () => {

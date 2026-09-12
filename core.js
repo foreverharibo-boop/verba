@@ -1750,8 +1750,8 @@ function promptIdentityAliasBlock(speakerIdentity = {}) {
     return `IDENTITY ALIAS MAP — FOR INTERPRETING USER-AUTHORED PROMPT RULES
 - CURRENT USER / PERSONA canonical name: ${JSON.stringify(userName)}
 - CURRENT TARGET CHARACTER canonical name: ${JSON.stringify(characterName)}
-- In prompt instructions, the role labels USER / user / current user / current persona and the literal placeholder {{user}} all refer to the SAME person: ${JSON.stringify(userName)}.
-- In prompt instructions, the role labels TARGET CHARACTER / current character / CHARACTER / char and the literal placeholder {{char}} all refer to the SAME person: ${JSON.stringify(characterName)}.
+- In prompt instructions, USER-role labels are CASE-INSENSITIVE. USER / User / user / any other capitalization of "user", plus current user / current persona and the literal placeholder {{user}}, all refer to the SAME person: ${JSON.stringify(userName)}.
+- In prompt instructions, TARGET-CHARACTER role labels are CASE-INSENSITIVE. TARGET CHARACTER / Target Character / target character / CHARACTER / Character / character / CHAR / Char / char / any capitalization of those role labels, plus current character and the literal placeholder {{char}}, all refer to the SAME person: ${JSON.stringify(characterName)}.
 - Use this alias map to interpret conditional style rules such as rules that apply only when the character speaks to USER versus to someone else.
 - This alias map is semantic context for prompt instructions only. Do NOT replace ordinary source-content words, do NOT print the placeholders unless the source itself contains them, and do NOT invent that USER is the addressee when the dialogue context does not support it.
 - If a prompt condition says {{user}}, treat it exactly as the current USER/PERSONA named above; if it says {{char}}, treat it exactly as the current TARGET CHARACTER named above.`;
@@ -1853,8 +1853,8 @@ function speakerIdentityBlock(speakerIdentity = {}) {
 - TARGET CHARACTER: ${JSON.stringify(characterName)}
 - TARGET CHARACTER GENDER: ${JSON.stringify(characterGender)}
 - USER: ${JSON.stringify(userName)}
-- USER / user / current user / current persona / {{user}} are prompt-rule aliases for the same current USER/PERSONA: ${JSON.stringify(userName)}.
-- TARGET CHARACTER / current character / CHARACTER / char / {{char}} are prompt-rule aliases for the same current TARGET CHARACTER: ${JSON.stringify(characterName)}.
+- USER-role labels are case-insensitive: USER / User / user / any capitalization of "user" / current user / current persona / {{user}} are prompt-rule aliases for the same current USER/PERSONA: ${JSON.stringify(userName)}.
+- TARGET-character role labels are case-insensitive: TARGET CHARACTER / Target Character / target character / CHARACTER / Character / character / CHAR / Char / char / any capitalization of those labels / current character / {{char}} are prompt-rule aliases for the same current TARGET CHARACTER: ${JSON.stringify(characterName)}.
 - TARGET CHARACTER is the author of the current assistant output, but do not assume every quoted passage inside that output is spoken by them.
 - Infer who speaks each quoted passage from the entire supplied output: subject continuity, adjacent actions, pronouns, speech tags, turn order, and surrounding narration.
 - Classify each quoted passage so TARGET-CHARACTER and USER/NPC/OTHER dialogue can receive different speaker-specific prompts. Apply the TARGET-CHARACTER DIALOGUE PROMPT only to direct dialogue actually spoken by TARGET CHARACTER.
@@ -2275,7 +2275,7 @@ function inputIdentitySpellingBlock(identityContext = {}) {
     return `INPUT IDENTITY / NAME SPELLING — MINIMAL LOCAL CONTEXT
 - CURRENT USER / PERSONA CANONICAL NAME: ${JSON.stringify(userName || '(unknown)')}
 - CURRENT TARGET CHARACTER CANONICAL NAME: ${JSON.stringify(characterName || '(unknown)')}
-- PROMPT ROLE ALIASES: USER / user / current user / current persona / {{user}} = the CURRENT USER/PERSONA above; TARGET CHARACTER / current character / CHARACTER / char / {{char}} = the CURRENT TARGET CHARACTER above.
+- PROMPT ROLE ALIASES are case-insensitive: any capitalization of USER/user, plus current user / current persona / {{user}} = the CURRENT USER/PERSONA above; any capitalization of TARGET CHARACTER / CHARACTER / CHAR/char, plus current character / {{char}} = the CURRENT TARGET CHARACTER above.
 - EXACT KOREAN → ENGLISH NAME SPELLINGS: ${JSON.stringify(exactNamePairs)}
 - This is spelling context only. It is NOT permission to add names where the Korean source used only a pronoun or omitted the subject.
 - When the source clearly names the current USER/PERSONA or TARGET CHARACTER, use the canonical spelling above instead of inventing a new romanization.

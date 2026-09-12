@@ -2,9 +2,20 @@
 
 SillyTavern 1.18용 독립 자동번역 확장입니다.
 
-현재 버전: **v0.4.73**
+현재 버전: **v0.4.74**
 
 ## 업데이트 내역
+
+### v0.4.74
+
+- v0.4.72~0.4.73의 inSTead 호환 fallback이 최근 메시지를 임의로 자동 번역할 수 있던 회귀 버그 수정
+- `최근 생성 시간`이나 `다시 화면에 보임`만으로 자동 번역하지 않도록 변경
+- generic/inSTead fallback 자동 번역은 아래 경우에만 동작
+  - 현재 채팅에 실제로 새 assistant 메시지가 추가됨
+  - 이미 화면에 있던 assistant 원문 signature가 실제로 변경됨
+  - 기존 베르바 번역과 현재 원문이 어긋난 stale-owned revision 복구가 필요함
+- 설정창/드로어/기타 DOM 변화만으로 기존 메시지를 재번역하지 않음
+- 정상 MESSAGE_RECEIVED / CHARACTER_MESSAGE_RENDERED / GENERATION_ENDED 자동 번역 경로는 그대로 유지
 
 ### v0.4.73
 

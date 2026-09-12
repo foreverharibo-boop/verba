@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.73';
+const EXTENSION_VERSION = '0.4.74';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -516,7 +516,10 @@ const translationRecoveryCache = new Map();
 // Track recent assistant source versions independently of controller-specific
 // metadata/event order.
 const assistantSourceObservation = new Map();
-let assistantObservationSuppressUntil = Date.now() + 1600;
+// Number of messages that already existed when the current chat observation
+// baseline was established. Only genuinely appended messages or changed source
+// signatures may trigger the generic fallback.
+let assistantObservedChatLength = 0;
 
 const pendingInputControllers = new Set();
 const transientLockedMessages = new Set();
@@ -10565,23 +10568,27 @@ function assistantMessageFreshTimestamp(message) {
     return candidates.length ? Math.max(...candidates) : null;
 }
 
-function resetAssistantSourceObservation(suppressMs = 1600) {
+function resetAssistantSourceObservation() {
     assistantSourceObservation.clear();
-    assistantObservationSuppressUntil = Date.now() + Math.max(0, Number(suppressMs) || 0);
 
     const chat = liveContext().chat;
-    if (!Array.isArray(chat)) return;
+    if (!Array.isArray(chat)) {
+        assistantObservedChatLength = 0;
+        return;
+    }
+
     chat.forEach((message, id) => {
         if (!message || message.is_user || message.is_system) return;
         const signature = messageVersionSignature(message);
         if (signature) assistantSourceObservation.set(id, signature);
     });
+    assistantObservedChatLength = chat.length;
 }
 
 function scheduleFreshMountedAssistantTranslations(delay = 180) {
     const context = liveContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
-    const now = Date.now();
+    const observedLengthBefore = assistantObservedChatLength;
     const start = Math.max(0, chat.length - 8);
 
     for (let id = start; id < chat.length; id += 1) {
@@ -10592,25 +10599,40 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
         const source = messageSource(message);
         const signature = messageVersionSignature(message);
         const previousSignature = assistantSourceObservation.get(id) || '';
-        if (signature) assistantSourceObservation.set(id, signature);
 
-        if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) continue;
-        if (!document.querySelector(`.mes[mesid="${id}"]`)) continue;
+        if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) {
+            if (signature) assistantSourceObservation.set(id, signature);
+            continue;
+        }
+        if (!document.querySelector(`.mes[mesid="${id}"]`)) {
+            if (signature) assistantSourceObservation.set(id, signature);
+            continue;
+        }
 
         const record = currentRecord(message, id);
         if (record) {
+            if (signature) assistantSourceObservation.set(id, signature);
             restoreCurrentDisplay(id, message, record);
             continue;
         }
 
-        const finishedAt = assistantMessageFreshTimestamp(message);
-        const freshByTimestamp = finishedAt !== null && Math.abs(now - finishedAt) <= 120_000;
-        const sourceChangedWhileMounted = Boolean(previousSignature && previousSignature !== signature);
-        const newlyObservedLatest = !previousSignature
-            && now >= assistantObservationSuppressUntil
-            && id >= chat.length - 2;
+        const sourceChangedWhileMounted = Boolean(
+            previousSignature
+            && signature
+            && previousSignature !== signature
+        );
+        const genuinelyAppendedMessage = Boolean(
+            !previousSignature
+            && id >= observedLengthBefore
+            && id >= chat.length - 2
+        );
 
-        if (!freshByTimestamp && !sourceChangedWhileMounted && !newlyObservedLatest) continue;
+        if (signature) assistantSourceObservation.set(id, signature);
+
+        // Do NOT translate merely because a message has a recent timestamp or
+        // because it became visible again. Those broad heuristics caused Verba
+        // to translate old/current messages during unrelated UI mutations.
+        if (!sourceChangedWhileMounted && !genuinelyAppendedMessage) continue;
 
         scheduleAutomaticTranslation(id, Math.max(100, Number(delay) || 180), {
             insteadRevision: true,
@@ -10618,6 +10640,8 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
             genericControllerFallback: true,
         });
     }
+
+    assistantObservedChatLength = chat.length;
 
     for (const id of [...assistantSourceObservation.keys()]) {
         if (!Number.isInteger(id) || id < 0 || id >= chat.length) {
@@ -10663,6 +10687,7 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
     const context = liveContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
     const now = Date.now();
+    const observedLengthBefore = assistantObservedChatLength;
     pruneInsteadRevisionSeen(now);
 
     chat.forEach((message, id) => {
@@ -10670,33 +10695,49 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
         const meta = insteadRevisionMeta(message);
         if (!meta) return;
 
-        // Prefer inSTead's fresh gen_finished timestamp. Some revisions can
-        // expose their metadata late or omit gen_finished, so allow a narrow
-        // fallback only when this mounted message already carries a stale Verba
-        // translation whose source hash no longer matches the regenerated text.
-        const freshByTimestamp = meta.finishedAt !== null
-            && Math.abs(now - meta.finishedAt) <= 90_000;
-        const staleOwnedFallback = hasStaleOwnedAssistantTranslation(message)
-            && Boolean(document.querySelector(`.mes[mesid="${id}"]`));
-        if (!freshByTimestamp && !staleOwnedFallback) return;
-
         const source = messageSource(message);
         if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) return;
+
+        const signature = messageVersionSignature(message);
+        const previousSignature = assistantSourceObservation.get(id) || '';
+        const sourceChangedWhileMounted = Boolean(
+            previousSignature
+            && signature
+            && previousSignature !== signature
+        );
+        const genuinelyAppendedMessage = Boolean(
+            !previousSignature
+            && id >= observedLengthBefore
+            && id >= chat.length - 2
+        );
+        const staleOwnedFallback = hasStaleOwnedAssistantTranslation(message)
+            && Boolean(document.querySelector(`.mes[mesid="${id}"]`));
+
+        // Fresh timestamps alone are NOT enough. A recently generated message
+        // can stay "recent" while the user opens drawers/panels or navigates UI,
+        // which previously caused surprise automatic translations.
+        if (!sourceChangedWhileMounted && !genuinelyAppendedMessage && !staleOwnedFallback) return;
+
         const existingRecord = currentRecord(message, id);
         if (existingRecord) {
+            if (signature) assistantSourceObservation.set(id, signature);
             restoreCurrentDisplay(id, message, existingRecord);
             return;
         }
 
-        const signature = insteadRevisionSignature(message);
-        if (!signature) return;
-        const key = `${id}:${signature}`;
+        if (signature) assistantSourceObservation.set(id, signature);
+
+        const revisionSignature = insteadRevisionSignature(message);
+        if (!revisionSignature) return;
+        const key = `${id}:${revisionSignature}`;
         if (insteadRevisionTranslationSeen.has(key)) return;
 
         insteadRevisionTranslationSeen.set(key, now);
         console.info(`[베르바] inSTead 새 revision 감지 #${id} swipe ${meta.swipeId ?? '?'} — 자동 번역 예약`);
         scheduleAutomaticTranslation(id, delay, { insteadRevision: true });
     });
+
+    assistantObservedChatLength = chat.length;
 }
 
 function handleCompletedAssistantMessage(payload, delay = 80) {
@@ -10918,7 +10959,7 @@ function setupEvents() {
             const closeButton = requestOverlay?.querySelector('.verba-close');
             if (closeButton) closeButton.click();
             else requestOverlay?.remove();
-            resetAssistantSourceObservation(1800);
+            resetAssistantSourceObservation();
             setTimeout(() => {
                 injectInputAction();
                 refreshProfileSelect();
@@ -10985,7 +11026,7 @@ function initialize() {
     injectInputAction();
     refreshTranslationClasses();
     scheduleChatOpenTranslationRestore();
-    resetAssistantSourceObservation(1600);
+    resetAssistantSourceObservation();
     setupAutoInput();
     setupMessageCopyHold();
     setupSelection();

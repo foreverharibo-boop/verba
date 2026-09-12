@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.58';
+const EXTENSION_VERSION = '0.4.60';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -59,6 +59,18 @@ const DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS = [
     { value: 'natural', label: '자연스럽게' },
     { value: 'prefer', label: '우선 적용' },
     { value: 'strict', label: '강하게 고정' },
+];
+
+const DEVELOPER_AUDIENCE_REGISTER_OPTIONS = [
+    { value: 'unset', label: '미설정' },
+    { value: 'banmal', label: '반말' },
+    { value: 'jondaetmal', label: '존댓말' },
+];
+
+const DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS = [
+    { value: 'minimal', label: '최소' },
+    { value: 'natural', label: '자연스럽게' },
+    { value: 'often', label: '자주' },
 ];
 
 const LOCALIZATION_LEVEL_OPTIONS = [
@@ -147,6 +159,10 @@ const DEFAULT_SETTINGS = {
     developerSpeechDistance: 'source',
     developerTargetToUserAddress: '',
     developerTargetToUserAddressStrength: 'natural',
+    developerTargetToUserAddressFrequency: 'natural',
+    developerTargetToUserRegister: 'unset',
+    developerTargetToOtherRegister: 'unset',
+    developerRegisterShiftMonitor: false,
     expressionEmphasisTaste: 'default',
     expressionDisfluencyTaste: 'default',
     expressionIdiomMetaphorTaste: 'default',
@@ -241,6 +257,16 @@ settings.developerTargetToUserAddress = String(settings.developerTargetToUserAdd
 settings.developerTargetToUserAddressStrength = DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.some(option => option.value === settings.developerTargetToUserAddressStrength)
     ? settings.developerTargetToUserAddressStrength
     : 'natural';
+settings.developerTargetToUserAddressFrequency = DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS.some(option => option.value === settings.developerTargetToUserAddressFrequency)
+    ? settings.developerTargetToUserAddressFrequency
+    : 'natural';
+settings.developerTargetToUserRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === settings.developerTargetToUserRegister)
+    ? settings.developerTargetToUserRegister
+    : 'unset';
+settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === settings.developerTargetToOtherRegister)
+    ? settings.developerTargetToOtherRegister
+    : 'unset';
+settings.developerRegisterShiftMonitor = settings.developerRegisterShiftMonitor === true;
 settings.expressionEmphasisTaste = ['default', 'source', 'natural', 'active'].includes(settings.expressionEmphasisTaste)
     ? settings.expressionEmphasisTaste
     : 'default';
@@ -412,6 +438,7 @@ const scopedParallelRequestQueue = [];
 let scopedParallelRequestActive = 0;
 let requestTail = Promise.resolve();
 let lastQualityAuditSummary = '아직 실행되지 않음';
+let lastRegisterShiftMonitorSummary = '아직 실행되지 않음';
 let chatSaveTimer = null;
 let promptEditorBackupTimer = null;
 let uiRefreshTimer = null;
@@ -3226,6 +3253,108 @@ function localQualityAuditCandidates(segmented, translations, speakerScopes) {
     return suspects;
 }
 
+function strongKoreanRegisterProfile(value) {
+    const polite = koreanPoliteEndingCount(value);
+    const casual = koreanCasualEndingCount(value);
+    if (polite >= 2 && casual === 0) return { kind: 'polite', polite, casual };
+    if (casual >= 2 && polite === 0) return { kind: 'casual', polite, casual };
+    if (polite >= 2 && casual >= 2) return { kind: 'mixed', polite, casual };
+    return { kind: 'unclear', polite, casual };
+}
+
+function runDeveloperRegisterShiftMonitor(segmented, translations, speakerScopes) {
+    if (
+        !settings.developerMode
+        || !settings.developerRelationshipExperimentEnabled
+        || !settings.developerRegisterShiftMonitor
+    ) {
+        return { issues: [] };
+    }
+
+    const rows = (segmented.segments || [])
+        .filter(segment => (speakerScopes?.[segment.id] || '') === 'target_dialogue')
+        .map(segment => ({
+            segment,
+            translation: String(translations.get(segment.id) || ''),
+        }))
+        .filter(row => row.translation.trim())
+        .map(row => ({
+            ...row,
+            profile: strongKoreanRegisterProfile(row.translation),
+        }));
+
+    const issues = [];
+
+    for (const row of rows) {
+        if (row.profile.kind === 'mixed') {
+            issues.push({
+                id: row.segment.id,
+                reason: '한 대사 구간 안에서 존댓말·반말 종결이 강하게 혼재',
+            });
+        }
+    }
+
+    let previousStrong = null;
+    for (const row of rows) {
+        if (!['polite', 'casual'].includes(row.profile.kind)) continue;
+        if (previousStrong && previousStrong.profile.kind !== row.profile.kind) {
+            issues.push({
+                id: row.segment.id,
+                reason: `연속 TARGET CHARACTER 대사에서 ${previousStrong.profile.kind === 'polite' ? '존댓말→반말' : '반말→존댓말'} 급변 의심`,
+            });
+        }
+        previousStrong = row;
+    }
+
+    // If USER and OTHER are explicitly configured to the SAME speech level,
+    // listener identity no longer matters for local validation.
+    const userRegister = settings.developerTargetToUserRegister;
+    const otherRegister = settings.developerTargetToOtherRegister;
+    const commonExpected = userRegister !== 'unset' && userRegister === otherRegister
+        ? userRegister
+        : null;
+
+    if (commonExpected) {
+        for (const row of rows) {
+            if (commonExpected === 'banmal' && row.profile.kind === 'polite') {
+                issues.push({
+                    id: row.segment.id,
+                    reason: '청자별 설정이 모두 반말인데 존댓말 종결이 강하게 감지됨',
+                });
+            }
+            if (commonExpected === 'jondaetmal' && row.profile.kind === 'casual') {
+                issues.push({
+                    id: row.segment.id,
+                    reason: '청자별 설정이 모두 존댓말인데 반말 종결이 강하게 감지됨',
+                });
+            }
+        }
+    }
+
+    const uniqueIssues = [];
+    const seen = new Set();
+    for (const issue of issues) {
+        const key = `${issue.id}\u0000${issue.reason}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueIssues.push(issue);
+    }
+
+    lastRegisterShiftMonitorSummary = uniqueIssues.length
+        ? `급변 의심 ${uniqueIssues.length}건`
+        : rows.length
+            ? '최근 이상 없음'
+            : '검사할 캐릭터 대사 없음';
+    renderRegisterShiftMonitorStatus();
+
+    if (uniqueIssues.length) {
+        console.warn('[베르바] 존댓말·반말 급변 감시', uniqueIssues);
+        notify(`관계 실험: 존댓말·반말 급변 의심 ${uniqueIssues.length}건을 감지했어요. 자동 수정은 하지 않았습니다.`, 'warning');
+    }
+
+    return { issues: uniqueIssues };
+}
+
 async function runExperimentalQualityAudit({
     segmented,
     translations,
@@ -3420,6 +3549,8 @@ async function translateOutputText(source, options = {}) {
         speakerIdentity,
         options,
     });
+
+    runDeveloperRegisterShiftMonitor(segmented, translations, speakerScopes);
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings.bannedWords));
     if (remaining.length) {
@@ -8067,7 +8198,29 @@ function developerSettingsMarkup() {
                                 <select id="verba-developer-speech-distance" class="text_pole">
                                     ${DEVELOPER_SPEECH_DISTANCE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerSpeechDistance === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
-                                <div class="verba-help">현재 캐릭터의 직접 대사에만 적용합니다. 원문 우선 / 격식적 / 공손한 편 / 편안한 편 / 매우 편안함 중 선택해 한국어의 존댓말·반말·문장 거리감을 조절합니다.</div>
+                                <div class="verba-help">현재 캐릭터의 직접 대사에만 적용합니다. 원문 우선 / 격식적 / 공손한 편 / 편안한 편 / 매우 편안함 중 선택해 한국어의 전반적인 말투 거리감을 조절합니다.</div>
+
+                                <div class="verba-divider"></div>
+                                <b>청자별 말투 분리</b>
+                                <label for="verba-developer-target-user-register">USER에게</label>
+                                <select id="verba-developer-target-user-register" class="text_pole">
+                                    ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <label for="verba-developer-target-other-register">타인에게</label>
+                                <select id="verba-developer-target-other-register" class="text_pole">
+                                    ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToOtherRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">미설정이면 기존 말투 거리감/프롬프트를 따릅니다. 반말·존댓말을 고르면 캐릭터가 그 청자에게 말하는 것이 확실할 때만 해당 한국어 상대높임을 적용합니다. 청자가 애매하면 추측하지 않습니다.</div>
+
+                                <label class="verba-check-row">
+                                    <input type="checkbox" id="verba-developer-register-shift-monitor" ${settings.developerRegisterShiftMonitor ? 'checked' : ''}>
+                                    <span>존댓말·반말 급변 감시</span>
+                                </label>
+                                <div class="verba-quality-audit-status-row">
+                                    <span>최근 감시</span>
+                                    <b id="verba-register-shift-monitor-status">${escapeHtml(lastRegisterShiftMonitorSummary)}</b>
+                                </div>
+                                <div class="verba-help">추가 API 없이 최종 번역의 TARGET CHARACTER 대사에서 존댓말·반말이 갑자기 섞이거나 연속 대사 사이에서 강하게 뒤집히는 패턴만 보수적으로 감지합니다. 감지해도 자동 수정하지 않고 경고만 표시합니다.</div>
 
                                 <label for="verba-developer-target-user-address">캐릭터 → USER 호칭 고정</label>
                                 <input id="verba-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
@@ -8076,6 +8229,12 @@ function developerSettingsMarkup() {
                                 <select id="verba-developer-target-user-address-strength" class="text_pole">
                                     ${DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressStrength === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
+
+                                <label for="verba-developer-target-user-address-frequency">호칭 사용 빈도</label>
+                                <select id="verba-developer-target-user-address-frequency" class="text_pole">
+                                    ${DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">최소: 정말 필요한 호명 자리 위주로 사용합니다. 자연스럽게: 한국어에서 자연스러운 빈도로 사용합니다. 자주: 어색하지 않은 직접 호명 자리에서 설정 호칭을 더 적극적으로 사용합니다. 어떤 단계도 모든 you를 호칭으로 바꾸지는 않습니다.</div>
                                 <div class="verba-help">자연스럽게: 장면 분위기와 한국어 자연스러움을 가장 우선합니다. 우선 적용: USER를 명확히 부르는 자리에서는 설정 호칭을 우선합니다. 강하게 고정: 일반 2인칭을 명시적으로 호칭해야 할 때 설정 호칭 외의 당신/그쪽/너/다른 관계 호칭으로 바꾸지 않습니다. 세 단계 모두 자연스러운 생략과 원문의 애칭·명시 호칭은 허용합니다.</div>
                                 <div class="verba-help">비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다. 입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고합니다. 원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</div>
                                 <div class="verba-help">현재 테스트 단계라 E→K 아웃풋의 TARGET CHARACTER 대사에만 적용합니다. USER/NPC 대사와 K→E 인풋에는 아직 적용하지 않습니다.</div>
@@ -8151,6 +8310,7 @@ function refreshSettingsPanelForDeveloperMode() {
     current.replaceWith(replacement);
     syncDeveloperQualityControls(panel);
     renderQualityAuditStatus();
+    renderRegisterShiftMonitorStatus();
 }
 
 function enabledQualityAuditChecks() {
@@ -8166,6 +8326,11 @@ function enabledQualityAuditChecks() {
 function renderQualityAuditStatus() {
     const target = document.querySelector('#verba-quality-audit-status');
     if (target) target.textContent = lastQualityAuditSummary;
+}
+
+function renderRegisterShiftMonitorStatus() {
+    const target = document.querySelector('#verba-register-shift-monitor-status');
+    if (target) target.textContent = lastRegisterShiftMonitorSummary;
 }
 
 function injectSettingsPanel() {
@@ -8824,6 +8989,22 @@ function injectSettingsPanel() {
             return;
         }
 
+        if (target.id === 'verba-developer-target-user-register' && target instanceof HTMLSelectElement) {
+            settings.developerTargetToUserRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'unset';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-target-other-register' && target instanceof HTMLSelectElement) {
+            settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'unset';
+            saveSettings();
+            return;
+        }
+
         if (target.id === 'verba-developer-target-user-address' && target instanceof HTMLInputElement) {
             settings.developerTargetToUserAddress = String(target.value || '').trim().slice(0, 40);
             target.value = settings.developerTargetToUserAddress;
@@ -8836,6 +9017,22 @@ function injectSettingsPanel() {
                 ? target.value
                 : 'natural';
             saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-target-user-address-frequency' && target instanceof HTMLSelectElement) {
+            settings.developerTargetToUserAddressFrequency = DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'natural';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-register-shift-monitor' && target instanceof HTMLInputElement) {
+            settings.developerRegisterShiftMonitor = target.checked;
+            lastRegisterShiftMonitorSummary = target.checked ? '활성화됨 · 다음 아웃풋부터 감시' : '비활성화됨';
+            saveSettings();
+            renderRegisterShiftMonitorStatus();
             return;
         }
 

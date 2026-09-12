@@ -807,6 +807,65 @@ const DEVELOPER_SPEECH_DISTANCE_RULES = {
 - Do not add profanity, pet names, affection, teasing, or intimacy that is absent from the source.`,
 };
 
+const DEVELOPER_AUDIENCE_REGISTER_RULES = {
+    unset: '',
+    banmal: `BANMAL
+- Use natural contemporary Korean 반말/non-honorific addressee speech for this audience.
+- Preserve the source's attitude, emotion, sarcasm, hostility, warmth, and character voice; change only the Korean speech level needed to keep 반말.`,
+    jondaetmal: `JONDAETMAL
+- Use natural contemporary Korean 존댓말/polite addressee speech for this audience.
+- Prefer ordinary conversational 존댓말 unless another explicit user prompt requests a more formal register.
+- Preserve the source's attitude, emotion, sarcasm, hostility, warmth, and character voice; politeness must not soften or intensify the source meaning.`,
+};
+
+function developerAudienceRegisterBlock(settings = {}) {
+    const userKey = Object.hasOwn(DEVELOPER_AUDIENCE_REGISTER_RULES, settings?.developerTargetToUserRegister)
+        ? settings.developerTargetToUserRegister
+        : 'unset';
+    const otherKey = Object.hasOwn(DEVELOPER_AUDIENCE_REGISTER_RULES, settings?.developerTargetToOtherRegister)
+        ? settings.developerTargetToOtherRegister
+        : 'unset';
+
+    if (userKey === 'unset' && otherKey === 'unset') return '';
+
+    const userRule = DEVELOPER_AUDIENCE_REGISTER_RULES[userKey];
+    const otherRule = DEVELOPER_AUDIENCE_REGISTER_RULES[otherKey];
+
+    return `AUDIENCE-SPECIFIC KOREAN SPEECH LEVEL — TARGET CHARACTER
+- Determine the addressee from the full source context before applying these rules.
+- CURRENT USER/PERSONA means USER / user / {{user}} / the canonical USER name supplied in the identity alias map.
+- "OTHER" means a clearly identified addressee who is NOT the CURRENT USER/PERSONA.
+- If the addressee is ambiguous, mixed, plural across USER and others, off-screen without a clear referent, or the line is quoted speech, DO NOT guess. Fall back to the base speech-distance rule and applicable user prompts.
+- These audience-specific settings override the base SPEECH DISTANCE only for the matching, clearly identified audience.
+- They control Korean 반말/존댓말 only. Do not change factual relationship, intimacy, affection, hostility, pet names, titles, or meaning.
+${userKey !== 'unset' ? `
+TARGET CHARACTER → CURRENT USER/PERSONA
+${userRule}` : `
+TARGET CHARACTER → CURRENT USER/PERSONA
+(미설정 — base speech distance / prompts decide)`}
+
+${otherKey !== 'unset' ? `
+TARGET CHARACTER → OTHER PERSON
+${otherRule}` : `
+TARGET CHARACTER → OTHER PERSON
+(미설정 — base speech distance / prompts decide)`}`;
+}
+
+const DEVELOPER_USER_ADDRESS_FREQUENCY_RULES = {
+    minimal: `ADDRESS FREQUENCY — MINIMAL
+- Prefer natural Korean omission most of the time.
+- Use the configured USER address only when direct calling, turn-taking, contrast, disambiguation, or emotional emphasis genuinely benefits from an explicit vocative.
+- Avoid repeating the configured address in nearby sentences unless the source itself deliberately repeats the address.`,
+    natural: `ADDRESS FREQUENCY — NATURAL
+- Use the configured USER address at a natural contemporary Korean frequency.
+- Omit it where Korean naturally omits second-person reference, and include it where a native speaker would naturally call or re-engage the addressee.
+- Avoid mechanical repetition.`,
+    often: `ADDRESS FREQUENCY — OFTEN
+- Use the configured USER address more actively in natural direct-address positions, especially at turn openings, re-engagement, emphasis, or emotionally marked calls.
+- Still do NOT replace every "you" with the address and do not force the address into grammatically or pragmatically awkward positions.
+- Avoid back-to-back repetition that would sound unnatural unless the source intentionally repeats the address.`,
+};
+
 const DEVELOPER_USER_ADDRESS_STRENGTH_RULES = {
     natural: `ADDRESS STRENGTH — NATURAL
 - Treat the configured address as a preferred relationship cue, not a hard lexical replacement.
@@ -839,12 +898,18 @@ function developerRelationshipExperimentBlock(settings = {}, scope = 'narration'
     const addressStrengthKey = Object.hasOwn(DEVELOPER_USER_ADDRESS_STRENGTH_RULES, settings?.developerTargetToUserAddressStrength)
         ? settings.developerTargetToUserAddressStrength
         : 'natural';
+    const addressFrequencyKey = Object.hasOwn(DEVELOPER_USER_ADDRESS_FREQUENCY_RULES, settings?.developerTargetToUserAddressFrequency)
+        ? settings.developerTargetToUserAddressFrequency
+        : 'natural';
+    const audienceRegisterRules = developerAudienceRegisterBlock(settings);
 
     const addressRules = address
         ? `USER ADDRESS LOCK
 - Configured TARGET CHARACTER → USER address form: ${JSON.stringify(address)}.
 
 ${DEVELOPER_USER_ADDRESS_STRENGTH_RULES[addressStrengthKey]}
+
+${DEVELOPER_USER_ADDRESS_FREQUENCY_RULES[addressFrequencyKey]}
 
 - This lock applies ONLY when the TARGET CHARACTER is clearly addressing or referring to the CURRENT USER/PERSONA with a generic/underspecified second-person form.
 - Do NOT mechanically replace every English "you" with the configured address. First determine whether the source "you" clearly refers to CURRENT USER/PERSONA and whether natural Korean needs an explicit address term; then follow the selected ADDRESS STRENGTH above.
@@ -862,15 +927,17 @@ ${DEVELOPER_USER_ADDRESS_STRENGTH_RULES[addressStrengthKey]}
 - Explicit source pet names, vocatives, titles, relationship terms, kinship terms, or names must still be preserved and naturally translated.
 - Otherwise prefer natural Korean omission or a generic rendering unless the source or another explicit user prompt truly establishes the address.`;
 
-    return `DEVELOPER RELATIONSHIP TRANSLATION EXPERIMENT — TARGET CHARACTER → USER ONLY
+    return `DEVELOPER RELATIONSHIP TRANSLATION EXPERIMENT — TARGET CHARACTER DIALOGUE ONLY
 - EXPERIMENTAL: applies only to direct dialogue classified as TARGET CHARACTER speech in E→K output.
-- Never apply this block to narration, USER/NPC/OTHER dialogue, K→E input, quoted speech spoken by someone else, or relationship facts in the source.
+- Never apply this block to narration, USER/NPC/OTHER-speaker dialogue, K→E input, quoted speech spoken by someone else, or relationship facts in the source.
 - This controls Korean surface register/address only. Preserve meaning, speech-act force, facts, consent, emotional intensity, speaker attribution, and factual relationship exactly.
 
-SPEECH DISTANCE
+BASE SPEECH DISTANCE
 ${DEVELOPER_SPEECH_DISTANCE_RULES[distanceKey]}
 
-${addressRules}`;
+${audienceRegisterRules ? `${audienceRegisterRules}
+
+` : ''}${addressRules}`;
 }
 
 const LOCALIZATION_RULES = {

@@ -2,9 +2,18 @@
 
 SillyTavern 1.18용 독립 자동번역 확장입니다.
 
-현재 버전: **v0.4.75**
+현재 버전: **v0.4.76**
 
 ## 업데이트 내역
+
+### v0.4.76
+
+- 기존 메시지가 설정창/Recent/드로어 등 UI 변화 뒤 갑자기 자동 번역되는 회귀 버그 추가 수정
+- 원인: 채팅을 열거나 페이지가 초기화되는 동안 기존 최신 메시지가 generic fallback에 `새 메시지`처럼 보일 수 있었음
+- 채팅/초기화 직후 1.5초 동안 fallback 관찰 기준선을 여러 번 재구축하고, 기준선 준비 전에는 generic/inSTead fallback 자동 번역을 금지
+- 기준선 준비 후에는 `실제 chat 길이 증가 + 새 assistant`, `기존 원문 signature 변경`, `stale revision 복구`일 때만 fallback 동작
+- 정상 MESSAGE_RECEIVED / CHARACTER_MESSAGE_RENDERED / GENERATION_ENDED 자동 번역은 warmup과 무관하게 그대로 동작
+- v0.4.75의 `chat[] 먼저 → DOM 나중` 자동번역 누락 방지 로직 유지
 
 ### v0.4.75
 

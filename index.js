@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.75';
+const EXTENSION_VERSION = '0.4.76';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -516,9 +516,12 @@ const translationRecoveryCache = new Map();
 // Track recent assistant source versions independently of controller-specific
 // metadata/event order.
 const assistantSourceObservation = new Map();
-// Existing assistant signatures are seeded when the chat observation baseline
-// is established. An unknown signature/id after that point means a genuinely
-// new assistant message; do not consume it until its message DOM is mounted.
+// Generic fallback must not classify messages as "new" while the current chat
+// is still opening/rendering. Otherwise opening Recent/settings/other drawers
+// can cause an existing untranslated latest message to be auto-translated.
+let assistantObservationReady = false;
+let assistantObservedChatLength = 0;
+let assistantObservationBaselineToken = 0;
 
 const pendingInputControllers = new Set();
 const transientLockedMessages = new Set();
@@ -10567,22 +10570,50 @@ function assistantMessageFreshTimestamp(message) {
     return candidates.length ? Math.max(...candidates) : null;
 }
 
-function resetAssistantSourceObservation() {
+function seedAssistantSourceObservation() {
     assistantSourceObservation.clear();
 
     const chat = liveContext().chat;
-    if (!Array.isArray(chat)) return;
+    if (!Array.isArray(chat)) {
+        assistantObservedChatLength = 0;
+        return;
+    }
 
     chat.forEach((message, id) => {
         if (!message || message.is_user || message.is_system) return;
         const signature = messageVersionSignature(message);
         if (signature) assistantSourceObservation.set(id, signature);
     });
+    assistantObservedChatLength = chat.length;
+}
+
+function resetAssistantSourceObservation({ warmup = true } = {}) {
+    assistantObservationBaselineToken += 1;
+    const token = assistantObservationBaselineToken;
+    assistantObservationReady = !warmup;
+
+    seedAssistantSourceObservation();
+    if (!warmup) return;
+
+    // Chat data and its DOM can arrive in different orders on mobile and with
+    // third-party controllers. Re-seed the baseline while the chat settles.
+    // Normal MESSAGE_RECEIVED / CHARACTER_MESSAGE_RENDERED / GENERATION_ENDED
+    // auto-translation is NOT blocked by this; only the generic fallback waits.
+    [120, 420, 900, 1500].forEach((delay, index, delays) => {
+        setTimeout(() => {
+            if (token !== assistantObservationBaselineToken) return;
+            seedAssistantSourceObservation();
+            if (index === delays.length - 1) assistantObservationReady = true;
+        }, delay);
+    });
 }
 
 function scheduleFreshMountedAssistantTranslations(delay = 180) {
+    if (!assistantObservationReady) return;
+
     const context = liveContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
+    const observedLengthBefore = assistantObservedChatLength;
     const start = Math.max(0, chat.length - 8);
 
     for (let id = start; id < chat.length; id += 1) {
@@ -10595,15 +10626,12 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
         const previousSignature = assistantSourceObservation.get(id) || '';
 
         if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) {
-            // A non-translatable final source can safely become the baseline.
             if (signature) assistantSourceObservation.set(id, signature);
             continue;
         }
 
-        // IMPORTANT: on some mobile/inSTead/controller paths chat[] is updated
-        // before the .mes DOM is mounted. Do not mark the signature as observed
-        // yet, or the later mounted pass will think this new message is old and
-        // skip automatic translation.
+        // chat[] may update before the .mes node appears. Do not consume the
+        // source/signature before mount, or the next pass can miss translation.
         if (!document.querySelector(`.mes[mesid="${id}"]`)) continue;
 
         const record = currentRecord(message, id);
@@ -10618,19 +10646,18 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
             && signature
             && previousSignature !== signature
         );
-        const newlyObservedAssistant = Boolean(
+        const genuinelyAppendedAssistant = Boolean(
             !previousSignature
             && signature
+            && id >= observedLengthBefore
             && id >= chat.length - 2
         );
 
-        if (!sourceChangedWhileMounted && !newlyObservedAssistant) {
+        if (!sourceChangedWhileMounted && !genuinelyAppendedAssistant) {
             if (signature) assistantSourceObservation.set(id, signature);
             continue;
         }
 
-        // Mark as observed only once the mounted message has actually been
-        // accepted for recovery/translation.
         if (signature) assistantSourceObservation.set(id, signature);
 
         scheduleAutomaticTranslation(id, Math.max(100, Number(delay) || 180), {
@@ -10639,6 +10666,8 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
             genericControllerFallback: true,
         });
     }
+
+    assistantObservedChatLength = Math.max(assistantObservedChatLength, chat.length);
 
     for (const id of [...assistantSourceObservation.keys()]) {
         if (!Number.isInteger(id) || id < 0 || id >= chat.length) {
@@ -10681,8 +10710,11 @@ function schedulePotentialAssistantRevision(payload = null, delay = 180, options
 }
 
 function scheduleRecentInsteadRevisionTranslations(delay = 180) {
+    if (!assistantObservationReady) return;
+
     const context = liveContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
+    const observedLengthBefore = assistantObservedChatLength;
     const now = Date.now();
     pruneInsteadRevisionSeen(now);
 
@@ -10696,10 +10728,6 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
 
         const signature = messageVersionSignature(message);
         const previousSignature = assistantSourceObservation.get(id) || '';
-
-        // Same mobile/controller ordering issue as the generic scanner:
-        // chat data may exist before its message DOM. Leave it unobserved until
-        // mounted so the next pass still sees it as new/changed.
         const mounted = Boolean(document.querySelector(`.mes[mesid="${id}"]`));
         if (!mounted) return;
 
@@ -10708,14 +10736,15 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
             && signature
             && previousSignature !== signature
         );
-        const newlyObservedAssistant = Boolean(
+        const genuinelyAppendedAssistant = Boolean(
             !previousSignature
             && signature
+            && id >= observedLengthBefore
             && id >= chat.length - 2
         );
         const staleOwnedFallback = hasStaleOwnedAssistantTranslation(message);
 
-        if (!sourceChangedWhileMounted && !newlyObservedAssistant && !staleOwnedFallback) {
+        if (!sourceChangedWhileMounted && !genuinelyAppendedAssistant && !staleOwnedFallback) {
             if (signature) assistantSourceObservation.set(id, signature);
             return;
         }
@@ -10738,6 +10767,8 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
         console.info(`[베르바] inSTead 새 revision 감지 #${id} swipe ${meta.swipeId ?? '?'} — 자동 번역 예약`);
         scheduleAutomaticTranslation(id, delay, { insteadRevision: true });
     });
+
+    assistantObservedChatLength = Math.max(assistantObservedChatLength, chat.length);
 }
 
 function handleCompletedAssistantMessage(payload, delay = 80) {

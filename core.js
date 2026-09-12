@@ -807,6 +807,22 @@ const DEVELOPER_SPEECH_DISTANCE_RULES = {
 - Do not add profanity, pet names, affection, teasing, or intimacy that is absent from the source.`,
 };
 
+const DEVELOPER_USER_ADDRESS_STRENGTH_RULES = {
+    natural: `ADDRESS STRENGTH — NATURAL
+- Treat the configured address as a preferred relationship cue, not a hard lexical replacement.
+- Immediate scene tone and natural Korean may choose omission or a neutral/generic second-person wording instead when the configured form would sound conspicuously unnatural in that moment.
+- Never invent a different age-, kinship-, status-, or relationship-specific title merely to fit the mood.`,
+    prefer: `ADDRESS STRENGTH — PREFER CONFIGURED
+- When the TARGET CHARACTER clearly addresses the CURRENT USER/PERSONA and Korean naturally calls for an explicit address term, prefer the configured address.
+- Natural Korean omission is still allowed when no explicit address is needed.
+- Do not switch to another generic second-person label merely because the scene is angry, cold, awkward, or affectionate; preserve the configured relationship address unless an explicit source term overrides it.`,
+    strict: `ADDRESS STRENGTH — STRONG LOCK
+- When the TARGET CHARACTER clearly addresses the CURRENT USER/PERSONA with a generic/underspecified second-person form AND Korean explicitly realizes an address term, use the configured address only.
+- Do not substitute 당신, 그쪽, 너, 이름, another kinship/status/relationship title, or another generic second-person label merely because of scene mood.
+- Natural Korean omission is still allowed when an explicit address term is unnecessary.
+- Explicit source pet names, vocatives, names, titles, kinship terms, and relationship terms still override this lock because they are source meaning, not generic "you".`,
+};
+
 function developerRelationshipExperimentBlock(settings = {}, scope = 'narration') {
     if (
         settings?.developerMode !== true
@@ -820,12 +836,18 @@ function developerRelationshipExperimentBlock(settings = {}, scope = 'narration'
         ? settings.developerSpeechDistance
         : 'source';
     const address = String(settings?.developerTargetToUserAddress || '').trim().slice(0, 40);
+    const addressStrengthKey = Object.hasOwn(DEVELOPER_USER_ADDRESS_STRENGTH_RULES, settings?.developerTargetToUserAddressStrength)
+        ? settings.developerTargetToUserAddressStrength
+        : 'natural';
 
     const addressRules = address
         ? `USER ADDRESS LOCK
 - Configured TARGET CHARACTER → USER address form: ${JSON.stringify(address)}.
+
+${DEVELOPER_USER_ADDRESS_STRENGTH_RULES[addressStrengthKey]}
+
 - This lock applies ONLY when the TARGET CHARACTER is clearly addressing or referring to the CURRENT USER/PERSONA with a generic/underspecified second-person form.
-- Do NOT mechanically replace every English "you" with the configured address. If natural Korean would omit the subject/addressee, omit it. Use the configured address only where Korean would naturally include a direct vocative or explicit second-person address.
+- Do NOT mechanically replace every English "you" with the configured address. First determine whether the source "you" clearly refers to CURRENT USER/PERSONA and whether natural Korean needs an explicit address term; then follow the selected ADDRESS STRENGTH above.
 - If the addressee of "you" is ambiguous, plural, quoted speech, another character, or otherwise not clearly the CURRENT USER/PERSONA, do NOT use the configured address.
 - EXPLICIT SOURCE PET NAMES / TERMS OF ENDEARMENT / VOCATIVES take priority over this generic USER address lock. Preserve and naturally translate affectionate or relationship-marked forms of address from the source instead of replacing them with the configured generic address.
 - Likewise, an explicitly stated source title, role, relationship term, kinship term, or name takes priority as semantic content. Preserve that source meaning instead of forcing the configured address.

@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.57';
+const EXTENSION_VERSION = '0.4.58';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -53,6 +53,12 @@ const DEVELOPER_SPEECH_DISTANCE_OPTIONS = [
     { value: 'polite', label: '공손한 편' },
     { value: 'casual', label: '편안한 편' },
     { value: 'veryCasual', label: '매우 편안함' },
+];
+
+const DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS = [
+    { value: 'natural', label: '자연스럽게' },
+    { value: 'prefer', label: '우선 적용' },
+    { value: 'strict', label: '강하게 고정' },
 ];
 
 const LOCALIZATION_LEVEL_OPTIONS = [
@@ -140,6 +146,7 @@ const DEFAULT_SETTINGS = {
     developerRelationshipExperimentEnabled: false,
     developerSpeechDistance: 'source',
     developerTargetToUserAddress: '',
+    developerTargetToUserAddressStrength: 'natural',
     expressionEmphasisTaste: 'default',
     expressionDisfluencyTaste: 'default',
     expressionIdiomMetaphorTaste: 'default',
@@ -231,6 +238,9 @@ settings.developerSpeechDistance = DEVELOPER_SPEECH_DISTANCE_OPTIONS.some(option
     ? settings.developerSpeechDistance
     : 'source';
 settings.developerTargetToUserAddress = String(settings.developerTargetToUserAddress || '').trim().slice(0, 40);
+settings.developerTargetToUserAddressStrength = DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.some(option => option.value === settings.developerTargetToUserAddressStrength)
+    ? settings.developerTargetToUserAddressStrength
+    : 'natural';
 settings.expressionEmphasisTaste = ['default', 'source', 'natural', 'active'].includes(settings.expressionEmphasisTaste)
     ? settings.expressionEmphasisTaste
     : 'default';
@@ -8061,7 +8071,13 @@ function developerSettingsMarkup() {
 
                                 <label for="verba-developer-target-user-address">캐릭터 → USER 호칭 고정</label>
                                 <input id="verba-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
-                                <div class="verba-help">비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다. 입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고하며, 자연스러운 한국어에서는 생략할 수 있습니다. 원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</div>
+
+                                <label for="verba-developer-target-user-address-strength">호칭 고정 강도</label>
+                                <select id="verba-developer-target-user-address-strength" class="text_pole">
+                                    ${DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressStrength === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">자연스럽게: 장면 분위기와 한국어 자연스러움을 가장 우선합니다. 우선 적용: USER를 명확히 부르는 자리에서는 설정 호칭을 우선합니다. 강하게 고정: 일반 2인칭을 명시적으로 호칭해야 할 때 설정 호칭 외의 당신/그쪽/너/다른 관계 호칭으로 바꾸지 않습니다. 세 단계 모두 자연스러운 생략과 원문의 애칭·명시 호칭은 허용합니다.</div>
+                                <div class="verba-help">비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다. 입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고합니다. 원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</div>
                                 <div class="verba-help">현재 테스트 단계라 E→K 아웃풋의 TARGET CHARACTER 대사에만 적용합니다. USER/NPC 대사와 K→E 인풋에는 아직 적용하지 않습니다.</div>
                             </div>
                         </div>
@@ -8811,6 +8827,14 @@ function injectSettingsPanel() {
         if (target.id === 'verba-developer-target-user-address' && target instanceof HTMLInputElement) {
             settings.developerTargetToUserAddress = String(target.value || '').trim().slice(0, 40);
             target.value = settings.developerTargetToUserAddress;
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-target-user-address-strength' && target instanceof HTMLSelectElement) {
+            settings.developerTargetToUserAddressStrength = DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'natural';
             saveSettings();
             return;
         }

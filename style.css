@@ -542,6 +542,7 @@
 
 .verba-retranslate-glyph {
     font-size: 22px;
+    transform: translateY(-1.5px);
 }
 
 /* Verba's long-running translation indicator must never inherit a generic

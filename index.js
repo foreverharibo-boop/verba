@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.71';
+const EXTENSION_VERSION = '0.4.72';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -506,6 +506,18 @@ const serverRetryStates = new Map();
 const speakerAttributionCache = new Map();
 const roleTermPlanCache = new Map();
 const insteadRevisionTranslationSeen = new Map();
+
+// inSTead/other controllers can replace a message object and discard
+// extension-owned extra fields while keeping the same source text. Keep a
+// bounded recovery copy so returning to that revision can restore Verba.
+const TRANSLATION_RECOVERY_CACHE_LIMIT = 96;
+const translationRecoveryCache = new Map();
+
+// Track recent assistant source versions independently of controller-specific
+// metadata/event order.
+const assistantSourceObservation = new Map();
+let assistantObservationSuppressUntil = Date.now() + 1600;
+
 const pendingInputControllers = new Set();
 const transientLockedMessages = new Set();
 const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
@@ -4118,11 +4130,81 @@ function outputSpeakerIdentity(message) {
     };
 }
 
-function currentRecord(message) {
+function currentTranslationRecoveryScope() {
+    const context = liveContext();
+    return [
+        String(context.groupId ?? ''),
+        String(context.characterId ?? ''),
+        String(context.chatId ?? ''),
+        String(context.name2 || ''),
+    ].join('|');
+}
+
+function inferredMessageId(message, explicitId = null) {
+    const direct = Number(explicitId);
+    if (Number.isInteger(direct) && direct >= 0) return direct;
+    const chat = liveContext().chat;
+    if (!Array.isArray(chat) || !message) return -1;
+    return chat.indexOf(message);
+}
+
+function translationRecoveryKey(messageId, sourceHash) {
+    const id = Number(messageId);
+    if (!Number.isInteger(id) || id < 0 || !sourceHash) return '';
+    return `${currentTranslationRecoveryScope()}|${id}|${sourceHash}`;
+}
+
+function rememberTranslationRecovery(messageId, source, record) {
+    const sourceHash = String(record?.sourceHash || hashText(source || ''));
+    const key = translationRecoveryKey(messageId, sourceHash);
+    if (!key || !record || !String(record.translation || '').trim()) return;
+
+    if (translationRecoveryCache.has(key)) translationRecoveryCache.delete(key);
+    translationRecoveryCache.set(key, {
+        ...record,
+        sourceHash,
+        sourceMap: normalizedSourceMap(record.sourceMap),
+        lockedSegments: normalizedLockedSegments(record.lockedSegments),
+    });
+
+    while (translationRecoveryCache.size > TRANSLATION_RECOVERY_CACHE_LIMIT) {
+        const oldest = translationRecoveryCache.keys().next().value;
+        if (oldest === undefined) break;
+        translationRecoveryCache.delete(oldest);
+    }
+}
+
+function recoveredTranslationRecord(message, explicitId = null) {
+    if (!message) return null;
     const source = messageSource(message);
     if (!source.trim()) return null;
+    const id = inferredMessageId(message, explicitId);
+    const sourceHash = hashText(source);
+    const key = translationRecoveryKey(id, sourceHash);
+    if (!key) return null;
+
+    const recovered = translationRecoveryCache.get(key);
+    if (!recovered || !String(recovered.translation || '').trim()) return null;
+
+    translationRecoveryCache.delete(key);
+    translationRecoveryCache.set(key, recovered);
+
+    return {
+        ...recovered,
+        swipeId: currentSwipeId(message),
+        sourceHash,
+        sourceMap: normalizedSourceMap(recovered.sourceMap),
+        lockedSegments: normalizedLockedSegments(recovered.lockedSegments),
+    };
+}
+
+function currentRecord(message, explicitId = null) {
+    const source = messageSource(message);
+    if (!source.trim()) return null;
+    const messageId = inferredMessageId(message, explicitId);
     const swipeId = currentSwipeId(message);
     const sourceHash = hashText(source);
+
     const normalize = record => {
         if (
             !record
@@ -4131,25 +4213,18 @@ function currentRecord(message) {
             || !String(record.translation || '').trim()
         ) return null;
 
-        // Deleting a swipe shifts every following swipe index. The translation
-        // still belongs to this source, so repair its stored index instead of
-        // discarding the cache and translating it again.
-        return record.swipeId === swipeId ? record : { ...record, swipeId };
+        const normalized = record.swipeId === swipeId ? record : { ...record, swipeId };
+        rememberTranslationRecovery(messageId, source, normalized);
+        return normalized;
     };
 
     const activeRecord = normalize(message?.extra?.[STATE_KEY]);
     if (activeRecord) return activeRecord;
 
-    // Some SillyTavern swipe transitions replace message.extra a frame later.
-    // Read the authoritative current swipe slot directly so a saved translation
-    // is restored instead of being sent to the API again.
     const swipeExtra = currentSwipeExtra(message, false);
     const swipeRecord = normalize(swipeExtra?.[STATE_KEY]);
     if (swipeRecord) return swipeRecord;
 
-    // Older translation versions may have only SillyTavern's display_text and
-    // no Verba record. Treat the active display as a translation so selection
-    // actions remain available without mistaking a stale swipe display for it.
     const displayExtras = [...new Set([swipeExtra, message?.extra].filter(Boolean))];
     for (const displayExtra of displayExtras) {
         const displayText = typeof displayExtra?.display_text === 'string' ? displayExtra.display_text : '';
@@ -4159,33 +4234,15 @@ function currentRecord(message) {
             && displayText !== source
             && (!displayRecord || String(displayRecord.translation || '') === displayText)
         ) {
-            return {
-                swipeId,
-                sourceHash,
-                translation: displayText,
-            };
+            const record = { swipeId, sourceHash, translation: displayText };
+            rememberTranslationRecovery(messageId, source, record);
+            return record;
         }
     }
-    return null;
-}
 
-function currentSelectionRecord(message) {
-    const record = currentRecord(message);
-    if (record) return record;
-
-    // A model may already return Korean-English bilingual dialogue. Automatic
-    // translation can then skip the message as Korean-dominant, leaving no Verba
-    // cache record even though the mixed-language text still needs selection tools.
-    const source = messageSource(message);
-    if (!hasKorean(source) || !/[A-Za-z]/.test(source)) return null;
-    return {
-        swipeId: currentSwipeId(message),
-        sourceHash: hashText(source),
-        translation: source,
-        sourceMap: [],
-        lockedSegments: [],
-        rawBilingual: true,
-    };
+    // Third-party revision controllers can restore the source but lose
+    // message.extra/swipe_info.extra. Recover only an exact chat+id+source hash.
+    return recoveredTranslationRecord(message, messageId);
 }
 
 function currentSwipeExtra(message, create = true) {
@@ -4505,6 +4562,7 @@ function applyTranslation(messageId, message, source, translation, chatReference
     };
     message.extra[STATE_KEY] = record;
     message.extra.display_text = translation;
+    rememberTranslationRecovery(messageId, source, record);
     delete message.extra[SOURCE_VIEW_KEY];
     syncOwnedTranslationToCurrentSwipe(message, record);
     if (
@@ -10486,7 +10544,97 @@ function hasStaleOwnedAssistantTranslation(message) {
     ));
 }
 
-function schedulePotentialAssistantRevision(payload = null, delay = 180) {
+function timestampMillis(value) {
+    if (value === null || value === undefined || value === '') return null;
+    if (value instanceof Date) {
+        const time = value.getTime();
+        return Number.isFinite(time) ? time : null;
+    }
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return null;
+        return value < 10_000_000_000 ? value * 1000 : value;
+    }
+    const parsed = Date.parse(String(value));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function assistantMessageFreshTimestamp(message) {
+    const swipeId = currentSwipeId(message);
+    const swipeInfo = swipeId !== null && Array.isArray(message?.swipe_info)
+        ? message.swipe_info[swipeId]
+        : null;
+    const candidates = [
+        swipeInfo?.gen_finished,
+        message?.gen_finished,
+        swipeInfo?.send_date,
+        message?.send_date,
+    ]
+        .map(timestampMillis)
+        .filter(value => Number.isFinite(value));
+    return candidates.length ? Math.max(...candidates) : null;
+}
+
+function resetAssistantSourceObservation(suppressMs = 1600) {
+    assistantSourceObservation.clear();
+    assistantObservationSuppressUntil = Date.now() + Math.max(0, Number(suppressMs) || 0);
+
+    const chat = liveContext().chat;
+    if (!Array.isArray(chat)) return;
+    chat.forEach((message, id) => {
+        if (!message || message.is_user || message.is_system) return;
+        const signature = messageVersionSignature(message);
+        if (signature) assistantSourceObservation.set(id, signature);
+    });
+}
+
+function scheduleFreshMountedAssistantTranslations(delay = 180) {
+    const context = liveContext();
+    const chat = Array.isArray(context.chat) ? context.chat : [];
+    const now = Date.now();
+    const start = Math.max(0, chat.length - 8);
+
+    for (let id = start; id < chat.length; id += 1) {
+        const message = chat[id];
+        if (!message || message.is_user || message.is_system) continue;
+
+        const source = messageSource(message);
+        const signature = messageVersionSignature(message);
+        const previousSignature = assistantSourceObservation.get(id) || '';
+        if (signature) assistantSourceObservation.set(id, signature);
+
+        if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) continue;
+        if (!document.querySelector(`.mes[mesid="${id}"]`)) continue;
+
+        const record = currentRecord(message, id);
+        if (record) {
+            restoreCurrentDisplay(id, message, record);
+            continue;
+        }
+
+        const finishedAt = assistantMessageFreshTimestamp(message);
+        const freshByTimestamp = finishedAt !== null && Math.abs(now - finishedAt) <= 120_000;
+        const sourceChangedWhileMounted = Boolean(previousSignature && previousSignature !== signature);
+        const newlyObservedLatest = !previousSignature
+            && now >= assistantObservationSuppressUntil
+            && id >= chat.length - 2;
+
+        if (!freshByTimestamp && !sourceChangedWhileMounted && !newlyObservedLatest) continue;
+
+        scheduleAutomaticTranslation(id, Math.max(100, Number(delay) || 180), {
+            insteadRevision: true,
+            sourceRevisionFallback: true,
+            genericControllerFallback: true,
+        });
+    }
+
+    for (const id of [...assistantSourceObservation.keys()]) {
+        if (!Number.isInteger(id) || id < 0 || id >= chat.length) {
+            assistantSourceObservation.delete(id);
+        }
+    }
+}
+
+function schedulePotentialAssistantRevision(payload = null, delay = 180, options = {}) {
     let id = normalizedMessageId(payload);
     if (id < 0) id = latestAssistantMessage()?.id ?? -1;
     if (id < 0) return;
@@ -10494,21 +10642,24 @@ function schedulePotentialAssistantRevision(payload = null, delay = 180) {
     const message = liveContext().chat?.[id];
     if (!message || message.is_user || message.is_system) return;
 
-    // This fallback intentionally targets same-message revisions that already
-    // had a Verba translation. It therefore does not scan/translate arbitrary
-    // historical untranslated assistant messages.
-    if (!hasStaleOwnedAssistantTranslation(message)) return;
-
     const source = messageSource(message);
     if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) return;
-
-    // Only react to a mounted/current message. This avoids background work for
-    // stale historical revisions when a chat is first opened.
     if (!document.querySelector(`.mes[mesid="${id}"]`)) return;
+
+    const existingRecord = currentRecord(message, id);
+    if (existingRecord) {
+        restoreCurrentDisplay(id, message, existingRecord);
+        return;
+    }
+
+    const staleOwned = hasStaleOwnedAssistantTranslation(message);
+    const allowUntranslated = options.allowUntranslated === true;
+    if (!staleOwned && !allowUntranslated) return;
 
     scheduleAutomaticTranslation(id, Math.max(100, Number(delay) || 180), {
         insteadRevision: true,
         sourceRevisionFallback: true,
+        genericControllerFallback: allowUntranslated,
     });
 }
 
@@ -10534,7 +10685,11 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
 
         const source = messageSource(message);
         if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) return;
-        if (currentRecord(message)) return;
+        const existingRecord = currentRecord(message, id);
+        if (existingRecord) {
+            restoreCurrentDisplay(id, message, existingRecord);
+            return;
+        }
 
         const signature = insteadRevisionSignature(message);
         if (!signature) return;
@@ -10579,9 +10734,15 @@ function handleGenerationEnded() {
         scheduleAutomaticTranslation(latest.id, 120);
     }
 
-    if (latest) schedulePotentialAssistantRevision(latest.id, 140);
-    setTimeout(() => scheduleRecentInsteadRevisionTranslations(160), 260);
-    setTimeout(() => scheduleRecentInsteadRevisionTranslations(160), 620);
+    if (latest) schedulePotentialAssistantRevision(latest.id, 140, { allowUntranslated: true });
+    setTimeout(() => {
+        scheduleRecentInsteadRevisionTranslations(160);
+        scheduleFreshMountedAssistantTranslations(160);
+    }, 260);
+    setTimeout(() => {
+        scheduleRecentInsteadRevisionTranslations(160);
+        scheduleFreshMountedAssistantTranslations(160);
+    }, 620);
 }
 
 /**
@@ -10760,15 +10921,23 @@ function setupEvents() {
             const closeButton = requestOverlay?.querySelector('.verba-close');
             if (closeButton) closeButton.click();
             else requestOverlay?.remove();
+            resetAssistantSourceObservation(1800);
             setTimeout(() => {
                 injectInputAction();
                 refreshProfileSelect();
                 renderNameLockManager();
                 scheduleChatOpenTranslationRestore();
                 scheduleRecentInsteadRevisionTranslations(220);
+                scheduleFreshMountedAssistantTranslations(220);
             }, 120);
-            setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 420);
-            setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 900);
+            setTimeout(() => {
+                scheduleRecentInsteadRevisionTranslations(220);
+                scheduleFreshMountedAssistantTranslations(220);
+            }, 420);
+            setTimeout(() => {
+                scheduleRecentInsteadRevisionTranslations(220);
+                scheduleFreshMountedAssistantTranslations(220);
+            }, 900);
         });
     }
     if (types.MESSAGE_EDITED) {
@@ -10780,9 +10949,15 @@ function setupEvents() {
     if (types.MESSAGE_UPDATED) {
         source.on(types.MESSAGE_UPDATED, payload => {
             restoreTranslationAfterMessageUpdate(payload);
-            schedulePotentialAssistantRevision(payload, 160);
-            setTimeout(() => schedulePotentialAssistantRevision(payload, 160), 360);
-            setTimeout(() => scheduleRecentInsteadRevisionTranslations(160), 520);
+            schedulePotentialAssistantRevision(payload, 160, { allowUntranslated: true });
+            setTimeout(
+                () => schedulePotentialAssistantRevision(payload, 160, { allowUntranslated: true }),
+                360,
+            );
+            setTimeout(() => {
+                scheduleRecentInsteadRevisionTranslations(160);
+                scheduleFreshMountedAssistantTranslations(160);
+            }, 520);
         });
     }
 }
@@ -10797,6 +10972,7 @@ function setupObserver() {
             refreshTranslationClasses();
             schedulePotentialAssistantRevision(null, 180);
             scheduleRecentInsteadRevisionTranslations(180);
+            scheduleFreshMountedAssistantTranslations(180);
         }, 100);
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -10812,12 +10988,17 @@ function initialize() {
     injectInputAction();
     refreshTranslationClasses();
     scheduleChatOpenTranslationRestore();
+    resetAssistantSourceObservation(1600);
     setupAutoInput();
     setupMessageCopyHold();
     setupSelection();
     setupEvents();
     setupObserver();
-    setTimeout(() => scheduleRecentInsteadRevisionTranslations(220), 300);
+    setTimeout(() => {
+        scheduleRecentInsteadRevisionTranslations(220);
+        scheduleFreshMountedAssistantTranslations(220);
+    }, 300);
+    setTimeout(() => scheduleFreshMountedAssistantTranslations(220), 900);
     globalThis.__verbaTranslatorVersion = EXTENSION_VERSION;
     console.log(`[베르바] v${EXTENSION_VERSION} 준비 완료`);
 }

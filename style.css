@@ -1963,6 +1963,120 @@
 
 
 
+
+/* v0.4.61: relationship-lab mobile readability */
+#verba-developer-relationship-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 14px !important;
+    min-width: 0 !important;
+}
+
+.verba-relationship-section {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 7px !important;
+    min-width: 0 !important;
+    padding-top: 2px !important;
+}
+
+.verba-relationship-section + .verba-relationship-section {
+    padding-top: 13px !important;
+    border-top: 1px solid color-mix(in srgb, var(--verba-border) 24%, transparent) !important;
+}
+
+.verba-relationship-section > label:not(.verba-check-row),
+.verba-relationship-section-title {
+    margin: 0 !important;
+    line-height: 1.4 !important;
+    font-weight: 700 !important;
+    overflow-wrap: anywhere !important;
+}
+
+.verba-relationship-section select,
+.verba-relationship-section input.text_pole {
+    width: 100% !important;
+    margin: 0 !important;
+}
+
+.verba-relationship-help {
+    margin: 1px 0 0 !important;
+    line-height: 1.62 !important;
+    white-space: normal !important;
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+}
+
+.verba-relationship-help > span {
+    display: block !important;
+    margin: 0 !important;
+}
+
+.verba-relationship-help > span + span {
+    margin-top: 4px !important;
+}
+
+.verba-relationship-help b {
+    font-weight: 700 !important;
+    opacity: 1 !important;
+}
+
+.verba-register-monitor-status-row {
+    display: grid !important;
+    grid-template-columns: minmax(72px, auto) minmax(0, 1fr) !important;
+    align-items: start !important;
+    gap: 8px 12px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 40px !important;
+    margin: 1px 0 0 !important;
+    padding: 9px 10px !important;
+    box-sizing: border-box !important;
+    line-height: 1.45 !important;
+}
+
+.verba-register-monitor-status-row > span,
+.verba-register-monitor-status-row > b {
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 1.45 !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+}
+
+.verba-register-monitor-status-row > b {
+    text-align: right !important;
+}
+
+.verba-relationship-notes {
+    padding-bottom: 2px !important;
+}
+
+@media (max-width: 600px) {
+    #verba-developer-relationship-controls {
+        gap: 12px !important;
+    }
+
+    .verba-relationship-section + .verba-relationship-section {
+        padding-top: 11px !important;
+    }
+
+    .verba-register-monitor-status-row {
+        grid-template-columns: 1fr !important;
+        gap: 3px !important;
+    }
+
+    .verba-register-monitor-status-row > b {
+        text-align: left !important;
+    }
+
+    .verba-relationship-help {
+        line-height: 1.58 !important;
+    }
+}
+
+
 /* v0.3.94: explicit developer mode section */
 .verba-developer-settings {
     margin-top: 14px !important;

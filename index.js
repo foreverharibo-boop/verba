@@ -35,7 +35,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.60';
+const EXTENSION_VERSION = '0.4.62';
+const DEVELOPER_ACCESS_CODE = '091813';
+const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -149,6 +151,7 @@ const DEFAULT_SETTINGS = {
     autoProfileFallback: true,
     debugMode: false,
     developerMode: false,
+    developerAccessFingerprint: '',
     qualityAuditEnabled: false,
     qualityAuditMeaning: true,
     qualityAuditReferent: true,
@@ -243,6 +246,18 @@ let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
 settings.developerMode = settings.developerMode === true;
+settings.developerAccessFingerprint = String(settings.developerAccessFingerprint || '');
+if (
+    settings.developerMode
+    && settings.developerAccessFingerprint !== DEVELOPER_ACCESS_FINGERPRINT
+) {
+    // A missing/old fingerprint means this developer session was unlocked by
+    // an older access code. Lock it in memory immediately. No settings save is
+    // triggered here; entering the current code is required to unlock again.
+    settings.developerMode = false;
+    settings.qualityAuditEnabled = false;
+    settings.developerRelationshipExperimentEnabled = false;
+}
 settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
 settings.qualityAuditMeaning = settings.qualityAuditMeaning !== false;
 settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
@@ -8194,50 +8209,95 @@ function developerSettingsMarkup() {
                                 <span>관계 번역 실험 사용</span>
                             </label>
                             <div id="verba-developer-relationship-controls" class="${settings.developerRelationshipExperimentEnabled ? '' : 'verba-control-disabled'}">
-                                <label for="verba-developer-speech-distance">캐릭터 → USER 말투 거리감</label>
-                                <select id="verba-developer-speech-distance" class="text_pole">
-                                    ${DEVELOPER_SPEECH_DISTANCE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerSpeechDistance === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-                                <div class="verba-help">현재 캐릭터의 직접 대사에만 적용합니다. 원문 우선 / 격식적 / 공손한 편 / 편안한 편 / 매우 편안함 중 선택해 한국어의 전반적인 말투 거리감을 조절합니다.</div>
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-speech-distance">캐릭터 → USER 말투 거리감</label>
+                                    <select id="verba-developer-speech-distance" class="text_pole">
+                                        ${DEVELOPER_SPEECH_DISTANCE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerSpeechDistance === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+                                    <div class="verba-help verba-relationship-help">
+                                        <span>현재 캐릭터의 직접 대사에만 적용합니다.</span>
+                                        <span>한국어의 전반적인 말투 거리감을 원문 우선 / 격식적 / 공손한 편 / 편안한 편 / 매우 편안함 중에서 조절합니다.</span>
+                                    </div>
+                                </section>
 
-                                <div class="verba-divider"></div>
-                                <b>청자별 말투 분리</b>
-                                <label for="verba-developer-target-user-register">USER에게</label>
-                                <select id="verba-developer-target-user-register" class="text_pole">
-                                    ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-                                <label for="verba-developer-target-other-register">타인에게</label>
-                                <select id="verba-developer-target-other-register" class="text_pole">
-                                    ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToOtherRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-                                <div class="verba-help">미설정이면 기존 말투 거리감/프롬프트를 따릅니다. 반말·존댓말을 고르면 캐릭터가 그 청자에게 말하는 것이 확실할 때만 해당 한국어 상대높임을 적용합니다. 청자가 애매하면 추측하지 않습니다.</div>
+                                <section class="verba-relationship-section">
+                                    <div class="verba-relationship-section-title">청자별 말투 분리</div>
 
-                                <label class="verba-check-row">
-                                    <input type="checkbox" id="verba-developer-register-shift-monitor" ${settings.developerRegisterShiftMonitor ? 'checked' : ''}>
-                                    <span>존댓말·반말 급변 감시</span>
-                                </label>
-                                <div class="verba-quality-audit-status-row">
-                                    <span>최근 감시</span>
-                                    <b id="verba-register-shift-monitor-status">${escapeHtml(lastRegisterShiftMonitorSummary)}</b>
-                                </div>
-                                <div class="verba-help">추가 API 없이 최종 번역의 TARGET CHARACTER 대사에서 존댓말·반말이 갑자기 섞이거나 연속 대사 사이에서 강하게 뒤집히는 패턴만 보수적으로 감지합니다. 감지해도 자동 수정하지 않고 경고만 표시합니다.</div>
+                                    <label for="verba-developer-target-user-register">USER에게</label>
+                                    <select id="verba-developer-target-user-register" class="text_pole">
+                                        ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
 
-                                <label for="verba-developer-target-user-address">캐릭터 → USER 호칭 고정</label>
-                                <input id="verba-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
+                                    <label for="verba-developer-target-other-register">타인에게</label>
+                                    <select id="verba-developer-target-other-register" class="text_pole">
+                                        ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToOtherRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
 
-                                <label for="verba-developer-target-user-address-strength">호칭 고정 강도</label>
-                                <select id="verba-developer-target-user-address-strength" class="text_pole">
-                                    ${DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressStrength === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
+                                    <div class="verba-help verba-relationship-help">
+                                        <span>미설정이면 기존 말투 거리감과 프롬프트를 따릅니다.</span>
+                                        <span>반말·존댓말은 캐릭터가 그 청자에게 말하는 것이 확실할 때만 적용합니다.</span>
+                                        <span>청자가 애매하면 추측하지 않습니다.</span>
+                                    </div>
+                                </section>
 
-                                <label for="verba-developer-target-user-address-frequency">호칭 사용 빈도</label>
-                                <select id="verba-developer-target-user-address-frequency" class="text_pole">
-                                    ${DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-                                <div class="verba-help">최소: 정말 필요한 호명 자리 위주로 사용합니다. 자연스럽게: 한국어에서 자연스러운 빈도로 사용합니다. 자주: 어색하지 않은 직접 호명 자리에서 설정 호칭을 더 적극적으로 사용합니다. 어떤 단계도 모든 you를 호칭으로 바꾸지는 않습니다.</div>
-                                <div class="verba-help">자연스럽게: 장면 분위기와 한국어 자연스러움을 가장 우선합니다. 우선 적용: USER를 명확히 부르는 자리에서는 설정 호칭을 우선합니다. 강하게 고정: 일반 2인칭을 명시적으로 호칭해야 할 때 설정 호칭 외의 당신/그쪽/너/다른 관계 호칭으로 바꾸지 않습니다. 세 단계 모두 자연스러운 생략과 원문의 애칭·명시 호칭은 허용합니다.</div>
-                                <div class="verba-help">비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다. 입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고합니다. 원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</div>
-                                <div class="verba-help">현재 테스트 단계라 E→K 아웃풋의 TARGET CHARACTER 대사에만 적용합니다. USER/NPC 대사와 K→E 인풋에는 아직 적용하지 않습니다.</div>
+                                <section class="verba-relationship-section">
+                                    <label class="verba-check-row">
+                                        <input type="checkbox" id="verba-developer-register-shift-monitor" ${settings.developerRegisterShiftMonitor ? 'checked' : ''}>
+                                        <span>존댓말·반말 급변 감시</span>
+                                    </label>
+
+                                    <div class="verba-quality-audit-status-row verba-register-monitor-status-row">
+                                        <span>최근 감시</span>
+                                        <b id="verba-register-shift-monitor-status">${escapeHtml(lastRegisterShiftMonitorSummary)}</b>
+                                    </div>
+
+                                    <div class="verba-help verba-relationship-help">
+                                        <span>추가 API 없이 최종 TARGET CHARACTER 대사만 로컬에서 검사합니다.</span>
+                                        <span>존댓말·반말이 한 대사 안에서 강하게 섞이거나, 연속 대사 사이에서 갑자기 뒤집히는 패턴만 보수적으로 감지합니다.</span>
+                                        <span>감지해도 자동 수정하지 않고 경고만 표시합니다.</span>
+                                    </div>
+                                </section>
+
+                                <section class="verba-relationship-section">
+                                    <div class="verba-relationship-section-title">캐릭터 → USER 호칭</div>
+
+                                    <label for="verba-developer-target-user-address">호칭 고정</label>
+                                    <input id="verba-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
+
+                                    <label for="verba-developer-target-user-address-strength">호칭 고정 강도</label>
+                                    <select id="verba-developer-target-user-address-strength" class="text_pole">
+                                        ${DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressStrength === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+
+                                    <div class="verba-help verba-relationship-help">
+                                        <span><b>자연스럽게</b> · 장면 분위기와 한국어 자연스러움을 가장 우선합니다.</span>
+                                        <span><b>우선 적용</b> · USER를 명확히 부르는 자리에서는 설정 호칭을 우선합니다.</span>
+                                        <span><b>강하게 고정</b> · 명시적 호칭이 필요한 자리에서 설정 호칭 외의 당신/그쪽/너/다른 관계 호칭으로 바꾸지 않습니다.</span>
+                                        <span>세 단계 모두 자연스러운 생략과 원문의 애칭·명시 호칭은 허용합니다.</span>
+                                    </div>
+
+                                    <label for="verba-developer-target-user-address-frequency">호칭 사용 빈도</label>
+                                    <select id="verba-developer-target-user-address-frequency" class="text_pole">
+                                        ${DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+
+                                    <div class="verba-help verba-relationship-help">
+                                        <span><b>최소</b> · 정말 필요한 직접 호명 자리 위주로 사용합니다.</span>
+                                        <span><b>자연스럽게</b> · 한국어에서 자연스러운 빈도로 사용합니다.</span>
+                                        <span><b>자주</b> · 어색하지 않은 직접 호명 자리에서 설정 호칭을 더 적극적으로 사용합니다.</span>
+                                        <span>어떤 단계도 모든 you를 호칭으로 바꾸지는 않습니다.</span>
+                                    </div>
+                                </section>
+
+                                <section class="verba-relationship-section verba-relationship-notes">
+                                    <div class="verba-help verba-relationship-help">
+                                        <span>호칭을 비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다.</span>
+                                        <span>입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고합니다.</span>
+                                        <span>원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</span>
+                                        <span>현재 테스트 단계라 E→K 아웃풋의 TARGET CHARACTER 대사에만 적용합니다.</span>
+                                        <span>USER/NPC 대사와 K→E 인풋에는 아직 적용하지 않습니다.</span>
+                                    </div>
+                                </section>
                             </div>
                         </div>
                     </details>
@@ -8249,7 +8309,7 @@ function developerSettingsMarkup() {
                         <input id="verba-developer-code" class="text_pole" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="번호 입력">
                         <button type="button" id="verba-developer-mode-on" class="menu_button">활성화</button>
                     </div>
-                    <div class="verba-help">개발자 번호를 입력한 뒤 활성화를 눌러 주세요.</div>
+                    <div class="verba-help">개발자 번호를 입력한 뒤 활성화를 눌러 주세요. 배포본의 개발자 번호가 바뀌면 이전 활성화 상태는 자동으로 잠깁니다.</div>
                 `}
             </div>
         </details>`;
@@ -8868,7 +8928,7 @@ function injectSettingsPanel() {
         const input = panel.querySelector('#verba-developer-code');
         const code = String(input?.value || '').trim();
 
-        if (code !== '130918') {
+        if (code !== DEVELOPER_ACCESS_CODE) {
             if (input) {
                 input.value = '';
                 input.focus();
@@ -8878,6 +8938,7 @@ function injectSettingsPanel() {
         }
 
         settings.developerMode = true;
+        settings.developerAccessFingerprint = DEVELOPER_ACCESS_FINGERPRINT;
         saveSettings();
         lastQualityAuditSummary = '활성화됨 · 품질 검수는 기본 OFF';
         refreshSettingsPanelForDeveloperMode();

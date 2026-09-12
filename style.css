@@ -499,7 +499,7 @@
     box-shadow: 0 0 0 1px var(--verba-profile-slot-color);
 }
 
-.verba-input-icon.verba-busy {
+.verba-input-icon.verba-busy .verba-retranslate-glyph {
     animation: verba-spin 1.1s linear infinite;
 }
 
@@ -509,7 +509,8 @@
 }
 
 @keyframes verba-spin {
-    to { transform: rotate(360deg); }
+    from { transform: translateY(-1.5px) rotate(0deg); }
+    to { transform: translateY(-1.5px) rotate(360deg); }
 }
 
 

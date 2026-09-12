@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.70';
+const EXTENSION_VERSION = '0.4.71';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -2444,22 +2444,46 @@ async function sendProfileRequest(prompt, options = {}) {
     outerSignal?.addEventListener?.('abort', forwardAbort, { once: true });
     const timeoutSeconds = Math.min(300, Math.max(20, Number(settings.timeoutSeconds) || 120));
     let timedOut = false;
-    const timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-    }, timeoutSeconds * 1000);
+    let timer = null;
+    let removeHardStopAbort = null;
+
+    const hardStop = new Promise((_, reject) => {
+        const onAbort = () => {
+            if (timedOut) {
+                const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
+                timeoutError.code = 'VERBA_TIMEOUT';
+                reject(timeoutError);
+                return;
+            }
+            reject(abortError());
+        };
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        removeHardStopAbort = () => controller.signal.removeEventListener('abort', onAbort);
+        timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, timeoutSeconds * 1000);
+    });
 
     try {
         const executeRequest = async () => {
             if (controller.signal.aborted) throw abortError();
             const service = liveContext().ConnectionManagerRequestService;
             if (!service?.sendRequest) throw new Error('실리태번 연결 관리자 요청 기능을 찾을 수 없습니다.');
-            const response = await service.sendRequest(
+
+            // Some ConnectionManager/provider implementations do not actually
+            // settle their Promise when AbortSignal is aborted. In that case a
+            // plain `await sendRequest()` can leave Verba stuck on "번역 중"
+            // forever. Race against Verba's own hard-stop Promise so each
+            // attempt always returns or fails within the configured timeout.
+            const request = Promise.resolve().then(() => service.sendRequest(
                 profileId,
                 [{ role: 'user', content: prompt }],
                 VERBA_MAX_TOKENS,
                 { signal: controller.signal },
-            );
+            ));
+            const response = await Promise.race([request, hardStop]);
+
             if (!extractResponseText(response).trim()) throw new Error('AI가 빈 응답을 반환했습니다.');
             attemptSucceeded = true;
             return response;
@@ -2485,7 +2509,8 @@ async function sendProfileRequest(prompt, options = {}) {
         attemptError = error;
         throw error;
     } finally {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
+        removeHardStopAbort?.();
         outerSignal?.removeEventListener?.('abort', forwardAbort);
         recordProfileAttempt(profileSlot, {
             success: attemptSucceeded,

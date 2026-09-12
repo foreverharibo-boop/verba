@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.63';
+const EXTENSION_VERSION = '0.4.64';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -1196,21 +1196,6 @@ function promptPresetById(id) {
     return normalizedPromptPresets().find(preset => preset.id === key) || null;
 }
 
-function promptPresetDuplicateName(baseName, rows = normalizedPromptPresets()) {
-    const base = normalizedPromptPresetName(baseName) || '프롬프트 프리셋';
-    const used = new Set((rows || []).map(row => String(row?.name || '').toLocaleLowerCase()));
-    const first = normalizedPromptPresetName(`${base} 복사본`);
-    if (first && !used.has(first.toLocaleLowerCase())) return first;
-
-    for (let index = 2; index <= 999; index += 1) {
-        const suffix = ` 복사본 ${index}`;
-        const trimmedBase = base.slice(0, Math.max(1, 60 - suffix.length)).trim();
-        const candidate = normalizedPromptPresetName(`${trimmedBase}${suffix}`);
-        if (candidate && !used.has(candidate.toLocaleLowerCase())) return candidate;
-    }
-    return normalizedPromptPresetName(`${base.slice(0, 42)} ${Date.now()}`);
-}
-
 function promptPresetDisplayRows() {
     return normalizedPromptPresets()
         .map((preset, index) => ({ preset, index }))
@@ -1246,7 +1231,6 @@ function renderPromptPresetManager(selectedId = '') {
     const hasSelection = Boolean(selectedPreset);
     [
         '#verba-prompt-preset-rename',
-        '#verba-prompt-preset-duplicate',
         '#verba-prompt-preset-favorite',
         '#verba-prompt-preset-delete',
     ].forEach(selector => {
@@ -8503,7 +8487,7 @@ function injectSettingsPanel() {
                 <details id="verba-prompt-presets" class="verba-tool-details verba-prompt-presets">
                     <summary>프롬프트 프리셋 <small id="verba-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
                     <div class="verba-tool-details-content">
-                        <div class="verba-help">아래 4개 프롬프트의 내용과 각 슬롯 ON/OFF 상태를 한 세트로 저장합니다. 프리셋을 선택하면 즉시 현재 프롬프트로 적용됩니다. 이름 고정·금지어·현지화·말맛·기타 설정은 저장하거나 바꾸지 않습니다.</div>
+                        <div class="verba-help">아래 4개 프롬프트의 내용과 각 슬롯 ON/OFF 상태를 한 세트로 저장합니다. 프리셋을 선택하면 즉시 적용됩니다. 선택된 프리셋이 있는 상태에서 ‘저장’을 누르면 현재 값으로 덮어쓰고, 선택된 프리셋이 없으면 새 프리셋으로 저장합니다. 이름 고정·금지어·현지화·말맛·기타 설정은 아직 저장하거나 바꾸지 않습니다.</div>
 
                         <select id="verba-prompt-preset-select" class="text_pole">
                             ${promptPresetSelectMarkup()}
@@ -8513,8 +8497,7 @@ function injectSettingsPanel() {
                         <input id="verba-prompt-preset-name" class="text_pole" type="text" maxlength="60" autocomplete="off" placeholder="예: 한국캐 기본 말투">
 
                         <div class="verba-prompt-preset-actions">
-                            <button type="button" id="verba-prompt-preset-save" class="menu_button">새로 저장</button>
-                            <button type="button" id="verba-prompt-preset-duplicate" class="menu_button" disabled>복제</button>
+                            <button type="button" id="verba-prompt-preset-save" class="menu_button">저장</button>
                             <button type="button" id="verba-prompt-preset-favorite" class="menu_button" disabled>☆ 즐겨찾기</button>
                             <button type="button" id="verba-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
                             <button type="button" id="verba-prompt-preset-delete" class="menu_button" disabled>삭제</button>
@@ -9469,9 +9452,44 @@ function injectSettingsPanel() {
             promptPresetName?.focus();
             return;
         }
+
         const presets = normalizedPromptPresets();
+        const selectedId = String(promptPresetSelect?.value || '');
+        const selectedPreset = selectedId
+            ? presets.find(preset => preset.id === selectedId) || null
+            : null;
+
+        if (selectedPreset) {
+            const duplicateName = presets.some(preset =>
+                preset.id !== selectedPreset.id
+                && preset.name.toLocaleLowerCase() === name.toLocaleLowerCase()
+            );
+            if (duplicateName) {
+                notify('같은 이름의 다른 프롬프트 프리셋이 이미 있어요.', 'warning');
+                return;
+            }
+
+            const snapshot = currentPromptPresetSnapshot();
+            const updated = {
+                ...selectedPreset,
+                ...snapshot,
+                name,
+                favorite: selectedPreset.favorite === true,
+                updatedAt: new Date().toISOString(),
+            };
+            settings.promptPresets = presets.map(preset => (
+                preset.id === selectedPreset.id ? updated : preset
+            ));
+            saveSettings();
+            renderPromptPresetManager(updated.id);
+            if (promptPresetSelect) promptPresetSelect.value = updated.id;
+            if (promptPresetName) promptPresetName.value = updated.name;
+            notify(`프롬프트 프리셋 “${updated.name}”을 현재 값으로 저장했어요.`, 'success');
+            return;
+        }
+
         if (presets.some(preset => preset.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
-            notify('같은 이름의 프롬프트 프리셋이 이미 있어요. 다른 이름을 사용해 주세요.', 'warning');
+            notify('같은 이름의 프롬프트 프리셋이 이미 있어요. 해당 프리셋을 선택한 뒤 저장해 주세요.', 'warning');
             return;
         }
         if (presets.length >= 100) {
@@ -9490,35 +9508,8 @@ function injectSettingsPanel() {
         saveSettings();
         renderPromptPresetManager(preset.id);
         if (promptPresetSelect) promptPresetSelect.value = preset.id;
+        if (promptPresetName) promptPresetName.value = preset.name;
         notify(`프롬프트 프리셋 “${name}”을 저장했어요.`, 'success');
-    });
-
-    panel.querySelector('#verba-prompt-preset-duplicate')?.addEventListener('click', () => {
-        const sourcePreset = promptPresetById(promptPresetSelect?.value);
-        if (!sourcePreset) {
-            notify('복제할 프롬프트 프리셋을 선택해 주세요.', 'warning');
-            return;
-        }
-        const presets = normalizedPromptPresets();
-        if (presets.length >= 100) {
-            notify('프롬프트 프리셋은 최대 100개까지 저장할 수 있어요.', 'warning');
-            return;
-        }
-
-        const name = promptPresetDuplicateName(sourcePreset.name, presets);
-        const duplicated = {
-            ...sourcePreset,
-            id: `prompt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-            name,
-            favorite: false,
-            updatedAt: new Date().toISOString(),
-        };
-        settings.promptPresets = [...presets, duplicated];
-        saveSettings();
-        renderPromptPresetManager(duplicated.id);
-        if (promptPresetSelect) promptPresetSelect.value = duplicated.id;
-        if (promptPresetName) promptPresetName.value = duplicated.name;
-        notify(`프롬프트 프리셋 “${sourcePreset.name}”을 “${duplicated.name}”으로 복제했어요.`, 'success');
     });
 
     panel.querySelector('#verba-prompt-preset-favorite')?.addEventListener('click', () => {

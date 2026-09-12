@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.53';
+const EXTENSION_VERSION = '0.4.54';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -47,6 +47,14 @@ const RELATION_TEMPERATURE_OPTIONS = [
     { value: 'close', label: '가까움' },
     { value: 'intimate', label: '친밀함' },
 ];
+const DEVELOPER_SPEECH_DISTANCE_OPTIONS = [
+    { value: 'source', label: '원문 우선' },
+    { value: 'formal', label: '격식적' },
+    { value: 'polite', label: '공손한 편' },
+    { value: 'casual', label: '편안한 편' },
+    { value: 'veryCasual', label: '매우 편안함' },
+];
+
 const LOCALIZATION_LEVEL_OPTIONS = [
     { value: 'preserve', label: '원문 유지' },
     { value: 'light', label: '약한 현지화' },
@@ -129,6 +137,9 @@ const DEFAULT_SETTINGS = {
     qualityAuditVoice: true,
     qualityAuditTranslationese: true,
     qualityAuditContinuity: true,
+    developerRelationshipExperimentEnabled: false,
+    developerSpeechDistance: 'source',
+    developerTargetToUserAddress: '',
     expressionEmphasisTaste: 'default',
     expressionDisfluencyTaste: 'default',
     expressionIdiomMetaphorTaste: 'default',
@@ -215,6 +226,11 @@ settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
 settings.qualityAuditVoice = settings.qualityAuditVoice !== false;
 settings.qualityAuditTranslationese = settings.qualityAuditTranslationese !== false;
 settings.qualityAuditContinuity = settings.qualityAuditContinuity !== false;
+settings.developerRelationshipExperimentEnabled = settings.developerRelationshipExperimentEnabled === true;
+settings.developerSpeechDistance = DEVELOPER_SPEECH_DISTANCE_OPTIONS.some(option => option.value === settings.developerSpeechDistance)
+    ? settings.developerSpeechDistance
+    : 'source';
+settings.developerTargetToUserAddress = String(settings.developerTargetToUserAddress || '').trim().slice(0, 40);
 settings.expressionEmphasisTaste = ['default', 'source', 'natural', 'active'].includes(settings.expressionEmphasisTaste)
     ? settings.expressionEmphasisTaste
     : 'default';
@@ -8028,6 +8044,28 @@ function developerSettingsMarkup() {
 
                     
 
+                    <details id="verba-developer-relationship-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 관계 번역 실험실 <small>개발자</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-relationship-enabled" ${settings.developerRelationshipExperimentEnabled ? 'checked' : ''}>
+                                <span>관계 번역 실험 사용</span>
+                            </label>
+                            <div id="verba-developer-relationship-controls" class="${settings.developerRelationshipExperimentEnabled ? '' : 'verba-control-disabled'}">
+                                <label for="verba-developer-speech-distance">캐릭터 → USER 말투 거리감</label>
+                                <select id="verba-developer-speech-distance" class="text_pole">
+                                    ${DEVELOPER_SPEECH_DISTANCE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerSpeechDistance === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">현재 캐릭터의 직접 대사에만 적용합니다. 원문 우선 / 격식적 / 공손한 편 / 편안한 편 / 매우 편안함 중 선택해 한국어의 존댓말·반말·문장 거리감을 조절합니다.</div>
+
+                                <label for="verba-developer-target-user-address">캐릭터 → USER 호칭 고정</label>
+                                <input id="verba-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
+                                <div class="verba-help">비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다. 입력해도 영어 you를 전부 호칭으로 치환하지 않고, 한국어에서 자연스럽게 직접 부르는 자리에서만 사용하도록 지시합니다.</div>
+                                <div class="verba-help">현재 테스트 단계라 E→K 아웃풋의 TARGET CHARACTER 대사에만 적용합니다. USER/NPC 대사와 K→E 인풋에는 아직 적용하지 않습니다.</div>
+                            </div>
+                        </div>
+                    </details>
+
                     <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
                 ` : `
                     <label for="verba-developer-code">개발자 번호</label>
@@ -8059,6 +8097,16 @@ function syncDeveloperQualityControls(root = document.querySelector('#verba-sett
         flavorControls.classList.toggle('verba-control-disabled', !flavorEnabled);
         flavorControls.querySelectorAll('input, select').forEach(control => {
             control.disabled = !flavorEnabled;
+        });
+    }
+
+    const relationshipMaster = root?.querySelector('#verba-developer-relationship-enabled');
+    const relationshipControls = root?.querySelector('#verba-developer-relationship-controls');
+    if (relationshipControls) {
+        const relationshipEnabled = Boolean(relationshipMaster?.checked);
+        relationshipControls.classList.toggle('verba-control-disabled', !relationshipEnabled);
+        relationshipControls.querySelectorAll('input, select').forEach(control => {
+            control.disabled = !relationshipEnabled;
         });
     }
 
@@ -8666,6 +8714,7 @@ function injectSettingsPanel() {
         if (target.closest('#verba-developer-mode-off')) {
             settings.developerMode = false;
             settings.qualityAuditEnabled = false;
+            settings.developerRelationshipExperimentEnabled = false;
             saveSettings();
             lastQualityAuditSummary = '개발자 모드 비활성화';
             refreshSettingsPanelForDeveloperMode();
@@ -8740,6 +8789,28 @@ function injectSettingsPanel() {
                 : 'unspecified';
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-developer-relationship-enabled' && target instanceof HTMLInputElement) {
+            settings.developerRelationshipExperimentEnabled = target.checked;
+            saveSettings();
+            syncDeveloperQualityControls(panel);
+            return;
+        }
+
+        if (target.id === 'verba-developer-speech-distance' && target instanceof HTMLSelectElement) {
+            settings.developerSpeechDistance = DEVELOPER_SPEECH_DISTANCE_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'source';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-target-user-address' && target instanceof HTMLInputElement) {
+            settings.developerTargetToUserAddress = String(target.value || '').trim().slice(0, 40);
+            target.value = settings.developerTargetToUserAddress;
+            saveSettings();
             return;
         }
 

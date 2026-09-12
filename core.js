@@ -790,6 +790,60 @@ const RELATION_TEMPERATURE_RULES = {
 - Adjust only wording, address, and sentence endings; never add affection, sexuality, actions, or relationship facts absent from the source.`,
 };
 
+const DEVELOPER_SPEECH_DISTANCE_RULES = {
+    source: `SOURCE-LED SPEECH DISTANCE
+- Preserve the source's actual politeness, formality, casualness, and interpersonal distance. Do not impose an extra 존댓말/반말 shift.`,
+    formal: `FORMAL
+- Render TARGET CHARACTER dialogue in consistently formal, respectful Korean.
+- Prefer restrained, complete sentence endings and clear social distance. Do not invent a status title or hierarchy that the source/configured address does not establish.`,
+    polite: `POLITE / COMFORTABLE RESPECT
+- Render TARGET CHARACTER dialogue in natural contemporary 존댓말 that feels polite without becoming stiff or ceremonial.
+- Preserve the source's emotional force and personality; politeness changes surface register only.`,
+    casual: `CASUAL / COMFORTABLE
+- Render TARGET CHARACTER dialogue in natural contemporary 반말/casual Korean where grammar permits.
+- Keep it relaxed and familiar without inventing slang, affection, flirtation, or a closer factual relationship.`,
+    veryCasual: `VERY CASUAL / VERY COMFORTABLE
+- Render TARGET CHARACTER dialogue with strongly relaxed conversational distance: natural 반말, omission, contractions, and loose spoken rhythm where appropriate.
+- Do not add profanity, pet names, affection, teasing, or intimacy that is absent from the source.`,
+};
+
+function developerRelationshipExperimentBlock(settings = {}, scope = 'narration') {
+    if (
+        settings?.developerMode !== true
+        || settings?.developerRelationshipExperimentEnabled !== true
+        || scope !== 'target_dialogue'
+    ) {
+        return '';
+    }
+
+    const distanceKey = Object.hasOwn(DEVELOPER_SPEECH_DISTANCE_RULES, settings?.developerSpeechDistance)
+        ? settings.developerSpeechDistance
+        : 'source';
+    const address = String(settings?.developerTargetToUserAddress || '').trim().slice(0, 40);
+
+    const addressRules = address
+        ? `USER ADDRESS LOCK
+- Configured TARGET CHARACTER → USER address form: ${JSON.stringify(address)}.
+- This lock governs only generic/underspecified second-person address to USER in TARGET CHARACTER dialogue.
+- Use the configured form only when Korean would naturally use a direct vocative/address term. Do NOT mechanically replace every English "you" with it; omit the address when Korean naturally omits it.
+- Do not invent or alternate to another age-, kinship-, status-, or relationship-specific address form for USER merely from gender, age, intimacy, or context.
+- If the source explicitly states a DIFFERENT relationship/status/title as semantic content, preserve that explicit source meaning instead of rewriting the fact to match this vocative lock.`
+        : `USER ADDRESS SAFETY — NO LOCK
+- No TARGET CHARACTER → USER address form is configured.
+- Do not invent 오빠/언니/형/누나/선배/선배님/사장님 or any other age-, kinship-, status-, or relationship-specific form of address merely from gender, age, intimacy, or social guesswork.
+- Use natural omission or a generic rendering unless the source or another explicit user prompt truly establishes the address.`;
+
+    return `DEVELOPER RELATIONSHIP TRANSLATION EXPERIMENT — TARGET CHARACTER → USER ONLY
+- EXPERIMENTAL: applies only to direct dialogue classified as TARGET CHARACTER speech in E→K output.
+- Never apply this block to narration, USER/NPC/OTHER dialogue, K→E input, quoted speech spoken by someone else, or relationship facts in the source.
+- This controls Korean surface register/address only. Preserve meaning, speech-act force, facts, consent, emotional intensity, speaker attribution, and factual relationship exactly.
+
+SPEECH DISTANCE
+${DEVELOPER_SPEECH_DISTANCE_RULES[distanceKey]}
+
+${addressRules}`;
+}
+
 const LOCALIZATION_RULES = {
     preserve: `SOURCE-FAITHFUL KOREAN
 - Keep source sentence structure, emphasis, repetitions, idioms, and culture-specific phrasing as recognizable as natural Korean permits.
@@ -1406,6 +1460,7 @@ function translationTuningBlock(settings = {}, override = null) {
     const englishCharacterTaste = englishCharacterKoreanTasteBlock(settings, 'mixed');
     const characterTasteConflictNote = outputCharacterTasteConflictNote(settings);
     const expressionDetail = outputExpressionDetailBlock(settings, 'mixed');
+    const developerRelationshipExperiment = developerRelationshipExperimentBlock(settings, 'target_dialogue');
 
     if (!relationTemperatureEnabled) {
         return `TRANSLATION FINE TUNING
@@ -1420,7 +1475,9 @@ ${koreanOutputTaste}
 
 ${englishCharacterTaste}
 
-${characterTasteConflictNote}`;
+${characterTasteConflictNote}
+
+${developerRelationshipExperiment}`;
     }
 
     const relationKey = Object.hasOwn(RELATION_TEMPERATURE_RULES, requested.relationTemperature)
@@ -1462,6 +1519,8 @@ ${koreanOutputTaste}
 ${englishCharacterTaste}
 
 ${characterTasteConflictNote}
+
+${developerRelationshipExperiment}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
@@ -1539,9 +1598,13 @@ ${LOCALIZATION_RULES[dialogueLocalizationKey]}`
 
 ${dialogueEndingPreferenceBlock(settings, requested)}`
         : '';
+    const developerRelationshipExperiment = developerRelationshipExperimentBlock(settings, scope);
 
     return `TRANSLATION FINE TUNING — DIALOGUE ONLY
 ${relationAndLocalization}${characterEndingPreferences}
+${developerRelationshipExperiment ? `
+
+${developerRelationshipExperiment}` : ''}
 
 ${outputExpressionDetailBlock(settings, scope)}
 

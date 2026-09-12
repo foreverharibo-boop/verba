@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.64';
+const EXTENSION_VERSION = '0.4.65';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -304,6 +304,10 @@ settings.promptPresets = Array.isArray(settings.promptPresets)
             dialoguePromptEnabled: preset?.dialoguePromptEnabled !== false,
             otherDialoguePrompt: String(preset?.otherDialoguePrompt || ''),
             otherDialoguePromptEnabled: preset?.otherDialoguePromptEnabled !== false,
+            saveScope: normalizedPromptPresetSaveScope(preset?.saveScope, preset?.translationSettings),
+            translationSettings: normalizedPromptPresetSaveScope(preset?.saveScope, preset?.translationSettings) === PROMPT_PRESET_SCOPE_TRANSLATION
+                ? normalizedPromptPresetTranslationSettings(preset.translationSettings)
+                : null,
             favorite: preset?.favorite === true,
             updatedAt: String(preset?.updatedAt || ''),
         }))
@@ -873,6 +877,115 @@ function normalizedPromptPresetName(value) {
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 60);
 }
 
+const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
+const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
+
+function normalizedPromptPresetSaveScope(value, translationSettings = null) {
+    return value === PROMPT_PRESET_SCOPE_TRANSLATION
+        && translationSettings
+        && typeof translationSettings === 'object'
+        ? PROMPT_PRESET_SCOPE_TRANSLATION
+        : PROMPT_PRESET_SCOPE_PROMPTS;
+}
+
+function normalizedPromptPresetTranslationSettings(value = {}) {
+    const raw = value && typeof value === 'object' ? value : {};
+    const valid = (options, candidate, fallback) => (
+        options.includes(candidate) ? candidate : fallback
+    );
+
+    return {
+        translationRuleOrder: normalizeTranslationRuleOrder(raw.translationRuleOrder),
+
+        relationTemperatureEnabled: raw.relationTemperatureEnabled !== false,
+        relationTemperature: RELATION_TEMPERATURE_OPTIONS.some(option => option.value === raw.relationTemperature)
+            ? raw.relationTemperature
+            : DEFAULT_SETTINGS.relationTemperature,
+        narrationLocalizationLevel: LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === raw.narrationLocalizationLevel)
+            ? raw.narrationLocalizationLevel
+            : DEFAULT_SETTINGS.narrationLocalizationLevel,
+        dialogueLocalizationLevel: LOCALIZATION_LEVEL_OPTIONS.some(option => option.value === raw.dialogueLocalizationLevel)
+            ? raw.dialogueLocalizationLevel
+            : DEFAULT_SETTINGS.dialogueLocalizationLevel,
+
+        dialogueEndingPreferred: String(raw.dialogueEndingPreferred || ''),
+        dialogueEndingAvoid: String(raw.dialogueEndingAvoid || ''),
+        dialogueEndingStrength: valid(['light', 'normal', 'strong'], raw.dialogueEndingStrength, DEFAULT_SETTINGS.dialogueEndingStrength),
+        dialogueEndingRepetitionReduction: raw.dialogueEndingRepetitionReduction !== false,
+
+        expressionEmphasisTaste: valid(['default', 'source', 'natural', 'active'], raw.expressionEmphasisTaste, DEFAULT_SETTINGS.expressionEmphasisTaste),
+        expressionDisfluencyTaste: valid(['default', 'clean', 'natural', 'active'], raw.expressionDisfluencyTaste, DEFAULT_SETTINGS.expressionDisfluencyTaste),
+        expressionIdiomMetaphorTaste: valid(['default', 'meaning', 'balanced', 'koreanized', 'sourceCulture'], raw.expressionIdiomMetaphorTaste, DEFAULT_SETTINGS.expressionIdiomMetaphorTaste),
+
+        koreanFlavorEnabled: raw.koreanFlavorEnabled === true,
+        koreanFlavorDialogueRhythm: valid(['default', 'short', 'balanced', 'smooth'], raw.koreanFlavorDialogueRhythm, DEFAULT_SETTINGS.koreanFlavorDialogueRhythm),
+        koreanFlavorPronounOmission: valid(['default', 'preserve', 'natural', 'active'], raw.koreanFlavorPronounOmission, DEFAULT_SETTINGS.koreanFlavorPronounOmission),
+        koreanFlavorProfanityTone: valid(['default', 'dry', 'blunt', 'lowSlang', 'restrained'], raw.koreanFlavorProfanityTone, DEFAULT_SETTINGS.koreanFlavorProfanityTone),
+        koreanFlavorInterjectionTone: valid(['default', 'natural', 'restrained', 'lively'], raw.koreanFlavorInterjectionTone, DEFAULT_SETTINGS.koreanFlavorInterjectionTone),
+        koreanFlavorMemeDensity: valid(['default', 'light', 'natural', 'active'], raw.koreanFlavorMemeDensity, DEFAULT_SETTINGS.koreanFlavorMemeDensity),
+        koreanFlavorReduceReferentRepetition: raw.koreanFlavorReduceReferentRepetition !== false,
+
+        englishFlavorEnabled: raw.englishFlavorEnabled === true,
+        englishFlavorDialogueRhythm: valid(['default', 'short', 'balanced', 'smooth'], raw.englishFlavorDialogueRhythm, DEFAULT_SETTINGS.englishFlavorDialogueRhythm),
+        englishFlavorConversationNaturalization: valid(['default', 'natural', 'active'], raw.englishFlavorConversationNaturalization, DEFAULT_SETTINGS.englishFlavorConversationNaturalization),
+        englishFlavorSlangDensity: valid(['default', 'low', 'natural', 'active'], raw.englishFlavorSlangDensity, DEFAULT_SETTINGS.englishFlavorSlangDensity),
+        englishFlavorProfanityTone: valid(['default', 'dry', 'blunt', 'everyday', 'lowSlang', 'restrained'], raw.englishFlavorProfanityTone, DEFAULT_SETTINGS.englishFlavorProfanityTone),
+        englishFlavorInterjectionTone: valid(['default', 'natural', 'restrained', 'lively'], raw.englishFlavorInterjectionTone, DEFAULT_SETTINGS.englishFlavorInterjectionTone),
+        englishFlavorMemeDensity: valid(['default', 'light', 'natural', 'active'], raw.englishFlavorMemeDensity, DEFAULT_SETTINGS.englishFlavorMemeDensity),
+        englishFlavorReduceReferentRepetition: raw.englishFlavorReduceReferentRepetition !== false,
+    };
+}
+
+function currentPromptPresetTranslationSettingsSnapshot() {
+    return normalizedPromptPresetTranslationSettings({
+        translationRuleOrder: settings.translationRuleOrder,
+
+        relationTemperatureEnabled: settings.relationTemperatureEnabled,
+        relationTemperature: settings.relationTemperature,
+        narrationLocalizationLevel: settings.narrationLocalizationLevel,
+        dialogueLocalizationLevel: settings.dialogueLocalizationLevel,
+
+        dialogueEndingPreferred: settings.dialogueEndingPreferred,
+        dialogueEndingAvoid: settings.dialogueEndingAvoid,
+        dialogueEndingStrength: settings.dialogueEndingStrength,
+        dialogueEndingRepetitionReduction: settings.dialogueEndingRepetitionReduction,
+
+        expressionEmphasisTaste: settings.expressionEmphasisTaste,
+        expressionDisfluencyTaste: settings.expressionDisfluencyTaste,
+        expressionIdiomMetaphorTaste: settings.expressionIdiomMetaphorTaste,
+
+        koreanFlavorEnabled: settings.koreanFlavorEnabled,
+        koreanFlavorDialogueRhythm: settings.koreanFlavorDialogueRhythm,
+        koreanFlavorPronounOmission: settings.koreanFlavorPronounOmission,
+        koreanFlavorProfanityTone: settings.koreanFlavorProfanityTone,
+        koreanFlavorInterjectionTone: settings.koreanFlavorInterjectionTone,
+        koreanFlavorMemeDensity: settings.koreanFlavorMemeDensity,
+        koreanFlavorReduceReferentRepetition: settings.koreanFlavorReduceReferentRepetition,
+
+        englishFlavorEnabled: settings.englishFlavorEnabled,
+        englishFlavorDialogueRhythm: settings.englishFlavorDialogueRhythm,
+        englishFlavorConversationNaturalization: settings.englishFlavorConversationNaturalization,
+        englishFlavorSlangDensity: settings.englishFlavorSlangDensity,
+        englishFlavorProfanityTone: settings.englishFlavorProfanityTone,
+        englishFlavorInterjectionTone: settings.englishFlavorInterjectionTone,
+        englishFlavorMemeDensity: settings.englishFlavorMemeDensity,
+        englishFlavorReduceReferentRepetition: settings.englishFlavorReduceReferentRepetition,
+    });
+}
+
+function currentPromptPresetSaveSnapshot(saveScope = PROMPT_PRESET_SCOPE_PROMPTS) {
+    const scope = saveScope === PROMPT_PRESET_SCOPE_TRANSLATION
+        ? PROMPT_PRESET_SCOPE_TRANSLATION
+        : PROMPT_PRESET_SCOPE_PROMPTS;
+    return {
+        ...currentPromptPresetSnapshot(),
+        saveScope: scope,
+        translationSettings: scope === PROMPT_PRESET_SCOPE_TRANSLATION
+            ? currentPromptPresetTranslationSettingsSnapshot()
+            : null,
+    };
+}
+
 function currentPromptPresetSnapshot() {
     return {
         globalPrompt: String(settings.globalPrompt || ''),
@@ -907,6 +1020,10 @@ function normalizedPromptPresets() {
             dialoguePromptEnabled: raw?.dialoguePromptEnabled !== false,
             otherDialoguePrompt: String(raw?.otherDialoguePrompt || ''),
             otherDialoguePromptEnabled: raw?.otherDialoguePromptEnabled !== false,
+            saveScope: normalizedPromptPresetSaveScope(raw?.saveScope, raw?.translationSettings),
+            translationSettings: normalizedPromptPresetSaveScope(raw?.saveScope, raw?.translationSettings) === PROMPT_PRESET_SCOPE_TRANSLATION
+                ? normalizedPromptPresetTranslationSettings(raw.translationSettings)
+                : null,
             favorite: raw?.favorite === true,
             updatedAt: String(raw?.updatedAt || ''),
         });
@@ -1212,7 +1329,7 @@ function promptPresetSelectMarkup(selectedId = '') {
     return [
         '<option value="">저장된 프롬프트 프리셋 선택</option>',
         ...rows.map(preset => (
-            `<option value="${escapeHtml(preset.id)}" ${preset.id === selected ? 'selected' : ''}>${preset.favorite ? '★ ' : ''}${escapeHtml(preset.name)}</option>`
+            `<option value="${escapeHtml(preset.id)}" ${preset.id === selected ? 'selected' : ''}>${preset.favorite ? '★ ' : ''}${escapeHtml(preset.name)}${preset.saveScope === PROMPT_PRESET_SCOPE_TRANSLATION ? ' · 설정 포함' : ''}</option>`
         )),
     ].join('');
 }
@@ -1237,6 +1354,13 @@ function renderPromptPresetManager(selectedId = '') {
         const button = document.querySelector(selector);
         if (button) button.disabled = !hasSelection;
     });
+
+    const saveScopeSelect = document.querySelector('#verba-prompt-preset-save-scope');
+    if (saveScopeSelect instanceof HTMLSelectElement) {
+        saveScopeSelect.value = selectedPreset?.saveScope === PROMPT_PRESET_SCOPE_TRANSLATION
+            ? PROMPT_PRESET_SCOPE_TRANSLATION
+            : PROMPT_PRESET_SCOPE_PROMPTS;
+    }
 
     const favoriteButton = document.querySelector('#verba-prompt-preset-favorite');
     if (favoriteButton) {
@@ -1278,6 +1402,106 @@ function syncPromptSlotUi() {
     }
 }
 
+function setCheckedValue(selector, checked) {
+    const field = document.querySelector(selector);
+    if (field instanceof HTMLInputElement) field.checked = Boolean(checked);
+}
+
+function setControlValue(selector, value) {
+    const field = document.querySelector(selector);
+    if (
+        field instanceof HTMLInputElement
+        || field instanceof HTMLTextAreaElement
+        || field instanceof HTMLSelectElement
+    ) {
+        field.value = String(value ?? '');
+    }
+}
+
+function setRadioGroupValue(name, value) {
+    document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
+        if (input instanceof HTMLInputElement) input.checked = input.value === String(value);
+    });
+}
+
+function applyPromptPresetTranslationSettings(value) {
+    const next = normalizedPromptPresetTranslationSettings(value);
+
+    settings.translationRuleOrder = [...next.translationRuleOrder];
+
+    settings.relationTemperatureEnabled = next.relationTemperatureEnabled;
+    settings.relationTemperature = next.relationTemperature;
+    settings.narrationLocalizationLevel = next.narrationLocalizationLevel;
+    settings.dialogueLocalizationLevel = next.dialogueLocalizationLevel;
+
+    settings.dialogueEndingPreferred = next.dialogueEndingPreferred;
+    settings.dialogueEndingAvoid = next.dialogueEndingAvoid;
+    settings.dialogueEndingStrength = next.dialogueEndingStrength;
+    settings.dialogueEndingRepetitionReduction = next.dialogueEndingRepetitionReduction;
+
+    settings.expressionEmphasisTaste = next.expressionEmphasisTaste;
+    settings.expressionDisfluencyTaste = next.expressionDisfluencyTaste;
+    settings.expressionIdiomMetaphorTaste = next.expressionIdiomMetaphorTaste;
+
+    settings.koreanFlavorEnabled = next.koreanFlavorEnabled;
+    settings.koreanFlavorDialogueRhythm = next.koreanFlavorDialogueRhythm;
+    settings.koreanFlavorPronounOmission = next.koreanFlavorPronounOmission;
+    settings.koreanFlavorProfanityTone = next.koreanFlavorProfanityTone;
+    settings.koreanFlavorInterjectionTone = next.koreanFlavorInterjectionTone;
+    settings.koreanFlavorMemeDensity = next.koreanFlavorMemeDensity;
+    settings.koreanFlavorReduceReferentRepetition = next.koreanFlavorReduceReferentRepetition;
+
+    settings.englishFlavorEnabled = next.englishFlavorEnabled;
+    settings.englishFlavorDialogueRhythm = next.englishFlavorDialogueRhythm;
+    settings.englishFlavorConversationNaturalization = next.englishFlavorConversationNaturalization;
+    settings.englishFlavorSlangDensity = next.englishFlavorSlangDensity;
+    settings.englishFlavorProfanityTone = next.englishFlavorProfanityTone;
+    settings.englishFlavorInterjectionTone = next.englishFlavorInterjectionTone;
+    settings.englishFlavorMemeDensity = next.englishFlavorMemeDensity;
+    settings.englishFlavorReduceReferentRepetition = next.englishFlavorReduceReferentRepetition;
+
+    renderTranslationRuleOrder();
+
+    setCheckedValue('#verba-relation-temperature-enabled', settings.relationTemperatureEnabled);
+    setRadioGroupValue('verba-relation-temperature', settings.relationTemperature);
+    setRadioGroupValue('verba-narration-localization-level', settings.narrationLocalizationLevel);
+    setRadioGroupValue('verba-dialogue-localization-level', settings.dialogueLocalizationLevel);
+    const fineTuningControls = document.querySelector('#verba-fine-tuning-controls');
+    fineTuningControls?.classList.toggle('verba-control-disabled', !settings.relationTemperatureEnabled);
+    fineTuningControls?.querySelectorAll('input').forEach(input => {
+        input.disabled = !settings.relationTemperatureEnabled;
+    });
+
+    setControlValue('#verba-dialogue-ending-preferred', settings.dialogueEndingPreferred);
+    setControlValue('#verba-dialogue-ending-avoid', settings.dialogueEndingAvoid);
+    setControlValue('#verba-dialogue-ending-strength', settings.dialogueEndingStrength);
+    setCheckedValue('#verba-dialogue-ending-repetition-reduction', settings.dialogueEndingRepetitionReduction);
+
+    setControlValue('#verba-expression-emphasis', settings.expressionEmphasisTaste);
+    setControlValue('#verba-expression-disfluency', settings.expressionDisfluencyTaste);
+    setControlValue('#verba-expression-idiom', settings.expressionIdiomMetaphorTaste);
+
+    setCheckedValue('#verba-korean-flavor-enabled', settings.koreanFlavorEnabled);
+    setControlValue('#verba-korean-flavor-rhythm', settings.koreanFlavorDialogueRhythm);
+    setControlValue('#verba-korean-flavor-pronoun', settings.koreanFlavorPronounOmission);
+    setControlValue('#verba-korean-flavor-profanity', settings.koreanFlavorProfanityTone);
+    setControlValue('#verba-korean-flavor-interjection', settings.koreanFlavorInterjectionTone);
+    setControlValue('#verba-korean-flavor-meme', settings.koreanFlavorMemeDensity);
+    setCheckedValue('#verba-korean-flavor-referent-repeat', settings.koreanFlavorReduceReferentRepetition);
+
+    setCheckedValue('#verba-english-flavor-enabled', settings.englishFlavorEnabled);
+    setControlValue('#verba-english-flavor-rhythm', settings.englishFlavorDialogueRhythm);
+    setControlValue('#verba-english-flavor-conversation', settings.englishFlavorConversationNaturalization);
+    setControlValue('#verba-english-flavor-slang', settings.englishFlavorSlangDensity);
+    setControlValue('#verba-english-flavor-profanity', settings.englishFlavorProfanityTone);
+    setControlValue('#verba-english-flavor-interjection', settings.englishFlavorInterjectionTone);
+    setControlValue('#verba-english-flavor-meme', settings.englishFlavorMemeDensity);
+    setCheckedValue('#verba-english-flavor-referent-repeat', settings.englishFlavorReduceReferentRepetition);
+
+    syncDeveloperQualityControls(document.querySelector('#verba-settings'));
+    if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+}
+
 function setPromptFieldsFromPreset(preset) {
     if (!preset) return;
     settings.globalPrompt = String(preset.globalPrompt || '');
@@ -1300,6 +1524,15 @@ function setPromptFieldsFromPreset(preset) {
         if (field) field.value = value;
     }
     syncPromptSlotUi();
+
+    const saveScope = normalizedPromptPresetSaveScope(preset.saveScope, preset.translationSettings);
+    const scopeSelect = document.querySelector('#verba-prompt-preset-save-scope');
+    if (scopeSelect instanceof HTMLSelectElement) scopeSelect.value = saveScope;
+
+    if (saveScope === PROMPT_PRESET_SCOPE_TRANSLATION && preset.translationSettings) {
+        applyPromptPresetTranslationSettings(preset.translationSettings);
+    }
+
     saveSettings();
     renderPromptConflictInspector();
 }
@@ -8487,7 +8720,7 @@ function injectSettingsPanel() {
                 <details id="verba-prompt-presets" class="verba-tool-details verba-prompt-presets">
                     <summary>프롬프트 프리셋 <small id="verba-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
                     <div class="verba-tool-details-content">
-                        <div class="verba-help">아래 4개 프롬프트의 내용과 각 슬롯 ON/OFF 상태를 한 세트로 저장합니다. 프리셋을 선택하면 즉시 적용됩니다. 선택된 프리셋이 있는 상태에서 ‘저장’을 누르면 현재 값으로 덮어쓰고, 선택된 프리셋이 없으면 새 프리셋으로 저장합니다. 이름 고정·금지어·현지화·말맛·기타 설정은 아직 저장하거나 바꾸지 않습니다.</div>
+                        <div class="verba-help">프리셋을 선택하면 즉시 적용됩니다. 선택된 프리셋이 있는 상태에서 ‘저장’을 누르면 현재 값으로 덮어쓰고, 선택된 프리셋이 없으면 새 프리셋으로 저장합니다.</div>
 
                         <select id="verba-prompt-preset-select" class="text_pole">
                             ${promptPresetSelectMarkup()}
@@ -8495,6 +8728,13 @@ function injectSettingsPanel() {
 
                         <label for="verba-prompt-preset-name">프리셋 이름</label>
                         <input id="verba-prompt-preset-name" class="text_pole" type="text" maxlength="60" autocomplete="off" placeholder="예: 한국캐 기본 말투">
+
+                        <label for="verba-prompt-preset-save-scope">저장 범위</label>
+                        <select id="verba-prompt-preset-save-scope" class="text_pole">
+                            <option value="prompts">프롬프트만</option>
+                            <option value="prompts_translation">프롬프트 + 번역 설정</option>
+                        </select>
+                        <div class="verba-help">기존 프리셋은 ‘프롬프트만’으로 유지됩니다. ‘프롬프트 + 번역 설정’을 선택하면 아래 번역 스타일 설정도 함께 저장·적용합니다.</div>
 
                         <div class="verba-prompt-preset-actions">
                             <button type="button" id="verba-prompt-preset-save" class="menu_button">저장</button>
@@ -8504,8 +8744,12 @@ function injectSettingsPanel() {
                         </div>
 
                         <div class="verba-prompt-preset-fields">
-                            <small>저장 대상</small>
+                            <small>항상 저장</small>
                             <span>전체 번역 전역 · 모든 대사 공통 · 캐릭터 대사 전용 · NPC·USER 대사 전용 + 각 슬롯 ON/OFF</span>
+                            <small>‘프롬프트 + 번역 설정’ 선택 시 추가 저장</small>
+                            <span>번역 규칙 우선순위 · 번역 미세 조정 · 대사 말끝 취향 · 표현 디테일 · 한캐의 맛 · 영캐의 맛</span>
+                            <small>저장하지 않음</small>
+                            <span>연결 프로필 · 성능 통계 · 이름 고정 · 금지어 · 개발자/비밀번호/관계 실험실 · 백업 · 디버그 · 캐시/임시 상태</span>
                         </div>
 
                         <details id="verba-prompt-preset-backups" class="verba-prompt-preset-backups">
@@ -9428,11 +9672,15 @@ function injectSettingsPanel() {
     });
     const promptPresetSelect = panel.querySelector('#verba-prompt-preset-select');
     const promptPresetName = panel.querySelector('#verba-prompt-preset-name');
+    const promptPresetSaveScope = panel.querySelector('#verba-prompt-preset-save-scope');
 
     promptPresetSelect?.addEventListener('change', event => {
         const preset = promptPresetById(event.target.value);
         if (!preset) {
             if (promptPresetName) promptPresetName.value = '';
+            if (promptPresetSaveScope instanceof HTMLSelectElement) {
+                promptPresetSaveScope.value = PROMPT_PRESET_SCOPE_PROMPTS;
+            }
             renderPromptPresetManager('');
             return;
         }
@@ -9454,6 +9702,9 @@ function injectSettingsPanel() {
         }
 
         const presets = normalizedPromptPresets();
+        const saveScope = promptPresetSaveScope?.value === PROMPT_PRESET_SCOPE_TRANSLATION
+            ? PROMPT_PRESET_SCOPE_TRANSLATION
+            : PROMPT_PRESET_SCOPE_PROMPTS;
         const selectedId = String(promptPresetSelect?.value || '');
         const selectedPreset = selectedId
             ? presets.find(preset => preset.id === selectedId) || null
@@ -9469,7 +9720,7 @@ function injectSettingsPanel() {
                 return;
             }
 
-            const snapshot = currentPromptPresetSnapshot();
+            const snapshot = currentPromptPresetSaveSnapshot(saveScope);
             const updated = {
                 ...selectedPreset,
                 ...snapshot,
@@ -9484,7 +9735,10 @@ function injectSettingsPanel() {
             renderPromptPresetManager(updated.id);
             if (promptPresetSelect) promptPresetSelect.value = updated.id;
             if (promptPresetName) promptPresetName.value = updated.name;
-            notify(`프롬프트 프리셋 “${updated.name}”을 현재 값으로 저장했어요.`, 'success');
+            notify(
+                `프롬프트 프리셋 “${updated.name}”을 ${saveScope === PROMPT_PRESET_SCOPE_TRANSLATION ? '프롬프트 + 번역 설정' : '프롬프트만'} 범위로 저장했어요.`,
+                'success',
+            );
             return;
         }
 
@@ -9500,7 +9754,7 @@ function injectSettingsPanel() {
         const preset = {
             id: `prompt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
             name,
-            ...currentPromptPresetSnapshot(),
+            ...currentPromptPresetSaveSnapshot(saveScope),
             favorite: false,
             updatedAt: new Date().toISOString(),
         };
@@ -9509,7 +9763,10 @@ function injectSettingsPanel() {
         renderPromptPresetManager(preset.id);
         if (promptPresetSelect) promptPresetSelect.value = preset.id;
         if (promptPresetName) promptPresetName.value = preset.name;
-        notify(`프롬프트 프리셋 “${name}”을 저장했어요.`, 'success');
+        notify(
+            `프롬프트 프리셋 “${name}”을 ${saveScope === PROMPT_PRESET_SCOPE_TRANSLATION ? '프롬프트 + 번역 설정' : '프롬프트만'} 범위로 저장했어요.`,
+            'success',
+        );
     });
 
     panel.querySelector('#verba-prompt-preset-favorite')?.addEventListener('click', () => {

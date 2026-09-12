@@ -2166,6 +2166,41 @@
 }
 
 
+
+/* v0.4.70: developer Kim Hongjin flavor lab */
+#verba-developer-hongjin-controls {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 7px !important;
+    min-width: 0 !important;
+}
+
+#verba-developer-hongjin-controls > label:not(.verba-check-row) {
+    margin-top: 5px !important;
+    line-height: 1.4 !important;
+    font-weight: 700 !important;
+}
+
+#verba-developer-hongjin-controls select {
+    width: 100% !important;
+}
+
+.verba-hongjin-help {
+    line-height: 1.58 !important;
+    white-space: normal !important;
+    word-break: keep-all !important;
+    overflow-wrap: anywhere !important;
+}
+
+.verba-hongjin-help > span {
+    display: block !important;
+}
+
+.verba-hongjin-help > span + span {
+    margin-top: 4px !important;
+}
+
+
 /* v0.4.9: prompt-only presets */
 .verba-prompt-presets {
     margin: 2px 0 !important;

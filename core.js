@@ -940,6 +940,107 @@ ${audienceRegisterRules ? `${audienceRegisterRules}
 ` : ''}${addressRules}`;
 }
 
+const DEVELOPER_HONGJIN_TRANSCREATION_RULES = {
+    light: `TRANSCREATION — LIGHT
+- Keep the source meaning and rough sentence shape recognizable, but rewrite stiff/literal English-shaped Korean into a sly, mischievous, vulgar spoken voice.
+- Prefer characterful Korean phrasing over dictionary-equivalent wording when both preserve the same intent.`,
+    strong: `TRANSCREATION — STRONG
+- Rebuild the TARGET CHARACTER's dialogue aggressively as if this character had originally spoken it in Korean.
+- Preserve pragmatic intent and scene function rather than lexical wording. Freely reorder, compress, split, merge, drop recoverable subjects, and replace literal constructions with punchier Korean speech.`,
+    maximum: `TRANSCREATION — MAXIMUM
+- Treat the source as semantic/scene constraints, NOT as wording to preserve.
+- Re-author the TARGET CHARACTER's dialogue from scratch in Korean so the line lands with the strongest sly, shameless, teasing, vulgar character voice compatible with the source.
+- Lexical wording, clause order, sentence boundaries, and source-language rhetoric may be discarded completely when the same underlying intent/facts are preserved.`,
+};
+
+const DEVELOPER_HONGJIN_PROFANITY_RULES = {
+    low: `PROFANITY — LOW
+- Add profanity only occasionally, at genuinely strong emphasis/annoyance/comedic beats. Prefer rough casual wording over explicit swearing most of the time.`,
+    natural: `PROFANITY — NATURAL
+- Profanity and vulgar intensifiers may be added even when absent from the source when they naturally strengthen exasperation, emphasis, teasing, shamelessness, or comic timing.
+- Vary placement and wording; do not mechanically swear in every sentence.`,
+    high: `PROFANITY — HIGH
+- Use frequent, characterful Korean profanity/vulgar intensifiers where conversationally plausible, including source lines that contain no profanity.
+- Profanity should feel habitual and shameless, but still follow the scene's emotional direction rather than turning every line into indiscriminate rage.`,
+};
+
+const DEVELOPER_HONGJIN_TEASING_RULES = {
+    light: `TEASING / NEEDLING — LIGHT
+- Add only a faint sly edge: mild needling, cheeky phrasing, or a knowing verbal nudge when compatible with the source.`,
+    natural: `TEASING / NEEDLING — NATURAL
+- Preserve or actively reconstruct smug teasing, sly provocation, playful needling, backhanded phrasing, and shameless little verbal jabs where the source situation supports them.`,
+    active: `TEASING / NEEDLING — ACTIVE
+- Make the delivery aggressively sly and provocative: cheeky taunts, smug rhetorical turns, needling cadence, brazen little digs, and playful verbal pressure.
+- Do not invent a new accusation, new grievance, or new target of abuse.`,
+};
+
+const DEVELOPER_HONGJIN_VULGARITY_RULES = {
+    restrained: `VULGAR VOICE — RESTRAINED
+- Keep the speech rough and lowbrow without overloading every line with crude vocabulary.`,
+    natural: `VULGAR VOICE — NATURAL
+- Use shameless, lowbrow, street-level Korean diction, vulgar intensifiers, crude-but-natural turns of phrase, and intentionally unrefined wording when it fits.`,
+    open: `VULGAR VOICE — OPEN
+- Lean hard into brazenly low-class, crude, shameless Korean speech texture. Prefer deliberately unpolished, indecorous diction over tasteful/elegant wording whenever the meaning allows it.
+- Crudeness is a voice layer only; it must not fabricate new sexual acts, bodily facts, humiliation events, or relationship facts.`,
+};
+
+const DEVELOPER_HONGJIN_PLAYFULNESS_RULES = {
+    low: `PLAYFULNESS — LOW
+- Keep the voice sly and confident but let serious/angry moments stay serious. Use jokes or playful bends sparingly.`,
+    natural: `PLAYFULNESS — NATURAL
+- Let the character twist lines playfully, bounce back with cheeky timing, and undercut stiffness with mischievous rhythm where compatible with the scene.`,
+    high: `PLAYFULNESS — HIGH
+- Make playful audacity highly visible: mischievous timing, unserious little swerves, mockery, exaggerated reactions, and impish phrasing.
+- Do not turn grief, fear, consent, danger, or genuinely serious source content into comedy when that would reverse the emotional direction.`,
+};
+
+function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
+    if (
+        settings?.developerMode !== true
+        || settings?.developerHongjinFlavorEnabled !== true
+        || scope !== 'target_dialogue'
+    ) {
+        return '';
+    }
+
+    const transcreationKey = Object.hasOwn(DEVELOPER_HONGJIN_TRANSCREATION_RULES, settings?.developerHongjinTranscreation)
+        ? settings.developerHongjinTranscreation
+        : 'strong';
+    const profanityKey = Object.hasOwn(DEVELOPER_HONGJIN_PROFANITY_RULES, settings?.developerHongjinProfanity)
+        ? settings.developerHongjinProfanity
+        : 'natural';
+    const teasingKey = Object.hasOwn(DEVELOPER_HONGJIN_TEASING_RULES, settings?.developerHongjinTeasing)
+        ? settings.developerHongjinTeasing
+        : 'natural';
+    const vulgarityKey = Object.hasOwn(DEVELOPER_HONGJIN_VULGARITY_RULES, settings?.developerHongjinVulgarity)
+        ? settings.developerHongjinVulgarity
+        : 'natural';
+    const playfulnessKey = Object.hasOwn(DEVELOPER_HONGJIN_PLAYFULNESS_RULES, settings?.developerHongjinPlayfulness)
+        ? settings.developerHongjinPlayfulness
+        : 'natural';
+
+    return `DEVELOPER KIM HONGJIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY
+- EXPERIMENTAL E→K voice transcreation layer.
+- Fixed personality premise sent with this translation:
+  "이 캐릭터는 능글맞고 장난기가 많은 성격이며 츤데레식, 능글맞은, 천박한 말투를 사용한다."
+- Translate the TARGET CHARACTER's dialogue as if this personality is speaking Korean natively: sly, shamelessly playful, teasing, tsundere-flavored, rough, vulgar, brazen, and casually profane.
+- This is intentionally a CHARACTER-VOICE OVERRIDE for translation style. It may add profanity, vulgar intensifiers, cheeky verbal jabs, interjections, and playful phrasing even when those exact words are absent from the source, according to the selected controls below.
+- Added material may ONLY operate at the surface voice level. Preserve the source's underlying proposition, events, actions, who did what to whom, speaker/addressee, factual relationships, chronology, consent/refusal, threats that actually exist, sexual explicitness, emotional direction, and scene stakes.
+- Do NOT invent new events, physical actions, sexual acts, relationship status, backstory, promises, consent, accusations, threats, insults aimed at a NEW target, or factual claims.
+- Surface profanity may be stronger than the literal source, but it must not transform friendliness into genuine hostility, joking into a serious threat, rejection into consent, or a neutral statement into a new accusation.
+- Never apply this block to narration, USER/NPC/OTHER-speaker dialogue, quoted speech spoken by someone else, tagged content outside TARGET CHARACTER dialogue, or K→E input.
+
+${DEVELOPER_HONGJIN_TRANSCREATION_RULES[transcreationKey]}
+
+${DEVELOPER_HONGJIN_PROFANITY_RULES[profanityKey]}
+
+${DEVELOPER_HONGJIN_TEASING_RULES[teasingKey]}
+
+${DEVELOPER_HONGJIN_VULGARITY_RULES[vulgarityKey]}
+
+${DEVELOPER_HONGJIN_PLAYFULNESS_RULES[playfulnessKey]}`;
+}
+
 const LOCALIZATION_RULES = {
     preserve: `SOURCE-FAITHFUL KOREAN
 - Keep source sentence structure, emphasis, repetitions, idioms, and culture-specific phrasing as recognizable as natural Korean permits.
@@ -1557,6 +1658,7 @@ function translationTuningBlock(settings = {}, override = null) {
     const characterTasteConflictNote = outputCharacterTasteConflictNote(settings);
     const expressionDetail = outputExpressionDetailBlock(settings, 'mixed');
     const developerRelationshipExperiment = developerRelationshipExperimentBlock(settings, 'target_dialogue');
+    const developerHongjinFlavor = developerHongjinFlavorBlock(settings, 'target_dialogue');
 
     if (!relationTemperatureEnabled) {
         return `TRANSLATION FINE TUNING
@@ -1573,7 +1675,9 @@ ${englishCharacterTaste}
 
 ${characterTasteConflictNote}
 
-${developerRelationshipExperiment}`;
+${developerRelationshipExperiment}
+
+${developerHongjinFlavor}`;
     }
 
     const relationKey = Object.hasOwn(RELATION_TEMPERATURE_RULES, requested.relationTemperature)
@@ -1617,6 +1721,8 @@ ${englishCharacterTaste}
 ${characterTasteConflictNote}
 
 ${developerRelationshipExperiment}
+
+${developerHongjinFlavor}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
@@ -1695,12 +1801,16 @@ ${LOCALIZATION_RULES[dialogueLocalizationKey]}`
 ${dialogueEndingPreferenceBlock(settings, requested)}`
         : '';
     const developerRelationshipExperiment = developerRelationshipExperimentBlock(settings, scope);
+    const developerHongjinFlavor = developerHongjinFlavorBlock(settings, scope);
 
     return `TRANSLATION FINE TUNING — DIALOGUE ONLY
 ${relationAndLocalization}${characterEndingPreferences}
 ${developerRelationshipExperiment ? `
 
 ${developerRelationshipExperiment}` : ''}
+${developerHongjinFlavor ? `
+
+${developerHongjinFlavor}` : ''}
 
 ${outputExpressionDetailBlock(settings, scope)}
 

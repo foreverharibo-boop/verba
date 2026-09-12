@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.69';
+const EXTENSION_VERSION = '0.4.70';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -73,6 +73,36 @@ const DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS = [
     { value: 'minimal', label: '최소' },
     { value: 'natural', label: '자연스럽게' },
     { value: 'often', label: '자주' },
+];
+
+const DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS = [
+    { value: 'light', label: '약하게' },
+    { value: 'strong', label: '강하게' },
+    { value: 'maximum', label: '초월번역' },
+];
+
+const DEVELOPER_HONGJIN_PROFANITY_OPTIONS = [
+    { value: 'low', label: '적게' },
+    { value: 'natural', label: '자연스럽게' },
+    { value: 'high', label: '많이' },
+];
+
+const DEVELOPER_HONGJIN_TEASING_OPTIONS = [
+    { value: 'light', label: '약하게' },
+    { value: 'natural', label: '자연스럽게' },
+    { value: 'active', label: '적극적으로' },
+];
+
+const DEVELOPER_HONGJIN_VULGARITY_OPTIONS = [
+    { value: 'restrained', label: '절제' },
+    { value: 'natural', label: '자연스럽게' },
+    { value: 'open', label: '개방적으로' },
+];
+
+const DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS = [
+    { value: 'low', label: '낮게' },
+    { value: 'natural', label: '자연스럽게' },
+    { value: 'high', label: '높게' },
 ];
 
 const LOCALIZATION_LEVEL_OPTIONS = [
@@ -169,6 +199,12 @@ const DEFAULT_SETTINGS = {
     developerTargetToUserRegister: 'unset',
     developerTargetToOtherRegister: 'unset',
     developerRegisterShiftMonitor: false,
+    developerHongjinFlavorEnabled: false,
+    developerHongjinTranscreation: 'strong',
+    developerHongjinProfanity: 'natural',
+    developerHongjinTeasing: 'natural',
+    developerHongjinVulgarity: 'natural',
+    developerHongjinPlayfulness: 'natural',
     expressionEmphasisTaste: 'default',
     expressionDisfluencyTaste: 'default',
     expressionIdiomMetaphorTaste: 'default',
@@ -260,6 +296,7 @@ if (
     settings.developerMode = false;
     settings.qualityAuditEnabled = false;
     settings.developerRelationshipExperimentEnabled = false;
+    settings.developerHongjinFlavorEnabled = false;
 }
 settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
 settings.qualityAuditMeaning = settings.qualityAuditMeaning !== false;
@@ -285,6 +322,22 @@ settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.so
     ? settings.developerTargetToOtherRegister
     : 'unset';
 settings.developerRegisterShiftMonitor = settings.developerRegisterShiftMonitor === true;
+settings.developerHongjinFlavorEnabled = settings.developerHongjinFlavorEnabled === true;
+settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === settings.developerHongjinTranscreation)
+    ? settings.developerHongjinTranscreation
+    : 'strong';
+settings.developerHongjinProfanity = DEVELOPER_HONGJIN_PROFANITY_OPTIONS.some(option => option.value === settings.developerHongjinProfanity)
+    ? settings.developerHongjinProfanity
+    : 'natural';
+settings.developerHongjinTeasing = DEVELOPER_HONGJIN_TEASING_OPTIONS.some(option => option.value === settings.developerHongjinTeasing)
+    ? settings.developerHongjinTeasing
+    : 'natural';
+settings.developerHongjinVulgarity = DEVELOPER_HONGJIN_VULGARITY_OPTIONS.some(option => option.value === settings.developerHongjinVulgarity)
+    ? settings.developerHongjinVulgarity
+    : 'natural';
+settings.developerHongjinPlayfulness = DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.some(option => option.value === settings.developerHongjinPlayfulness)
+    ? settings.developerHongjinPlayfulness
+    : 'natural';
 settings.expressionEmphasisTaste = ['default', 'source', 'natural', 'active'].includes(settings.expressionEmphasisTaste)
     ? settings.expressionEmphasisTaste
     : 'default';
@@ -8665,6 +8718,56 @@ function developerSettingsMarkup() {
                         </div>
                     </details>
 
+                    <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-hongjin-enabled" ${settings.developerHongjinFlavorEnabled ? 'checked' : ''}>
+                                <span>김홍진의 맛 사용</span>
+                            </label>
+
+                            <div id="verba-developer-hongjin-controls" class="${settings.developerHongjinFlavorEnabled ? '' : 'verba-control-disabled'}">
+                                <div class="verba-help verba-hongjin-help">
+                                    <span><b>고정 성격 프롬프트</b></span>
+                                    <span>이 캐릭터는 능글맞고 장난기가 많은 성격이며 츤데레식, 능글맞은, 천박한 말투를 사용한다.</span>
+                                    <span>원문의 사실·행동·관계는 유지하면서 TARGET CHARACTER 대사를 이 성격과 말투로 과감하게 재창작합니다.</span>
+                                </div>
+
+                                <label for="verba-developer-hongjin-transcreation">초월 의역 강도</label>
+                                <select id="verba-developer-hongjin-transcreation" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTranscreation === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <label for="verba-developer-hongjin-profanity">욕설 농도</label>
+                                <select id="verba-developer-hongjin-profanity" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_PROFANITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinProfanity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">원문에 욕설이 없어도 캐릭터 말맛을 위해 감탄·강조·짜증·장난 자리에 욕설/비속어를 추가할 수 있습니다. 의미나 공격 대상을 새로 만들지는 않습니다.</div>
+
+                                <label for="verba-developer-hongjin-teasing">능글거림·약올리기</label>
+                                <select id="verba-developer-hongjin-teasing" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_TEASING_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTeasing === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <label for="verba-developer-hongjin-vulgarity">천박한 말맛</label>
+                                <select id="verba-developer-hongjin-vulgarity" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_VULGARITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinVulgarity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <label for="verba-developer-hongjin-playfulness">장난기</label>
+                                <select id="verba-developer-hongjin-playfulness" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinPlayfulness === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <div class="verba-help verba-hongjin-help">
+                                    <span>E→K 아웃풋의 TARGET CHARACTER 직접 대사에만 적용합니다.</span>
+                                    <span>서술·USER/NPC 대사·K→E 인풋에는 적용하지 않습니다.</span>
+                                    <span>욕설/비속어/비꼼/장난은 추가할 수 있지만 새로운 사건·행동·관계·성적 의미·동의 변화·새로운 협박/비난 대상을 만들지는 않습니다.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+
                     <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
                 ` : `
                     <label for="verba-developer-code">개발자 번호</label>
@@ -8706,6 +8809,16 @@ function syncDeveloperQualityControls(root = document.querySelector('#verba-sett
         relationshipControls.classList.toggle('verba-control-disabled', !relationshipEnabled);
         relationshipControls.querySelectorAll('input, select').forEach(control => {
             control.disabled = !relationshipEnabled;
+        });
+    }
+
+    const hongjinMaster = root?.querySelector('#verba-developer-hongjin-enabled');
+    const hongjinControls = root?.querySelector('#verba-developer-hongjin-controls');
+    if (hongjinControls) {
+        const hongjinEnabled = Boolean(hongjinMaster?.checked);
+        hongjinControls.classList.toggle('verba-control-disabled', !hongjinEnabled);
+        hongjinControls.querySelectorAll('input, select').forEach(control => {
+            control.disabled = !hongjinEnabled;
         });
     }
 
@@ -9332,6 +9445,7 @@ function injectSettingsPanel() {
             settings.developerMode = false;
             settings.qualityAuditEnabled = false;
             settings.developerRelationshipExperimentEnabled = false;
+            settings.developerHongjinFlavorEnabled = false;
             saveSettings();
             lastQualityAuditSummary = '개발자 모드 비활성화';
             refreshSettingsPanelForDeveloperMode();
@@ -9406,6 +9520,53 @@ function injectSettingsPanel() {
                 : 'unspecified';
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-enabled' && target instanceof HTMLInputElement) {
+            settings.developerHongjinFlavorEnabled = target.checked;
+            saveSettings();
+            syncDeveloperQualityControls(panel);
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-transcreation' && target instanceof HTMLSelectElement) {
+            settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'strong';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-profanity' && target instanceof HTMLSelectElement) {
+            settings.developerHongjinProfanity = DEVELOPER_HONGJIN_PROFANITY_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'natural';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-teasing' && target instanceof HTMLSelectElement) {
+            settings.developerHongjinTeasing = DEVELOPER_HONGJIN_TEASING_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'natural';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-vulgarity' && target instanceof HTMLSelectElement) {
+            settings.developerHongjinVulgarity = DEVELOPER_HONGJIN_VULGARITY_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'natural';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-playfulness' && target instanceof HTMLSelectElement) {
+            settings.developerHongjinPlayfulness = DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'natural';
+            saveSettings();
             return;
         }
 

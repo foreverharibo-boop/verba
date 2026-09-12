@@ -402,7 +402,7 @@
 #verba-retranslate-latest,
 #verba-profile-toggle {
     position: relative;
-    top: 0 !important;
+    top: auto !important;
     bottom: auto !important;
     margin-top: 0 !important;
     margin-bottom: 0 !important;
@@ -514,19 +514,36 @@
 
 
 
-/* v0.4.50: profile/retranslate remain separate SillyTavern siblings.
-   JS aligns each button box to the send button's vertical center. */
+/* v0.4.52: theme-stable input controls.
+   Keep both controls as independent siblings and never calculate top offsets
+   from the active theme. Their outer geometry is fixed; only the glyph gets
+   a tiny optical correction. */
 #verba-profile-toggle,
 #verba-retranslate-latest {
     position: relative !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
     width: 30px !important;
     height: 30px !important;
     min-width: 30px !important;
     max-width: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    flex: 0 0 30px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    align-self: center !important;
     padding: 0 !important;
-    margin: 0 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
     box-sizing: border-box !important;
     vertical-align: middle !important;
+    line-height: 1 !important;
+    transform: none !important;
+    translate: none !important;
 }
 
 .verba-profile-arrows,

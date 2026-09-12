@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.48';
+const EXTENSION_VERSION = '0.4.49';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -717,13 +717,18 @@ function updateServerRetryIndicator() {
 
 function showProgress(message, options = {}) {
     if (!globalThis.toastr?.info) return null;
-    return globalThis.toastr.info(message, '베르바', {
+    const toast = globalThis.toastr.info(message, '베르바', {
         timeOut: 0,
         extendedTimeOut: 0,
         tapToDismiss: false,
         closeButton: Boolean(options.onCancel),
         onCloseClick: typeof options.onCancel === 'function' ? options.onCancel : undefined,
     });
+
+    const element = toast?.[0] || toast;
+    element?.classList?.add?.('verba-progress-toast');
+    toast?.addClass?.('verba-progress-toast');
+    return toast;
 }
 
 function showInputProgress(controller) {
@@ -9317,7 +9322,21 @@ function scheduleAutomaticTranslation(messageId, delay = 100, translationOptions
     cancelScheduledAutomaticTranslation(id);
     const timer = setTimeout(() => {
         automaticTranslationTimers.delete(id);
-        if (swipeTranslationJobs.has(id)) return;
+
+        // A regenerated/revised message can briefly overlap SillyTavern's swipe
+        // settling job. Older Verba builds simply returned here, which could
+        // permanently drop the scheduled automatic translation. Defer instead.
+        if (swipeTranslationJobs.has(id)) {
+            const waitCount = Math.max(0, Number(translationOptions.waitForSwipeCount) || 0);
+            if (waitCount < 40) {
+                scheduleAutomaticTranslation(id, 180, {
+                    ...translationOptions,
+                    waitForSwipeCount: waitCount + 1,
+                });
+            }
+            return;
+        }
+
         const message = liveContext().chat?.[id];
         if (repairSwipeTranslationIndexes(message)) scheduleChatSave(liveContext().chat);
         clearStaleCurrentTranslation(id);
@@ -9501,6 +9520,53 @@ function pruneInsteadRevisionSeen(now = Date.now()) {
     }
 }
 
+function hasStaleOwnedAssistantTranslation(message) {
+    if (!message || message.is_user || message.is_system) return false;
+
+    const source = messageSource(message);
+    if (!source.trim()) return false;
+    const sourceHash = hashText(source);
+
+    const candidates = [
+        message?.extra?.[STATE_KEY],
+        currentSwipeExtra(message, false)?.[STATE_KEY],
+    ];
+
+    return candidates.some(record => (
+        record
+        && typeof record === 'object'
+        && String(record.translation || '').trim()
+        && String(record.sourceHash || '')
+        && record.sourceHash !== sourceHash
+    ));
+}
+
+function schedulePotentialAssistantRevision(payload = null, delay = 180) {
+    let id = normalizedMessageId(payload);
+    if (id < 0) id = latestAssistantMessage()?.id ?? -1;
+    if (id < 0) return;
+
+    const message = liveContext().chat?.[id];
+    if (!message || message.is_user || message.is_system) return;
+
+    // This fallback intentionally targets same-message revisions that already
+    // had a Verba translation. It therefore does not scan/translate arbitrary
+    // historical untranslated assistant messages.
+    if (!hasStaleOwnedAssistantTranslation(message)) return;
+
+    const source = messageSource(message);
+    if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) return;
+
+    // Only react to a mounted/current message. This avoids background work for
+    // stale historical revisions when a chat is first opened.
+    if (!document.querySelector(`.mes[mesid="${id}"]`)) return;
+
+    scheduleAutomaticTranslation(id, Math.max(100, Number(delay) || 180), {
+        insteadRevision: true,
+        sourceRevisionFallback: true,
+    });
+}
+
 function scheduleRecentInsteadRevisionTranslations(delay = 180) {
     const context = liveContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
@@ -9511,10 +9577,15 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
         const meta = insteadRevisionMeta(message);
         if (!meta) return;
 
-        // inSTead writes gen_finished immediately before save/reload. Restrict
-        // compatibility auto-detection to fresh revisions so opening an old chat
-        // never causes every historical inSTead swipe to be translated at once.
-        if (meta.finishedAt === null || Math.abs(now - meta.finishedAt) > 90_000) return;
+        // Prefer inSTead's fresh gen_finished timestamp. Some revisions can
+        // expose their metadata late or omit gen_finished, so allow a narrow
+        // fallback only when this mounted message already carries a stale Verba
+        // translation whose source hash no longer matches the regenerated text.
+        const freshByTimestamp = meta.finishedAt !== null
+            && Math.abs(now - meta.finishedAt) <= 90_000;
+        const staleOwnedFallback = hasStaleOwnedAssistantTranslation(message)
+            && Boolean(document.querySelector(`.mes[mesid="${id}"]`));
+        if (!freshByTimestamp && !staleOwnedFallback) return;
 
         const source = messageSource(message);
         if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) return;
@@ -9562,6 +9633,10 @@ function handleGenerationEnded() {
     if (latest && !swipeTranslationJobs.has(latest.id)) {
         scheduleAutomaticTranslation(latest.id, 120);
     }
+
+    if (latest) schedulePotentialAssistantRevision(latest.id, 140);
+    setTimeout(() => scheduleRecentInsteadRevisionTranslations(160), 260);
+    setTimeout(() => scheduleRecentInsteadRevisionTranslations(160), 620);
 }
 
 /**
@@ -9758,7 +9833,12 @@ function setupEvents() {
         });
     }
     if (types.MESSAGE_UPDATED) {
-        source.on(types.MESSAGE_UPDATED, restoreTranslationAfterMessageUpdate);
+        source.on(types.MESSAGE_UPDATED, payload => {
+            restoreTranslationAfterMessageUpdate(payload);
+            schedulePotentialAssistantRevision(payload, 160);
+            setTimeout(() => schedulePotentialAssistantRevision(payload, 160), 360);
+            setTimeout(() => scheduleRecentInsteadRevisionTranslations(160), 520);
+        });
     }
 }
 
@@ -9770,6 +9850,7 @@ function setupObserver() {
             injectSettingsPanel();
             injectInputAction();
             refreshTranslationClasses();
+            schedulePotentialAssistantRevision(null, 180);
             scheduleRecentInsteadRevisionTranslations(180);
         }, 100);
     });

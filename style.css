@@ -399,9 +399,14 @@
     opacity: 0.28;
 }
 
-#verba-retranslate-latest {
+#verba-retranslate-latest,
+#verba-profile-toggle {
     position: relative;
-    top: -2px;
+    top: 0 !important;
+    bottom: auto !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    align-self: center !important;
 }
 
 .verba-input-icon {
@@ -423,6 +428,9 @@
     line-height: 1;
     cursor: pointer;
     opacity: 0.84;
+    vertical-align: middle;
+    align-self: center;
+    margin-block: 0 !important;
 }
 
 .verba-input-icon:hover,
@@ -502,6 +510,23 @@
 
 @keyframes verba-spin {
     to { transform: rotate(360deg); }
+}
+
+
+/* Verba's long-running translation indicator must never inherit a generic
+   gray toast fallback from theme/Toastr state changes. */
+#toast-container > .toast.verba-progress-toast,
+.toast.verba-progress-toast {
+    background-color: #5f9db4 !important;
+    background-image: none !important;
+    color: #fff !important;
+    opacity: 1 !important;
+}
+
+#toast-container > .toast.verba-progress-toast:hover,
+.toast.verba-progress-toast:hover {
+    background-color: #5f9db4 !important;
+    opacity: 1 !important;
 }
 
 .verba-bottom-notice {

@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.43';
+const EXTENSION_VERSION = '0.4.47';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -161,7 +161,6 @@ const DEFAULT_SETTINGS = {
     showSelectionSource: true,
     showSelectionLock: true,
     showSelectionBundle: true,
-    profileStats: null,
     globalPrompt: '',
     globalPromptEnabled: true,
     allDialoguePrompt: '',
@@ -201,7 +200,13 @@ extension_settings[EXTENSION_KEY] = Object.assign(
     extension_settings[EXTENSION_KEY] || {},
 );
 const settings = extension_settings[EXTENSION_KEY];
-settings.profileStats = normalizeProfileStats(settings.profileStats);
+
+// Performance stats are local telemetry, not configuration.
+// Keep them out of SillyTavern's global settings object.
+const legacyProfileStats = settings.profileStats;
+delete settings.profileStats;
+let profileStatsState = loadLocalProfileStats(legacyProfileStats);
+
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
 settings.developerMode = settings.developerMode === true;
 settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
@@ -1615,6 +1620,35 @@ function normalizeProfileStats(value) {
     }));
 }
 
+const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
+
+function loadLocalProfileStats(fallback = null) {
+    let stored = null;
+    try {
+        const raw = globalThis.localStorage?.getItem(PROFILE_STATS_STORAGE_KEY);
+        if (raw) stored = JSON.parse(raw);
+    } catch (error) {
+        console.warn('[베르바] 프로필 성능 기록 로컬 불러오기 실패', error);
+    }
+
+    const normalized = normalizeProfileStats(stored ?? fallback);
+    try {
+        globalThis.localStorage?.setItem(PROFILE_STATS_STORAGE_KEY, JSON.stringify(normalized));
+    } catch (error) {
+        console.warn('[베르바] 프로필 성능 기록 로컬 저장 실패', error);
+    }
+    return normalized;
+}
+
+function saveLocalProfileStats() {
+    profileStatsState = normalizeProfileStats(profileStatsState);
+    try {
+        globalThis.localStorage?.setItem(PROFILE_STATS_STORAGE_KEY, JSON.stringify(profileStatsState));
+    } catch (error) {
+        console.warn('[베르바] 프로필 성능 기록 로컬 저장 실패', error);
+    }
+}
+
 function profileSlotForId(profileId) {
     const id = String(profileId || '');
     return configuredProfiles().find(profile => profile.id === id)?.slot || 'A';
@@ -1622,31 +1656,29 @@ function profileSlotForId(profileId) {
 
 function recordProfileAttempt(slot, { success, elapsedMs, retry = false, fallback = false } = {}) {
     const normalizedSlot = ['A', 'B', 'C'].includes(slot) ? slot : 'A';
-    settings.profileStats = normalizeProfileStats(settings.profileStats);
-    const stat = settings.profileStats[normalizedSlot];
+    profileStatsState = normalizeProfileStats(profileStatsState);
+    const stat = profileStatsState[normalizedSlot];
     stat.requests += 1;
     stat.totalMs += Math.max(0, Math.round(Number(elapsedMs) || 0));
     if (success) stat.successes += 1;
     else stat.failures += 1;
     if (retry) stat.retries += 1;
-    // '대체'는 대체 프로필을 시도한 횟수가 아니라, 실제로 성공해
-    // 번역 응답으로 사용된 횟수만 집계한다.
     if (fallback && success) stat.fallbacks += 1;
-    saveSettings();
+    saveLocalProfileStats();
     renderProfileStats();
 }
 
 function recordOutputTranslation(slot, { success, elapsedMs } = {}) {
     const normalizedSlot = ['A', 'B', 'C'].includes(slot) ? slot : 'A';
-    settings.profileStats = normalizeProfileStats(settings.profileStats);
-    const stat = settings.profileStats[normalizedSlot];
+    profileStatsState = normalizeProfileStats(profileStatsState);
+    const stat = profileStatsState[normalizedSlot];
     const measuredMs = Math.max(0, Math.round(Number(elapsedMs) || 0));
     stat.outputJobs += 1;
     stat.outputTotalMs += measuredMs;
     stat.lastOutputMs = measuredMs;
     if (success) stat.outputSuccesses += 1;
     else stat.outputFailures += 1;
-    saveSettings();
+    saveLocalProfileStats();
     renderProfileStats();
 }
 
@@ -1700,9 +1732,9 @@ async function copyText(value) {
 function renderProfileStats() {
     const content = document.querySelector('#verba-profile-stats-content');
     if (!content) return;
-    settings.profileStats = normalizeProfileStats(settings.profileStats);
+    profileStatsState = normalizeProfileStats(profileStatsState);
     content.innerHTML = ['A', 'B', 'C'].map(slot => {
-        const stat = settings.profileStats[slot];
+        const stat = profileStatsState[slot];
         const successRate = stat.requests ? Math.round((stat.successes / stat.requests) * 100) : 0;
         const outputAverageSeconds = stat.outputJobs ? stat.outputTotalMs / stat.outputJobs / 1000 : 0;
         const outputAverageLabel = stat.outputJobs
@@ -3379,10 +3411,42 @@ async function translateOutputText(source, options = {}) {
     };
 }
 
+function inputIdentitySpellingContext() {
+    const context = liveContext();
+    const reference = currentCharacterReference();
+
+    const characterName = String(
+        reference?.character?.name
+        ?? reference?.character?.data?.name
+        ?? context.name2
+        ?? '',
+    ).trim().slice(0, 120);
+
+    const userName = String(context.name1 || '').trim().slice(0, 120);
+
+    // Existing Verba name locks are E→K. For input K→E, reuse only
+    // unambiguous Hangul→Latin pairs in reverse.
+    const exactNamePairs = normalizedCharacterNameLocks(reference?.character)
+        .filter(row => /[\uac00-\ud7a3]/u.test(row.target) && /[A-Za-z]/u.test(row.source))
+        .map(row => ({
+            korean: String(row.target).trim(),
+            english: String(row.source).trim(),
+        }))
+        .filter(row => row.korean && row.english)
+        .slice(0, 30);
+
+    return {
+        userName,
+        characterName,
+        exactNamePairs,
+    };
+}
+
 async function translateInputText(source, options = {}) {
     const expected = [{ id: 'seg_0000', type: 'user_input', text: source }];
     const targetGender = detectCharacterGender(currentCharacterReference()?.character);
-    const prompt = buildInputPrompt(source, settings, targetGender);
+    const identityContext = inputIdentitySpellingContext();
+    const prompt = buildInputPrompt(source, settings, targetGender, identityContext);
     const translations = await requestSegments(prompt, expected, { ...options, stage: options.stage || 'input-translation' });
     const result = String(translations.get('seg_0000') || '').trim();
     if (!result) throw new Error('인풋 번역 결과가 비어 있습니다.');
@@ -7812,7 +7876,8 @@ async function testConnection(button) {
         const source = '안녕하세요.';
         const expected = [{ id: 'seg_0000', type: 'user_input', text: source }];
         const targetGender = detectCharacterGender(currentCharacterReference()?.character);
-        const prompt = buildInputPrompt(source, settings, targetGender);
+        const identityContext = inputIdentitySpellingContext();
+        const prompt = buildInputPrompt(source, settings, targetGender, identityContext);
         const response = await sendProfileRequest(prompt, {
             profileId,
             profileSlot,
@@ -8084,7 +8149,7 @@ function injectSettingsPanel() {
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
                     <div class="verba-tool-details-content">
                         <div id="verba-profile-stats-content" class="verba-profile-stats-content"></div>
-                        <div class="verba-help">평균은 아웃풋 번역 시작부터 화면 적용 또는 실패 종료까지의 전체 시간이며, 나머지는 프로필 내부 요청 기록이에요.</div>
+                        <div class="verba-help">평균은 아웃풋 번역 시작부터 화면 적용 또는 실패 종료까지의 전체 시간이며, 나머지는 프로필 내부 요청 기록이에요. 성능 기록은 브라우저 로컬 저장소에만 저장하며 번역할 때 SillyTavern 전체 설정 저장을 호출하지 않습니다.</div>
                         <button type="button" id="verba-reset-profile-stats" class="menu_button verba-wide">성능 기록 초기화</button>
                     </div>
                 </details>
@@ -8891,8 +8956,8 @@ function injectSettingsPanel() {
     syncDebugCopyButton();
     panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
         if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
-        settings.profileStats = normalizeProfileStats(null);
-        saveSettings();
+        profileStatsState = normalizeProfileStats(null);
+        saveLocalProfileStats();
         renderProfileStats();
         notify('프로필 성능 기록을 초기화했어요.', 'success');
     });

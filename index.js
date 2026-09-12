@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.49';
+const EXTENSION_VERSION = '0.4.50';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -7833,11 +7833,54 @@ function createRetranslateButton() {
     button.id = 'verba-retranslate-latest';
     button.type = 'button';
     button.className = 'verba-input-icon';
-    button.textContent = '↻';
+    const glyph = document.createElement('span');
+    glyph.className = 'verba-retranslate-glyph';
+    glyph.textContent = '↻';
+    glyph.setAttribute('aria-hidden', 'true');
+    button.append(glyph);
     button.title = '아웃풋 번역 / 재번역';
     button.setAttribute('aria-label', button.title);
     button.addEventListener('click', retranslateLatestOutput);
     return button;
+}
+
+function alignVerbaInputButtons() {
+    const sendButton = document.querySelector('#send_but');
+    if (!sendButton) return;
+
+    const buttons = [
+        document.querySelector('#verba-profile-toggle'),
+        document.querySelector('#verba-retranslate-latest'),
+    ].filter(button => button && !button.hidden);
+
+    if (!buttons.length) return;
+
+    // Keep Verba controls as independent siblings. Only match their vertical
+    // centers to SillyTavern's send button so neighboring extension icons keep
+    // their own spacing and layout behavior.
+    for (const button of buttons) {
+        button.style.setProperty('top', '0px', 'important');
+    }
+
+    requestAnimationFrame(() => {
+        const sendRect = sendButton.getBoundingClientRect();
+        if (!sendRect.width || !sendRect.height) return;
+        const targetCenter = sendRect.top + (sendRect.height / 2);
+
+        for (const button of buttons) {
+            const rect = button.getBoundingClientRect();
+            if (!rect.width || !rect.height) continue;
+            const currentCenter = rect.top + (rect.height / 2);
+            const shift = Math.max(-12, Math.min(12, targetCenter - currentCenter));
+            button.style.setProperty('top', `${shift.toFixed(2)}px`, 'important');
+        }
+    });
+}
+
+function scheduleVerbaInputAlignment() {
+    requestAnimationFrame(alignVerbaInputButtons);
+    setTimeout(alignVerbaInputButtons, 80);
+    setTimeout(alignVerbaInputButtons, 260);
 }
 
 function injectInputAction() {
@@ -7857,6 +7900,7 @@ function injectInputAction() {
     }
     refreshProfileToggleButton();
     refreshRetranslateButton();
+    scheduleVerbaInputAlignment();
 }
 
 async function testConnection(button) {
@@ -9858,6 +9902,8 @@ function setupObserver() {
 }
 
 function initialize() {
+    window.addEventListener('resize', scheduleVerbaInputAlignment, { passive: true });
+    globalThis.visualViewport?.addEventListener?.('resize', scheduleVerbaInputAlignment, { passive: true });
     clearTransientTranslationSelections();
 
     const stalePanels = [...document.querySelectorAll('#verba-settings, .verba-settings')];

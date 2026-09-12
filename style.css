@@ -513,6 +513,37 @@
 }
 
 
+
+/* v0.4.50: profile/retranslate remain separate SillyTavern siblings.
+   JS aligns each button box to the send button's vertical center. */
+#verba-profile-toggle,
+#verba-retranslate-latest {
+    position: relative !important;
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    vertical-align: middle !important;
+}
+
+.verba-profile-arrows,
+.verba-retranslate-glyph {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.verba-retranslate-glyph {
+    font-size: 22px;
+}
+
 /* Verba's long-running translation indicator must never inherit a generic
    gray toast fallback from theme/Toastr state changes. */
 #toast-container > .toast.verba-progress-toast,

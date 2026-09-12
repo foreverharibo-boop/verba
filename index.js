@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.54';
+const EXTENSION_VERSION = '0.4.56';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -2921,6 +2921,7 @@ async function requestScopedGroupTranslations({
         nameTokens: nameTokensForSegments(segmented, targetSegments),
         tuning: options.tuning || null,
         scope,
+        speakerIdentity: options.speakerIdentity || {},
     });
 
     try {
@@ -8060,7 +8061,7 @@ function developerSettingsMarkup() {
 
                                 <label for="verba-developer-target-user-address">캐릭터 → USER 호칭 고정</label>
                                 <input id="verba-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
-                                <div class="verba-help">비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다. 입력해도 영어 you를 전부 호칭으로 치환하지 않고, 한국어에서 자연스럽게 직접 부르는 자리에서만 사용하도록 지시합니다.</div>
+                                <div class="verba-help">비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다. 입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고하며, 자연스러운 한국어에서는 생략할 수 있습니다. 원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</div>
                                 <div class="verba-help">현재 테스트 단계라 E→K 아웃풋의 TARGET CHARACTER 대사에만 적용합니다. USER/NPC 대사와 K→E 인풋에는 아직 적용하지 않습니다.</div>
                             </div>
                         </div>

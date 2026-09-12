@@ -824,14 +824,21 @@ function developerRelationshipExperimentBlock(settings = {}, scope = 'narration'
     const addressRules = address
         ? `USER ADDRESS LOCK
 - Configured TARGET CHARACTER → USER address form: ${JSON.stringify(address)}.
-- This lock governs only generic/underspecified second-person address to USER in TARGET CHARACTER dialogue.
-- Use the configured form only when Korean would naturally use a direct vocative/address term. Do NOT mechanically replace every English "you" with it; omit the address when Korean naturally omits it.
+- This lock applies ONLY when the TARGET CHARACTER is clearly addressing or referring to the CURRENT USER/PERSONA with a generic/underspecified second-person form.
+- Do NOT mechanically replace every English "you" with the configured address. If natural Korean would omit the subject/addressee, omit it. Use the configured address only where Korean would naturally include a direct vocative or explicit second-person address.
+- If the addressee of "you" is ambiguous, plural, quoted speech, another character, or otherwise not clearly the CURRENT USER/PERSONA, do NOT use the configured address.
+- EXPLICIT SOURCE PET NAMES / TERMS OF ENDEARMENT / VOCATIVES take priority over this generic USER address lock. Preserve and naturally translate affectionate or relationship-marked forms of address from the source instead of replacing them with the configured generic address.
+- Likewise, an explicitly stated source title, role, relationship term, kinship term, or name takes priority as semantic content. Preserve that source meaning instead of forcing the configured address.
 - Do not invent or alternate to another age-, kinship-, status-, or relationship-specific address form for USER merely from gender, age, intimacy, or context.
-- If the source explicitly states a DIFFERENT relationship/status/title as semantic content, preserve that explicit source meaning instead of rewriting the fact to match this vocative lock.`
+- Priority for TARGET CHARACTER → USER address handling:
+  1) explicit source pet name / vocative / title / relationship term / name,
+  2) configured generic USER address when the referent is clearly USER and Korean naturally wants an address,
+  3) natural Korean omission when no address is needed.`
         : `USER ADDRESS SAFETY — NO LOCK
 - No TARGET CHARACTER → USER address form is configured.
 - Do not invent 오빠/언니/형/누나/선배/선배님/사장님 or any other age-, kinship-, status-, or relationship-specific form of address merely from gender, age, intimacy, or social guesswork.
-- Use natural omission or a generic rendering unless the source or another explicit user prompt truly establishes the address.`;
+- Explicit source pet names, vocatives, titles, relationship terms, kinship terms, or names must still be preserved and naturally translated.
+- Otherwise prefer natural Korean omission or a generic rendering unless the source or another explicit user prompt truly establishes the address.`;
 
     return `DEVELOPER RELATIONSHIP TRANSLATION EXPERIMENT — TARGET CHARACTER → USER ONLY
 - EXPERIMENTAL: applies only to direct dialogue classified as TARGET CHARACTER speech in E→K output.
@@ -1736,6 +1743,20 @@ BANNED KOREAN WORDS — absolute, including particles or suffixes attached
 ${bannedWords.length ? bannedWords.join(', ') : '(없음)'}`;
 }
 
+function promptIdentityAliasBlock(speakerIdentity = {}) {
+    const characterName = String(speakerIdentity.characterName || '').trim() || '(current assistant character)';
+    const userName = String(speakerIdentity.userName || '').trim() || '(current user)';
+
+    return `IDENTITY ALIAS MAP — FOR INTERPRETING USER-AUTHORED PROMPT RULES
+- CURRENT USER / PERSONA canonical name: ${JSON.stringify(userName)}
+- CURRENT TARGET CHARACTER canonical name: ${JSON.stringify(characterName)}
+- In prompt instructions, the role labels USER / user / current user / current persona and the literal placeholder {{user}} all refer to the SAME person: ${JSON.stringify(userName)}.
+- In prompt instructions, the role labels TARGET CHARACTER / current character / CHARACTER / char and the literal placeholder {{char}} all refer to the SAME person: ${JSON.stringify(characterName)}.
+- Use this alias map to interpret conditional style rules such as rules that apply only when the character speaks to USER versus to someone else.
+- This alias map is semantic context for prompt instructions only. Do NOT replace ordinary source-content words, do NOT print the placeholders unless the source itself contains them, and do NOT invent that USER is the addressee when the dialogue context does not support it.
+- If a prompt condition says {{user}}, treat it exactly as the current USER/PERSONA named above; if it says {{char}}, treat it exactly as the current TARGET CHARACTER named above.`;
+}
+
 export function buildSpeakerAttributionPrompt(segmented, speakerIdentity = {}) {
     const characterName = String(speakerIdentity.characterName || '').trim() || '(current assistant character)';
     const userName = String(speakerIdentity.userName || '').trim() || '(current user)';
@@ -1745,6 +1766,8 @@ export function buildSpeakerAttributionPrompt(segmented, speakerIdentity = {}) {
 
 TARGET CHARACTER: ${JSON.stringify(characterName)}
 USER: ${JSON.stringify(userName)}
+
+${promptIdentityAliasBlock(speakerIdentity)}
 
 RULES
 - Read ALL SEGMENTS as one continuous assistant output before deciding.
@@ -1773,6 +1796,7 @@ export function buildScopedOutputPrompt({
     nameTokens = [],
     tuning = null,
     scope = 'narration',
+    speakerIdentity = {},
 }) {
     const payload = (segments || []).map(({ id, type, text }) => ({ id, type, text }));
     const dialogue = scope === 'target_dialogue' || scope === 'other_dialogue';
@@ -1780,6 +1804,8 @@ export function buildScopedOutputPrompt({
     const targetDialogue = scope === 'target_dialogue';
 
     return `${scopedOutputRules(settings, oneTimeInstruction, nameTokens, tuning, scope)}
+
+${promptIdentityAliasBlock(speakerIdentity)}
 
 TASK
 Produce exactly one translation output for every TRANSLATION TARGET. Korean is the required translated language; preserve/include source English only when an applicable user prompt explicitly requests bilingual or parallel-language output for this scope.
@@ -1827,6 +1853,8 @@ function speakerIdentityBlock(speakerIdentity = {}) {
 - TARGET CHARACTER: ${JSON.stringify(characterName)}
 - TARGET CHARACTER GENDER: ${JSON.stringify(characterGender)}
 - USER: ${JSON.stringify(userName)}
+- USER / user / current user / current persona / {{user}} are prompt-rule aliases for the same current USER/PERSONA: ${JSON.stringify(userName)}.
+- TARGET CHARACTER / current character / CHARACTER / char / {{char}} are prompt-rule aliases for the same current TARGET CHARACTER: ${JSON.stringify(characterName)}.
 - TARGET CHARACTER is the author of the current assistant output, but do not assume every quoted passage inside that output is spoken by them.
 - Infer who speaks each quoted passage from the entire supplied output: subject continuity, adjacent actions, pronouns, speech tags, turn order, and surrounding narration.
 - Classify each quoted passage so TARGET-CHARACTER and USER/NPC/OTHER dialogue can receive different speaker-specific prompts. Apply the TARGET-CHARACTER DIALOGUE PROMPT only to direct dialogue actually spoken by TARGET CHARACTER.
@@ -2247,6 +2275,7 @@ function inputIdentitySpellingBlock(identityContext = {}) {
     return `INPUT IDENTITY / NAME SPELLING — MINIMAL LOCAL CONTEXT
 - CURRENT USER / PERSONA CANONICAL NAME: ${JSON.stringify(userName || '(unknown)')}
 - CURRENT TARGET CHARACTER CANONICAL NAME: ${JSON.stringify(characterName || '(unknown)')}
+- PROMPT ROLE ALIASES: USER / user / current user / current persona / {{user}} = the CURRENT USER/PERSONA above; TARGET CHARACTER / current character / CHARACTER / char / {{char}} = the CURRENT TARGET CHARACTER above.
 - EXACT KOREAN → ENGLISH NAME SPELLINGS: ${JSON.stringify(exactNamePairs)}
 - This is spelling context only. It is NOT permission to add names where the Korean source used only a pronoun or omitted the subject.
 - When the source clearly names the current USER/PERSONA or TARGET CHARACTER, use the canonical spelling above instead of inventing a new romanization.

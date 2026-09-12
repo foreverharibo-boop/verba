@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.65';
+const EXTENSION_VERSION = '0.4.67';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -143,6 +143,9 @@ const TRANSLATION_RULE_DEFINITIONS = [
     { key: 'fineTuning', label: '관계 온도·현지화' },
 ];
 const DEFAULT_TRANSLATION_RULE_ORDER = TRANSLATION_RULE_DEFINITIONS.map(item => item.key);
+const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
+const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
+const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const DEFAULT_SETTINGS = {
     profileId: '',
     fallbackProfileId: '',
@@ -876,9 +879,6 @@ function saveSettings() {
 function normalizedPromptPresetName(value) {
     return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 60);
 }
-
-const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
-const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
 
 function normalizedPromptPresetSaveScope(value, translationSettings = null) {
     return value === PROMPT_PRESET_SCOPE_TRANSLATION
@@ -1906,8 +1906,6 @@ function normalizeProfileStats(value) {
         return [slot, stat];
     }));
 }
-
-const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 
 function loadLocalProfileStats(fallback = null) {
     let stored = null;

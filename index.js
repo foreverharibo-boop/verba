@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.72';
+const EXTENSION_VERSION = '0.4.73';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -4232,8 +4232,11 @@ function currentRecord(message, explicitId = null) {
         if (
             displayText.trim()
             && displayText !== source
-            && (!displayRecord || String(displayRecord.translation || '') === displayText)
+            && !displayRecord
         ) {
+            // Legacy-only fallback. If a Verba record exists but belongs to a
+            // different source hash, display_text is stale state from another
+            // swipe/revision and must never be relabelled as this source.
             const record = { swipeId, sourceHash, translation: displayText };
             rememberTranslationRecovery(messageId, source, record);
             return record;
@@ -4496,18 +4499,11 @@ function captureSwipeHold(messageId, message) {
 }
 
 function renderSwipeHold(messageId, job) {
-    if (!job?.hold?.html) return;
+    // Keep previous swipe translations cached in data, but never cover the
+    // newly generated/current answer with the previous translation.
     const messageElement = document.querySelector(`.mes[mesid="${Number(messageId)}"]`);
-    const textElement = messageElement?.querySelector('.mes_text:not(.verba-swipe-hold-content)');
-    if (!messageElement || !textElement) return;
-    let holdElement = messageElement.querySelector('.verba-swipe-hold-content');
-    if (!holdElement) {
-        holdElement = document.createElement('div');
-        holdElement.className = 'mes_text verba-swipe-hold-content';
-        textElement.insertAdjacentElement('afterend', holdElement);
-    }
-    if (holdElement.innerHTML !== job.hold.html) holdElement.innerHTML = job.hold.html;
-    messageElement.classList.add('verba-swipe-hold-active');
+    messageElement?.classList.remove('verba-swipe-hold-active');
+    messageElement?.querySelectorAll('.verba-swipe-hold-content').forEach(element => element.remove());
 }
 
 function releaseSwipeHold(messageId) {
@@ -10410,15 +10406,10 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
         // MESSAGE_SWIPED can fire before SillyTavern changes swipe_id. Never
         // translate the owned, previous swipe while that transition is pending.
         if (!message || (job.previousSignature && signature === job.previousSignature)) {
-            const restoredRecord = message && currentRecord(message);
-            if (
-                elapsed >= 650
-                && restoredRecord
-                && storedRecordSignature(restoredRecord) === job.previousSignature
-            ) {
-                restoreCurrentDisplay(id, message, restoredRecord);
-                finishSwipeTranslationJob(id, job);
-            } else if (elapsed < maxWaitMs) {
+            // MESSAGE_SWIPED may fire before SillyTavern advances swipe_id.
+            // Wait for the actual new source. Do not re-apply the previous
+            // translation during this transition.
+            if (elapsed < maxWaitMs) {
                 job.timer = setTimeout(check, 180);
             } else {
                 finishSwipeTranslationJob(id, job);
@@ -10596,6 +10587,7 @@ function scheduleFreshMountedAssistantTranslations(delay = 180) {
     for (let id = start; id < chat.length; id += 1) {
         const message = chat[id];
         if (!message || message.is_user || message.is_system) continue;
+        if (swipeTranslationJobs.has(id)) continue;
 
         const source = messageSource(message);
         const signature = messageVersionSignature(message);
@@ -10642,6 +10634,10 @@ function schedulePotentialAssistantRevision(payload = null, delay = 180, options
     const message = liveContext().chat?.[id];
     if (!message || message.is_user || message.is_system) return;
 
+    // A generated swipe owns this message until the new source settles.
+    // inSTead/revision fallbacks must not restore old translation state over it.
+    if (swipeTranslationJobs.has(id)) return;
+
     const source = messageSource(message);
     if (!source.trim() || isPredominantlyKorean(source) || !hasForeignText(source)) return;
     if (!document.querySelector(`.mes[mesid="${id}"]`)) return;
@@ -10670,6 +10666,7 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
     pruneInsteadRevisionSeen(now);
 
     chat.forEach((message, id) => {
+        if (swipeTranslationJobs.has(id)) return;
         const meta = insteadRevisionMeta(message);
         if (!meta) return;
 

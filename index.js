@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.47';
+const EXTENSION_VERSION = '0.4.48';
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
 const SOURCE_VIEW_KEY = 'verba_source_view';
@@ -202,9 +202,9 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 const settings = extension_settings[EXTENSION_KEY];
 
 // Performance stats are local telemetry, not configuration.
-// Keep them out of SillyTavern's global settings object.
+// Read the old persisted value only as a migration fallback.
+// Never delete or rewrite that legacy key during startup or translation.
 const legacyProfileStats = settings.profileStats;
-delete settings.profileStats;
 let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
@@ -366,10 +366,7 @@ delete settings.preserveNumbers;
 delete settings.preservePerspective;
 delete settings.preserveFormatting;
 settings.debugMode = settings.debugMode === true;
-if (settings.maxTokens !== 15000) {
-    settings.maxTokens = 15000;
-    liveContext().saveSettingsDebounced?.();
-}
+const VERBA_MAX_TOKENS = 15000;
 
 const pendingOutputs = new Map();
 const pendingSentInputs = new WeakMap();
@@ -520,7 +517,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             relationTemperature: String(settings.relationTemperature || ''),
             narrationLocalizationLevel: String(settings.narrationLocalizationLevel || ''),
             dialogueLocalizationLevel: String(settings.dialogueLocalizationLevel || ''),
-            maxTokens: Number(settings.maxTokens) || 0,
+            maxTokens: VERBA_MAX_TOKENS,
             timeoutSeconds: Number(settings.timeoutSeconds) || 0,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
@@ -1971,7 +1968,7 @@ async function sendProfileRequest(prompt, options = {}) {
             const response = await service.sendRequest(
                 profileId,
                 [{ role: 'user', content: prompt }],
-                Math.min(32768, Math.max(512, Number(settings.maxTokens) || 15000)),
+                VERBA_MAX_TOKENS,
                 { signal: controller.signal },
             );
             if (!extractResponseText(response).trim()) throw new Error('AI가 빈 응답을 반환했습니다.');

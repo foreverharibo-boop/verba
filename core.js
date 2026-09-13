@@ -1243,6 +1243,8 @@ FACT, REFERENT, AND FORCE LOCK
 - Preserve the source's specificity. Do not turn generic bedding into goose down, a fee into a contractual penalty, or mild movement into struggling.
 - Keep an established human identity intact. For the known TARGET CHARACTER and USER, do not render personal he/she/him/her or possessive his/her references as “그/그녀/그의/그녀의”. First omit the subject or possessor, or restructure the sentence naturally, whenever the referent remains clear in Korean.
 - If omission would make the actor, recipient, or owner ambiguous, use that person's established name directly. Use the name only where clarity requires it; do not mechanically repeat it in every sentence.
+- Do not over-omit names. At a speaker change, a new direct-dialogue paragraph, or an alternating action sequence between TARGET CHARACTER and USER, explicitly name the speaker or actor at the first natural narration beat whenever a Korean reader could momentarily assign the line or action to the other person.
+- Consecutive dialogue paragraphs by the same person still require unmistakable attribution when a paragraph break or intervening action could reset the perceived speaker. Merge or restructure the passage naturally, or state the established name once. Never make the reader backtrack or rely on gender-coded wording to discover who spoke.
 - Never rotate through “남자/여자/상대/사람/사내/청년/작은 몸” or similar substitute labels for a named TARGET CHARACTER or USER. Generic role labels remain allowed only for genuinely unnamed NPCs when context requires them. A body phrase is allowed only when the body itself is the actual focus.
 - A figurative image is style, not scene truth. If it is unnatural in Korean, replace it with an equally warm/harsh native effect or omit it. If retained, never change its subject or social force and never add a new insult, threat, slang, or joke.
 
@@ -1271,6 +1273,7 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 - Did any fact, referent, role, direction, body mechanic, force, register, consent, or explicitness change?
 - Did Korean naturalization add slang, insult, threat, restraint, sentiment, specificity, or comic improvisation?
 - Does any dialogue sound translated, staged, old-fashioned, or unlike something this person would say aloud?
+- At every new dialogue paragraph and speaker transition, can a Korean reader identify the speaker immediately without backtracking? If not, add the established name at one natural attribution point or restructure the passage.
 - Is any sentence decorative, redundant, vague, grammatically malformed, physically impossible, or inconsistent in terminology?
 - Did a known TARGET CHARACTER or USER become “그/그녀/남자/여자/상대/사람/사내/청년” even though full context identifies that person? If yes, omit the reference naturally or use the canonical name.
 

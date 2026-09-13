@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.103';
+const EXTENSION_VERSION = '0.5.1';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3430,6 +3430,17 @@ function repairKoreanParticleAlternatives(value) {
         }
         return hasBatchim ? withBatchim : withoutBatchim;
     };
+
+    // Resolve malformed cross-pair notation such as 담은(이)는. Treat its two
+    // visible choices as alternatives; this cleanup is shared by selection,
+    // candidate, and bundled retranslation.
+    result = result.replace(
+        /([가-힣]+)\s*\(\s*이\s*\)\s*는(?=$|[\s\p{P}\p{S}])/gu,
+        (whole, noun) => {
+            const desired = desiredParticle(noun, '이', '는');
+            return desired ? noun + desired : whole;
+        },
+    );
 
     for (const [withBatchim, withoutBatchim] of particlePairs) {
         const left = escapeRegularExpression(withBatchim);

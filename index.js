@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.93';
+const EXTENSION_VERSION = '0.4.94';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8883,6 +8883,7 @@ function developerSettingsMarkup() {
                                 <span>문장을 적극적으로 쪼개고 합치며, 한국어식 생략·동작 중심 서술·대사 종결과 정보 순서로 서술과 모든 화자의 대사를 전면 재구성합니다.</span>
                                 <span>번역투·과잉 수식·비문이 남거나 영어 원문을 역추적할 수 있는 문장은 출력 전에 다시 쓰도록 강제합니다.</span>
                                 <span>핵심 규칙을 맨 앞에 배치해 중간급 모델도 사실·강도·행위자와 대상 관계를 우선 확인합니다.</span>
+                                <span>장면에 필요 없는 영어 수식어는 모두 옮기지 않고 덜어내며, 같은 장소·사물은 한 가지 자연스러운 명칭으로 유지합니다.</span>
                                 <span>자연스러움을 이유로 부드러운 행동을 거칠게 만들거나, 지지하는 손길에 구속·도주 의미를 추가하지 않습니다.</span>
                                 <span>야한 장면도 과장된 AI 야설 문구보다 정확하고 담백한 한국어 동작 서술을 우선합니다.</span>
                                 <span><b>활성화 중에는 김홍진의 맛을 제외한 모든 저장 지침·전역/대사 프롬프트·미세 조정·다른 개발자 실험을 AI 요청에서 자동 제외합니다.</b></span>

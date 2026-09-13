@@ -27,6 +27,7 @@ import {
     hasKorean,
     hashText,
     isPredominantlyKorean,
+    normalizeStructuredMetadataTranslation,
     parseSegmentResponse,
     parseSelectionCandidateResponse,
     replaceOutsideProtected,
@@ -36,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.91';
+const EXTENSION_VERSION = '0.4.92';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3629,6 +3630,17 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
     return translations;
 }
 
+function normalizeTaggedOutputTranslations(segmented, translations) {
+    for (const segment of segmented?.segments || []) {
+        if (segment.type !== 'tagged_content' || !translations.has(segment.id)) continue;
+        translations.set(
+            segment.id,
+            normalizeStructuredMetadataTranslation(translations.get(segment.id)),
+        );
+    }
+    return translations;
+}
+
 async function repairSegmentsByOutputScope({
     invalid,
     segmented,
@@ -3665,7 +3677,13 @@ async function repairSegmentsByOutputScope({
 
     for (const [segments, repaired] of results) {
         for (const segment of segments) {
-            translations.set(segment.id, repaired.get(segment.id));
+            const value = repaired.get(segment.id);
+            translations.set(
+                segment.id,
+                segment.type === 'tagged_content'
+                    ? normalizeStructuredMetadataTranslation(value)
+                    : value,
+            );
         }
     }
 }
@@ -4066,11 +4084,11 @@ async function translateOutputText(source, options = {}) {
         ...options,
         speakerIdentity,
     });
-    const translations = await requestScopedOutputTranslations(segmented, speakerScopes, {
+    const translations = normalizeTaggedOutputTranslations(segmented, await requestScopedOutputTranslations(segmented, speakerScopes, {
         ...options,
         speakerIdentity,
         stage: options.stage || 'output-translation',
-    });
+    }));
 
     for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
         const invalid = segmented.segments.filter(segment =>
@@ -4129,6 +4147,8 @@ async function translateOutputText(source, options = {}) {
         speakerIdentity,
         options,
     });
+
+    normalizeTaggedOutputTranslations(segmented, translations);
 
     runDeveloperRegisterShiftMonitor(segmented, translations, speakerScopes);
 
@@ -8858,16 +8878,18 @@ function developerSettingsMarkup() {
                                 <span>미친 한출의 맛 사용</span>
                             </label>
                             <div class="verba-help verba-hongjin-help">
-                                <span><b>장면의 사실만 설계도로 남기고, 한국어 원고를 백지에서 다시 씁니다.</b></span>
+                                <span><b>장면의 사실과 강도를 그대로 둔 채, 한국어 원고를 백지에서 다시 씁니다.</b></span>
                                 <span>사실·사건 순서·화자·관계·감정 방향은 지키되 영어 문장과 한국어 문장의 1:1 대응, 영어 어순·수식·비유·호흡은 허용하지 않습니다.</span>
                                 <span>문장을 적극적으로 쪼개고 합치며, 한국어식 생략·동작 중심 서술·대사 종결과 정보 순서로 서술과 모든 화자의 대사를 전면 재구성합니다.</span>
-                                <span>번역투가 남거나 영어 원문을 역추적할 수 있는 문장은 출력 전에 다시 쓰도록 강제합니다.</span>
+                                <span>번역투·과잉 수식·비문이 남거나 영어 원문을 역추적할 수 있는 문장은 출력 전에 다시 쓰도록 강제합니다.</span>
+                                <span>자연스러움을 이유로 부드러운 행동을 거칠게 만들거나, 지지하는 손길에 구속·도주 의미를 추가하지 않습니다.</span>
+                                <span>야한 장면도 과장된 AI 야설 문구보다 정확하고 담백한 한국어 동작 서술을 우선합니다.</span>
                                 <span><b>활성화 중에는 김홍진의 맛을 제외한 모든 저장 지침·전역/대사 프롬프트·미세 조정·다른 개발자 실험을 AI 요청에서 자동 제외합니다.</b></span>
                                 <span>기존 설정값은 변경하거나 삭제하지 않습니다. 이 기능을 끄면 이전 설정이 그대로 다시 적용됩니다.</span>
                                 <span>김홍진의 맛도 켜져 있으면 해당 지침만 캐릭터 대사에 함께 적용합니다.</span>
                                 <span>일반 번역 뒤 재작성하는 방식이 아니라 첫 요청에서 바로 최종 한국어를 만드는 단일 단계입니다.</span>
                                 <span>E→K 아웃풋과 선택 재번역에 적용하며 K→E 인풋에는 적용하지 않습니다.</span>
-                                <span>표현은 과감하게 바꿔도 새 사건·행동·소품·장소·대사·관계·동의·설정은 만들지 않으며 보호 토큰과 출력 형식은 그대로 유지합니다.</span>
+                                <span>표현은 과감하게 바꿔도 새 사건·행동·소품·장소·대사·관계·동의·설정은 만들지 않으며, 인포 패널의 보이는 영어도 빠짐없이 번역합니다.</span>
                             </div>
                         </div>
                     </details>

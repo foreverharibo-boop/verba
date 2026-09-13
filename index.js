@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.3';
+const EXTENSION_VERSION = '0.5.5';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -67,6 +67,12 @@ const DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS = [
 
 const DEVELOPER_AUDIENCE_REGISTER_OPTIONS = [
     { value: 'unset', label: '미설정' },
+    { value: 'banmal', label: '반말' },
+    { value: 'jondaetmal', label: '존댓말' },
+];
+
+const DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS = [
+    { value: 'source', label: '원문·문맥' },
     { value: 'banmal', label: '반말' },
     { value: 'jondaetmal', label: '존댓말' },
 ];
@@ -219,6 +225,8 @@ const DEFAULT_SETTINGS = {
     developerRegisterShiftMonitor: false,
     developerHongjinFlavorEnabled: false,
     developerMadKoreanOutputEnabled: false,
+    developerMadKoreanTargetToUserRegister: 'source',
+    developerMadKoreanUserToTargetRegister: 'source',
     developerHongjinTranscreation: 'strong',
     developerHongjinProfanity: 'natural',
     developerHongjinTeasing: 'natural',
@@ -348,6 +356,12 @@ settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.so
 settings.developerRegisterShiftMonitor = settings.developerRegisterShiftMonitor === true;
 settings.developerHongjinFlavorEnabled = settings.developerHongjinFlavorEnabled === true;
 settings.developerMadKoreanOutputEnabled = settings.developerMadKoreanOutputEnabled === true;
+settings.developerMadKoreanTargetToUserRegister = DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.some(option => option.value === settings.developerMadKoreanTargetToUserRegister)
+    ? settings.developerMadKoreanTargetToUserRegister
+    : 'source';
+settings.developerMadKoreanUserToTargetRegister = DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.some(option => option.value === settings.developerMadKoreanUserToTargetRegister)
+    ? settings.developerMadKoreanUserToTargetRegister
+    : 'source';
 
 function madKoreanExclusiveMode() {
     return settings.developerMode === true
@@ -1982,6 +1996,12 @@ function renderCurrentAppliedRules() {
                 ['우선순위', priority],
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['미친 한출의 맛', settings.developerMode && settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
+                ['캐릭터 → USER 말투', madKoreanExclusiveMode()
+                    ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanTargetToUserRegister)?.label || '원문·문맥')
+                    : '적용 안 함'],
+                ['USER → 캐릭터 말투', madKoreanExclusiveMode()
+                    ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanUserToTargetRegister)?.label || '원문·문맥')
+                    : '적용 안 함'],
                 ['김홍진의 맛', settings.developerMode && settings.developerHongjinFlavorEnabled === true ? 'ON' : 'OFF'],
                 ['김홍진 연령대', settings.developerMode && settings.developerHongjinFlavorEnabled === true
                     ? (DEVELOPER_HONGJIN_AGE_OPTIONS.find(option => option.value === settings.developerHongjinAgeBand)?.label || '미지정')
@@ -8919,24 +8939,24 @@ function developerSettingsMarkup() {
                                 <input type="checkbox" id="verba-developer-mad-korean-enabled" ${settings.developerMadKoreanOutputEnabled ? 'checked' : ''}>
                                 <span>미친 한출의 맛 사용</span>
                             </label>
+                            <div id="verba-developer-mad-korean-controls" class="${settings.developerMadKoreanOutputEnabled ? '' : 'verba-control-disabled'}">
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-mad-korean-target-user-register">캐릭터 → USER</label>
+                                    <select id="verba-developer-mad-korean-target-user-register" class="text_pole">
+                                        ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+                                </section>
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-mad-korean-user-target-register">USER → 캐릭터</label>
+                                    <select id="verba-developer-mad-korean-user-target-register" class="text_pole">
+                                        ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanUserToTargetRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+                                </section>
+                            </div>
                             <div class="verba-help verba-hongjin-help">
-                                <span><b>장면의 사실만 고정하고 모든 문장을 파괴한 뒤, 한국어 원고를 백지에서 다시 씁니다.</b></span>
-                                <span>사실·사건 순서·화자·관계·감정 방향은 지키되 영어 문장과 한국어 문장의 1:1 대응, 영어 어순·수식·비유·호흡은 허용하지 않습니다.</span>
-                                <span>문장을 적극적으로 쪼개고 합치며, 한국어식 생략·동작 중심 서술·대사 종결과 정보 순서로 서술과 모든 화자의 대사를 전면 재구성합니다.</span>
-                                <span>번역투·과잉 수식·비문이 남거나 영어 원문을 역추적할 수 있는 문장은 출력 전에 다시 쓰도록 강제합니다.</span>
-                                <span>핵심 규칙을 맨 앞에 배치해 중간급 모델도 사실·강도·행위자와 대상 관계를 우선 확인합니다.</span>
-                                <span>장면에 필요 없는 영어 수식어는 모두 옮기지 않고 덜어내며, 같은 장소·사물은 한 가지 자연스러운 명칭으로 유지합니다.</span>
-                                <span>인물을 여자·상대·사람 같은 일반 명사로 바꿔 부르지 않고, 불필요한 감정 해설과 어색한 수식 결합을 제거합니다.</span>
-                                <span>영어식 선언문을 실제 한국어 제안·결정 말투로 다시 쓰고, 홈시어터 같은 반복 장소 명칭을 끝까지 통일합니다.</span>
-                                <span>한국어 구어체를 거친 남성 말투나 유행어로 과장하지 않으며, 영어식 농담은 같은 온도의 자연스러운 농담으로만 바꿉니다.</span>
-                                <span>자연스러움을 이유로 부드러운 행동을 거칠게 만들거나, 지지하는 손길에 구속·도주 의미를 추가하지 않습니다.</span>
-                                <span>야한 장면도 과장된 AI 야설 문구보다 정확하고 담백한 한국어 동작 서술을 우선합니다.</span>
-                                <span><b>활성화 중에는 김홍진의 맛을 제외한 모든 저장 지침·전역/대사 프롬프트·미세 조정·다른 개발자 실험을 AI 요청에서 자동 제외합니다.</b></span>
-                                <span>기존 설정값은 변경하거나 삭제하지 않습니다. 이 기능을 끄면 이전 설정이 그대로 다시 적용됩니다.</span>
-                                <span>김홍진의 맛도 켜져 있으면 해당 지침만 캐릭터 대사에 함께 적용합니다.</span>
-                                <span>일반 번역 뒤 재작성하는 방식이 아니라 첫 요청에서 바로 최종 한국어를 만드는 단일 단계입니다.</span>
-                                <span>E→K 아웃풋과 선택 재번역에 적용하며 K→E 인풋에는 적용하지 않습니다.</span>
-                                <span>표현은 과감하게 바꿔도 새 사건·행동·소품·장소·대사·관계·동의·설정은 만들지 않으며, 인포 패널의 보이는 영어도 빠짐없이 번역합니다.</span>
+                                <span>사실·관계·강도는 유지하고 영문 구조를 버린 뒤, 처음부터 자연스러운 한국어로 씁니다.</span>
+                                <span>두 사람의 말투를 방향별로 고정할 수 있으며 NPC 대사에는 적용하지 않습니다.</span>
+                                <span><b>사용 중에는 김홍진의 맛만 함께 적용되고 나머지 프롬프트는 전송하지 않습니다. 기존 설정값은 유지됩니다.</b></span>
                             </div>
                         </div>
                     </details>
@@ -9128,6 +9148,16 @@ function syncDeveloperQualityControls(root = document.querySelector('#verba-sett
         qualityControls.classList.toggle('verba-control-disabled', !enabled);
         qualityControls.querySelectorAll('input').forEach(input => {
             input.disabled = !enabled;
+        });
+    }
+
+    const madKoreanMaster = root?.querySelector('#verba-developer-mad-korean-enabled');
+    const madKoreanControls = root?.querySelector('#verba-developer-mad-korean-controls');
+    if (madKoreanControls) {
+        const madKoreanEnabled = Boolean(madKoreanMaster?.checked);
+        madKoreanControls.classList.toggle('verba-control-disabled', !madKoreanEnabled);
+        madKoreanControls.querySelectorAll('select').forEach(control => {
+            control.disabled = !madKoreanEnabled;
         });
     }
 
@@ -9873,6 +9903,25 @@ function injectSettingsPanel() {
 
         if (target.id === 'verba-developer-mad-korean-enabled' && target instanceof HTMLInputElement) {
             settings.developerMadKoreanOutputEnabled = target.checked;
+            saveSettings();
+            syncDeveloperQualityControls(panel);
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-developer-mad-korean-target-user-register' && target instanceof HTMLSelectElement) {
+            settings.developerMadKoreanTargetToUserRegister = DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'source';
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-developer-mad-korean-user-target-register' && target instanceof HTMLSelectElement) {
+            settings.developerMadKoreanUserToTargetRegister = DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'source';
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;

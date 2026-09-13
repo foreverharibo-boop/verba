@@ -5,6 +5,7 @@ import {
     assembleTranslation,
     buildBannedRepairPrompt,
     buildInputPrompt,
+    buildMadKoreanRewritePrompt,
     buildMultiSelectionPrompt,
     buildNameHistoryFormsPrompt,
     buildNameMatchPrompt,
@@ -36,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.88';
+const EXTENSION_VERSION = '0.4.89';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -893,7 +894,10 @@ function showProgress(message, options = {}) {
 
 function showInputProgress(controller) {
     return showProgress('인풋을 영어로 번역 중입니다…', {
-        onCancel: () => controller.abort(),
+        onCancel: () => {
+            controller.abort();
+            refreshRetranslateButton();
+        },
     });
 }
 
@@ -2455,10 +2459,11 @@ function abortPendingOutput(messageId, reason) {
     ));
 }
 
-function activeOutputTranslationControllers() {
+function activeTranslationControllers() {
     return [
         ...[...pendingOutputs.values()].map(pending => pending.controller),
         ...pendingSelectionTranslations,
+        ...pendingInputControllers,
     ];
 }
 
@@ -2472,7 +2477,17 @@ function untrackSelectionTranslation(controller) {
     refreshRetranslateButton();
 }
 
-function abortActiveOutputTranslations(reason) {
+function trackInputTranslation(controller) {
+    pendingInputControllers.add(controller);
+    refreshRetranslateButton();
+}
+
+function untrackInputTranslation(controller) {
+    pendingInputControllers.delete(controller);
+    refreshRetranslateButton();
+}
+
+function abortActiveTranslations(reason) {
     let cancelled = 0;
     for (const pending of pendingOutputs.values()) {
         if (pending.controller.signal.aborted) continue;
@@ -2480,6 +2495,11 @@ function abortActiveOutputTranslations(reason) {
         cancelled += 1;
     }
     for (const controller of pendingSelectionTranslations) {
+        if (controller.signal.aborted) continue;
+        controller.abort(reason);
+        cancelled += 1;
+    }
+    for (const controller of pendingInputControllers) {
         if (controller.signal.aborted) continue;
         controller.abort(reason);
         cancelled += 1;
@@ -3595,6 +3615,50 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
     return translations;
 }
 
+async function runDeveloperMadKoreanRewrite({
+    segmented,
+    translations,
+    speakerScopes,
+    speakerIdentity,
+    options,
+}) {
+    if (!settings.developerMode || !settings.developerMadKoreanOutputEnabled) return;
+
+    const groups = [...segmentsGroupedByOutputScope(segmented.segments, speakerScopes).entries()]
+        .filter(([, segments]) => segments.length);
+    const results = await runWithConcurrency(
+        groups,
+        SCOPED_PARALLEL_REQUEST_LIMIT,
+        async ([scope, segments]) => {
+            const prompt = buildMadKoreanRewritePrompt({
+                segments,
+                currentTranslations: translations,
+                sourceContext: segmented.protectedText,
+                settings,
+                oneTimeInstruction: options.oneTimeInstruction || '',
+                speakerIdentity,
+                nameTokens: nameTokensForSegments(segmented, segments),
+                tuning: options.tuning || null,
+                scope,
+            });
+            const rewritten = await requestSegments(prompt, segments, {
+                ...options,
+                parallelRequest: true,
+                stage: `mad-korean-rewrite:${scope}`,
+            });
+            return [segments, rewritten];
+        },
+    );
+
+    for (const [segments, rewritten] of results) {
+        for (const segment of segments) {
+            const value = String(rewritten.get(segment.id) || '').trim();
+            if (!value) throw new Error(`미친 한출 재집필 결과가 비어 있습니다: ${segment.id}`);
+            translations.set(segment.id, value);
+        }
+    }
+}
+
 async function repairSegmentsByOutputScope({
     invalid,
     segmented,
@@ -4032,6 +4096,14 @@ async function translateOutputText(source, options = {}) {
         ...options,
         speakerIdentity,
         stage: options.stage || 'output-translation',
+    });
+
+    await runDeveloperMadKoreanRewrite({
+        segmented,
+        translations,
+        speakerScopes,
+        speakerIdentity,
+        options,
     });
 
     for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
@@ -6460,9 +6532,9 @@ async function jumpToOutputMessage(messageId) {
 }
 
 async function retranslateLatestOutput() {
-    const activeControllers = activeOutputTranslationControllers();
+    const activeControllers = activeTranslationControllers();
     if (activeControllers.some(controller => !controller.signal.aborted)) {
-        const cancelled = abortActiveOutputTranslations(outputAbortReason(
+        const cancelled = abortActiveTranslations(outputAbortReason(
             'VERBA_OUTPUT_USER_CANCELLED',
             '사용자가 번역 요청을 취소했습니다.',
             true,
@@ -6546,7 +6618,7 @@ async function translateInputAndSend(textarea, sendButton, source) {
     if (inputBusy) return;
     inputBusy = true;
     const controller = new AbortController();
-    pendingInputControllers.add(controller);
+    trackInputTranslation(controller);
     const toast = showInputProgress(controller);
     try {
         const translated = await translateInputText(source, { signal: controller.signal });
@@ -6564,7 +6636,7 @@ async function translateInputAndSend(textarea, sendButton, source) {
         }
     } finally {
         clearProgress(toast);
-        pendingInputControllers.delete(controller);
+        untrackInputTranslation(controller);
         inputBusy = false;
     }
 }
@@ -6592,7 +6664,7 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
     }
     inputBusy = true;
     const controller = new AbortController();
-    pendingInputControllers.add(controller);
+    trackInputTranslation(controller);
     const toast = showInputProgress(controller);
     try {
         const translated = await translateInputText(source, { signal: controller.signal });
@@ -6609,7 +6681,7 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         blockGenerationAndRestore(textarea, source);
     } finally {
         clearProgress(toast);
-        pendingInputControllers.delete(controller);
+        untrackInputTranslation(controller);
         inputBusy = false;
     }
 }
@@ -6624,7 +6696,7 @@ async function translateSentInputMessage(payload) {
     if (!source.trim() || !hasKorean(source)) return;
 
     const controller = new AbortController();
-    pendingInputControllers.add(controller);
+    trackInputTranslation(controller);
     const toast = showInputProgress(controller);
     const work = (async () => {
         try {
@@ -6652,7 +6724,7 @@ async function translateSentInputMessage(payload) {
         await work;
     } finally {
         clearProgress(toast);
-        pendingInputControllers.delete(controller);
+        untrackInputTranslation(controller);
         pendingSentInputs.delete(message);
     }
 }
@@ -8592,14 +8664,14 @@ function refreshRetranslateButton() {
     const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
     const target = latestAssistantMessage();
-    const activeControllers = activeOutputTranslationControllers();
+    const activeControllers = activeTranslationControllers();
     const busy = activeControllers.length > 0;
     const cancelling = busy && activeControllers.every(controller => controller.signal.aborted);
     const failed = target
         ? failedOutputSignatures.get(target.id) === messageVersionSignature(target.message)
         : false;
-    // Any active output/selection translation makes this one global cancel
-    // control. Disable it only during the brief abort cleanup.
+    // Any active output, selection, or input translation makes this one global
+    // cancel control. Disable it only during the brief abort cleanup.
     button.disabled = (!target && !busy) || cancelling;
     button.classList.toggle('verba-busy', busy);
     button.classList.toggle('verba-cancelling', cancelling);
@@ -8608,7 +8680,7 @@ function refreshRetranslateButton() {
     button.title = cancelling
         ? '베르바 번역 취소 중'
         : busy
-            ? '베르바 번역 중 · 눌러서 취소'
+            ? '베르바 번역 중 · 눌러서 모두 취소'
             : failed || !translated
                 ? '최근 아웃풋 번역 또는 다시 시도'
                 : '아웃풋 재번역 · 최근/이전 선택';

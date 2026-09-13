@@ -2340,6 +2340,61 @@ SEGMENTS
 ${JSON.stringify(payload)}`;
 }
 
+export function buildMadKoreanRewritePrompt({
+    segments,
+    currentTranslations,
+    sourceContext,
+    settings,
+    oneTimeInstruction = '',
+    speakerIdentity = {},
+    nameTokens = [],
+    tuning = null,
+    scope = 'narration',
+}) {
+    const translations = currentTranslations instanceof Map
+        ? currentTranslations
+        : new Map(Object.entries(currentTranslations || {}));
+    const payload = (segments || []).map(segment => ({
+        id: String(segment.id || ''),
+        type: String(segment.type || ''),
+        source: String(segment.text || ''),
+        draft_korean: String(translations.get(segment.id) || ''),
+    }));
+
+    return `${scopedOutputRules(settings, oneTimeInstruction, nameTokens, tuning, scope)}
+
+${promptIdentityAliasBlock(speakerIdentity)}
+
+MAD KOREAN RE-AUTHORING PASS — MANDATORY
+The first Korean translation is only a semantic draft and has FAILED the requested style because it still follows the source sentences. Do not lightly polish or synonym-swap that draft.
+
+PROCESS — perform silently
+1. Read SOURCE CONTEXT and every source segment to recover only the scene truth: facts, actions, chronology, speaker/addressee, relationships, intent, emotional direction, characterization, explicitness, point of view, and meaningful ambiguity.
+2. Forget the source wording, English syntax, sentence boundaries, clause order, rhetoric, and the draft's sentence construction.
+3. Write the same scene again from a blank page as original contemporary Korean web-fiction/RP prose or genuinely spoken Korean dialogue.
+4. Compare the rewrite against the scene truth and repair only factual drift. Do not restore source-shaped sentences during that check.
+
+REJECTION RULES
+- A sentence-by-sentence translation, lightly edited draft, clause-order copy, one-to-one sentence match, or dictionary-synonym replacement is INVALID even when fluent.
+- Do not begin consecutive ideas in the same order merely because the source or draft does. Rebuild Korean information flow and emphasis while preserving actual event chronology.
+- Do not retain an English metaphor, body-part construction, explicit subject, possessive chain, filter phrase, connective, question shape, or dialogue cadence when a Korean author would stage the same meaning differently.
+- Return a substantially re-authored Korean value for EVERY id. Surface resemblance to source or draft should be minimal except for names, protected terminology, unavoidable facts, quotations required by format, and fixed tokens.
+
+SAFETY
+- Do not invent, delete, reverse, soften, or intensify story content. Preserve consent/refusal, negation, threats, sexual acts, physical positions, numbers, relationships, and who does what to whom exactly.
+- Preserve every protected token and all required Markdown/HTML/code/output formatting exactly. Obey banned words and applicable user prompts.
+- SOURCE CONTEXT is reference only. Return only the requested segment translations as valid JSON.
+
+Return exactly:
+{"segments":[{"id":"seg_0000","translation":"완전히 다시 쓴 한국어"}]}
+
+SOURCE CONTEXT — scene reference only
+${JSON.stringify(boundReference(sourceContext, 30000))}
+
+SOURCE + FAILED FIRST DRAFT
+${JSON.stringify(payload)}`;
+}
+
 function koreanPragmaticWarningBlock(source) {
     const text = String(source || '');
 
@@ -3042,6 +3097,10 @@ export function buildSelectionPrompt({
         ? boundReference(translation, contextMode === 'message' ? 20000 : 16000)
         : `${left}${selected}${right}`;
     const inDialogue = selectionTouchesDialogue(translation, start, end);
+    const madSelectionRewrite = developerMadKoreanOutputBlock(
+        settings,
+        inDialogue ? 'mixed' : 'narration',
+    );
     const multipleCandidates = Number(candidateCount) > 1;
     const outputRule = multipleCandidates
         ? `- Return exactly three distinct Korean replacement candidates for only the selected fragment.
@@ -3060,7 +3119,9 @@ ABSOLUTE TRANSLATION BASELINE
 ${baseTranslationPrompt(settings, inDialogue ? 'mixed' : 'scoped')}
 
 RULES
-- Find the part of ORIGINAL SOURCE that corresponds semantically to SELECTED KOREAN FRAGMENT.
+${madSelectionRewrite ? `${madSelectionRewrite}
+- For this selection, do not merely swap synonyms. Reconstruct the selected fragment's Korean syntax and rhythm from its contextual meaning while keeping it grammatically compatible with LEFT and RIGHT CONTEXT.
+` : ''}- Find the part of ORIGINAL SOURCE that corresponds semantically to SELECTED KOREAN FRAGMENT.
 ${outputRule}
 - Preserve its meaning, referent, tense, intensity, explicitness, and grammatical role.
 - Make the replacement connect naturally to LEFT CONTEXT and RIGHT CONTEXT.
@@ -3140,6 +3201,7 @@ export function buildMultiSelectionPrompt({
         };
     });
     const hasDialogue = rows.some(row => row.in_dialogue);
+    const madSelectionRewrite = developerMadKoreanOutputBlock(settings, 'mixed');
     const schema = JSON.stringify({
         segments: rows.map(row => ({ id: row.id, translation: 'replacement only' })),
     });
@@ -3149,7 +3211,9 @@ ABSOLUTE TRANSLATION BASELINE
 ${baseTranslationPrompt(settings, 'mixed')}
 
 RULES
-- Return exactly one Korean replacement for every supplied selection id.
+${madSelectionRewrite ? `${madSelectionRewrite}
+- For every selection, do not merely swap synonyms. Reconstruct its Korean syntax and rhythm from contextual meaning while keeping it grammatically compatible with that row's LEFT and RIGHT CONTEXT.
+` : ''}- Return exactly one Korean replacement for every supplied selection id.
 - Replace only each selected fragment, not its surrounding context and not any other part of the message.
 - Every replacement must be genuinely different from its selected_korean value after whitespace normalization. A retranslation request is not satisfied by echoing the existing wording.
 - Even when ONE-TIME REQUEST is empty, rephrase each selected fragment by changing natural Korean syntax, word choice, or rhythm without changing its meaning.

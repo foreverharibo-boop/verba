@@ -825,6 +825,20 @@
     font-size: 0.88em !important;
 }
 
+.verba-base-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+#verba-base-editor textarea {
+    width: 100%;
+    min-height: 150px;
+    max-height: 55vh;
+    resize: vertical;
+    font-size: 0.85em;
+}
+
 .verba-selection-actions {
     position: fixed !important;
     z-index: 2147483646 !important;

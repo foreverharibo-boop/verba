@@ -1,5 +1,6 @@
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
 import { messageFormatting, showMoreMessages } from '../../../../script.js';
+import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -35,7 +36,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.80';
+const EXTENSION_VERSION = '0.4.82';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -286,6 +287,7 @@ let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
 settings.developerMode = settings.developerMode === true;
+settings.baseTranslationCustom = normalizeBaseTranslationCustom(settings.baseTranslationCustom);
 settings.developerAccessFingerprint = String(settings.developerAccessFingerprint || '');
 if (
     settings.developerMode
@@ -4964,15 +4966,10 @@ async function translateMessage(messageId, options = {}) {
                     'VERBA_SWIPE_CHANGED',
                     'VERBA_CHAT_CHANGED',
                     'VERBA_OUTPUT_STALE',
-                    'VERBA_OUTPUT_USER_CANCELLED',
                 ].includes(silentCode);
 
                 if (allowedSilentAbort) {
-                    if (silentCode === 'VERBA_OUTPUT_USER_CANCELLED') {
-                        console.info('[베르바] 사용자가 출력 번역 요청을 취소했습니다.');
-                    } else {
-                        console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
-                    }
+                    console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
                     outputJobSuperseded = true;
                     outputJobSuccess = false;
                     failedOutputSignatures.delete(id);
@@ -6426,16 +6423,7 @@ async function retranslateLatestOutput() {
         return;
     }
     if (pendingOutputs.has(target.id)) {
-        const pending = pendingOutputs.get(target.id);
-        if (!pending?.controller.signal.aborted) {
-            abortPendingOutput(target.id, outputAbortReason(
-                'VERBA_OUTPUT_USER_CANCELLED',
-                '사용자가 번역 요청을 취소했습니다.',
-                true,
-            ));
-            notify('번역 요청을 취소했어요.', 'info');
-            refreshRetranslateButton();
-        }
+        notify('최근 아웃풋을 아직 번역 중이에요.', 'info');
         return;
     }
 
@@ -8549,26 +8537,19 @@ function refreshRetranslateButton() {
     const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
     const target = latestAssistantMessage();
-    const pending = target ? pendingOutputs.get(target.id) : null;
-    const busy = Boolean(pending);
-    const cancelling = Boolean(pending?.controller.signal.aborted);
+    const busy = target ? pendingOutputs.has(target.id) : false;
     const failed = target
         ? failedOutputSignatures.get(target.id) === messageVersionSignature(target.message)
         : false;
-    // Keep the spinning button clickable so a second tap can cancel the
-    // in-flight request. Disable it only during the brief abort cleanup.
-    button.disabled = !target || cancelling;
+    button.disabled = !target || busy;
     button.classList.toggle('verba-busy', busy);
-    button.classList.toggle('verba-cancelling', cancelling);
     button.classList.toggle('verba-retry-needed', failed && !busy);
     const translated = target ? Boolean(currentRecord(target.message)) : false;
-    button.title = cancelling
-        ? '최근 아웃풋 번역 취소 중'
-        : busy
-            ? '최근 아웃풋 번역 중 · 눌러서 취소'
-            : failed || !translated
-                ? '최근 아웃풋 번역 또는 다시 시도'
-                : '아웃풋 재번역 · 최근/이전 선택';
+    button.title = busy
+        ? '최근 아웃풋 번역 중'
+        : failed || !translated
+            ? '최근 아웃풋 번역 또는 다시 시도'
+            : '아웃풋 재번역 · 최근/이전 선택';
     button.setAttribute('aria-label', button.title);
 }
 
@@ -8742,6 +8723,7 @@ function developerSettingsMarkup() {
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+                    ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
 
                     <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab" open>
                         <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
@@ -9559,6 +9541,7 @@ function injectSettingsPanel() {
             </div>
         </div>`;
     host.append(panel);
+    bindBaseTranslationEditor(panel, settings, { save: saveSettings, notify });
     refreshProfileSelect();
     renderNameLockManager();
     renderProfileStats();

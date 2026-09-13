@@ -4,7 +4,9 @@ const escape = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll(
     .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 
 function migratedPrompt(raw, draft = false) {
-    const direct = draft ? raw.draft?.prompt : raw.prompt;
+    const direct = draft
+        ? (typeof raw.draft === 'string' ? raw.draft : raw.draft?.prompt)
+        : raw.prompt;
     if (typeof direct === 'string') return direct;
 
     const legacyContainer = draft && raw.draft && typeof raw.draft === 'object'
@@ -61,7 +63,7 @@ export function baseTranslationEditorMarkup(state) {
             <input id="verba-base-name" class="text_pole" maxlength="60" value="${escape(state.name)}" placeholder="전용 프리셋 이름" aria-label="기본 지침 프리셋 이름">
             <div class="verba-base-buttons">
                 <button type="button" class="menu_button" data-verba-base-action="new" title="새 프리셋 저장" aria-label="새 프리셋 저장">새로 저장</button>
-                <button type="button" class="menu_button" data-verba-base-action="overwrite" title="선택 프리셋 덮어쓰기" aria-label="선택 프리셋 덮어쓰기" ${state.selectedId ? '' : 'disabled'}>덮어쓰기</button>
+                <button type="button" class="menu_button" data-verba-base-action="rename" title="선택 프리셋 이름 변경" aria-label="선택 프리셋 이름 변경" ${state.selectedId ? '' : 'disabled'}>이름 변경</button>
                 <button type="button" class="menu_button" data-verba-base-action="delete" title="선택 프리셋 삭제" aria-label="선택 프리셋 삭제" ${state.selectedId ? '' : 'disabled'}>삭제</button>
             </div>
             <label for="verba-base-prompt">기본 번역 지침</label>
@@ -149,24 +151,47 @@ export function bindBaseTranslationEditor(panel, settings, { save, notify, confi
             if (!preset || !confirm(`기본 지침 프리셋 “${preset.name}”을 삭제할까요? 현재 지침은 유지됩니다.`)) return;
             state().presets = state().presets.filter(row => row.id !== preset.id);
             state().selectedId = '';
-        } else if (action === 'apply' || action === 'new' || action === 'overwrite') {
+        } else if (action === 'rename') {
+            const preset = state().presets.find(row => row.id === state().selectedId);
+            const name = state().name.trim();
+            if (!preset) return;
+            if (!name) {
+                notify('변경할 프리셋 이름을 입력해 주세요.', 'warning');
+                return;
+            }
+            state().presets = state().presets.map(row => (
+                row.id === preset.id ? { ...row, name } : row
+            ));
+            state().name = name;
+        } else if (action === 'apply' || action === 'new') {
             if (!validDraft()) return;
-            if (action !== 'apply') {
+            if (action === 'new') {
                 const name = state().name.trim();
                 if (!name) { notify('전용 프리셋 이름을 입력해 주세요.', 'warning'); return; }
-                const previous = state().presets.find(row => row.id === state().selectedId);
-                if (action === 'overwrite' && !previous) return;
-                const id = action === 'overwrite' ? previous.id : (globalThis.crypto?.randomUUID?.() || `base-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+                const id = globalThis.crypto?.randomUUID?.() || `base-${Date.now()}-${Math.random().toString(36).slice(2)}`;
                 const preset = { id, name, prompt: state().draft };
-                if (action === 'overwrite') state().presets = state().presets.map(row => row.id === id ? preset : row);
-                else state().presets.push(preset);
+                state().presets.push(preset);
                 state().selectedId = id;
                 state().name = name;
             }
             applyDraft();
+            if (action === 'apply' && state().selectedId) {
+                state().presets = state().presets.map(row => (
+                    row.id === state().selectedId ? { ...row, prompt: state().prompt } : row
+                ));
+            }
         } else return;
         save();
         render();
-        notify(action === 'delete' ? '전용 프리셋을 삭제했어요.' : action === 'restore' ? '기본 번역 지침을 복원했어요.' : '기본 번역 지침을 저장하고 적용했어요.', 'success');
+        notify(
+            action === 'delete'
+                ? '전용 프리셋을 삭제했어요.'
+                : action === 'restore'
+                    ? '기본 번역 지침을 복원했어요.'
+                    : action === 'rename'
+                        ? '전용 프리셋 이름을 변경했어요.'
+                        : '기본 번역 지침을 저장하고 적용했어요.',
+            'success',
+        );
     });
 }

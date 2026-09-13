@@ -1069,6 +1069,17 @@ const DEVELOPER_HONGJIN_AGE_RULES = {
 - Use Korean vocabulary and conversational rhythm plausibly compatible with an adult in their forties or older, guided by the source personality and setting. Do not force archaic speech, authoritarian endings, period-drama diction, or age stereotypes.`,
 };
 
+const DEVELOPER_HONGJIN_OPPA_FREQUENCY_RULES = {
+    off: `SELF-REFERENCE AS “오빠” — DO NOT ADD
+- Do not introduce “오빠” as a new self-reference. Preserve it only when the source itself explicitly contains the equivalent self-reference.`,
+    rare: `SELF-REFERENCE AS “오빠” — OCCASIONAL
+- When TARGET CHARACTER is clearly speaking directly to the CURRENT USER/PERSONA, he may naturally refer to himself as “오빠” instead of “나/내가” at most once across the full response, only at a particularly fitting affectionate, teasing, coaxing, or smug beat. Zero uses is acceptable when no line fits.`,
+    natural: `SELF-REFERENCE AS “오빠” — NATURAL
+- When TARGET CHARACTER is clearly speaking directly to the CURRENT USER/PERSONA, selectively use “오빠/오빠가/오빠는” as his self-reference where a contemporary Korean speaker would naturally do so for affectionate, teasing, coaxing, or smug emphasis. Usually one or two well-placed uses across a response are enough; do not repeat it in nearby lines.`,
+    often: `SELF-REFERENCE AS “오빠” — FREQUENT
+- When TARGET CHARACTER is clearly speaking directly to the CURRENT USER/PERSONA, actively prefer “오빠/오빠가/오빠는” over “나/내가/나는” in compatible affectionate, teasing, coaxing, or smug lines. Use it regularly across the response, but not in every sentence or twice in the same utterance.`,
+};
+
 function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
     if (
         settings?.developerMode !== true
@@ -1096,6 +1107,13 @@ function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
     const ageKey = Object.hasOwn(DEVELOPER_HONGJIN_AGE_RULES, settings?.developerHongjinAgeBand)
         ? settings.developerHongjinAgeBand
         : 'unspecified';
+    const oppaFrequencyKey = Object.hasOwn(DEVELOPER_HONGJIN_OPPA_FREQUENCY_RULES, settings?.developerHongjinOppaFrequency)
+        ? settings.developerHongjinOppaFrequency
+        : 'off';
+    const oppaSelfReferenceSafety = oppaFrequencyKey === 'off'
+        ? `- This control is OFF. Do not use the added “오빠” self-reference example or infer permission to introduce it. Preserve “오빠” only when the source explicitly contains that self-reference.`
+        : `- “오빠” in this block is strictly TARGET CHARACTER's self-reference: for example, “내가 해줄게” may become “오빠가 해줄게.” Never translate a source second-person “you” as “오빠.” Never make USER/NPC call TARGET CHARACTER “오빠,” and never use it while TARGET CHARACTER is addressing an NPC/OTHER person.
+- If TARGET CHARACTER is clearly not male, or if the addressee or speaker is ambiguous, do not use the added “오빠” self-reference. It is a playful/affectionate speech device authorized by this setting, not evidence of literal sibling kinship and not permission to alter age, gender, hierarchy, relationship, consent, or scene facts.`;
 
     return `DEVELOPER KIM HONGJIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY
 - EXPERIMENTAL E→K voice transcreation layer.
@@ -1111,6 +1129,9 @@ function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
 - Never apply this block to narration, USER/NPC/OTHER-speaker dialogue, quoted speech spoken by someone else, tagged content outside TARGET CHARACTER dialogue, or K→E input.
 
 ${DEVELOPER_HONGJIN_AGE_RULES[ageKey]}
+
+${DEVELOPER_HONGJIN_OPPA_FREQUENCY_RULES[oppaFrequencyKey]}
+${oppaSelfReferenceSafety}
 
 ${DEVELOPER_HONGJIN_TRANSCREATION_RULES[transcreationKey]}
 

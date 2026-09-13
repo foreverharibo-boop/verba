@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.100';
+const EXTENSION_VERSION = '0.4.101';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -114,6 +114,13 @@ const DEVELOPER_HONGJIN_AGE_OPTIONS = [
     { value: 'late20s', label: '20대 후반' },
     { value: 'thirties', label: '30대' },
     { value: 'fortiesPlus', label: '40대 이상' },
+];
+
+const DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS = [
+    { value: 'off', label: '사용 안 함' },
+    { value: 'rare', label: '가끔' },
+    { value: 'natural', label: '자연스럽게' },
+    { value: 'often', label: '자주' },
 ];
 
 const LOCALIZATION_LEVEL_OPTIONS = [
@@ -218,6 +225,7 @@ const DEFAULT_SETTINGS = {
     developerHongjinVulgarity: 'natural',
     developerHongjinPlayfulness: 'natural',
     developerHongjinAgeBand: 'unspecified',
+    developerHongjinOppaFrequency: 'off',
     expressionEmphasisTaste: 'default',
     expressionDisfluencyTaste: 'default',
     expressionIdiomMetaphorTaste: 'default',
@@ -364,6 +372,9 @@ settings.developerHongjinPlayfulness = DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.som
 settings.developerHongjinAgeBand = DEVELOPER_HONGJIN_AGE_OPTIONS.some(option => option.value === settings.developerHongjinAgeBand)
     ? settings.developerHongjinAgeBand
     : 'unspecified';
+settings.developerHongjinOppaFrequency = DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.some(option => option.value === settings.developerHongjinOppaFrequency)
+    ? settings.developerHongjinOppaFrequency
+    : 'off';
 settings.expressionEmphasisTaste = ['default', 'source', 'natural', 'active'].includes(settings.expressionEmphasisTaste)
     ? settings.expressionEmphasisTaste
     : 'default';
@@ -1974,6 +1985,9 @@ function renderCurrentAppliedRules() {
                 ['김홍진의 맛', settings.developerMode && settings.developerHongjinFlavorEnabled === true ? 'ON' : 'OFF'],
                 ['김홍진 연령대', settings.developerMode && settings.developerHongjinFlavorEnabled === true
                     ? (DEVELOPER_HONGJIN_AGE_OPTIONS.find(option => option.value === settings.developerHongjinAgeBand)?.label || '미지정')
+                    : '적용 안 함'],
+                ['김홍진 오빠 자칭', settings.developerMode && settings.developerHongjinFlavorEnabled === true
+                    ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
                     ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외`
@@ -9066,6 +9080,12 @@ function developerSettingsMarkup() {
                                 </select>
                                 <div class="verba-help">대사의 어휘·호흡만 연령대에 맞춥니다. 20대 초반·후반은 무조건 현대적이고 캐주얼하게 말하며, 실제 나이·관계·호칭은 새로 만들지 않습니다.</div>
 
+                                <label for="verba-developer-hongjin-oppa-frequency">자기 자신을 ‘오빠’라고 부르는 빈도</label>
+                                <select id="verba-developer-hongjin-oppa-frequency" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinOppaFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">현재 캐릭터가 USER에게 직접 말할 때만 ‘내가’ 대신 ‘오빠가’처럼 자신을 지칭합니다. NPC·타인과의 대사에는 사용하지 않습니다.</div>
+
                                 <div class="verba-help verba-hongjin-help">
                                     <span>E→K 아웃풋의 TARGET CHARACTER 직접 대사에만 적용합니다.</span>
                                     <span>서술·USER/NPC 대사·K→E 인풋에는 적용하지 않습니다.</span>
@@ -9891,6 +9911,14 @@ function injectSettingsPanel() {
             settings.developerHongjinAgeBand = DEVELOPER_HONGJIN_AGE_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'unspecified';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-oppa-frequency' && target instanceof HTMLSelectElement) {
+            settings.developerHongjinOppaFrequency = DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'off';
             saveSettings();
             return;
         }

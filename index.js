@@ -5,7 +5,6 @@ import {
     assembleTranslation,
     buildBannedRepairPrompt,
     buildInputPrompt,
-    buildMadKoreanRewritePrompt,
     buildMultiSelectionPrompt,
     buildNameHistoryFormsPrompt,
     buildNameMatchPrompt,
@@ -37,7 +36,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.89';
+const EXTENSION_VERSION = '0.4.90';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -330,6 +329,12 @@ settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.so
 settings.developerRegisterShiftMonitor = settings.developerRegisterShiftMonitor === true;
 settings.developerHongjinFlavorEnabled = settings.developerHongjinFlavorEnabled === true;
 settings.developerMadKoreanOutputEnabled = settings.developerMadKoreanOutputEnabled === true;
+
+function madKoreanExclusiveMode() {
+    return settings.developerMode === true
+        && settings.developerMadKoreanOutputEnabled === true;
+}
+
 settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === settings.developerHongjinTranscreation)
     ? settings.developerHongjinTranscreation
     : 'strong';
@@ -1952,6 +1957,9 @@ function renderCurrentAppliedRules() {
                 ['우선순위', priority],
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['미친 한출의 맛', settings.developerMode && settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
+                ['E→K 프롬프트 전송', madKoreanExclusiveMode()
+                    ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외`
+                    : '기존 설정 전체 적용'],
             ])}
         </div>`;
 }
@@ -3008,6 +3016,7 @@ function segmentContainsRoleTerm(segment, terms) {
 }
 
 async function planRepeatedRoleTermLocks(segmented, options = {}) {
+    if (madKoreanExclusiveMode()) return [];
     const terms = repeatedRoleTerms(segmented?.segments);
     if (!terms.length) return [];
 
@@ -3080,6 +3089,7 @@ function protectedTokensIntact(previous, next) {
 }
 
 async function repairRepeatedRoleTermConsistency(segmented, translations, options = {}) {
+    if (madKoreanExclusiveMode()) return;
     // Unlike the pre-translation lock (which handles exact repeated source terms),
     // this final pass also compares different role/title words that may point to
     // the same person, e.g. manager -> team lead. If context confirms the same
@@ -3466,7 +3476,9 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
     const dialogueSegments = (segmented?.segments || []).filter(segment => segment.type === 'dialogue_candidate');
     const scopes = Object.fromEntries(dialogueSegments.map(segment => [segment.id, 'other_dialogue']));
 
-    const needsSpeakerIsolation = Boolean(
+    const needsSpeakerIsolation = madKoreanExclusiveMode()
+        ? false
+        : Boolean(
         (settings.dialoguePromptEnabled !== false && String(settings.dialoguePrompt || '').trim())
         || (settings.otherDialoguePromptEnabled !== false && String(settings.otherDialoguePrompt || '').trim())
         || String(settings.dialogueEndingPreferred || '').trim()
@@ -3568,7 +3580,9 @@ async function requestScopedGroupTranslations({
 async function requestScopedOutputTranslations(segmented, speakerScopes, options = {}) {
     const translations = new Map();
     const groups = segmentsGroupedByOutputScope(segmented.segments, speakerScopes);
-    const strictIsolationNeeded = Boolean(
+    const strictIsolationNeeded = madKoreanExclusiveMode()
+        ? false
+        : Boolean(
         (settings.dialoguePromptEnabled !== false && String(settings.dialoguePrompt || '').trim())
         || (settings.otherDialoguePromptEnabled !== false && String(settings.otherDialoguePrompt || '').trim())
         || String(settings.dialogueEndingPreferred || '').trim()
@@ -3613,50 +3627,6 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
     }
 
     return translations;
-}
-
-async function runDeveloperMadKoreanRewrite({
-    segmented,
-    translations,
-    speakerScopes,
-    speakerIdentity,
-    options,
-}) {
-    if (!settings.developerMode || !settings.developerMadKoreanOutputEnabled) return;
-
-    const groups = [...segmentsGroupedByOutputScope(segmented.segments, speakerScopes).entries()]
-        .filter(([, segments]) => segments.length);
-    const results = await runWithConcurrency(
-        groups,
-        SCOPED_PARALLEL_REQUEST_LIMIT,
-        async ([scope, segments]) => {
-            const prompt = buildMadKoreanRewritePrompt({
-                segments,
-                currentTranslations: translations,
-                sourceContext: segmented.protectedText,
-                settings,
-                oneTimeInstruction: options.oneTimeInstruction || '',
-                speakerIdentity,
-                nameTokens: nameTokensForSegments(segmented, segments),
-                tuning: options.tuning || null,
-                scope,
-            });
-            const rewritten = await requestSegments(prompt, segments, {
-                ...options,
-                parallelRequest: true,
-                stage: `mad-korean-rewrite:${scope}`,
-            });
-            return [segments, rewritten];
-        },
-    );
-
-    for (const [segments, rewritten] of results) {
-        for (const segment of segments) {
-            const value = String(rewritten.get(segment.id) || '').trim();
-            if (!value) throw new Error(`미친 한출 재집필 결과가 비어 있습니다: ${segment.id}`);
-            translations.set(segment.id, value);
-        }
-    }
 }
 
 async function repairSegmentsByOutputScope({
@@ -3870,6 +3840,8 @@ function strongKoreanRegisterProfile(value) {
 
 function runDeveloperRegisterShiftMonitor(segmented, translations, speakerScopes) {
     if (
+        madKoreanExclusiveMode()
+        ||
         !settings.developerMode
         || !settings.developerRelationshipExperimentEnabled
         || !settings.developerRegisterShiftMonitor
@@ -3968,7 +3940,9 @@ async function runExperimentalQualityAudit({
     speakerIdentity,
     options,
 }) {
-    if (!settings.developerMode || !settings.qualityAuditEnabled) return { checked: 0, changed: 0 };
+    if (madKoreanExclusiveMode() || !settings.developerMode || !settings.qualityAuditEnabled) {
+        return { checked: 0, changed: 0 };
+    }
 
     const suspects = localQualityAuditCandidates(segmented, translations, speakerScopes);
     if (!suspects.size) {
@@ -4096,14 +4070,6 @@ async function translateOutputText(source, options = {}) {
         ...options,
         speakerIdentity,
         stage: options.stage || 'output-translation',
-    });
-
-    await runDeveloperMadKoreanRewrite({
-        segmented,
-        translations,
-        speakerScopes,
-        speakerIdentity,
-        options,
     });
 
     for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
@@ -8895,6 +8861,10 @@ function developerSettingsMarkup() {
                                 <span><b>내용만 살리고 원문 문장은 죽입니다.</b></span>
                                 <span>사실·사건 순서·화자·관계·감정 방향 등 장면의 진실만 유지하고, 영어 어순·문장 구조·표현·비유·호흡은 보존하지 않습니다.</span>
                                 <span>서술과 모든 화자의 대사를 한국인 작가가 처음부터 한국어로 쓴 것처럼 전면 재작성합니다.</span>
+                                <span><b>활성화 중에는 김홍진의 맛을 제외한 모든 저장 지침·전역/대사 프롬프트·미세 조정·다른 개발자 실험을 AI 요청에서 자동 제외합니다.</b></span>
+                                <span>기존 설정값은 변경하거나 삭제하지 않습니다. 이 기능을 끄면 이전 설정이 그대로 다시 적용됩니다.</span>
+                                <span>김홍진의 맛도 켜져 있으면 해당 지침만 캐릭터 대사에 함께 적용합니다.</span>
+                                <span>일반 번역 뒤 재작성하는 방식이 아니라 첫 요청에서 바로 최종 한국어를 만드는 단일 단계입니다.</span>
                                 <span>E→K 아웃풋과 선택 재번역에 적용하며 K→E 인풋에는 적용하지 않습니다.</span>
                                 <span>새 사건·행동·관계·동의·설정은 만들지 않으며 보호 토큰과 출력 형식은 그대로 유지합니다.</span>
                             </div>

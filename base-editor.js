@@ -1,35 +1,57 @@
-import { defaultBaseTranslationPrompt } from './core.js';
+import { defaultBaseTranslationPrompt, legacyBaseTranslationPrompt } from './core.js';
 
-const modes = ['scoped', 'mixed'];
 const escape = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 
+function migratedPrompt(raw, draft = false) {
+    const direct = draft ? raw.draft?.prompt : raw.prompt;
+    if (typeof direct === 'string') return direct;
+
+    const legacyContainer = draft && raw.draft && typeof raw.draft === 'object'
+        ? raw.draft
+        : raw;
+    const scoped = typeof legacyContainer.scoped === 'string' ? legacyContainer.scoped : '';
+    const mixed = typeof legacyContainer.mixed === 'string' ? legacyContainer.mixed : '';
+    const unchangedLegacyDefaults = scoped === legacyBaseTranslationPrompt('scoped')
+        && mixed === legacyBaseTranslationPrompt('mixed');
+    if (unchangedLegacyDefaults) return defaultBaseTranslationPrompt();
+    if (scoped && scoped !== legacyBaseTranslationPrompt('scoped')) return scoped;
+    if (mixed && mixed !== legacyBaseTranslationPrompt('mixed')) return mixed;
+    return scoped || mixed || defaultBaseTranslationPrompt();
+}
+
 export function normalizeBaseTranslationCustom(value) {
     const raw = value && typeof value === 'object' ? value : {};
-    const result = { enabled: raw.enabled === true, selectedId: '', name: String(raw.name || '').slice(0, 60), presets: [], draft: {} };
-    for (const mode of modes) {
-        result[mode] = typeof raw[mode] === 'string' && raw[mode].trim()
-            ? raw[mode] : defaultBaseTranslationPrompt(mode);
-        result.draft[mode] = typeof raw.draft?.[mode] === 'string' ? raw.draft[mode] : result[mode];
-    }
+    const prompt = migratedPrompt(raw);
+    const draft = migratedPrompt(raw, true);
+    const result = {
+        enabled: raw.enabled === true && Boolean(prompt.trim()),
+        selectedId: '',
+        name: String(raw.name || '').slice(0, 60),
+        presets: [],
+        prompt: prompt.trim() ? prompt : defaultBaseTranslationPrompt(),
+        draft,
+    };
     const ids = new Set();
     for (const row of Array.isArray(raw.presets) ? raw.presets : []) {
         if (!row || typeof row.id !== 'string' || !row.id || ids.has(row.id)
             || typeof row.name !== 'string' || !row.name.trim()
-            || modes.some(mode => typeof row[mode] !== 'string' || !row[mode].trim())) continue;
+        ) continue;
+        const presetPrompt = migratedPrompt(row);
+        if (!presetPrompt.trim()) continue;
         ids.add(row.id);
-        result.presets.push({ id: row.id, name: row.name.trim().slice(0, 60), scoped: row.scoped, mixed: row.mixed });
+        result.presets.push({ id: row.id, name: row.name.trim().slice(0, 60), prompt: presetPrompt });
     }
     if (result.presets.some(row => row.id === raw.selectedId)) result.selectedId = raw.selectedId;
     return result;
 }
 
 export function baseTranslationEditorMarkup(state) {
-    const changed = modes.some(mode => state.draft[mode] !== state[mode]);
+    const changed = state.draft !== state.prompt;
     return `<details id="verba-base-editor" class="verba-tool-details">
         <summary>기본 번역 지침 편집 <small>전용 프리셋</small></summary>
         <div class="verba-tool-details-content">
-            <div class="verba-help">내장 기본 지침을 대체합니다. 필수 출력 형식·기존 사용자 프롬프트·미세조정·이름 고정·금지어는 별도로 유지됩니다. 분리·통합 번역과 해당 복구 요청에 적용되며, 인풋·선택 재번역·별도 검수 지침은 편집하지 않습니다.</div>
+            <div class="verba-help">베르바가 모든 아웃풋 번역에 기본으로 보내는 번역 지침입니다. 필수 출력 형식·구간 처리와 기존 사용자 프롬프트·미세조정·이름 고정·금지어는 베르바가 별도로 붙입니다.</div>
             <label class="verba-check-row"><input id="verba-base-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span>저장한 기본 지침 사용</span></label>
             <div class="verba-help">개발자 모드를 끄면 기본값을 사용합니다. 편집 내용과 전용 프리셋은 보관됩니다.</div>
             <select id="verba-base-preset" class="text_pole" aria-label="기본 지침 전용 프리셋">
@@ -42,20 +64,14 @@ export function baseTranslationEditorMarkup(state) {
                 <button type="button" class="menu_button" data-verba-base-action="overwrite" title="선택 프리셋 덮어쓰기" aria-label="선택 프리셋 덮어쓰기" ${state.selectedId ? '' : 'disabled'}>덮어쓰기</button>
                 <button type="button" class="menu_button" data-verba-base-action="delete" title="선택 프리셋 삭제" aria-label="선택 프리셋 삭제" ${state.selectedId ? '' : 'disabled'}>삭제</button>
             </div>
-            <label for="verba-base-scoped">분리 번역용 기본 지침</label>
-            <div class="verba-help">캐릭터별 대사 지침·말끝 선호/회피·말끝 반복 줄이기를 사용하면, 서술과 화자별 대사를 구분해 요청합니다. 각 요청에서 이 기본 지침을 사용합니다.</div>
-            <textarea id="verba-base-scoped" class="text_pole" rows="10" spellcheck="false">${escape(state.draft.scoped)}</textarea>
-            <details class="verba-tool-details">
-                <summary>통합 번역용 기본 지침</summary>
-                <div class="verba-help">위의 분리 조건이 없으면 서술·대사를 한 요청으로 번역하며 이 기본 지침을 사용합니다. 실패 시 전환하는 기능이 아닙니다. 프리셋에는 두 지침이 함께 저장되며, 일반 번역 요청에는 해당 방식의 지침 하나만 들어갑니다.</div>
-                <textarea id="verba-base-mixed" class="text_pole" rows="10" spellcheck="false" aria-label="통합 번역 기본 지침">${escape(state.draft.mixed)}</textarea>
-            </details>
-            <small id="verba-base-status">${state.enabled ? '저장한 지침 적용 중' : '기본값 사용 중'}${changed ? ' · 미적용 편집 내용 있음' : ''} · 분리 ${state.draft.scoped.length.toLocaleString()}자 / 통합 ${state.draft.mixed.length.toLocaleString()}자</small>
+            <label for="verba-base-prompt">기본 번역 지침</label>
+            <textarea id="verba-base-prompt" class="text_pole" rows="14" spellcheck="false">${escape(state.draft)}</textarea>
+            <small id="verba-base-status">${state.enabled ? '저장한 지침 적용 중' : '기본값 사용 중'}${changed ? ' · 미적용 편집 내용 있음' : ''} · ${state.draft.length.toLocaleString()}자</small>
             <div class="verba-base-buttons">
                 <button type="button" class="menu_button" data-verba-base-action="apply">저장·적용</button>
                 <button type="button" class="menu_button" data-verba-base-action="restore">기본값 복원</button>
             </div>
-            <div class="verba-help">입력 중인 내용은 보관되며 ‘저장·적용’ 또는 프리셋 저장 후 요청에 반영됩니다. 프리셋을 선택하면 즉시 적용됩니다. 이미 시작한 요청과 기존 번역문은 소급 변경하지 않습니다.</div>
+            <div class="verba-help">입력 중인 내용은 보관되며 ‘저장·적용’ 또는 프리셋 저장 후 모든 아웃풋 번역 요청에 반영됩니다. 프리셋을 선택하면 즉시 적용됩니다. 이미 시작한 요청과 기존 번역문은 소급 변경하지 않습니다.</div>
         </div>
     </details>`;
 }
@@ -75,24 +91,23 @@ export function bindBaseTranslationEditor(panel, settings, { save, notify, confi
         old.replaceWith(next);
     };
     const validDraft = () => {
-        if (modes.some(mode => !state().draft[mode].trim())) {
-            notify('분리·통합 기본 지침을 모두 입력해 주세요. 원래 지침은 기본값 복원으로 되돌릴 수 있어요.', 'warning');
+        if (!state().draft.trim()) {
+            notify('기본 번역 지침을 입력해 주세요. 원래 지침은 기본값 복원으로 되돌릴 수 있어요.', 'warning');
             return false;
         }
         return true;
     };
     const applyDraft = () => {
-        for (const mode of modes) state()[mode] = state().draft[mode];
+        state().prompt = state().draft;
         state().enabled = true;
     };
     panel.addEventListener('input', event => {
         if (!settings.developerMode) return;
         const id = event.target?.id;
-        const mode = modes.find(key => id === `verba-base-${key}`);
-        if (mode) {
-            state().draft[mode] = event.target.value;
+        if (id === 'verba-base-prompt') {
+            state().draft = event.target.value;
             const status = panel.querySelector('#verba-base-status');
-            if (status) status.textContent = `${state().enabled ? '저장한 지침 적용 중' : '기본값 사용 중'} · 미적용 편집 내용 있음 · 분리 ${state().draft.scoped.length.toLocaleString()}자 / 통합 ${state().draft.mixed.length.toLocaleString()}자`;
+            if (status) status.textContent = `${state().enabled ? '저장한 지침 적용 중' : '기본값 사용 중'} · 미적용 편집 내용 있음 · ${state().draft.length.toLocaleString()}자`;
             save();
         } else if (id === 'verba-base-name') {
             state().name = event.target.value.slice(0, 60);
@@ -110,7 +125,7 @@ export function bindBaseTranslationEditor(panel, settings, { save, notify, confi
             state().selectedId = preset?.id || '';
             if (preset) {
                 state().name = preset.name;
-                for (const mode of modes) state().draft[mode] = preset[mode];
+                state().draft = preset.prompt;
                 applyDraft();
                 notify(`기본 지침 프리셋 “${preset.name}”을 적용했어요.`, 'success');
             }
@@ -124,8 +139,8 @@ export function bindBaseTranslationEditor(panel, settings, { save, notify, confi
         const action = button.dataset.verbaBaseAction;
         event.preventDefault();
         if (action === 'restore') {
-            if (!confirm('편집 중인 두 기본 지침을 기본값으로 복원할까요? 전용 프리셋과 기존 번역 설정은 유지됩니다.')) return;
-            for (const mode of modes) state().draft[mode] = state()[mode] = defaultBaseTranslationPrompt(mode);
+            if (!confirm('편집 중인 기본 번역 지침을 기본값으로 복원할까요? 전용 프리셋과 기존 번역 설정은 유지됩니다.')) return;
+            state().draft = state().prompt = defaultBaseTranslationPrompt();
             state().enabled = false;
             state().selectedId = '';
             state().name = '';
@@ -142,7 +157,7 @@ export function bindBaseTranslationEditor(panel, settings, { save, notify, confi
                 const previous = state().presets.find(row => row.id === state().selectedId);
                 if (action === 'overwrite' && !previous) return;
                 const id = action === 'overwrite' ? previous.id : (globalThis.crypto?.randomUUID?.() || `base-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-                const preset = { id, name, scoped: state().draft.scoped, mixed: state().draft.mixed };
+                const preset = { id, name, prompt: state().draft };
                 if (action === 'overwrite') state().presets = state().presets.map(row => row.id === id ? preset : row);
                 else state().presets.push(preset);
                 state().selectedId = id;

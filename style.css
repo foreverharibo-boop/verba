@@ -2840,3 +2840,371 @@
     resize: vertical;
     font-size: .82em;
 }
+
+
+/* v0.4.102: compact only the extension-tab settings panel.
+ * Composer icons, message controls, selection popups, and modal dialogs stay unchanged. */
+#verba-settings {
+    font-size: .86em;
+}
+
+#verba-settings .verba-drawer-header {
+    min-height: 32px !important;
+    padding: 5px 7px !important;
+}
+
+#verba-settings .inline-drawer-content {
+    gap: 5px !important;
+    padding: 5px 7px 8px !important;
+}
+
+#verba-settings label {
+    margin-top: 1px !important;
+    line-height: 1.3;
+}
+
+#verba-settings .verba-note {
+    padding: 6px 8px;
+    border-radius: 8px;
+    line-height: 1.32;
+}
+
+#verba-settings .verba-help {
+    margin-top: -2px;
+    font-size: .84em;
+    line-height: 1.32 !important;
+}
+
+#verba-settings select.text_pole,
+#verba-settings input.text_pole {
+    box-sizing: border-box;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 2px 6px !important;
+    font-size: .92em !important;
+}
+
+#verba-settings textarea.text_pole {
+    box-sizing: border-box;
+    padding: 5px 6px !important;
+    font-size: .88em !important;
+    line-height: 1.32 !important;
+}
+
+#verba-settings button.menu_button {
+    height: auto !important;
+    min-height: 29px !important;
+    padding: 4px 7px !important;
+    font-size: .9em !important;
+    line-height: 1.15 !important;
+}
+
+#verba-settings .verba-profile-row,
+#verba-settings .verba-prompt-preset-actions,
+#verba-settings .verba-prompt-preset-backup-actions {
+    gap: 4px !important;
+}
+
+#verba-settings .verba-profile-row button {
+    flex-basis: 72px;
+    width: 72px !important;
+    min-width: 72px;
+}
+
+#verba-settings .verba-check-row {
+    gap: 6px;
+    min-height: 29px;
+    padding: 4px 6px;
+    border-radius: 7px;
+}
+
+#verba-settings .verba-check-row input[type="checkbox"] {
+    width: 15px !important;
+    height: 15px !important;
+    min-width: 15px !important;
+    flex-basis: 15px !important;
+}
+
+#verba-settings .verba-check-row input[type="checkbox"]:checked {
+    background-size: 14px 14px !important;
+}
+
+#verba-settings .verba-tool-details,
+#verba-settings .verba-name-lock-manager {
+    margin: 1px 0;
+    border-radius: 8px;
+}
+
+#verba-settings .verba-tool-details > summary,
+#verba-settings .verba-name-lock-manager > summary {
+    gap: 4px;
+    padding: 6px 8px;
+    line-height: 1.25;
+}
+
+#verba-settings .verba-tool-details-content {
+    gap: 5px;
+    padding: 6px;
+}
+
+#verba-settings .verba-name-lock-manager-content {
+    gap: 5px;
+    padding: 0 6px 6px;
+}
+
+#verba-settings .verba-name-lock-manager-content > .verba-help:first-child {
+    margin-top: 5px;
+}
+
+#verba-settings .verba-name-lock-list,
+#verba-settings .verba-name-lock-group,
+#verba-settings .verba-name-lock-row {
+    gap: 4px;
+}
+
+#verba-settings .verba-name-lock-group,
+#verba-settings .verba-name-lock-row {
+    padding: 5px;
+    border-radius: 7px;
+}
+
+#verba-settings .verba-name-lock-group-header,
+#verba-settings .verba-name-lock-pair,
+#verba-settings .verba-name-lock-row-actions {
+    gap: 4px;
+}
+
+#verba-settings .verba-name-lock-row-actions button {
+    min-width: 50px;
+}
+
+#verba-settings .verba-name-lock-empty {
+    padding: 6px;
+    border-radius: 7px;
+}
+
+#verba-settings .verba-profile-stats-content,
+#verba-settings .verba-rule-priority-list {
+    gap: 4px;
+}
+
+#verba-settings .verba-stat-row {
+    grid-template-columns: 19px minmax(0, 1fr);
+    gap: 1px 5px;
+    padding: 5px 6px;
+    border-radius: 7px;
+}
+
+#verba-settings .verba-rule-priority-row {
+    grid-template-columns: 19px minmax(0, 1fr) auto;
+    gap: 5px;
+    min-height: 31px;
+    padding: 3px 4px 3px 6px;
+    border-radius: 7px;
+}
+
+#verba-settings .verba-rule-priority-actions {
+    gap: 3px;
+}
+
+#verba-settings .verba-rule-priority-actions button.menu_button {
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 25px !important;
+    min-height: 25px !important;
+    padding: 0 !important;
+}
+
+#verba-settings .verba-quality-audit-status-row,
+#verba-settings .verba-register-monitor-status-row {
+    min-height: 0 !important;
+    margin-top: 4px !important;
+    padding: 5px 6px !important;
+    gap: 5px 8px !important;
+    border-radius: 7px !important;
+    line-height: 1.3 !important;
+}
+
+#verba-settings .verba-developer-settings {
+    margin-top: 7px !important;
+}
+
+#verba-settings .verba-developer-enabled-note {
+    margin-bottom: 4px !important;
+    padding: 5px 7px !important;
+}
+
+#verba-settings .verba-developer-code-row {
+    gap: 4px !important;
+}
+
+#verba-settings .verba-developer-code-row > button {
+    min-width: 60px !important;
+}
+
+#verba-settings .verba-developer-lab {
+    margin: 3px 0 5px !important;
+}
+
+#verba-settings #verba-developer-relationship-controls {
+    gap: 8px !important;
+}
+
+#verba-settings .verba-relationship-section {
+    gap: 4px !important;
+    padding-top: 1px !important;
+}
+
+#verba-settings .verba-relationship-section + .verba-relationship-section {
+    padding-top: 7px !important;
+}
+
+#verba-settings #verba-developer-hongjin-controls {
+    gap: 4px !important;
+}
+
+#verba-settings #verba-developer-hongjin-controls > label:not(.verba-check-row) {
+    margin-top: 2px !important;
+}
+
+#verba-settings #verba-korean-flavor-controls,
+#verba-settings #verba-english-flavor-controls {
+    gap: 3px !important;
+}
+
+#verba-settings #verba-korean-flavor-controls > label:not(.verba-check-row),
+#verba-settings #verba-english-flavor-controls > label:not(.verba-check-row) {
+    margin-top: 2px !important;
+}
+
+#verba-settings .verba-relationship-help,
+#verba-settings .verba-hongjin-help {
+    line-height: 1.4 !important;
+}
+
+#verba-settings .verba-prompt-preset-fields {
+    gap: 4px !important;
+    padding: 5px 6px !important;
+}
+
+#verba-settings .verba-prompt-preset-backup-actions .menu_button {
+    min-height: 25px !important;
+    padding: 3px 5px !important;
+    font-size: .78em !important;
+}
+
+#verba-settings .verba-prompt-preset-backup-content,
+#verba-settings .verba-prompt-preset-backup-list,
+#verba-settings .verba-prompt-preset-backup-inline-preview .verba-backup-preview-list {
+    gap: 4px !important;
+}
+
+#verba-settings .verba-prompt-preset-backup-row,
+#verba-settings .verba-prompt-preset-backup-inline-preview .verba-backup-preview-slot {
+    padding: 5px 6px !important;
+}
+
+#verba-settings .verba-prompt-slot {
+    margin: 4px 0 5px !important;
+}
+
+#verba-settings .verba-prompt-slot-head {
+    margin-bottom: 3px !important;
+}
+
+#verba-settings .verba-prompt-preset-backups {
+    margin-top: 4px;
+}
+
+#verba-settings .verba-prompt-preset-backup-content {
+    padding-top: 4px;
+}
+
+#verba-settings .verba-tuning-choice,
+#verba-settings .verba-context-choice {
+    padding: 5px 6px !important;
+}
+
+#verba-settings .verba-tuning-control-group,
+#verba-settings .verba-tuning-options {
+    gap: 3px !important;
+}
+
+#verba-settings .verba-tuning-options span {
+    min-height: 32px !important;
+    padding: 3px 2px !important;
+    line-height: 1.12 !important;
+}
+
+#verba-settings .verba-current-rules #verba-current-rules-content,
+#verba-settings .verba-current-rule-grid,
+#verba-settings .verba-current-rule-lines {
+    gap: 4px !important;
+}
+
+#verba-settings .verba-current-rules-note {
+    padding: 5px 6px !important;
+}
+
+#verba-settings .verba-current-rule-card {
+    gap: 4px !important;
+    padding: 6px 7px !important;
+    border-radius: 7px !important;
+}
+
+#verba-settings #verba-beginner-character-controls {
+    gap: 5px;
+}
+
+#verba-settings .verba-beginner-group {
+    gap: 4px;
+    padding: 6px 7px;
+    border-radius: 7px;
+}
+
+#verba-settings .verba-beginner-choice-grid {
+    gap: 3px;
+}
+
+#verba-settings .verba-beginner-choice {
+    gap: 4px !important;
+    padding: 4px 5px;
+    border-radius: 6px;
+}
+
+#verba-settings .verba-beginner-choice input[type="checkbox"] {
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 14px !important;
+    flex-basis: 14px !important;
+}
+
+#verba-settings #verba-base-editor .verba-base-buttons {
+    gap: 4px !important;
+}
+
+#verba-settings #verba-base-editor .verba-base-buttons > button.menu_button {
+    min-height: 28px !important;
+    padding: 4px 7px !important;
+    font-size: clamp(10px, 2.55vw, 12px) !important;
+    line-height: 1.2 !important;
+}
+
+#verba-settings #verba-base-editor textarea {
+    min-height: 120px;
+    max-height: 48vh;
+}
+
+#verba-settings #verba-dialogue-ending-settings textarea {
+    min-height: 68px !important;
+}
+
+@media (max-width: 600px) {
+    #verba-settings {
+        font-size: .84em;
+    }
+
+    #verba-settings .inline-drawer-content {
+        padding-inline: 5px !important;
+    }
+}

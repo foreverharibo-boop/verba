@@ -1219,7 +1219,9 @@ FACT, REFERENT, AND FORCE LOCK
 - Stability words such as secure/anchor/support/prevent slipping do not create escape or resistance. Use restraint language only when the source contains an actual attempt to leave or physical restraint.
 - Preserve intensity both ways. Gentle stays gentle; firm stays firm; rough or explicit stays equally rough or explicit. Natural prose is neither censorship nor escalation.
 - Preserve the source's specificity. Do not turn generic bedding into goose down, a fee into a contractual penalty, or mild movement into struggling.
-- Keep an established human identity intact. When the referent is clear, omit the Korean subject; otherwise use the established name or appropriate pronoun. Never rotate through “여자/상대/사람/작은 몸” as substitute labels for one person. A body phrase is allowed only when the body itself is the actual focus.
+- Keep an established human identity intact. For the known TARGET CHARACTER and USER, do not render personal he/she/him/her or possessive his/her references as “그/그녀/그의/그녀의”. First omit the subject or possessor, or restructure the sentence naturally, whenever the referent remains clear in Korean.
+- If omission would make the actor, recipient, or owner ambiguous, use that person's established name directly. Use the name only where clarity requires it; do not mechanically repeat it in every sentence.
+- Never rotate through “남자/여자/상대/사람/사내/청년/작은 몸” or similar substitute labels for a named TARGET CHARACTER or USER. Generic role labels remain allowed only for genuinely unnamed NPCs when context requires them. A body phrase is allowed only when the body itself is the actual focus.
 - A figurative image is style, not scene truth. If it is unnatural in Korean, replace it with an equally warm/harsh native effect or omit it. If retained, never change its subject or social force and never add a new insult, threat, slang, or joke.
 
 KOREAN NARRATION

@@ -1052,6 +1052,23 @@ const DEVELOPER_HONGJIN_PLAYFULNESS_RULES = {
 - Do not turn grief, fear, consent, danger, or genuinely serious source content into comedy when that would reverse the emotional direction.`,
 };
 
+const DEVELOPER_HONGJIN_AGE_RULES = {
+    unspecified: `AGE VOICE — UNSPECIFIED
+- Do not impose an age-coded vocabulary or cadence. Follow the character and scene context.`,
+    teen: `AGE VOICE — TEEN
+- Use contemporary Korean vocabulary and conversational rhythm natural for a teenager, without childish caricature, forced school slang, or invented age facts.`,
+    early20s: `AGE VOICE — EARLY TWENTIES / MANDATORY CASUAL DELIVERY
+- The TARGET CHARACTER MUST sound contemporary and casual in vocabulary, phrasing, contractions, and conversational rhythm. Never make the line stiff, old-fashioned, literary, bureaucratic, or generically middle-aged.
+- "Casual" controls delivery, not relationship facts: retain the required 반말/존댓말 and address terms, but make even 존댓말 relaxed and naturally spoken.`,
+    late20s: `AGE VOICE — LATE TWENTIES / MANDATORY CASUAL DELIVERY
+- The TARGET CHARACTER MUST sound contemporary and casual in vocabulary, phrasing, contractions, and conversational rhythm. Never make the line stiff, old-fashioned, literary, bureaucratic, or generically middle-aged.
+- "Casual" controls delivery, not relationship facts: retain the required 반말/존댓말 and address terms, but make even 존댓말 relaxed and naturally spoken.`,
+    thirties: `AGE VOICE — THIRTIES
+- Use contemporary Korean vocabulary and conversational rhythm natural for someone in their thirties, without imposing stiffness, authority, old-fashioned diction, or invented age facts.`,
+    fortiesPlus: `AGE VOICE — FORTIES OR OLDER
+- Use Korean vocabulary and conversational rhythm plausibly compatible with an adult in their forties or older, guided by the source personality and setting. Do not force archaic speech, authoritarian endings, period-drama diction, or age stereotypes.`,
+};
+
 function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
     if (
         settings?.developerMode !== true
@@ -1076,6 +1093,9 @@ function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
     const playfulnessKey = Object.hasOwn(DEVELOPER_HONGJIN_PLAYFULNESS_RULES, settings?.developerHongjinPlayfulness)
         ? settings.developerHongjinPlayfulness
         : 'natural';
+    const ageKey = Object.hasOwn(DEVELOPER_HONGJIN_AGE_RULES, settings?.developerHongjinAgeBand)
+        ? settings.developerHongjinAgeBand
+        : 'unspecified';
 
     return `DEVELOPER KIM HONGJIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY
 - EXPERIMENTAL E→K voice transcreation layer.
@@ -1086,7 +1106,11 @@ function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
 - Added material may ONLY operate at the surface voice level. Preserve the source's underlying proposition, events, actions, who did what to whom, speaker/addressee, factual relationships, chronology, consent/refusal, threats that actually exist, sexual explicitness, emotional direction, and scene stakes.
 - Do NOT invent new events, physical actions, sexual acts, relationship status, backstory, promises, consent, accusations, threats, insults aimed at a NEW target, or factual claims.
 - Surface profanity may be stronger than the literal source, but it must not transform friendliness into genuine hostility, joking into a serious threat, rejection into consent, or a neutral statement into a new accusation.
+- HARD SAFETY / VOICE RULE — NO MISOGYNISTIC WORDING: Never use misogynistic slurs, woman-hating labels, gendered degradation, or language that reduces a woman to a sex object or treats women as an inferior class. This prohibition overrides every profanity, vulgarity, teasing, and transcreation setting.
+- If the source itself contains misogynistic wording, preserve the relevant hostility, insult function, speaker intent, and scene consequence without repeating or embellishing the misogynistic term; replace it with a natural non-gendered or non-degrading Korean expression of matching force.
 - Never apply this block to narration, USER/NPC/OTHER-speaker dialogue, quoted speech spoken by someone else, tagged content outside TARGET CHARACTER dialogue, or K→E input.
+
+${DEVELOPER_HONGJIN_AGE_RULES[ageKey]}
 
 ${DEVELOPER_HONGJIN_TRANSCREATION_RULES[transcreationKey]}
 

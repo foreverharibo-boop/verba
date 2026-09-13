@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.98';
+const EXTENSION_VERSION = '0.4.99';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -105,6 +105,15 @@ const DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS = [
     { value: 'low', label: '낮게' },
     { value: 'natural', label: '자연스럽게' },
     { value: 'high', label: '높게' },
+];
+
+const DEVELOPER_HONGJIN_AGE_OPTIONS = [
+    { value: 'unspecified', label: '미지정' },
+    { value: 'teen', label: '10대' },
+    { value: 'early20s', label: '20대 초반' },
+    { value: 'late20s', label: '20대 후반' },
+    { value: 'thirties', label: '30대' },
+    { value: 'fortiesPlus', label: '40대 이상' },
 ];
 
 const LOCALIZATION_LEVEL_OPTIONS = [
@@ -208,6 +217,7 @@ const DEFAULT_SETTINGS = {
     developerHongjinTeasing: 'natural',
     developerHongjinVulgarity: 'natural',
     developerHongjinPlayfulness: 'natural',
+    developerHongjinAgeBand: 'unspecified',
     expressionEmphasisTaste: 'default',
     expressionDisfluencyTaste: 'default',
     expressionIdiomMetaphorTaste: 'default',
@@ -351,6 +361,9 @@ settings.developerHongjinVulgarity = DEVELOPER_HONGJIN_VULGARITY_OPTIONS.some(op
 settings.developerHongjinPlayfulness = DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.some(option => option.value === settings.developerHongjinPlayfulness)
     ? settings.developerHongjinPlayfulness
     : 'natural';
+settings.developerHongjinAgeBand = DEVELOPER_HONGJIN_AGE_OPTIONS.some(option => option.value === settings.developerHongjinAgeBand)
+    ? settings.developerHongjinAgeBand
+    : 'unspecified';
 settings.expressionEmphasisTaste = ['default', 'source', 'natural', 'active'].includes(settings.expressionEmphasisTaste)
     ? settings.expressionEmphasisTaste
     : 'default';
@@ -1958,6 +1971,10 @@ function renderCurrentAppliedRules() {
                 ['우선순위', priority],
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['미친 한출의 맛', settings.developerMode && settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
+                ['김홍진의 맛', settings.developerMode && settings.developerHongjinFlavorEnabled === true ? 'ON' : 'OFF'],
+                ['김홍진 연령대', settings.developerMode && settings.developerHongjinFlavorEnabled === true
+                    ? (DEVELOPER_HONGJIN_AGE_OPTIONS.find(option => option.value === settings.developerHongjinAgeBand)?.label || '미지정')
+                    : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
                     ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외`
                     : '기존 설정 전체 적용'],
@@ -9043,10 +9060,17 @@ function developerSettingsMarkup() {
                                     ${DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinPlayfulness === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
 
+                                <label for="verba-developer-hongjin-age-band">연령대</label>
+                                <select id="verba-developer-hongjin-age-band" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_AGE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinAgeBand === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">대사의 어휘·호흡만 연령대에 맞춥니다. 20대 초반·후반은 무조건 현대적이고 캐주얼하게 말하며, 실제 나이·관계·호칭은 새로 만들지 않습니다.</div>
+
                                 <div class="verba-help verba-hongjin-help">
                                     <span>E→K 아웃풋의 TARGET CHARACTER 직접 대사에만 적용합니다.</span>
                                     <span>서술·USER/NPC 대사·K→E 인풋에는 적용하지 않습니다.</span>
                                     <span>욕설/비속어/비꼼/장난은 추가할 수 있지만 새로운 사건·행동·관계·성적 의미·동의 변화·새로운 협박/비난 대상을 만들지는 않습니다.</span>
+                                    <span><b>욕설 농도와 관계없이 여성혐오·여성 비하·성별 대상화 표현은 사용하지 않습니다.</b></span>
                                 </div>
                             </div>
                         </div>
@@ -9859,6 +9883,14 @@ function injectSettingsPanel() {
             settings.developerHongjinPlayfulness = DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'natural';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-hongjin-age-band' && target instanceof HTMLSelectElement) {
+            settings.developerHongjinAgeBand = DEVELOPER_HONGJIN_AGE_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'unspecified';
             saveSettings();
             return;
         }

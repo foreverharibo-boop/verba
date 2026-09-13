@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.97';
+const EXTENSION_VERSION = '0.4.98';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8878,7 +8878,7 @@ function developerSettingsMarkup() {
                                 <span>미친 한출의 맛 사용</span>
                             </label>
                             <div class="verba-help verba-hongjin-help">
-                                <span><b>장면의 사실과 강도를 그대로 둔 채, 한국어 원고를 백지에서 다시 씁니다.</b></span>
+                                <span><b>장면의 사실만 고정하고 모든 문장을 파괴한 뒤, 한국어 원고를 백지에서 다시 씁니다.</b></span>
                                 <span>사실·사건 순서·화자·관계·감정 방향은 지키되 영어 문장과 한국어 문장의 1:1 대응, 영어 어순·수식·비유·호흡은 허용하지 않습니다.</span>
                                 <span>문장을 적극적으로 쪼개고 합치며, 한국어식 생략·동작 중심 서술·대사 종결과 정보 순서로 서술과 모든 화자의 대사를 전면 재구성합니다.</span>
                                 <span>번역투·과잉 수식·비문이 남거나 영어 원문을 역추적할 수 있는 문장은 출력 전에 다시 쓰도록 강제합니다.</span>

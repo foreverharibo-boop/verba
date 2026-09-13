@@ -38,15 +38,16 @@ export function baseTranslationEditorMarkup(state) {
             </select>
             <input id="verba-base-name" class="text_pole" maxlength="60" value="${escape(state.name)}" placeholder="전용 프리셋 이름" aria-label="기본 지침 프리셋 이름">
             <div class="verba-base-buttons">
-                <button type="button" class="menu_button" data-verba-base-action="new">새 프리셋 저장</button>
-                <button type="button" class="menu_button" data-verba-base-action="overwrite" ${state.selectedId ? '' : 'disabled'}>선택 프리셋 덮어쓰기</button>
-                <button type="button" class="menu_button" data-verba-base-action="delete" ${state.selectedId ? '' : 'disabled'}>선택 프리셋 삭제</button>
+                <button type="button" class="menu_button" data-verba-base-action="new" title="새 프리셋 저장" aria-label="새 프리셋 저장">새로 저장</button>
+                <button type="button" class="menu_button" data-verba-base-action="overwrite" title="선택 프리셋 덮어쓰기" aria-label="선택 프리셋 덮어쓰기" ${state.selectedId ? '' : 'disabled'}>덮어쓰기</button>
+                <button type="button" class="menu_button" data-verba-base-action="delete" title="선택 프리셋 삭제" aria-label="선택 프리셋 삭제" ${state.selectedId ? '' : 'disabled'}>삭제</button>
             </div>
-            <label for="verba-base-scoped">분리 번역 기본 지침 · 기본 경로</label>
+            <label for="verba-base-scoped">분리 번역용 기본 지침</label>
+            <div class="verba-help">캐릭터별 대사 지침·말끝 선호/회피·말끝 반복 줄이기를 사용하면, 서술과 화자별 대사를 구분해 요청합니다. 각 요청에서 이 기본 지침을 사용합니다.</div>
             <textarea id="verba-base-scoped" class="text_pole" rows="10" spellcheck="false">${escape(state.draft.scoped)}</textarea>
             <details class="verba-tool-details">
-                <summary>통합 번역 기본 지침 · 대체 경로</summary>
-                <div class="verba-help">통합 번역에서도 같은 취향을 사용하려면 이 지침도 수정하세요. 프리셋에는 두 지침이 함께 저장됩니다.</div>
+                <summary>통합 번역용 기본 지침</summary>
+                <div class="verba-help">위의 분리 조건이 없으면 서술·대사를 한 요청으로 번역하며 이 기본 지침을 사용합니다. 실패 시 전환하는 기능이 아닙니다. 프리셋에는 두 지침이 함께 저장되며, 일반 번역 요청에는 해당 방식의 지침 하나만 들어갑니다.</div>
                 <textarea id="verba-base-mixed" class="text_pole" rows="10" spellcheck="false" aria-label="통합 번역 기본 지침">${escape(state.draft.mixed)}</textarea>
             </details>
             <small id="verba-base-status">${state.enabled ? '저장한 지침 적용 중' : '기본값 사용 중'}${changed ? ' · 미적용 편집 내용 있음' : ''} · 분리 ${state.draft.scoped.length.toLocaleString()}자 / 통합 ${state.draft.mixed.length.toLocaleString()}자</small>

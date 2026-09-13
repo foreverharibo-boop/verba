@@ -36,7 +36,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.86';
+const EXTENSION_VERSION = '0.4.87';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -503,6 +503,7 @@ settings.debugMode = settings.debugMode === true;
 const VERBA_MAX_TOKENS = 15000;
 
 const pendingOutputs = new Map();
+const pendingSelectionTranslations = new Set();
 const pendingSentInputs = new WeakMap();
 const automaticTranslationTimers = new Map();
 const swipeTranslationJobs = new Map();
@@ -2448,6 +2449,39 @@ function abortPendingOutput(messageId, reason) {
         '출력 번역이 중단되었습니다.',
         false,
     ));
+}
+
+function activeOutputTranslationControllers() {
+    return [
+        ...[...pendingOutputs.values()].map(pending => pending.controller),
+        ...pendingSelectionTranslations,
+    ];
+}
+
+function trackSelectionTranslation(controller) {
+    pendingSelectionTranslations.add(controller);
+    refreshRetranslateButton();
+}
+
+function untrackSelectionTranslation(controller) {
+    pendingSelectionTranslations.delete(controller);
+    refreshRetranslateButton();
+}
+
+function abortActiveOutputTranslations(reason) {
+    let cancelled = 0;
+    for (const pending of pendingOutputs.values()) {
+        if (pending.controller.signal.aborted) continue;
+        pending.controller.abort(reason);
+        cancelled += 1;
+    }
+    for (const controller of pendingSelectionTranslations) {
+        if (controller.signal.aborted) continue;
+        controller.abort(reason);
+        cancelled += 1;
+    }
+    refreshRetranslateButton();
+    return cancelled;
 }
 
 function wait(ms, signal) {
@@ -6422,22 +6456,20 @@ async function jumpToOutputMessage(messageId) {
 }
 
 async function retranslateLatestOutput() {
+    const activeControllers = activeOutputTranslationControllers();
+    if (activeControllers.some(controller => !controller.signal.aborted)) {
+        const cancelled = abortActiveOutputTranslations(outputAbortReason(
+            'VERBA_OUTPUT_USER_CANCELLED',
+            '사용자가 번역 요청을 취소했습니다.',
+            true,
+        ));
+        if (cancelled) notify('진행 중인 번역 요청을 취소했어요.', 'info');
+        return;
+    }
+
     const target = latestAssistantMessage();
     if (!target) {
         notify('번역할 AI 아웃풋이 없어요.', 'warning');
-        return;
-    }
-    if (pendingOutputs.has(target.id)) {
-        const pending = pendingOutputs.get(target.id);
-        if (!pending?.controller.signal.aborted) {
-            abortPendingOutput(target.id, outputAbortReason(
-                'VERBA_OUTPUT_USER_CANCELLED',
-                '사용자가 번역 요청을 취소했습니다.',
-                true,
-            ));
-            notify('번역 요청을 취소했어요.', 'info');
-            refreshRetranslateButton();
-        }
         return;
     }
 
@@ -7807,6 +7839,7 @@ async function retranslateSelectionBundle() {
         tuning,
     });
     const controller = new AbortController();
+    trackSelectionTranslation(controller);
     let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
     try {
         const result = await requestSegments(prompt, expected, {
@@ -7880,6 +7913,7 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
         }
     } finally {
         clearProgress(toast);
+        untrackSelectionTranslation(controller);
         selectionBusy = false;
     }
 }
@@ -8035,6 +8069,7 @@ async function retranslateSelection(snapshot) {
     const speakerIdentity = outputSpeakerIdentity(snapshot.message);
 
     const controller = new AbortController();
+    trackSelectionTranslation(controller);
     const candidateMode = Boolean(settings.selectionCandidates);
     const prompt = buildSelectionPrompt({
         source: snapshot.source,
@@ -8069,6 +8104,7 @@ async function retranslateSelection(snapshot) {
                 throw new Error('사용할 수 있는 서로 다른 번역 후보가 두 개 이상 만들어지지 않았습니다.');
             }
             if (!selectionStillCurrent(snapshot)) throw new Error('후보 생성 중 원문이나 번역문이 바뀌었습니다.');
+            untrackSelectionTranslation(controller);
             clearProgress(toast);
             toast = null;
             replacement = await requestSelectionCandidateChoice(candidates, snapshot.selected);
@@ -8125,6 +8161,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
         }
     } finally {
         clearProgress(toast);
+        untrackSelectionTranslation(controller);
         selectionBusy = false;
         selectionSnapshot = null;
         hideSelectionButton();
@@ -8551,23 +8588,23 @@ function refreshRetranslateButton() {
     const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
     const target = latestAssistantMessage();
-    const pending = target ? pendingOutputs.get(target.id) : null;
-    const busy = Boolean(pending);
-    const cancelling = Boolean(pending?.controller.signal.aborted);
+    const activeControllers = activeOutputTranslationControllers();
+    const busy = activeControllers.length > 0;
+    const cancelling = busy && activeControllers.every(controller => controller.signal.aborted);
     const failed = target
         ? failedOutputSignatures.get(target.id) === messageVersionSignature(target.message)
         : false;
-    // Keep the spinning button clickable so a second tap can cancel the
-    // in-flight request. Disable it only during the brief abort cleanup.
-    button.disabled = !target || cancelling;
+    // Any active output/selection translation makes this one global cancel
+    // control. Disable it only during the brief abort cleanup.
+    button.disabled = (!target && !busy) || cancelling;
     button.classList.toggle('verba-busy', busy);
     button.classList.toggle('verba-cancelling', cancelling);
     button.classList.toggle('verba-retry-needed', failed && !busy);
     const translated = target ? Boolean(currentRecord(target.message)) : false;
     button.title = cancelling
-        ? '최근 아웃풋 번역 취소 중'
+        ? '베르바 번역 취소 중'
         : busy
-            ? '최근 아웃풋 번역 중 · 눌러서 취소'
+            ? '베르바 번역 중 · 눌러서 취소'
             : failed || !translated
                 ? '최근 아웃풋 번역 또는 다시 시도'
                 : '아웃풋 재번역 · 최근/이전 선택';
@@ -11070,6 +11107,14 @@ function setupEvents() {
                 ));
             }
             pendingOutputs.clear();
+            for (const controller of pendingSelectionTranslations) {
+                controller.abort(outputAbortReason(
+                    'VERBA_CHAT_CHANGED',
+                    '채팅이 변경되어 진행 중인 선택 재번역을 취소했습니다.',
+                    true,
+                ));
+            }
+            pendingSelectionTranslations.clear();
             for (const controller of pendingInputControllers) controller.abort();
             pendingInputControllers.clear();
             failedOutputSignatures.clear();

@@ -1158,7 +1158,7 @@ function developerMadKoreanOutputBlock(settings = {}, scope = 'mixed') {
 
 CORE CONTRACT — HIGHEST PRIORITY; NEVER SACRIFICE ONE ITEM FOR ANOTHER
 1. Write Korean that could plausibly have been conceived and written only in Korean. Do not expose English wording, syntax, clause order, joke construction, or sentence rhythm.
-2. Preserve every scene fact and every actor→action→target relationship. Never add, remove, reverse, transfer, or make more specific an action, sensation, possession, intention, reaction, speaker, addressee, object, or point of view.
+2. Preserve every scene fact, established human identity, and every actor→action→target relationship. Never add, remove, reverse, transfer, or make more specific an action, sensation, possession, intention, reaction, speaker, addressee, object, or point of view.
 3. Preserve intensity in BOTH directions. Do not amplify and do not soften. Gentle stays gentle; firm stays firm; rough or explicit stays equally rough or explicit. Natural Korean is not censorship, and clean prose is not a reduction of force.
 4. Add no new insult, profanity, contempt, coercion, escape/resistance, romance, jealousy, possessiveness, pleasure, pain, motive, object, event, or setting detail. A playful neutral image must not become a degrading animal comparison.
 5. Recreate dialogue from its speech act and relationship in genuinely spoken contemporary Korean. Never translate an English idiom, joke, or rhetorical template word by word.
@@ -1173,6 +1173,7 @@ MANDATORY SILENT WORKFLOW — DO NOT PRINT IT
 
 MEANING, FORCE, AND BODY-MECHANICS LOCK
 - Preserve chronology, causality, relationships, consent/refusal, negation, quantity, meaningful tense/aspect, characterization, emotional direction, implications, explicitness, and world facts.
+- REFERENT CONTINUITY: Never replace an already established woman/person with generic labels such as “여자/상대/사람/자그마한 몸/작은 체구” merely to avoid repeating a pronoun or name. In natural Korean, omit the subject when clear; otherwise use the established name or “그녀”. A physical phrase such as “작은 몸” is allowed only when the body itself is genuinely the focus of the source action, never as a routine label for the person.
 - Soft/gentle/light/careful/brief may not become grabbing, growling, ripping, crushing, or grinding. Firm/hard/violent/rough may remain fully forceful and must not be euphemized or softened.
 - Secure/anchor/hold/support/prevent slipping describes stability unless the source explicitly describes escape, restraint, or resistance. Do not add capture language such as “달아나지 못하게/도망칠 틈도 없이/옭아매다” without that fact.
 - Preserve sensory channels and mechanics: taste is not smell; a forearm is not an elbow; the small of the back is not the neck; a rolling motion is not pounding. Never invent a character's pleasure or pain from neutral physical strain.
@@ -1180,19 +1181,22 @@ MEANING, FORCE, AND BODY-MECHANICS LOCK
 - Preserve the source's level of specificity. Generic down bedding must not become goose down, an unspecified fee must not become a contractual penalty, and mild movement must not become struggling. Choose a natural general Korean term when the source does not justify a narrower one.
 
 CLEAN KOREAN NARRATION
-- Build scenes from visible objects, actions, and reactions. Let behavior carry emotion instead of adding abstract labels such as vague “기색/기운/울림/감각”, or invented explanations of affection, dominance, and possessiveness. If dialogue or action already shows the feeling, do not explain it again in a speech tag.
+- Build scenes from visible objects, actions, and reactions. Let behavior carry emotion instead of adding abstract labels such as vague “기색/기운/울림/감각”, or invented explanations of affection, dominance, and possessiveness. If dialogue or action already shows the feeling, do not explain it again in a speech tag or a follow-up sentence.
+- Do not turn an English mood modifier into a separate Korean explanation ending in stock phrases such as “묻어났다/감돌았다/번졌다/기색이 돌았다/고스란히 담겨 있었다”. Use one concrete action or omit the modifier when the action already conveys it. These verbs remain allowed only when they are genuinely the most ordinary, necessary expression—not as automatic emotional packaging.
 - Prefer exact ordinary verbs and varied short-to-medium beats. Avoid repeated decorative stacks and automatic AI-web-fiction garnish such as excessive “빈틈없이/집요하게/묵직하게/거칠게/뜨겁게/나지막이”, ornamental gazes, voices, and smiles, or personified anatomy.
 - Do not translate English distinctions that Korean would normally leave implicit. “personal phone” is usually simply “휴대폰”; surface correspondence is not fidelity.
 - Collapse English sound-and-body packaging into an ordinary Korean action unless it is plot-relevant. A chuckle that “rumbles/vibrates in the chest” is normally simply “낮게 웃었다” or “피식 웃었다”; do not mechanically route one laugh through the chest, throat, and teeth.
-- Do not create malformed Korean to sound vivid. A person does not “엎질러지다”; peace does not “가라앉다” when the person is what calms down; hair color cannot modify facial features. Silently correct typos, duplicated roots, unnatural word combinations, impossible subjects, and dangling modifiers.
+- Reassign English figurative grammar to the real Korean experiencer. If tension dissipates, write that the person relaxes or the tension eases; do not make the room absorb or scatter it. A metaphorical label such as “passenger” need not survive as “품에 안긴 사람” when Korean can simply omit it.
+- Do not create malformed Korean to sound vivid. A person does not “엎질러지다”; “짓궂은 숨” and “장난기 어린 의욕” are not natural collocations; “손가락 끝통” is not acceptable Korean. Silently correct typos, duplicated roots, unnatural word combinations, impossible subjects, and dangling modifiers.
 - Vividness is welcome when the source supports it and the Korean is idiomatic. Do not flatten a forceful source into bland summary merely to avoid purple prose.
 
 NATIVE KOREAN DIALOGUE
 - Translate intent, subtext, timing, hierarchy, intimacy, humor, and emotional temperature—not English grammar. Use the omissions, particles, contractions, and endings this exact speaker would spontaneously use with this listener.
 - Prefer the shortest complete Korean utterance that carries the same intent and character voice. Break or rebuild long English contrasts and rhetorical questions; avoid repeated subjects and scaffolding such as “나 혼자… 너 혼자… 할 생각은 추호도 없어” when a direct Korean reaction is enough.
 - Rebuild English rhetorical formulas completely. “You have no idea how exhausting it was” should become a context-native complaint such as “아까 회의, 진짜 지겨워 죽는 줄 알았어”, not “넌 모를 거다”. “Be prepared to compensate me” may become “그러니까 네가 책임져” when that matches the intended teasing. These demonstrate distance from English, not fixed substitutions.
+- Rebuild playful corporate/legal wording as a Korean joke rather than a translated term. A line such as “full cohabitation privileges” should sound like spontaneous teasing—e.g. “같이 사는 사람 특권이 있잖아”—not a stiff coined phrase such as “완전한 동거 권한”. Preserve the joke's fact and tone, not its English noun structure.
 - Do not add insults or profanity for liveliness. A neutral playful “well-fed creature” does not authorize “사료 먹은 짐승”. Preserve the exact warmth, teasing, contempt, and dignity of the source.
-- In modern Korean settings, choose one coherent relationship-based address and speech level. Do not generate Japanese-translation-style clusters such as “○○군/자네/~인가?/~맞네만” from age or rank alone. Deliberately old-fashioned speech is allowed only when established by context.
+- In modern Korean settings, choose one coherent relationship-based address and speech level. Do not generate Japanese-translation-style clusters or forced masculine labels such as “녀석/○○군/자네/~인가?/~맞네만” from age, rank, or gender alone. “녀석/이놈/저놈” is allowed only when the source and relationship genuinely carry that contemptuous or rough address. Deliberately old-fashioned speech is allowed only when established by context.
 
 INTIMATE OR EXPLICIT SCENES
 - Keep the source's tenderness, urgency, roughness, consent, discomfort, and explicitness exactly. Neither sanitize nor intensify.
@@ -1211,7 +1215,8 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 - Is the prose decorative where a simple Korean action would work, or bland where the source is forceful?
 - Does any dialogue sound like subtitles, Japanese-translated character speech, or an English rhetorical formula in Korean words?
 - Was any expendable English modifier translated only to maintain surface coverage, or any generic fact narrowed into unsupported specificity?
-- Is there any typo, repeated subject or wording, redundant speech tag, malformed collocation, impossible body mechanics, modifier error, untranslated visible text, or inconsistent term?
+- Was an established person reduced to “여자/상대/사람/몸” where Korean would omit the subject or retain the established identity?
+- Is there any typo, repeated subject or wording, redundant speech tag or emotion recap, stock “묻어났다/감돌았다/고스란히 담겼다” packaging, malformed collocation, impossible body mechanics, modifier error, untranslated visible text, or inconsistent term?
 
 - Output only the final Korean required by the request. If a fluent Korean reader could still sense a foreign original, rewrite it once more before returning it.`;
 }

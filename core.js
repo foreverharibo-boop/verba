@@ -1224,7 +1224,7 @@ function developerMadKoreanOutputBlock(settings = {}, scope = 'mixed') {
 
 SUPREME COMMAND: KEEP THE SCENE TRUTH; DESTROY AND REBUILD EVERY SENTENCE
 1. SCENE TRUTH IS IMMUTABLE: preserve who does/says/feels what to whom, ownership, referents, chronology, causality, negation, quantity, meaningful tense/aspect, point of view, setting, names, numbers, relationship, dialogue intent, emotional direction, consent/refusal, intensity, and explicitness.
-2. ENGLISH EXPRESSION IS DISPOSABLE: discard its word order, clause order, sentence count, subject repetition, pronoun pattern, possessive chains, passive structure, connectors, idioms, metaphors, jokes, sound/body packaging, modifiers, speech tags, and rhythm. None of these surfaces deserves preservation merely because it exists.
+2. ENGLISH EXPRESSION MUST BE DESTROYED: you MUST discard its word order, clause order, sentence count, subject repetition, pronoun pattern, possessive chains, passive structure, connectors, idioms, metaphors, jokes, sound/body packaging, modifiers, speech tags, and rhythm. Preserving any of these surfaces merely because they exist in English is a failure, not an acceptable option.
 3. Write the same scene as if a skilled contemporary Korean writer had conceived it only in Korean. Freely split, merge, compress, expand, or reorder expression inside each target segment. Omit expendable decoration and rebuild emphasis around Korean information flow.
 4. Native Korean means effortless, ordinary, and context-appropriate—not slangy, macho, aggressive, old-fashioned, trendy, cute, vulgar, or comically exaggerated unless the source or the sole permitted style add-on clearly requires it.
 5. Never add, remove, reverse, transfer, intensify, soften, or make more specific any fact, action, intention, reaction, insult, coercion, romance, pleasure, pain, object, event, or setting detail.
@@ -1260,7 +1260,9 @@ KOREAN DIALOGUE
 - Do not invent a character voice. Ordinary contemporary Korean is the default. Do not add rough masculine labels, profanity, fashionable shorthand, or Japanese-translated speech merely to sound lively. Avoid “녀석/놈들/너더러/자네/○○군/일절/말동무/꼼짝없이/공식 지정” when a simpler current expression carries the meaning.
 
 TERMS, CULTURE, AND STRUCTURE
-- Preserve actual names, garments, products, institutions, places, currencies, and cultural facts. Korean-original composition does not relocate or rewrite the world.
+- Assume that the named TARGET CHARACTER and USER belong to a contemporary Korean linguistic and cultural frame. Rebuild unmarked everyday behavior, conversational implication, humor, courtesy, domestic habits, workplace interaction, and social rhythm as a contemporary Korean writer would naturally conceive and express them—not through English-speaking cultural defaults.
+- When the source leaves country, location, or cultural context unstated or ambiguous, default to contemporary Korean cultural context.
+- Preserve explicitly stated scene facts such as actual countries, cities, travel locations, foreign institutions, branded products, garments, currencies, and legal, historical, or fictional-world facts. Do not silently relocate an explicitly non-Korean scene or replace a real named item with a different Korean one.
 - Use one natural Korean rendering for every stable term throughout narration, dialogue, and metadata. When home theater room/media room/private screening room clearly mean the same residential room, use “홈시어터” throughout; do not alternate with a public “영화관”. Prefer ordinary “그릇/회사/소속사” over needless “보울/에이전시” when no branded term is intended.
 - Translate visible labels, weekdays, AM/PM markers, weather, and locations inside tags while preserving tags, attributes, code, emoji, punctuation, numbers, and layout.
 

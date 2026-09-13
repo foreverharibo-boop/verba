@@ -36,7 +36,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.85';
+const EXTENSION_VERSION = '0.4.86';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -4966,10 +4966,15 @@ async function translateMessage(messageId, options = {}) {
                     'VERBA_SWIPE_CHANGED',
                     'VERBA_CHAT_CHANGED',
                     'VERBA_OUTPUT_STALE',
+                    'VERBA_OUTPUT_USER_CANCELLED',
                 ].includes(silentCode);
 
                 if (allowedSilentAbort) {
-                    console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
+                    if (silentCode === 'VERBA_OUTPUT_USER_CANCELLED') {
+                        console.info('[베르바] 사용자가 출력 번역 요청을 취소했습니다.');
+                    } else {
+                        console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
+                    }
                     outputJobSuperseded = true;
                     outputJobSuccess = false;
                     failedOutputSignatures.delete(id);
@@ -6423,7 +6428,16 @@ async function retranslateLatestOutput() {
         return;
     }
     if (pendingOutputs.has(target.id)) {
-        notify('최근 아웃풋을 아직 번역 중이에요.', 'info');
+        const pending = pendingOutputs.get(target.id);
+        if (!pending?.controller.signal.aborted) {
+            abortPendingOutput(target.id, outputAbortReason(
+                'VERBA_OUTPUT_USER_CANCELLED',
+                '사용자가 번역 요청을 취소했습니다.',
+                true,
+            ));
+            notify('번역 요청을 취소했어요.', 'info');
+            refreshRetranslateButton();
+        }
         return;
     }
 
@@ -8537,19 +8551,26 @@ function refreshRetranslateButton() {
     const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
     const target = latestAssistantMessage();
-    const busy = target ? pendingOutputs.has(target.id) : false;
+    const pending = target ? pendingOutputs.get(target.id) : null;
+    const busy = Boolean(pending);
+    const cancelling = Boolean(pending?.controller.signal.aborted);
     const failed = target
         ? failedOutputSignatures.get(target.id) === messageVersionSignature(target.message)
         : false;
-    button.disabled = !target || busy;
+    // Keep the spinning button clickable so a second tap can cancel the
+    // in-flight request. Disable it only during the brief abort cleanup.
+    button.disabled = !target || cancelling;
     button.classList.toggle('verba-busy', busy);
+    button.classList.toggle('verba-cancelling', cancelling);
     button.classList.toggle('verba-retry-needed', failed && !busy);
     const translated = target ? Boolean(currentRecord(target.message)) : false;
-    button.title = busy
-        ? '최근 아웃풋 번역 중'
-        : failed || !translated
-            ? '최근 아웃풋 번역 또는 다시 시도'
-            : '아웃풋 재번역 · 최근/이전 선택';
+    button.title = cancelling
+        ? '최근 아웃풋 번역 취소 중'
+        : busy
+            ? '최근 아웃풋 번역 중 · 눌러서 취소'
+            : failed || !translated
+                ? '최근 아웃풋 번역 또는 다시 시도'
+                : '아웃풋 재번역 · 최근/이전 선택';
     button.setAttribute('aria-label', button.title);
 }
 

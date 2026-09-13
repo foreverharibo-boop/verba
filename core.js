@@ -1094,20 +1094,49 @@ function developerMadKoreanOutputBlock(settings = {}, scope = 'mixed') {
                     ? 'USER/NPC/OTHER DIALOGUE'
                     : 'ALL E→K OUTPUT SCOPES';
 
-    return `MAD KOREAN EXCLUSIVE ENGINE — SINGLE-PASS SENTENCE-DESTRUCTION TRANSCREATION
-- This is the primary and exclusive translation engine for ${scopeLabel}. Produce the final Korean directly from the source in this single pass. Do not create or imitate an ordinary literal Korean draft first. Never apply this mode to K→E input translation.
-- Ignore every saved/custom base translation instruction, one-time request, global prompt, all-dialogue prompt, target-character prompt, USER/NPC/other prompt, localization/fine-tuning option, dialogue-ending preference, character-taste option, and every other developer experiment EXCEPT KIM HONG-JIN FLAVOR when that experiment is enabled for target-character dialogue. Their saved settings still exist, but their prompt text is absent from this request.
-- HIGHEST EXPRESSION-FREEDOM RULE: preserve the scene truth, NOT the source prose. Treat the source as a record of what happened, who spoke, what was meant, and how the moment felt—not as a sentence template.
-- Preserve all hard facts, actions, event order, speaker/addressee identity, referents, relationships, consent/refusal, negation, numbers, tense/aspect, point of view, explicitness, emotional direction, characterization, ambiguity that affects meaning, and setting/world facts.
-- Apart from those constraints, DESTROY THE SOURCE SENTENCES. Do not mirror their wording, clause order, sentence count, grammar, rhythm, rhetorical packaging, imagery, idioms, discourse markers, pronoun pattern, possessive structure, or paragraph-internal information order merely for fidelity.
-- Re-author the passage from the ground up as if a skilled contemporary Korean web-fiction/RP writer had conceived and written this exact scene directly in Korean with no foreign-language source.
-- Freely split, merge, reorder, compress, expand, recast, or replace sentences and expressions within each paragraph. Use Korean ellipsis, information flow, sentence endings, connective rhythm, emphasis, imagery, idioms, reactions, and pacing even when the result has almost no surface resemblance to the source.
-- NARRATION: prefer polished, immersive Korean-original prose. Replace English-shaped body-part constructions, filter phrases, noun-heavy clauses, repeated subjects, possessive chains, explanatory padding, and stiff transitions with scene-appropriate Korean narration.
-- DIALOGUE: write what this exact speaker would naturally say in Korean in this exact situation. Rebuild cadence, fragments, hesitation, sarcasm, flirting, insults, humor, profanity, subtext, and sentence endings by pragmatic function rather than translating their English form.
-- Do not make the result prettier at the cost of voice. Rough, awkward, repetitive, fragmented, childish, formal, vulgar, cold, or emotionally restrained source characterization must remain so when it is meaningful, but express that quality through native Korean choices.
-- Preserve paragraph boundaries, protected tokens, Markdown/HTML/code structure, names, terminology constraints, banned-word rules, and any explicitly requested bilingual/output format.
-- Never invent or remove an event, action, physical detail, relationship, motive, promise, accusation, threat, sexual meaning, consent state, backstory, joke target, setting detail, or implication. Expansion may make implicit Korean grammar natural; it may not add story content.
-- A faithful-looking translation that exposes the source sentence structure is a FAILURE. Before returning each segment, silently ask: “Would a Korean author plausibly have written this exact Korean if the foreign source had never existed?” If not, rewrite it again.`;
+    return `MAD KOREAN EXCLUSIVE ENGINE — KOREAN-ORIGINAL REAUTHORING, ONE PASS
+- This is the primary and exclusive E→K engine for ${scopeLabel}. The requested product is NOT a polished translation. It is Korean-original prose reconstructed from the scene facts. Produce that final Korean directly in one call; never make a literal draft first and never apply this mode to K→E input translation.
+- Ignore every saved/custom base translation instruction, one-time request, global prompt, all-dialogue prompt, target-character prompt, USER/NPC/other prompt, localization/fine-tuning option, dialogue-ending preference, character-taste option, and every other developer experiment EXCEPT KIM HONG-JIN FLAVOR when that experiment is enabled for target-character dialogue. Their values remain saved, but their prompt text is absent from this request.
+
+MANDATORY INTERNAL METHOD — NEVER PRINT THESE STEPS
+1. Read the source only as a SCENE LEDGER: who did what to whom, event order, speaker/addressee, intent and subtext, relationship, consent/refusal, negation, numbers, time, point of view, emotional direction, explicitness, and setting/world facts.
+2. Mentally discard the English sentences after extracting that ledger. Do not keep their clauses, syntax, sentence count, metaphor packaging, modifiers, rhythm, or paragraph-internal order in working memory as a writing template.
+3. On a blank page, stage the same scene anew in idiomatic contemporary Korean web-fiction/RP prose. Decide the Korean focus, omissions, action order, paragraph beats, verbs, cadence, and sentence endings from scratch.
+4. Compare the Korean result against the scene ledger only. Restore any lost fact, but NEVER restore English-shaped wording merely because it is closer to the source.
+
+SCENE-TRUTH LOCK
+- Preserve every actual event and action, their chronology and causality, speaker/addressee identity, referents, relationships, consent/refusal, negation, quantities, tense/aspect when meaningful, point of view, characterization, emotional direction, degree of explicitness, implications that affect the scene, and established setting/world facts.
+- Do not invent props, cleanup actions, gestures, locations, scenery, plans, dialogue, motivations, backstory, or physical details merely to make the prose richer. For example, never add tissues, a city view, a movie plan, or a new embrace unless the source contains it.
+- Surface decoration is not a hard fact. Redundant modifiers, generic sensory packaging, English metaphors, filter phrases, and explanatory restatement may be absorbed, compressed, relocated, or replaced by a different SOURCE-SUPPORTED Korean expression.
+
+DESTROY ENGLISH COMPOSITION
+- One English sentence must NOT predict one Korean sentence. Freely split one sentence into several hard beats, merge adjacent facts, reorder presentation within the same moment, compress redundancy, and expand only what Korean grammar needs. Sentence-by-sentence correspondence is a failure.
+- Do not trace English clause order, subject placement, pronoun repetition, possessive chains, body-part subjects, participial phrases, passive voice, abstract nouns, adjective piles, or rhetorical scaffolding. Rebuild them around Korean agents, actions, omissions, and information flow.
+- Do not preserve a phrase merely because it is accurate or pretty. If it reveals the route from English, discard it. Prefer ordinary but exact Korean verbs over translated-looking ornament.
+- You may split, merge, or re-paragraph natural-language prose inside the same supplied segment. Never move content across segment ids, protected HTML/code/tag regions, or attach narration or dialogue to the wrong speaker.
+
+KOREAN-ORIGINAL TARGET
+- Write like a skilled contemporary Korean genre/web-fiction author, not a translator. Favor concrete action, clean subject omission, decisive verbs, natural Korean focalization, and varied short-to-medium sentence beats. Long sentences are allowed only when Korean rhythm genuinely benefits.
+- NARRATION must feel observed and staged in Korean. Cut English-style explanation after an action, avoid repeatedly naming body parts as grammatical subjects, and avoid decorative stacks such as “희미한/비스듬한/따스한/나지막한/느릿한” when one exact verb or a shorter beat carries the scene.
+- DIALOGUE must be recreated from the speech act and subtext: what this person is trying to do to this listener right now. Use natural omissions, particles, contractions, interruptions, profanity level, teasing, hierarchy, intimacy, and Korean sentence-final force. Do not translate the line's grammar or idiom.
+- Keep deliberately rough, childish, formal, vulgar, cold, awkward, repetitive, or fragmented characterization when meaningful. Korean-original does not mean uniformly elegant or literary.
+
+STYLE CALIBRATION — LEARN THE COMPOSITION, NOT FIXED SUBSTITUTIONS
+- TRANSLATION-SHAPED: “어지럽게 엉망이 된 시트 따위는 조금도 신경 쓰이지 않는지, 그의 입꼬리에 비스듬한 미소가 희미하게 걸렸다.”
+  KOREAN-ORIGINAL FEEL: “난장판이 된 시트는 안중에도 없었다. 입가에 비뚜름한 웃음만 걸렸다.”
+- TRANSLATION-SHAPED: “낮게 잠겨 따스한 울림이 실린 속삭임이 나지막이 번졌다.”
+  KOREAN-ORIGINAL FEEL: “그가 잠긴 목소리로 낮게 속삭였다.”
+- TRANSLATION-SHAPED: “그의 심장 박동은 천천히 안정적인 리듬을 되찾기 시작했다.”
+  KOREAN-ORIGINAL FEEL: “한동안 요란하던 심장도 차츰 잦아들었다.”
+
+HARD REJECTION GATE — SILENTLY REWRITE BEFORE OUTPUT IF ANY ITEM IS TRUE
+- The Korean sentences still map one-for-one onto the English sentences or follow their clause order.
+- A fluent Korean reader could reverse-engineer the English syntax, modifiers, metaphors, or pronoun pattern.
+- The narration relies on body-part subjects, possessive chains, abstract emotional labels, doubled modifiers, or ornamental translationese where a Korean action beat would be more natural.
+- Dialogue sounds like accurate subtitles rather than words this character would spontaneously say in Korean.
+- The result merely swaps synonyms while retaining the source's composition.
+
+- The final plausibility test is absolute: “Could a Korean reader reasonably believe this scene was conceived and written only in Korean, with no foreign original?” If the answer is not an immediate yes, reconstruct it again before returning it.`;
 }
 
 function madKoreanExclusiveEnabled(settings = {}) {

@@ -36,7 +36,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.87';
+const EXTENSION_VERSION = '0.4.88';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -201,6 +201,7 @@ const DEFAULT_SETTINGS = {
     developerTargetToOtherRegister: 'unset',
     developerRegisterShiftMonitor: false,
     developerHongjinFlavorEnabled: false,
+    developerMadKoreanOutputEnabled: false,
     developerHongjinTranscreation: 'strong',
     developerHongjinProfanity: 'natural',
     developerHongjinTeasing: 'natural',
@@ -300,6 +301,7 @@ if (
     settings.qualityAuditEnabled = false;
     settings.developerRelationshipExperimentEnabled = false;
     settings.developerHongjinFlavorEnabled = false;
+    settings.developerMadKoreanOutputEnabled = false;
 }
 settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
 settings.qualityAuditMeaning = settings.qualityAuditMeaning !== false;
@@ -326,6 +328,7 @@ settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.so
     : 'unset';
 settings.developerRegisterShiftMonitor = settings.developerRegisterShiftMonitor === true;
 settings.developerHongjinFlavorEnabled = settings.developerHongjinFlavorEnabled === true;
+settings.developerMadKoreanOutputEnabled = settings.developerMadKoreanOutputEnabled === true;
 settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === settings.developerHongjinTranscreation)
     ? settings.developerHongjinTranscreation
     : 'strong';
@@ -1944,6 +1947,7 @@ function renderCurrentAppliedRules() {
                 ['금지어', banned.length ? `${banned.length}개 · ${banned.join(' / ')}` : '없음'],
                 ['우선순위', priority],
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
+                ['미친 한출의 맛', settings.developerMode && settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
             ])}
         </div>`;
 }
@@ -8808,7 +8812,22 @@ function developerSettingsMarkup() {
                         </div>
                     </details>
 
-                    
+                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-mad-korean-enabled" ${settings.developerMadKoreanOutputEnabled ? 'checked' : ''}>
+                                <span>미친 한출의 맛 사용</span>
+                            </label>
+                            <div class="verba-help verba-hongjin-help">
+                                <span><b>내용만 살리고 원문 문장은 죽입니다.</b></span>
+                                <span>사실·사건 순서·화자·관계·감정 방향 등 장면의 진실만 유지하고, 영어 어순·문장 구조·표현·비유·호흡은 보존하지 않습니다.</span>
+                                <span>서술과 모든 화자의 대사를 한국인 작가가 처음부터 한국어로 쓴 것처럼 전면 재작성합니다.</span>
+                                <span>E→K 아웃풋과 선택 재번역에 적용하며 K→E 인풋에는 적용하지 않습니다.</span>
+                                <span>새 사건·행동·관계·동의·설정은 만들지 않으며 보호 토큰과 출력 형식은 그대로 유지합니다.</span>
+                            </div>
+                        </div>
+                    </details>
 
                     
 
@@ -9642,6 +9661,7 @@ function injectSettingsPanel() {
             settings.qualityAuditEnabled = false;
             settings.developerRelationshipExperimentEnabled = false;
             settings.developerHongjinFlavorEnabled = false;
+            settings.developerMadKoreanOutputEnabled = false;
             saveSettings();
             lastQualityAuditSummary = '개발자 모드 비활성화';
             refreshSettingsPanelForDeveloperMode();
@@ -9723,6 +9743,13 @@ function injectSettingsPanel() {
             settings.developerHongjinFlavorEnabled = target.checked;
             saveSettings();
             syncDeveloperQualityControls(panel);
+            return;
+        }
+
+        if (target.id === 'verba-developer-mad-korean-enabled' && target instanceof HTMLInputElement) {
+            settings.developerMadKoreanOutputEnabled = target.checked;
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 

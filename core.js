@@ -1076,6 +1076,39 @@ const LOCALIZATION_RULES = {
 - Preserve the identity and referent of proper names and setting terms, while following the PERSON-NAME SCRIPT POLICY for human names written in Latin letters. Do not relocate or Koreanize places, currencies, measurements, institutions, legal/historical facts, fictional-world facts, or culture-specific setting information.`,
 };
 
+function developerMadKoreanOutputBlock(settings = {}, scope = 'mixed') {
+    if (
+        settings?.developerMode !== true
+        || settings?.developerMadKoreanOutputEnabled !== true
+    ) {
+        return '';
+    }
+
+    const scopeLabel = scope === 'narration'
+        ? 'NARRATION'
+        : scope === 'tagged_content'
+            ? 'TAGGED VISIBLE TEXT'
+            : scope === 'target_dialogue'
+                ? 'TARGET-CHARACTER DIALOGUE'
+                : scope === 'other_dialogue'
+                    ? 'USER/NPC/OTHER DIALOGUE'
+                    : 'ALL E→K OUTPUT SCOPES';
+
+    return `DEVELOPER MAD KOREAN OUTPUT — SENTENCE-DESTRUCTION TRANSCREATION
+- EXPERIMENTAL. Applies to ${scopeLabel} in E→K output translation and selection retranslation. Never apply it to K→E input translation.
+- HIGHEST EXPRESSION-FREEDOM RULE: preserve the scene truth, NOT the source prose. Treat the source as a record of what happened, who spoke, what was meant, and how the moment felt—not as a sentence template.
+- Preserve all hard facts, actions, event order, speaker/addressee identity, referents, relationships, consent/refusal, negation, numbers, tense/aspect, point of view, explicitness, emotional direction, characterization, ambiguity that affects meaning, and setting/world facts.
+- Apart from those constraints, DESTROY THE SOURCE SENTENCES. Do not mirror their wording, clause order, sentence count, grammar, rhythm, rhetorical packaging, imagery, idioms, discourse markers, pronoun pattern, possessive structure, or paragraph-internal information order merely for fidelity.
+- Re-author the passage from the ground up as if a skilled contemporary Korean web-fiction/RP writer had conceived and written this exact scene directly in Korean with no foreign-language source.
+- Freely split, merge, reorder, compress, expand, recast, or replace sentences and expressions within each paragraph. Use Korean ellipsis, information flow, sentence endings, connective rhythm, emphasis, imagery, idioms, reactions, and pacing even when the result has almost no surface resemblance to the source.
+- NARRATION: prefer polished, immersive Korean-original prose. Replace English-shaped body-part constructions, filter phrases, noun-heavy clauses, repeated subjects, possessive chains, explanatory padding, and stiff transitions with scene-appropriate Korean narration.
+- DIALOGUE: write what this exact speaker would naturally say in Korean in this exact situation. Rebuild cadence, fragments, hesitation, sarcasm, flirting, insults, humor, profanity, subtext, and sentence endings by pragmatic function rather than translating their English form.
+- Do not make the result prettier at the cost of voice. Rough, awkward, repetitive, fragmented, childish, formal, vulgar, cold, or emotionally restrained source characterization must remain so when it is meaningful, but express that quality through native Korean choices.
+- Preserve paragraph boundaries, protected tokens, Markdown/HTML/code structure, names, terminology constraints, banned-word rules, and any explicitly requested bilingual/output format.
+- Never invent or remove an event, action, physical detail, relationship, motive, promise, accusation, threat, sexual meaning, consent state, backstory, joke target, setting detail, or implication. Expansion may make implicit Korean grammar natural; it may not add story content.
+- A faithful-looking translation that exposes the source sentence structure is a FAILURE. Before returning each segment, silently ask: “Would a Korean author plausibly have written this exact Korean if the foreign source had never existed?” If not, rewrite it again.`;
+}
+
 const DEFAULT_TRANSLATION_RULE_ORDER = [
     'oneTime',
     'characterDialogue',
@@ -1700,6 +1733,7 @@ function translationTuningBlock(settings = {}, override = null) {
     const expressionDetail = outputExpressionDetailBlock(settings, 'mixed');
     const developerRelationshipExperiment = developerRelationshipExperimentBlock(settings, 'target_dialogue');
     const developerHongjinFlavor = developerHongjinFlavorBlock(settings, 'target_dialogue');
+    const developerMadKoreanOutput = developerMadKoreanOutputBlock(settings, 'mixed');
 
     if (!relationTemperatureEnabled) {
         return `TRANSLATION FINE TUNING
@@ -1718,7 +1752,9 @@ ${characterTasteConflictNote}
 
 ${developerRelationshipExperiment}
 
-${developerHongjinFlavor}`;
+${developerHongjinFlavor}
+
+${developerMadKoreanOutput}`;
     }
 
     const relationKey = Object.hasOwn(RELATION_TEMPERATURE_RULES, requested.relationTemperature)
@@ -1765,6 +1801,8 @@ ${developerRelationshipExperiment}
 
 ${developerHongjinFlavor}
 
+${developerMadKoreanOutput}
+
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, speaker attribution, social roles explicitly stated by the source, chronology, tense, intensity, explicitness, and who does what to whom.
 - Never alter protected tokens, names, formatting, code, tags, URLs, numbers, or setting-specific terminology because of fine tuning.`;
@@ -1796,6 +1834,7 @@ function scopedTranslationTuningBlock(settings = {}, override = null, scope = 'n
         : Object.hasOwn(LOCALIZATION_RULES, settings.dialogueLocalizationLevel)
             ? settings.dialogueLocalizationLevel
             : legacyLocalizationKey || 'balanced';
+    const developerMadKoreanOutput = developerMadKoreanOutputBlock(settings, scope);
 
     if (scope === 'narration' || scope === 'tagged_content') {
         if (!relationTemperatureEnabled) {
@@ -1809,7 +1848,9 @@ ${koreanOutputTasteBlock(settings, 'narration')}
 
 ${englishCharacterKoreanTasteBlock(settings, 'narration')}
 
-${outputCharacterTasteConflictNote(settings)}`;
+${outputCharacterTasteConflictNote(settings)}
+
+${developerMadKoreanOutput}`;
         }
         return `TRANSLATION FINE TUNING — NARRATION ONLY
 ${LOCALIZATION_RULES[narrationLocalizationKey]}
@@ -1821,6 +1862,8 @@ ${koreanOutputTasteBlock(settings, 'narration')}
 ${englishCharacterKoreanTasteBlock(settings, 'narration')}
 
 ${outputCharacterTasteConflictNote(settings)}
+
+${developerMadKoreanOutput}
 
 FINE-TUNING SAFETY
 - Fine tuning changes Korean expression only. Preserve meaning, facts, referents, chronology, tense, intensity, explicitness, point of view, and who does what to whom.
@@ -1852,6 +1895,9 @@ ${developerRelationshipExperiment}` : ''}
 ${developerHongjinFlavor ? `
 
 ${developerHongjinFlavor}` : ''}
+${developerMadKoreanOutput ? `
+
+${developerMadKoreanOutput}` : ''}
 
 ${outputExpressionDetailBlock(settings, scope)}
 

@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.95';
+const EXTENSION_VERSION = '0.4.96';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8885,6 +8885,7 @@ function developerSettingsMarkup() {
                                 <span>핵심 규칙을 맨 앞에 배치해 중간급 모델도 사실·강도·행위자와 대상 관계를 우선 확인합니다.</span>
                                 <span>장면에 필요 없는 영어 수식어는 모두 옮기지 않고 덜어내며, 같은 장소·사물은 한 가지 자연스러운 명칭으로 유지합니다.</span>
                                 <span>인물을 여자·상대·사람 같은 일반 명사로 바꿔 부르지 않고, 불필요한 감정 해설과 어색한 수식 결합을 제거합니다.</span>
+                                <span>영어식 선언문을 실제 한국어 제안·결정 말투로 다시 쓰고, 홈시어터 같은 반복 장소 명칭을 끝까지 통일합니다.</span>
                                 <span>자연스러움을 이유로 부드러운 행동을 거칠게 만들거나, 지지하는 손길에 구속·도주 의미를 추가하지 않습니다.</span>
                                 <span>야한 장면도 과장된 AI 야설 문구보다 정확하고 담백한 한국어 동작 서술을 우선합니다.</span>
                                 <span><b>활성화 중에는 김홍진의 맛을 제외한 모든 저장 지침·전역/대사 프롬프트·미세 조정·다른 개발자 실험을 AI 요청에서 자동 제외합니다.</b></span>

@@ -1166,7 +1166,7 @@ CORE CONTRACT — HIGHEST PRIORITY; NEVER SACRIFICE ONE ITEM FOR ANOTHER
 7. Translate all visible natural language, including tagged information panels. Preserve protected structure and output format exactly.
 
 MANDATORY SILENT WORKFLOW — DO NOT PRINT IT
-- Extract a compact scene ledger: actors, actions, targets, ownership, chronology, cause, dialogue intent, relationship/register, force, consent/refusal, sensory channel, body position, numbers, names, setting, stable recurring terms, and point of view.
+- Extract a compact scene ledger: actors, actions, targets, ownership, chronology, cause, dialogue intent, relationship/register, force, consent/refusal, sensory channel, body position, numbers, names, setting, stable recurring terms, and point of view. Before drafting, assign one Korean form to every recurring place/object/institution and keep that form in narration, dialogue, and tagged metadata.
 - Put the English sentences aside. Re-stage the same ledger on a blank page using Korean information flow, omissions, verbs, paragraph beats, and sentence endings. Split, merge, and reorder wording within the same moment when natural, but never cross segment ids or protected regions.
 - Audit the Korean against the ledger. Check every pronoun and possessive: who holds whom, who gives or receives, whose object it is, who feels or says it, and which body part touches which target. Fix any role reversal before output.
 - Then audit intensity and Korean well-formedness. Restore a lost fact or force, but never restore English-shaped phrasing merely because it looks closer.
@@ -1175,7 +1175,7 @@ MEANING, FORCE, AND BODY-MECHANICS LOCK
 - Preserve chronology, causality, relationships, consent/refusal, negation, quantity, meaningful tense/aspect, characterization, emotional direction, implications, explicitness, and world facts.
 - REFERENT CONTINUITY: Never replace an already established woman/person with generic labels such as “여자/상대/사람/자그마한 몸/작은 체구” merely to avoid repeating a pronoun or name. In natural Korean, omit the subject when clear; otherwise use the established name or “그녀”. A physical phrase such as “작은 몸” is allowed only when the body itself is genuinely the focus of the source action, never as a routine label for the person.
 - Soft/gentle/light/careful/brief may not become grabbing, growling, ripping, crushing, or grinding. Firm/hard/violent/rough may remain fully forceful and must not be euphemized or softened.
-- Secure/anchor/hold/support/prevent slipping describes stability unless the source explicitly describes escape, restraint, or resistance. Do not add capture language such as “달아나지 못하게/도망칠 틈도 없이/옭아매다” without that fact.
+- Secure/anchor/hold/support/prevent slipping describes stability unless the source explicitly describes escape, restraint, or resistance. “Let her slip off his lap” normally means keeping/supporting her in position, not “무릎에서 내려가지 못하게”. Do not add capture language such as “달아나지 못하게/도망칠 틈도 없이/옭아매다” without an actual attempt to leave.
 - Preserve sensory channels and mechanics: taste is not smell; a forearm is not an elbow; the small of the back is not the neck; a rolling motion is not pounding. Never invent a character's pleasure or pain from neutral physical strain.
 - Preserve grammatical roles behind figurative English. If B is to serve as A's armrest, Korean must not reverse this into A giving B an arm pillow. If an adjective describes hair, do not attach it to facial features.
 - Preserve the source's level of specificity. Generic down bedding must not become goose down, an unspecified fee must not become a contractual penalty, and mild movement must not become struggling. Choose a natural general Korean term when the source does not justify a narrower one.
@@ -1193,6 +1193,7 @@ CLEAN KOREAN NARRATION
 NATIVE KOREAN DIALOGUE
 - Translate intent, subtext, timing, hierarchy, intimacy, humor, and emotional temperature—not English grammar. Use the omissions, particles, contractions, and endings this exact speaker would spontaneously use with this listener.
 - Prefer the shortest complete Korean utterance that carries the same intent and character voice. Break or rebuild long English contrasts and rhetorical questions; avoid repeated subjects and scaffolding such as “나 혼자… 너 혼자… 할 생각은 추호도 없어” when a direct Korean reaction is enough.
+- English declaration/decision frames must become the speech act a Korean person would actually use. “Sitting across the table sounds pointless” may become “너도 안 먹는다는데 굳이 식탁까지 갈 필요 없겠네”; “We're heading straight to the home theater room” may become “그냥 바로 영화 보러 가자”. Do not produce stiff traced lines such as “식탁에 마주 보고 앉아 있는 건 딱히 의미 없겠어” or “영화 방으로 바로 가지”. Examples show reconstruction distance, not fixed wording.
 - Rebuild English rhetorical formulas completely. “You have no idea how exhausting it was” should become a context-native complaint such as “아까 회의, 진짜 지겨워 죽는 줄 알았어”, not “넌 모를 거다”. “Be prepared to compensate me” may become “그러니까 네가 책임져” when that matches the intended teasing. These demonstrate distance from English, not fixed substitutions.
 - Rebuild playful corporate/legal wording as a Korean joke rather than a translated term. A line such as “full cohabitation privileges” should sound like spontaneous teasing—e.g. “같이 사는 사람 특권이 있잖아”—not a stiff coined phrase such as “완전한 동거 권한”. Preserve the joke's fact and tone, not its English noun structure.
 - Do not add insults or profanity for liveliness. A neutral playful “well-fed creature” does not authorize “사료 먹은 짐승”. Preserve the exact warmth, teasing, contempt, and dignity of the source.
@@ -1205,7 +1206,7 @@ INTIMATE OR EXPLICIT SCENES
 
 CULTURE, OBJECTS, AND STRUCTURED TEXT
 - Korean-original means native composition, not relocation. Preserve actual garments, loanwords, products, institutions, places, currencies, and cultural facts; make their surrounding Korean natural instead of replacing the object. A recognized item such as a Henley shirt may remain 헨리넥.
-- Choose one natural Korean rendering for each stable place, room, object, title, and technical term, then reuse it throughout the same response. Do not alternate among 홈시어터/영화 방/영화관 방/개인 상영관 for one unchanged referent merely for variety.
+- Choose one natural Korean rendering for each stable place, room, object, title, and technical term, then reuse it everywhere in the same response, including metadata. When home theater room/media room/private screening room clearly name the same residential room, use “홈시어터” consistently; never alternate with “영화 방/영화관/개인 상영관”. Do not use public “영화관” for a private home theater. Use ordinary Korean nouns such as “그릇” and “회사/소속사” instead of needless “보울” or “에이전시” when no branded term is intended.
 - Translate every visible label, weekday, AM/PM marker, weather term, and location inside custom tags or HTML. Preserve tags, attributes, code, emoji, punctuation, numbers, and layout. Use stable metadata labels: Date→날짜, Weather→날씨, Location→장소.
 
 FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
@@ -1216,7 +1217,8 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 - Does any dialogue sound like subtitles, Japanese-translated character speech, or an English rhetorical formula in Korean words?
 - Was any expendable English modifier translated only to maintain surface coverage, or any generic fact narrowed into unsupported specificity?
 - Was an established person reduced to “여자/상대/사람/몸” where Korean would omit the subject or retain the established identity?
-- Is there any typo, repeated subject or wording, redundant speech tag or emotion recap, stock “묻어났다/감돌았다/고스란히 담겼다” packaging, malformed collocation, impossible body mechanics, modifier error, untranslated visible text, or inconsistent term?
+- Did a simple Korean suggestion or decision retain an English declaration frame, producing stiff lines such as “의미 없겠어/바로 가지” instead of natural spoken Korean?
+- Is there any typo, repeated subject or wording, redundant speech tag or emotion recap, stock “묻어났다/감돌았다/고스란히 담겼다” packaging, malformed collocation, impossible body mechanics, modifier error, untranslated visible text, or inconsistent term between prose and metadata?
 
 - Output only the final Korean required by the request. If a fluent Korean reader could still sense a foreign original, rewrite it once more before returning it.`;
 }

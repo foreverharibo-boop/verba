@@ -35,7 +35,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.78';
+const EXTENSION_VERSION = '0.4.80';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -246,6 +246,7 @@ const DEFAULT_SETTINGS = {
     otherDialoguePrompt: '',
     otherDialoguePromptEnabled: true,
     promptPresets: [],
+    selectedPromptPresetId: '',
     promptPresetBackups: [],
     dialogueEndingPreferred: '',
     dialogueEndingAvoid: '',
@@ -370,6 +371,10 @@ settings.promptPresets = Array.isArray(settings.promptPresets)
         .filter(preset => preset.name)
         .slice(0, 100)
     : [];
+settings.selectedPromptPresetId = typeof settings.selectedPromptPresetId === 'string'
+    && settings.promptPresets.some(preset => preset.id === settings.selectedPromptPresetId)
+    ? settings.selectedPromptPresetId
+    : '';
 settings.promptPresetBackups = normalizedPromptPresetBackups(settings.promptPresetBackups);
 settings.koreanFlavorEnabled = settings.koreanFlavorEnabled === true;
 settings.koreanFlavorDialogueRhythm = ['default', 'short', 'balanced', 'smooth'].includes(settings.koreanFlavorDialogueRhythm)
@@ -1397,7 +1402,7 @@ function promptPresetDisplayRows() {
         .map(entry => entry.preset);
 }
 
-function promptPresetSelectMarkup(selectedId = '') {
+function promptPresetSelectMarkup(selectedId = settings.selectedPromptPresetId) {
     const selected = String(selectedId || '');
     const rows = promptPresetDisplayRows();
     return [
@@ -1408,18 +1413,29 @@ function promptPresetSelectMarkup(selectedId = '') {
     ].join('');
 }
 
-function renderPromptPresetManager(selectedId = '') {
+function renderPromptPresetManager(selectedId = null) {
     const select = document.querySelector('#verba-prompt-preset-select');
     if (!select) return;
-    const keep = selectedId || select.value;
+    const requested = selectedId === null
+        ? String(select.value || settings.selectedPromptPresetId || '')
+        : String(selectedId || '');
+    const keep = promptPresetById(requested)?.id || '';
     select.innerHTML = promptPresetSelectMarkup(keep);
-    if (keep && [...select.options].some(option => option.value === keep)) select.value = keep;
+    select.value = keep;
+    settings.selectedPromptPresetId = keep;
 
     const count = document.querySelector('#verba-prompt-preset-count');
     if (count) count.textContent = `${normalizedPromptPresets().length}개 저장`;
 
     const selectedPreset = promptPresetById(select.value);
     const hasSelection = Boolean(selectedPreset);
+    const nameField = document.querySelector('#verba-prompt-preset-name');
+    if (
+        nameField instanceof HTMLInputElement
+        || nameField instanceof HTMLTextAreaElement
+    ) {
+        nameField.value = selectedPreset?.name || '';
+    }
     [
         '#verba-prompt-preset-rename',
         '#verba-prompt-preset-favorite',
@@ -1603,6 +1619,7 @@ function resetPromptPresetWorkspace(scope = PROMPT_PRESET_SCOPE_PROMPTS) {
             : null,
     };
 
+    settings.selectedPromptPresetId = '';
     setPromptFieldsFromPreset(resetPreset);
 
     const select = document.querySelector('#verba-prompt-preset-select');
@@ -2510,11 +2527,15 @@ async function sendProfileRequest(prompt, options = {}) {
             return response;
         };
 
-        return await (
+        const queuedRequest = (
             options.parallelRequest === true
                 ? enqueueScopedParallelRequest(executeRequest)
                 : enqueueRequest(executeRequest)
         );
+        // Also race while the request is still waiting in Verba's queue.
+        // Otherwise a cancelled queued translation would keep showing
+        // "취소 중" until every earlier request had finished.
+        return await Promise.race([queuedRequest, hardStop]);
     } catch (error) {
         if (timedOut) {
             const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
@@ -2533,14 +2554,18 @@ async function sendProfileRequest(prompt, options = {}) {
         if (timer) clearTimeout(timer);
         removeHardStopAbort?.();
         outerSignal?.removeEventListener?.('abort', forwardAbort);
-        recordProfileAttempt(profileSlot, {
-            success: attemptSucceeded,
-            elapsedMs: performance.now() - startedAt,
-            retry: Number(options.retryAttempt) > 0,
-            fallback: Boolean(options.fallback),
-            error: attemptError,
-            stage: options.stage || 'request',
-        });
+        // A user/internal abort is neither a provider success nor a provider
+        // failure, so keep it out of the connection performance statistics.
+        if (!outerSignal?.aborted) {
+            recordProfileAttempt(profileSlot, {
+                success: attemptSucceeded,
+                elapsedMs: performance.now() - startedAt,
+                retry: Number(options.retryAttempt) > 0,
+                fallback: Boolean(options.fallback),
+                error: attemptError,
+                stage: options.stage || 'request',
+            });
+        }
     }
 }
 
@@ -4939,10 +4964,15 @@ async function translateMessage(messageId, options = {}) {
                     'VERBA_SWIPE_CHANGED',
                     'VERBA_CHAT_CHANGED',
                     'VERBA_OUTPUT_STALE',
+                    'VERBA_OUTPUT_USER_CANCELLED',
                 ].includes(silentCode);
 
                 if (allowedSilentAbort) {
-                    console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
+                    if (silentCode === 'VERBA_OUTPUT_USER_CANCELLED') {
+                        console.info('[베르바] 사용자가 출력 번역 요청을 취소했습니다.');
+                    } else {
+                        console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
+                    }
                     outputJobSuperseded = true;
                     outputJobSuccess = false;
                     failedOutputSignatures.delete(id);
@@ -6396,7 +6426,16 @@ async function retranslateLatestOutput() {
         return;
     }
     if (pendingOutputs.has(target.id)) {
-        notify('최근 아웃풋을 아직 번역 중이에요.', 'info');
+        const pending = pendingOutputs.get(target.id);
+        if (!pending?.controller.signal.aborted) {
+            abortPendingOutput(target.id, outputAbortReason(
+                'VERBA_OUTPUT_USER_CANCELLED',
+                '사용자가 번역 요청을 취소했습니다.',
+                true,
+            ));
+            notify('번역 요청을 취소했어요.', 'info');
+            refreshRetranslateButton();
+        }
         return;
     }
 
@@ -8510,19 +8549,27 @@ function refreshRetranslateButton() {
     const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
     const target = latestAssistantMessage();
-    const busy = target ? pendingOutputs.has(target.id) : false;
+    const pending = target ? pendingOutputs.get(target.id) : null;
+    const busy = Boolean(pending);
+    const cancelling = Boolean(pending?.controller.signal.aborted);
     const failed = target
         ? failedOutputSignatures.get(target.id) === messageVersionSignature(target.message)
         : false;
-    button.disabled = !target || busy;
+    // Keep the spinning button clickable so a second tap can cancel the
+    // in-flight request. Disable it only during the brief abort cleanup.
+    button.disabled = !target || cancelling;
     button.classList.toggle('verba-busy', busy);
+    button.classList.toggle('verba-cancelling', cancelling);
     button.classList.toggle('verba-retry-needed', failed && !busy);
     const translated = target ? Boolean(currentRecord(target.message)) : false;
-    button.title = busy
-        ? '최근 아웃풋 번역 중'
-        : failed || !translated
-            ? '최근 아웃풋 번역 또는 다시 시도'
-            : '아웃풋 재번역 · 최근/이전 선택';
+    button.title = cancelling
+        ? '최근 아웃풋 번역 취소 중'
+        : busy
+            ? '최근 아웃풋 번역 중 · 눌러서 취소'
+            : failed || !translated
+                ? '최근 아웃풋 번역 또는 다시 시도'
+                : '아웃풋 재번역 · 최근/이전 선택';
+    button.setAttribute('aria-label', button.title);
 }
 
 function createRetranslateButton() {
@@ -10093,6 +10140,8 @@ function injectSettingsPanel() {
     promptPresetSelect?.addEventListener('change', event => {
         const preset = promptPresetById(event.target.value);
         if (!preset) {
+            settings.selectedPromptPresetId = '';
+            saveSettings();
             if (promptPresetName) promptPresetName.value = '';
             if (promptPresetSaveScope instanceof HTMLSelectElement) {
                 promptPresetSaveScope.value = PROMPT_PRESET_SCOPE_PROMPTS;
@@ -10103,6 +10152,7 @@ function injectSettingsPanel() {
 
         clearTimeout(promptEditorBackupTimer);
         promptEditorBackupTimer = null;
+        settings.selectedPromptPresetId = preset.id;
         setPromptFieldsFromPreset(preset);
         if (promptPresetName) promptPresetName.value = preset.name;
         renderPromptPresetManager(preset.id);
@@ -10153,6 +10203,7 @@ function injectSettingsPanel() {
             settings.promptPresets = presets.map(preset => (
                 preset.id === selectedPreset.id ? updated : preset
             ));
+            settings.selectedPromptPresetId = updated.id;
             saveSettings();
             renderPromptPresetManager(updated.id);
             if (promptPresetSelect) promptPresetSelect.value = updated.id;
@@ -10181,6 +10232,7 @@ function injectSettingsPanel() {
             updatedAt: new Date().toISOString(),
         };
         settings.promptPresets = [...presets, preset];
+        settings.selectedPromptPresetId = preset.id;
         saveSettings();
         renderPromptPresetManager(preset.id);
         if (promptPresetSelect) promptPresetSelect.value = preset.id;
@@ -10249,6 +10301,7 @@ function injectSettingsPanel() {
         }
         if (!globalThis.confirm?.(`프롬프트 프리셋 “${preset.name}”을 삭제할까요?`)) return;
         settings.promptPresets = normalizedPromptPresets().filter(row => row.id !== id);
+        settings.selectedPromptPresetId = '';
         saveSettings();
         if (promptPresetName) promptPresetName.value = '';
         renderPromptPresetManager('');

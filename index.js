@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.4.99';
+const EXTENSION_VERSION = '0.4.100';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8862,7 +8862,7 @@ function developerSettingsMarkup() {
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
                     ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
 
-                    <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab" open>
+                    <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">

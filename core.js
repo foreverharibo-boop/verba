@@ -162,9 +162,48 @@ export function parseBannedWords(value) {
     return [...new Set(words)];
 }
 
-export function findBannedWords(text, configuredWords) {
+function developerGenderedInsultGuardEnabled(settings = {}) {
+    return settings?.developerMode === true
+        && (
+            settings?.developerMadKoreanOutputEnabled === true
+            || settings?.developerHongjinFlavorEnabled === true
+        );
+}
+
+function findDeveloperGenderedInsults(text) {
     const value = String(text || '');
-    return parseBannedWords(configuredWords).filter(word => value.includes(word));
+    const found = [];
+    const explicitPatterns = [
+        /(?:이|저|그|미친|독한|나쁜|썅|쌍|씨발|시발|개|망할|빌어먹을)\s*년(?:아|이(?:구나|네|야|냐|니|니까|라서|라고)?|은|는|을|를|에게|한테|의|도|만|까지|처럼|보다)?/gu,
+        /(?:김치녀|된장녀|맘충|보지년|걸레년|창녀|암캐|계집년?|계집애)(?:아|이|은|는|을|를|에게|한테|의|도|만|까지|처럼|보다)?/gu,
+    ];
+
+    for (const pattern of explicitPatterns) {
+        for (const match of value.matchAll(pattern)) found.push(match[0]);
+    }
+
+    const standalonePattern = /\s년(?:아|이(?:구나|네|야|냐|니|니까|라서|라고)?|은|는|을|를|에게|한테|의|도|만|까지|처럼|보다)?(?=$|[\s.,!?…"'”’)}\]])/gu;
+    const temporalPrefix = /(?:\d|몇|수|여러|오랜|지난|최근|향후|앞으로|약|만|꼬박|무려|반|일|이|삼|사|오|육|칠|팔|구|십|백|천|한|두|세|네|열|스무)\s*$/u;
+    for (const match of value.matchAll(standalonePattern)) {
+        const before = value.slice(0, match.index).trimEnd();
+        if (temporalPrefix.test(before)) continue;
+        found.push(match[0].trim());
+    }
+
+    return [...new Set(found.filter(Boolean))];
+}
+
+export function findBannedWords(text, configuredWordsOrSettings) {
+    const settings = configuredWordsOrSettings && typeof configuredWordsOrSettings === 'object'
+        ? configuredWordsOrSettings
+        : null;
+    const configuredWords = settings ? settings.bannedWords : configuredWordsOrSettings;
+    const value = String(text || '');
+    const found = parseBannedWords(configuredWords).filter(word => value.includes(word));
+    if (settings && developerGenderedInsultGuardEnabled(settings)) {
+        found.push(...findDeveloperGenderedInsults(value));
+    }
+    return [...new Set(found)];
 }
 
 const BILINGUAL_PROMPT_PATTERN = /bilingual|dual[-\s]?language|both\s+(?:english|korean)\s+and\s+(?:english|korean)|(?:retain|preserve|include|show|keep)[^\n]{0,50}(?:english|original)|(?:english|original)[^\n]{0,50}(?:retain|preserve|include|show|keep)|(?:english|original)[^\n]{0,80}(?:first|followed|then|alongside|together|parenthes)|(?:first|followed|then|alongside|together|parenthes)[^\n]{0,80}(?:english|original)|한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문|원문)[^\n]{0,30}병기|병기[^\n]{0,30}(?:영어|영문|원문)|영어와\s*한국어|한국어와\s*영어|(?:영어|영문|원문)[^\n]{0,50}(?:먼저|뒤에|괄호|함께)|(?:먼저|뒤에|괄호|함께)[^\n]{0,50}(?:영어|영문|원문)/i;
@@ -1147,6 +1186,7 @@ function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
 - Do NOT invent new events, physical actions, sexual acts, relationship status, backstory, promises, consent, accusations, threats, insults aimed at a NEW target, or factual claims.
 - Surface profanity may be stronger than the literal source, but it must not transform friendliness into genuine hostility, joking into a serious threat, rejection into consent, or a neutral statement into a new accusation.
 - HARD SAFETY / VOICE RULE — NO MISOGYNISTIC WORDING: Never use misogynistic slurs, woman-hating labels, gendered degradation, or language that reduces a woman to a sex object or treats women as an inferior class. This prohibition overrides every profanity, vulgarity, teasing, and transcreation setting.
+- ABSOLUTE LEXICAL BAN: Never use “년” as a label, noun, suffix, address, or insult for a female person—including standalone “년” and forms such as “이년/저년/그년/미친년/독한 년/씨발년/시발년/썅년/개년”. Also forbid “김치녀/된장녀/맘충/보지년/걸레년/창녀/암캐/계집/계집애” as person-directed wording. Calendar and elapsed-time uses such as “2026년/몇 년” remain allowed.
 - If the source itself contains misogynistic wording, preserve the relevant hostility, insult function, speaker intent, and scene consequence without repeating or embellishing the misogynistic term; replace it with a natural non-gendered or non-degrading Korean expression of matching force.
 - HARD ADDRESS / INSULT RULE: Never manufacture a Korean-only abusive nickname or vocative by attaching “-가놈/-놈/-녀석/-새끼” to a person's surname, name, role, or title. In particular, forms such as “최가놈/김가놈” are forbidden. Use the established name/address naturally; even strong profanity or teasing does not authorize a new insult aimed at that person.
 - Never apply this block to narration, USER/NPC/OTHER-speaker dialogue, quoted speech spoken by someone else, tagged content outside TARGET CHARACTER dialogue, or K→E input.
@@ -1259,6 +1299,7 @@ KOREAN NARRATION
 
 KOREAN DIALOGUE
 - Recreate the speech act, subtext, timing, relationship, hierarchy, humor, and emotional temperature—not the English grammar. Use the omissions, particles, contractions, and endings this speaker would naturally use with this listener.
+- Never use “년” as a person label or insult, whether standalone or inside “이년/저년/그년/미친년/독한 년/씨발년/시발년/썅년/개년”. Also never use “김치녀/된장녀/맘충/보지년/걸레년/창녀/암캐/계집/계집애” as person-directed wording. Preserve any source hostility with a non-gendered expression of matching force. Ordinary year expressions such as “2026년/몇 년” are not prohibited.
 - Prefer the shortest complete utterance carrying the same intent. Rebuild declarations, rhetorical questions, and legal/corporate jokes as spontaneous Korean; do not translate their noun structure or logic frame.
 - Examples of reconstruction distance: “Sitting across the table sounds pointless” → “너도 안 먹는다는데 굳이 식탁까지 갈 필요 없겠네.” “We're heading straight to the home theater room” → “그냥 바로 영화 보러 가자.” These are not fixed substitutions.
 - Do not invent a character voice. Ordinary contemporary Korean is the default. Do not add rough masculine labels, profanity, fashionable shorthand, or Japanese-translated speech merely to sound lively. Avoid “녀석/놈들/너더러/자네/○○군/일절/말동무/꼼짝없이/공식 지정” when a simpler current expression carries the meaning.
@@ -1282,6 +1323,7 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 - Is any sentence decorative, redundant, vague, grammatically malformed, physically impossible, or inconsistent in terminology?
 - Did a known TARGET CHARACTER or USER become “그/그녀/남자/여자/상대/사람/사내/청년” even though full context identifies that person? If yes, omit the reference naturally or use the canonical name.
 - Did any speaker acquire an invented “-가놈/-놈/-녀석/-새끼” address, or an unsupported “-드쇼/-하쇼/-구먼/-일세/-인가/-하게/-라네” ending? If yes, rewrite it in ordinary contemporary Korean.
+- Did “년” or another gendered term become a label, suffix, address, or insult for a person? If yes, replace it with non-gendered wording of the same force. Do not confuse this with a calendar or elapsed-time year unit.
 
 - Return only the final Korean required by the request. If it does not read like original Korean writing, destroy the phrasing and write it again from the unchanged scene truth.`;
 }
@@ -3162,11 +3204,12 @@ ${JSON.stringify(payload)}`;
 
 export function buildBannedRepairPrompt(segments, currentTranslations, settings, speakerIdentity = {}, nameTokens = [], tuning = null, scope = 'mixed') {
     const bannedWords = parseBannedWords(settings.bannedWords);
+    const genderedInsultGuard = developerGenderedInsultGuardEnabled(settings);
     const payload = segments.map(segment => ({
         id: segment.id,
         source: segment.text,
         current_translation: currentTranslations.get(segment.id) || '',
-        found_banned_words: findBannedWords(currentTranslations.get(segment.id) || '', settings.bannedWords),
+        found_banned_words: findBannedWords(currentTranslations.get(segment.id) || '', settings),
     }));
     const rules = scope === 'mixed'
         ? sharedOutputRules(settings, '', speakerIdentity, nameTokens, tuning)
@@ -3177,13 +3220,14 @@ TASK
 Repair only the supplied Korean translations so none of the banned words remain.
 - Preserve the complete meaning, tone, intensity, grammar, and formatting.
 - Replace banned expressions with context-appropriate natural Korean; do not merely delete them.
+- ${genderedInsultGuard ? 'A person-directed “년” or another detected gendered slur is absolutely forbidden. Replace it with natural non-gendered wording of matching force. Do not alter legitimate calendar/elapsed-time uses such as “2026년/몇 년”.' : 'Apply only the configured banned-word list.'}
 - Do not change or return any segment that was not supplied.
 
 Return exactly this schema:
 {"segments":[{"id":"seg_0000","translation":"수정된 한국어 번역"}]}
 
 SEGMENTS TO REPAIR
-${JSON.stringify(payload)}\n\nBANNED WORDS\n${bannedWords.join(', ')}`;
+${JSON.stringify(payload)}\n\nBANNED WORDS\n${bannedWords.join(', ')}${genderedInsultGuard ? '\nAUTOMATIC HARD BAN: person-directed 년 계열 및 여성 비하 인칭어 (연도·기간 단위 년은 허용)' : ''}`;
 }
 
 export function buildProtectedTokenRepairPrompt(segments, currentTranslations, settings, speakerIdentity = {}, nameTokens = [], tuning = null, scope = 'mixed') {

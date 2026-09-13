@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.5';
+const EXTENSION_VERSION = '0.5.6';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3108,7 +3108,7 @@ async function planRepeatedRoleTermLocks(segmented, options = {}) {
                 || target.length > 40
                 || /[\r\n@]/.test(target)
                 || !hasKorean(target)
-                || findBannedWords(target, settings.bannedWords).length
+                || findBannedWords(target, settings).length
             ) return [];
             return [{ source: term, target }];
         });
@@ -4081,7 +4081,7 @@ async function runExperimentalQualityAudit({
             }
 
             const banned = changed.filter(segment =>
-                findBannedWords(translations.get(segment.id), settings.bannedWords).length,
+                findBannedWords(translations.get(segment.id), settings).length,
             );
             if (banned.length) {
                 await repairSegmentsByOutputScope({
@@ -4154,7 +4154,7 @@ async function translateOutputText(source, options = {}) {
 
     for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
         const invalid = segmented.segments.filter(segment =>
-            findBannedWords(translations.get(segment.id), settings.bannedWords).length,
+            findBannedWords(translations.get(segment.id), settings).length,
         );
         if (!invalid.length) break;
         await repairSegmentsByOutputScope({
@@ -4214,7 +4214,7 @@ async function translateOutputText(source, options = {}) {
 
     runDeveloperRegisterShiftMonitor(segmented, translations, speakerScopes);
 
-    const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings.bannedWords));
+    const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));
     if (remaining.length) {
         throw new Error(`금지어가 계속 남아 번역을 적용하지 않았습니다: ${[...new Set(remaining)].join(', ')}`);
     }
@@ -8002,7 +8002,7 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
             if (sameRetranslationWording(replacement, row.selected)) {
                 throw new Error(`AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
             }
-            const banned = findBannedWords(replacement, settings.bannedWords);
+            const banned = findBannedWords(replacement, settings);
             if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
             if (replacement.length > Math.max(300, row.selected.length * 7)) {
                 throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
@@ -8221,7 +8221,7 @@ async function retranslateSelection(snapshot) {
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
-                if (findBannedWords(text, settings.bannedWords).length) return false;
+                if (findBannedWords(text, settings).length) return false;
                 return text.length <= Math.max(300, snapshot.selected.length * 7);
             });
             if (candidates.length < 2) {
@@ -8254,7 +8254,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             }
         }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
-        const banned = findBannedWords(replacement, settings.bannedWords);
+        const banned = findBannedWords(replacement, settings);
         if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
         if (replacement.length > Math.max(300, snapshot.selected.length * 7)) {
             throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');

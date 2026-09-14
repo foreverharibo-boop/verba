@@ -62,7 +62,7 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
         equal(build(core, { ...s, developerMode: false }), build(core, { ...s, developerMode: false, developerCompressedPromptEnabled: false }), 'developer gate: ' + name);
         if (changedMadRule) {
             const policySection = (p, start, end) => p.slice(p.indexOf(start), p.indexOf(end) + end.length);
-            for (const [start, end] of [['TOP PRIORITY — NO MISOGYNY', 'END TOP PRIORITY']]) {
+            for (const [start, end] of [['TOP PRIORITY — NO MISOGYNY', 'END TOP PRIORITY'], ['NATURAL COLLOCATIONS AND SOURCE IMAGERY:', 'END IDIOMATIC EXPRESSION']]) {
                 assert.ok(policySection(compact, start, end).length < policySection(full, start, end).length * 0.65,
                     'new policies must be materially shorter in compressed mode: ' + name); checks++;
             }
@@ -84,8 +84,15 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 equal(count(prompt, writingStart), 1, 'shared writing standard once: ' + name);
                 equal(count(prompt, writingEnd), 1, 'complete writing standard: ' + name);
                 const block = prompt.slice(prompt.indexOf(writingStart), prompt.indexOf(writingEnd) + writingEnd.length);
-                sharedWritingBlock ??= block;
-                equal(block, sharedWritingBlock, 'same writing criteria/examples in all Mad routes: ' + name);
+                const shared = block.replace(/NATURAL COLLOCATIONS AND SOURCE IMAGERY:[\s\S]*?END IDIOMATIC EXPRESSION/u, 'IDIOM_POLICY');
+                sharedWritingBlock ??= shared;
+                equal(shared, sharedWritingBlock, 'remaining writing criteria/examples unchanged across modes: ' + name);
+                equal(count(block, 'END IDIOMATIC EXPRESSION'), 1, 'complete idiom policy once: ' + name);
+                const idiom = policySection(block, 'NATURAL COLLOCATIONS AND SOURCE IMAGERY:', 'END IDIOMATIC EXPRESSION');
+                contains(idiom, 'spoken Korean'); contains(idiom, 'actions/states');
+                contains(idiom, 'wordplay effects'); contains(idiom, 'target of abuse');
+                contains(idiom, 'configured profanity/vulgarity/teasing');
+                contains(idiom, 'PRIMARY CAST REFERENCES');
                 equal(count(prompt, 'NATURAL VOCATIVES:'), 1, 'vocative rule once: ' + name);
                 equal(count(prompt, 'SUBJECT OR VOCATIVE:'), 1, 'subject/vocative rule once: ' + name);
                 contains(block, 'never turn a reference to a third person into direct address');
@@ -124,8 +131,8 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 contains(block, 'Stuttering/restarts, commas, sleepy speech, and sentence breaks do not authorize trailing dots');
                 contains(block, 'compare ellipsis sequences in each target with its source in order');
                 contains(block, 'including zero when none exist');
-                contains(block, 'verify that the Korean idiom means the same thing');
-                contains(block, 'vigilant sleep is not distracted attention');
+                contains(block, 'source meaning, facts, emotions');
+                contains(block, 'subject–predicate, verb–object');
                 equal(count(prompt, 'NATURAL INSULT REFERENCES:'), 1, 'name/title abuse rule once: ' + name);
                 contains(block, 'an established name/title followed by a natural insult phrase is ALLOWED');
                 contains(block, 'Without a source insult or an applicable voice permission, use the ordinary name/pronoun');
@@ -136,8 +143,8 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 contains(block, 'contextual choices, not automatic substitutions');
                 absent(prompt, 'Never create a Korean-only insult by fusing a name');
                 equal(count(prompt, 'NATURAL COLLOCATIONS AND SOURCE IMAGERY:'), 1, 'imagery rule once: ' + name);
-                contains(prompt, 'do not invent a metaphor for an ordinary expression');
-                contains(prompt, 'this is not a ban on figurative prose');
+                contains(prompt, 'decorative metaphor');
+                contains(prompt, 'meaningful imagery');
                 contains(prompt, '“그/그녀/그의/그녀의” and grammatically inflected forms are ALLOWED.');
                 contains(prompt, 'SPELLING, NOT FREQUENCY:');
                 contains(prompt, 'Do not rotate through “여자/남자/녀석/상대/사람/사내/청년/작은 몸”');

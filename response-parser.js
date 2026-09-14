@@ -1,4 +1,10 @@
-// Conservative JSON recovery: no eval, guessed quotes, guessed IDs, or invented text.
+// Conservative JSON recovery: no eval, guessed quotes/positions, or invented text.
+// Segment ID recovery changes only leading-zero padding, with unique correspondence.
+function segmentNumberKey(id) {
+    const match = typeof id === 'string' && /^seg_([0-9]+)$/.exec(id);
+    return match ? match[1].replace(/^0+(?=\d)/, '') : null;
+}
+
 function normalizeSyntax(text) {
     let result = '', quoted = false, escaped = false;
     const fixes = new Set();
@@ -103,14 +109,43 @@ export function collectSegmentResponse(raw, expectedSegments = []) {
     }
     const expected = new Set(expectedSegments.map(segment => segment.id));
     const conflicts = new Set();
+    const expectedNumbers = new Map(), responseNumbers = new Map();
+    for (const id of expected) {
+        const key = segmentNumberKey(id);
+        if (key === null) continue;
+        if (!expectedNumbers.has(key)) expectedNumbers.set(key, []);
+        expectedNumbers.get(key).push(id);
+    }
     for (const row of rows) {
-        if (!row || typeof row.id !== 'string' || !expected.has(row.id)) continue;
+        const key = segmentNumberKey(row?.id);
+        if (key === null) continue;
+        if (!responseNumbers.has(key)) responseNumbers.set(key, []);
+        responseNumbers.get(key).push(row.id);
+    }
+    // An exact ID plus a padding variant is ambiguous too: request this target again.
+    for (const [key, ids] of responseNumbers) {
+        const targets = expectedNumbers.get(key);
+        if (targets?.length === 1 && ids.length > 1 && ids.some(id => id !== targets[0])) {
+            conflicts.add(targets[0]);
+            issues.push('앞자리 0 보정 대상 구간 ID 중복');
+        }
+    }
+    for (const row of rows) {
+        if (!row || typeof row.id !== 'string') continue;
+        let id = row.id;
+        if (!expected.has(id)) {
+            const key = segmentNumberKey(id);
+            const targets = expectedNumbers.get(key);
+            if (targets?.length !== 1 || responseNumbers.get(key)?.length !== 1) continue;
+            id = targets[0];
+        }
         if (typeof row.translation !== 'string' || !row.translation.trim()) {
             issues.push('비어 있거나 문자열이 아닌 번역');
             continue;
         }
-        if (partial.has(row.id) && partial.get(row.id) !== row.translation) conflicts.add(row.id);
-        else partial.set(row.id, row.translation);
+        if (partial.has(id) && partial.get(id) !== row.translation) conflicts.add(id);
+        else partial.set(id, row.translation);
+        if (id !== row.id) repairs.push(`구간 ID 앞자리 0 보정: ${row.id} → ${id}`);
     }
     for (const id of conflicts) partial.delete(id);
     if (conflicts.size) issues.push('동일 구간 ID의 서로 다른 번역');

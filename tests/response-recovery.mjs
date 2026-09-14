@@ -45,6 +45,40 @@ r = collectSegmentResponse(duplicates, targets);
 assert.deepEqual([...r.partial], [['s2', '정상']]); assert.match(r.parseError.message, /동일 구간 ID/);
 assert.equal(collectSegmentResponse(duplicates.replace('둘', '하나'), targets).parseError, null);
 
+// Leading zeros only: unique request/response correspondence, never positional repair.
+const paddedTargets = [{ id: 'seg_0000' }, { id: 'seg_0001' }, { id: 'seg_0002' }];
+const encode = segments => JSON.stringify({ segments });
+const paddedRows = [
+    { id: 'seg_0002', translation: '마지막' },
+    { id: 'seg_001', translation: '내용 @@VERBA_NAME_0000@@ ... 그대로' },
+    { id: 'seg_0000', translation: '처음' },
+];
+const paddingResponse = encode(paddedRows);
+r = collectSegmentResponse(paddingResponse, paddedTargets);
+assert.equal(r.parseError, null);
+assert.equal(r.partial.get('seg_0001'), paddedRows[1].translation);
+assert.deepEqual(r.repairs, ['구간 ID 앞자리 0 보정: seg_001 → seg_0001']);
+for (const id of ['seg_1', 'seg_01', 'seg_00001']) {
+    assert.equal(collectSegmentResponse(encode([{ id, translation: '유지' }]), [paddedTargets[1]]).partial.get('seg_0001'), '유지');
+}
+assert.equal(collectSegmentResponse(encode([{ id: 'seg_0', translation: '영' }]), [paddedTargets[0]]).partial.get('seg_0000'), '영');
+for (const id of ['seg_10', 'SEG_001', 'seg_+1', 'seg_1.0', 'seg_1e0', 'seg_001 ', 'other_001', 'seg_9007199254740993']) {
+    r = collectSegmentResponse(encode([{ id, translation: '잘못 붙이면 안 됨' }]), [paddedTargets[1]]);
+    assert.ok(r.parseError, id); assert.equal(r.partial.size, 0, id);
+}
+for (const extraId of ['seg_0001', 'seg_01', 'seg_001']) {
+    r = collectSegmentResponse(encode([...paddedRows, { id: extraId, translation: paddedRows[1].translation }]), paddedTargets);
+    assert.deepEqual(r.missingIds, ['seg_0001']); assert.equal(r.partial.size, 2);
+    assert.equal(r.repairs.length, 0);
+}
+r = collectSegmentResponse(encode([{ id: 'seg_1', translation: '모호함' }]), [{ id: 'seg_01' }, { id: 'seg_001' }]);
+assert.equal(r.partial.size, 0); assert.equal(r.missingIds.length, 2);
+for (const translation of ['', ' ', null, 123]) {
+    r = collectSegmentResponse(encode([{ id: 'seg_001', translation }]), [paddedTargets[1]]);
+    assert.ok(r.parseError); assert.equal(r.repairs.length, 0);
+}
+assert.equal(parseSegmentResponse(paddingResponse, paddedTargets).get('seg_0001'), paddedRows[1].translation);
+
 // Actual retry loop + intermediate log helpers: local repair costs no extra AI call;
 // truncated row retains completed translations and only requests missing IDs.
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
@@ -74,6 +108,27 @@ assert.equal(calls.length, 1); assert.equal(waits, 0);
 assert.equal(translated.get('s1'), '한 줄\n두 줄\t탭\r리턴');
 assert.equal(log.latest().recovery.status, '로컬 복구 완료'); assert.equal(copyButton.disabled, false);
 assert.ok(log.latest().errorChain[0].request.rawResponse);
+
+for (const debugMode of [true, false]) {
+    settings.debugMode = debugMode; log.clear(); calls = []; waits = 0;
+    responses = [paddingResponse];
+    translated = await request('prompt', paddedTargets, { stage: 'output-translation' });
+    assert.equal(calls.length, 1); assert.equal(waits, 0);
+    assert.equal(translated.get('seg_0001'), paddedRows[1].translation);
+    if (debugMode) {
+        assert.equal(log.latest().recovery.status, '로컬 복구 완료');
+        assert.match(log.latest().recovery.localRepairs.join(), /seg_001 → seg_0001/);
+    } else assert.equal(log.latest(), null);
+}
+settings.debugMode = true;
+calls = []; waits = 0;
+responses = [encode([...paddedRows, { id: 'seg_0001', translation: '충돌' }]), encode([{ id: 'seg_0001', translation: '재요청 결과' }])];
+translated = await request('prompt', paddedTargets, {});
+assert.equal(calls.length, 2); assert.equal(waits, 1);
+assert.match(calls[1].prompt, /STILL-MISSING IDS: \["seg_0001"\]/);
+assert.equal(translated.get('seg_0001'), '재요청 결과');
+assert.equal(translated.get('seg_0000'), '처음');
+waits = 0;
 
 calls = []; responses = [cut, JSON.stringify({ segments: [{ id: 's1', translation: '덮어쓰면 안 됨' }, { id: 's2', translation: '복구' }] })];
 translated = await request('prompt', targets, { stage: 'output-retranslation' });

@@ -38,7 +38,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.13';
+const EXTENSION_VERSION = '0.5.14';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -6010,7 +6010,7 @@ function previousAssistantMessages(beforeId = Number.POSITIVE_INFINITY) {
 
 function requestRetranslateTargetChoice(target, button = document.querySelector('#verba-retranslate-latest')) {
     document.querySelector('#verba-retranslate-target-menu')?.remove();
-    if (!button || !target?.message) return Promise.resolve(null);
+    if (!target?.message) return Promise.resolve(null);
 
     const record = currentRecord(target.message);
     const swipeExtra = currentSwipeExtra(target.message, false);
@@ -6035,11 +6035,19 @@ function requestRetranslateTargetChoice(target, button = document.querySelector(
             <button type="button" class="menu_button" data-target="toggle-view">${viewLabel}</button>`;
         (document.body || document.documentElement).append(menu);
 
-        const buttonRect = button.getBoundingClientRect();
         const viewport = globalThis.visualViewport;
         const viewportLeft = viewport?.offsetLeft || 0;
         const viewportTop = viewport?.offsetTop || 0;
         const viewportWidth = viewport?.width || innerWidth;
+        const viewportHeight = viewport?.height || innerHeight;
+        const anchor = button || document.querySelector('#send_but');
+        const rect = anchor?.getBoundingClientRect();
+        const buttonRect = rect?.width && rect?.height ? rect : {
+            left: viewportLeft + viewportWidth / 2,
+            top: viewportTop + viewportHeight * 0.7,
+            bottom: viewportTop + viewportHeight * 0.7,
+            width: 0,
+        };
         const menuRect = menu.getBoundingClientRect();
         const width = menuRect.width || 156;
         const height = menuRect.height || 38;
@@ -6077,6 +6085,7 @@ function requestRetranslateTargetChoice(target, button = document.querySelector(
             });
         });
         requestAnimationFrame(() => {
+            if (settled) return;
             document.addEventListener('pointerdown', onOutside, true);
             document.addEventListener('keydown', onKey, true);
             menu.querySelector('[data-target="recent"]')?.focus?.();
@@ -6722,6 +6731,8 @@ async function retranslateLatestOutput() {
         if (cancelled) notify('진행 중인 번역 요청을 취소했어요.', 'info');
         return;
     }
+    // A slash command can run while the disabled icon is still cleaning up.
+    if (activeControllers.length) return;
 
     const target = latestAssistantMessage();
     if (!target) {
@@ -6736,7 +6747,14 @@ async function retranslateLatestOutput() {
         return;
     }
 
+    const targetSignature = messageVersionSignature(target.message);
     const choice = await requestRetranslateTargetChoice(target);
+    if (!choice) return;
+    if (liveContext().chat?.[target.id] !== target.message
+        || messageVersionSignature(target.message) !== targetSignature) {
+        notify('메시지가 바뀌었어요. 다시 눌러 주세요.', 'info');
+        return;
+    }
     if (choice === 'toggle-view') {
         const record = currentRecord(target.message);
         if (!record) {
@@ -8867,6 +8885,50 @@ function refreshRetranslateButton() {
     button.setAttribute('aria-label', button.title);
 }
 
+let outputActionPending = false;
+let verbaSlashCommandRegistered = false;
+
+async function runOutputAction() {
+    const busy = activeTranslationControllers().length > 0;
+    // Allow cancellation even while an earlier invocation awaits translation.
+    // Otherwise keep one menu/requirements dialog or pending launch at a time.
+    if (outputActionPending && !busy) return;
+    if (!busy) outputActionPending = true;
+    try {
+        await retranslateLatestOutput();
+    } catch (error) {
+        console.error('[베르바] 아웃풋 버튼 실행 실패', error);
+        reportError('output-action', error, `아웃풋 동작 실패: ${errorText(error)}`);
+    } finally {
+        if (!busy) outputActionPending = false;
+    }
+}
+
+function registerVerbaSlashCommand() {
+    if (verbaSlashCommandRegistered) return;
+    const { SlashCommandParser, SlashCommand } = liveContext();
+    if (!SlashCommandParser?.addCommandObject || !SlashCommand?.fromProps) {
+        console.warn('[베르바] 슬래시 명령어 API가 없어 /verba를 등록하지 못했습니다.');
+        return;
+    }
+    try {
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'verba',
+            callback: () => {
+                // Finish immediately so this same Quick Reply remains usable
+                // to cancel; runOutputAction handles asynchronous errors itself.
+                void runOutputAction();
+                return '';
+            },
+            returns: '빈 문자열. 번역 완료를 기다리지 않고 동작을 시작합니다.',
+            helpString: '<div>동그라미 화살표와 동일: 번역 중이면 모두 취소, 최신 AI 메시지에 번역본이 없으면 번역/재시도, 번역본이 있으면 최근·이전·원문/번역본 선택 팝업을 엽니다. 빠른답장 내용에 <code>/verba</code>만 입력하세요.</div>',
+        }));
+        verbaSlashCommandRegistered = true;
+    } catch (error) {
+        console.error('[베르바] /verba 등록 실패', error);
+    }
+}
+
 function createRetranslateButton() {
     const button = document.createElement('button');
     button.id = 'verba-retranslate-latest';
@@ -8879,7 +8941,7 @@ function createRetranslateButton() {
     button.append(glyph);
     button.title = '아웃풋 번역 / 재번역';
     button.setAttribute('aria-label', button.title);
-    button.addEventListener('click', retranslateLatestOutput);
+    button.addEventListener('click', runOutputAction);
     return button;
 }
 
@@ -11567,6 +11629,7 @@ function setupObserver() {
 
 function initialize() {
     clearTransientTranslationSelections();
+    registerVerbaSlashCommand();
 
     const stalePanels = [...document.querySelectorAll('#verba-settings, .verba-settings')];
     stalePanels.slice(1).forEach(panel => panel.remove());

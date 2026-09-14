@@ -1219,7 +1219,7 @@ ${DEVELOPER_HONGJIN_AGE_RULES[ageKey]}
 ${DEVELOPER_HONGJIN_OPPA_FREQUENCY_RULES[oppaFrequencyKey]}
 ${oppaSelfReferenceSafety}
 
-${DEVELOPER_HONGJIN_TRANSCREATION_RULES[transcreationKey]}
+${madKoreanExclusiveEnabled(settings) ? madKoreanHongjinVoiceRule(settings) : DEVELOPER_HONGJIN_TRANSCREATION_RULES[transcreationKey]}
 
 ${DEVELOPER_HONGJIN_PROFANITY_RULES[profanityKey]}
 
@@ -1364,6 +1364,18 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 function madKoreanExclusiveEnabled(settings = {}) {
     return settings?.developerMode === true
         && settings?.developerMadKoreanOutputEnabled === true;
+}
+
+function madKoreanHongjinVoiceRule(settings = {}) {
+    const strength = {
+        light: 'subtle character-voice phrasing',
+        strong: 'pronounced character-voice phrasing',
+        maximum: 'the most distinctive character-voice phrasing compatible with unchanged intent and scene facts',
+    }[settings.developerHongjinTranscreation] || 'pronounced character-voice phrasing';
+    return `MAD KOREAN + HONGJIN — VOICE-ONLY PRIORITY
+- Transcreation strength controls TARGET CHARACTER dialogue voice only: ${strength}. The separate profanity, teasing, vulgarity, playfulness, age, and self-reference controls still apply within their authorized scope.
+- KOREAN-ORIGINAL COMPOSITION and PRIMARY CAST REFERENCES govern sentence construction and subject/possessive omission at every voice strength. Do not retain English sentence shape for LIGHT or increase omission for STRONG/MAXIMUM. Follow SOURCE ELLIPSIS FIDELITY and NATURAL COLLOCATIONS AND SOURCE IMAGERY unchanged; voice settings never authorize added/altered ellipses or invented metaphors.
+- The voice exception permits only the authorized surface diction/teasing. It cannot override configured speech levels, speaker/addressee, name locks, hard lexical bans, or source facts, emotional direction, force, and consent.`;
 }
 
 function madKoreanIdentityReferenceBlock(speakerIdentity = {}) {
@@ -2402,7 +2414,7 @@ function compactHongjinFlavorBlock(settings = {}, scope = 'mixed', speakerIdenti
 
     return `KIM HONG-JIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY
 - TARGET CHARACTER ${JSON.stringify(characterName)}: sly, playful, tsundere-like, shameless and deliberately vulgar Korean voice.
-- Transcreation: ${transcreation}.
+${madKoreanExclusiveEnabled(settings) ? madKoreanHongjinVoiceRule(settings) : `- Transcreation: ${transcreation}.`}
 - Profanity: ${profanity}. Teasing: ${teasing}. Vulgarity: ${vulgarity}. Playfulness: ${playfulness}. Age voice: ${age}.
 - Self-reference: ${oppa}; “오빠” is allowed ONLY when ${JSON.stringify(characterName)} speaks directly and exclusively to USER ${JSON.stringify(userName)}. Never use it toward NPCs, groups, guards, managers, executives, friends, or strangers; use 나/내가 or omit naturally.
 - TARGET CHARACTER gender=${JSON.stringify(speakerIdentity.characterGender || 'unknown')}; if the character is clearly not male, never add 오빠 self-reference. It replaces first-person 나/내가 only, never second-person you or USER/NPC wording, and establishes no sibling, age, or relationship fact.

@@ -119,6 +119,41 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
     }
 }
 
+// Every voice strength must defer to Mad composition, in both encodings and all routes.
+let sharedVoicePriority;
+for (const strength of ['light', 'strong', 'maximum']) {
+    for (const compressed of [false, true]) {
+        for (const [name, build] of Object.entries(builders)) {
+            const settings = { ...short, developerCompressedPromptEnabled: compressed,
+                developerHongjinFlavorEnabled: true, developerHongjinTranscreation: strength };
+            // Hongjin by itself must keep the pre-existing behavior at every strength.
+            if (baseline) equal(build(core, settings), build(baseline, settings), 'standalone Hongjin unchanged: ' + name);
+            const mad = { ...settings, developerMadKoreanOutputEnabled: true };
+            const prompt = build(core, mad);
+            const voiceActive = prompt.includes('DEVELOPER KIM HONGJIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY')
+                || prompt.includes('KIM HONG-JIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY');
+            const label = `${name}/${strength}/${compressed}`;
+            equal(count(prompt, 'MAD KOREAN + HONGJIN — VOICE-ONLY PRIORITY'), voiceActive ? 1 : 0, 'voice priority scoped once: ' + label);
+            if (voiceActive) {
+                absent(prompt, 'drop recoverable subjects', label);
+                absent(prompt, 'Keep the source meaning and rough sentence shape recognizable', label);
+                absent(prompt, 'repair literal stiffness while keeping the rough source shape', label);
+                contains(prompt, 'Mere recoverability is insufficient.', label);
+                contains(prompt, 'Do not retain English sentence shape for LIGHT or increase omission for STRONG/MAXIMUM.', label);
+                contains(prompt, 'voice settings never authorize added/altered ellipses or invented metaphors.', label);
+                const priority = prompt.slice(prompt.indexOf('- KOREAN-ORIGINAL COMPOSITION and PRIMARY CAST REFERENCES'),
+                    prompt.indexOf('- The voice exception permits only'));
+                sharedVoicePriority ??= priority;
+                equal(priority, sharedVoicePriority, 'same composition priority across strengths/routes: ' + label);
+            }
+            absent(build(core, { ...mad, developerHongjinFlavorEnabled: false }), 'MAD KOREAN + HONGJIN — VOICE-ONLY PRIORITY', 'Hongjin off: ' + label);
+            const disabled = { ...mad, developerMode: false };
+            absent(build(core, disabled), 'MAD KOREAN + HONGJIN — VOICE-ONLY PRIORITY', 'developer off: ' + label);
+            if (baseline) equal(build(core, disabled), build(baseline, disabled), 'developer off unchanged: ' + label);
+        }
+    }
+}
+
 // Resolve identities from the current request; do not hard-code any particular RP pair.
 for (const compressed of [false, true]) {
     const renamed = core.buildOutputPrompt(segmented, { ...short, developerCompressedPromptEnabled: compressed, developerMadKoreanOutputEnabled: true }, '',

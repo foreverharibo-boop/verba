@@ -39,7 +39,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.17';
+const EXTENSION_VERSION = '0.5.19';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -6009,6 +6009,27 @@ function previousAssistantMessages(beforeId = Number.POSITIVE_INFINITY) {
     return rows;
 }
 
+function positionVerbaChoiceMenu(menu, anchor) {
+    const viewport = globalThis.visualViewport;
+    const left = viewport?.offsetLeft || 0;
+    const top = viewport?.offsetTop || 0;
+    const width = viewport?.width || innerWidth;
+    const height = viewport?.height || innerHeight;
+    const rect = anchor?.getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
+    const menuWidth = bounds.width || 180;
+    const menuHeight = bounds.height || 42;
+    const visibleAnchor = Boolean(rect?.width && rect?.height);
+    const centerX = visibleAnchor ? rect.left + rect.width / 2 : left + width / 2;
+    // Hidden icons / Quick Reply: both menus share the same viewport anchor.
+    // Keep visible-icon menus immediately above the button as before.
+    const desiredY = visibleAnchor ? rect.top - menuHeight - 7 : top + height * 0.7 + 70;
+    const maxX = Math.max(left + 8, left + width - menuWidth - 8);
+    const maxY = Math.max(top + 8, top + height - menuHeight - 8);
+    menu.style.setProperty('left', `${Math.max(left + 8, Math.min(centerX - menuWidth / 2, maxX))}px`, 'important');
+    menu.style.setProperty('top', `${Math.max(top + 8, Math.min(desiredY, maxY))}px`, 'important');
+}
+
 function requestRetranslateTargetChoice(target, button = document.querySelector('#verba-retranslate-latest')) {
     document.querySelector('#verba-retranslate-target-menu')?.remove();
     if (!target?.message) return Promise.resolve(null);
@@ -6036,31 +6057,7 @@ function requestRetranslateTargetChoice(target, button = document.querySelector(
             <button type="button" class="menu_button" data-target="toggle-view">${viewLabel}</button>`;
         (document.body || document.documentElement).append(menu);
 
-        const viewport = globalThis.visualViewport;
-        const viewportLeft = viewport?.offsetLeft || 0;
-        const viewportTop = viewport?.offsetTop || 0;
-        const viewportWidth = viewport?.width || innerWidth;
-        const viewportHeight = viewport?.height || innerHeight;
-        const anchor = button || document.querySelector('#send_but');
-        const rect = anchor?.getBoundingClientRect();
-        const buttonRect = rect?.width && rect?.height ? rect : {
-            left: viewportLeft + viewportWidth / 2,
-            top: viewportTop + viewportHeight * 0.7,
-            bottom: viewportTop + viewportHeight * 0.7,
-            width: 0,
-        };
-        const menuRect = menu.getBoundingClientRect();
-        const width = menuRect.width || 156;
-        const height = menuRect.height || 38;
-        const centered = buttonRect.left + buttonRect.width / 2 - width / 2;
-        const left = Math.min(
-            Math.max(viewportLeft + 8, centered),
-            viewportLeft + viewportWidth - width - 8,
-        );
-        const above = buttonRect.top - height - 7;
-        const top = above >= viewportTop + 8 ? above : buttonRect.bottom + 7;
-        menu.style.setProperty('left', `${left}px`, 'important');
-        menu.style.setProperty('top', `${top}px`, 'important');
+        positionVerbaChoiceMenu(menu, button || document.querySelector('#send_but'));
 
         let settled = false;
         const finish = value => {
@@ -8871,20 +8868,7 @@ function showTranslationProfileChoice() {
         menu.append(option);
     }
     (document.body || document.documentElement).append(menu);
-    const viewport = globalThis.visualViewport;
-    const left = viewport?.offsetLeft || 0;
-    const top = viewport?.offsetTop || 0;
-    const width = viewport?.width || innerWidth;
-    const height = viewport?.height || innerHeight;
-    const anchor = document.querySelector('#verba-profile-toggle') || document.querySelector('#send_but');
-    const rect = anchor?.getBoundingClientRect();
-    const bounds = menu.getBoundingClientRect();
-    const menuWidth = bounds.width || 180;
-    const menuHeight = bounds.height || 42;
-    const anchorX = rect?.width && rect?.height ? rect.left + rect.width / 2 : left + width / 2;
-    const anchorY = rect?.width && rect?.height ? rect.top - menuHeight - 7 : top + height * 0.7;
-    menu.style.setProperty('left', `${Math.max(left + 8, Math.min(anchorX - menuWidth / 2, left + width - menuWidth - 8))}px`, 'important');
-    menu.style.setProperty('top', `${Math.max(top + 8, Math.min(anchorY, top + height - menuHeight - 8))}px`, 'important');
+    positionVerbaChoiceMenu(menu, document.querySelector('#verba-profile-toggle') || document.querySelector('#send_but'));
     requestAnimationFrame(() => {
         if (closed) return;
         document.addEventListener('pointerdown', onOutside, true);
@@ -9548,6 +9532,22 @@ function renderRegisterShiftMonitorStatus() {
     if (target) target.textContent = lastRegisterShiftMonitorSummary;
 }
 
+function bindAutoInputSetting(panel) {
+    const input = panel.querySelector('#verba-auto-input');
+    const status = panel.querySelector('#verba-auto-input-status');
+    if (!input) return;
+    const sync = () => {
+        input.checked = Boolean(settings.autoInput);
+        if (status) status.textContent = input.checked ? 'ON' : 'OFF';
+    };
+    sync();
+    input.addEventListener('change', () => {
+        settings.autoInput = input.checked;
+        sync();
+        saveSettings();
+    });
+}
+
 function injectSettingsPanel() {
     const existingPanels = [...document.querySelectorAll('#verba-settings, .verba-settings')];
     if (existingPanels.length) {
@@ -9590,9 +9590,10 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
 
-                <label class="verba-check-row">
+                <label class="verba-check-row" for="verba-auto-input">
                     <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
                     <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
+                    <small id="verba-auto-input-status" aria-live="polite">${settings.autoInput ? 'ON' : 'OFF'}</small>
                 </label>
                 <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
 
@@ -10083,6 +10084,7 @@ function injectSettingsPanel() {
             </div>
         </div>`;
     host.append(panel);
+    bindAutoInputSetting(panel);
     bindBaseTranslationEditor(panel, settings, { save: saveSettings, notify });
     refreshProfileSelect();
     renderNameLockManager();
@@ -10591,10 +10593,6 @@ function injectSettingsPanel() {
         saveLocalProfileStats();
         renderProfileStats();
         notify('프로필 성능 기록을 초기화했어요.', 'success');
-    });
-    panel.querySelector('#verba-auto-input').addEventListener('change', event => {
-        settings.autoInput = event.target.checked;
-        saveSettings();
     });
     panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
         settings.selectionCandidates = event.target.checked;

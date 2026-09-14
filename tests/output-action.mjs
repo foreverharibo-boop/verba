@@ -150,13 +150,14 @@ for (const anchorMode of ['visible', 'hidden', 'absent']) {
             currentRecord: () => ({ translation: '번역' }), currentSwipeExtra: () => null, sourceViewRequested: () => false,
             requestAnimationFrame: fn => frames.push(fn),
         };
-        vm.runInNewContext(slice('function requestRetranslateTargetChoice(', 'const PREVIOUS_OUTPUT_PAGE_SIZE')
+        vm.runInNewContext(slice('function positionVerbaChoiceMenu(', 'const PREVIOUS_OUTPUT_PAGE_SIZE')
             + '\nglobalThis.open = requestRetranslateTargetChoice;', env);
         const result = env.open({ message: { extra: { display_text: '번역' } } });
         assert.equal(menu.connected, true); assert.ok(menu.innerHTML.includes('>원문</button>'));
         assert.equal(menu.options.length, 3);
         assert.ok(parseFloat(menu.style.left) >= 0 && parseFloat(menu.style.left) + 156 <= 360);
         assert.ok(parseFloat(menu.style.top) >= 0 && parseFloat(menu.style.top) + 38 <= 720);
+        if (anchorMode !== 'visible') assert.equal(parseFloat(menu.style.top), 574, 'hidden translation menu uses the same +70px baseline as profiles');
         frames.forEach(fn => fn());
         if (choice === 'escape') listeners.get('keydown')({ key: 'Escape' });
         else if (choice === 'outside') listeners.get('pointerdown')({ target: {} });

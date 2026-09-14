@@ -3227,3 +3227,30 @@
         padding-inline: 5px !important;
     }
 }
+
+/* The auto-input switch uses the browser's native checkmark, not pseudo-elements. */
+#verba-settings #verba-auto-input {
+    appearance: auto !important;
+    -webkit-appearance: checkbox !important;
+    accent-color: var(--verba-accent) !important;
+    background: revert !important;
+    border: revert !important;
+    border-radius: revert !important;
+    box-shadow: none !important;
+    filter: none !important;
+    opacity: 1 !important;
+}
+
+#verba-settings #verba-auto-input::before,
+#verba-settings #verba-auto-input::after {
+    content: none !important;
+    display: none !important;
+}
+
+#verba-auto-input-status {
+    margin-inline-start: auto;
+    flex: 0 0 auto;
+    color: var(--verba-text);
+    opacity: 1;
+    font-weight: 700;
+}

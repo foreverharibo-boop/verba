@@ -44,6 +44,7 @@ function fixture(overrides = {}, hidden = false) {
         requestAnimationFrame: fn => frames.push(fn),
     };
     vm.runInNewContext(source('function activeProfileSlot()', 'let lastFallbackNoticeAt')
+        + source('function positionVerbaChoiceMenu(', 'function requestRetranslateTargetChoice(')
         + source('function selectTranslationProfile(', 'function refreshProfileToggleButton()')
         + '\nglobalThis.register = registerVerbaProfileSlashCommand; globalThis.icon = createProfileToggleButton;', env);
     env.register(); env.register(); assert.equal(calls.filter(c => c[0] === 'register').length, 1);
@@ -56,7 +57,7 @@ for (const hidden of [false, true]) {
     for (const slot of ['A', 'B', 'C']) {
         const f = fixture({}, hidden); f.invoke(); f.invoke();
         assert.equal(f.roots.length, 1, 'one popup despite repeated command');
-        const menu = f.roots[0]; assert.deepEqual(menu.children.map(c => c.textContent), ['A ✓', 'B', 'C']);
+        const menu = f.roots[0]; if (hidden) assert.equal(parseFloat(menu.style.top), 574); assert.deepEqual(menu.children.map(c => c.textContent), ['A ✓', 'B', 'C']);
         assert.equal(menu.children[0].title, 'A: <Profile A>', 'profile name remains plain text');
         assert.ok(parseFloat(menu.style.left) >= 8 && parseFloat(menu.style.left) + 180 <= 352);
         assert.ok(parseFloat(menu.style.top) >= 8 && parseFloat(menu.style.top) + 42 <= 712);
@@ -66,6 +67,22 @@ for (const hidden of [false, true]) {
         assert.equal(f.calls.filter(c => c[0] === 'save').length, 1); assert.equal(f.calls.filter(c => c[0] === 'refresh').length, 1);
         assert.deepEqual(Object.keys(f.settings).sort(), ['activeProfileSlot', 'fallbackProfileId', 'profileId', 'thirdProfileId']);
         assert.equal(f.settings.profileId, 'p1'); assert.equal(f.settings.fallbackProfileId, 'p2'); assert.equal(f.settings.thirdProfileId, 'p3');
+    }
+}
+// Both menu sizes use the same hidden-icon baseline, including keyboard/zoom bounds.
+{
+    const f = fixture({}, true);
+    for (const viewport of [{offsetLeft:0, offsetTop:0, width:360, height:720},
+        {offsetLeft:20, offsetTop:90, width:280, height:190}]) {
+        f.env.visualViewport = viewport;
+        for (const menuHeight of [38, 42]) {
+            const menu = {style:{setProperty(k,v){this[k]=v;}}, getBoundingClientRect:()=>({width:180,height:menuHeight})};
+            f.env.positionVerbaChoiceMenu(menu, {getBoundingClientRect:()=>({width:0,height:0})});
+            const expected = Math.min(viewport.offsetTop + viewport.height * 0.7 + 70,
+                viewport.offsetTop + viewport.height - menuHeight - 8);
+            assert.equal(parseFloat(menu.style.top), expected);
+            assert.ok(parseFloat(menu.style.top) + menuHeight <= viewport.offsetTop + viewport.height - 8);
+        }
     }
 }
 // Duplicate/empty slots cannot be selected; no configured profiles show feedback.

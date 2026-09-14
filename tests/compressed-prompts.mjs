@@ -78,10 +78,18 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 absent(prompt, 'A figurative image is style, not scene truth');
                 absent(prompt, '너도 안 먹는다는데 굳이 식탁까지');
                 absent(prompt, 'Is any sentence decorative');
-                equal(count(prompt, 'CANONICAL-NAME-FIRST — PRIMARY CAST REFERENCES'), 1, 'shared name policy once: ' + name);
+                equal(count(prompt, 'NATURAL PERSON REFERENCES — PRIMARY CAST REFERENCES'), 1, 'shared name policy once: ' + name);
                 contains(prompt, identity.characterName); contains(prompt, identity.userName);
-                contains(prompt, 'Omit only within an uninterrupted continuation');
-                contains(prompt, 'At each new narrative paragraph, speaker change, or actor change');
+                contains(prompt, 'Omit recoverable subjects/possessors when clear.');
+                contains(prompt, '“그/그녀/그의/그녀의” and grammatically inflected forms are ALLOWED.');
+                contains(prompt, 'SPELLING, NOT FREQUENCY:');
+                contains(prompt, 'Do not rotate through “여자/남자/녀석/상대/사람/사내/청년/작은 몸”');
+                contains(prompt, 'do not expand a given name into a full name');
+                absent(prompt, 'Canonical names are the default');
+                absent(prompt, 'use the canonical name as the reference by default');
+                absent(prompt, 'not “그/그녀/그의/그녀의”');
+                contains(prompt, 'a new paragraph alone does not mandate a name');
+                absent(prompt, 'At each new narrative paragraph, speaker change, or actor change');
                 contains(prompt, 'Do not guess an uncertain referent');
                 contains(prompt, 'not first/second-person dialogue address');
                 absent(prompt, '(1) omit the subject/possessor');
@@ -89,9 +97,9 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
             }
         } else {
             absent(full, writingStart); absent(compact, writingStart);
-            absent(full, 'CANONICAL-NAME-FIRST'); absent(compact, 'CANONICAL-NAME-FIRST');
+            absent(full, 'NATURAL PERSON REFERENCES'); absent(compact, 'NATURAL PERSON REFERENCES');
         }
-        absent(build(core, { ...s, developerMode: false }), 'CANONICAL-NAME-FIRST');
+        absent(build(core, { ...s, developerMode: false }), 'NATURAL PERSON REFERENCES');
         absent(build(core, { ...s, developerMode: false }), writingStart);
         if (changedMadRule && name === 'full') assert.ok(compact.length < full.length * 0.65, 'Mad compression must remain substantial');
         measures.push({ mode: flags.developerHongjinFlavorEnabled ? 'mad+hongjin' : flags.developerMadKoreanOutputEnabled ? 'mad' : 'standard', name,

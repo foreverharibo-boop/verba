@@ -114,7 +114,12 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 absent(prompt, 'Omit recoverable subjects/possessors when clear.');
                 equal(count(prompt, 'OMIT ONLY WHEN MORE NATURAL:'), 1, 'omission criterion once: ' + name);
                 contains(prompt, 'Mere recoverability is insufficient.');
-                contains(prompt, 'situational description, or interior reflection intervenes');
+                equal(count(prompt, 'RE-ANCHOR THE SUBJECT:'), 1, 'subject re-anchoring once: ' + name);
+                contains(prompt, 'EVEN IF THE SAME PERSON CONTINUES');
+                contains(prompt, 'At a new paragraph linking speech and action, normally identify');
+                contains(prompt, 'Prefer 그/그녀 when clear');
+                absent(prompt, 'a new paragraph alone does not mandate a name');
+                absent(prompt, 'a paragraph break alone does not require repeating a name');
                 equal(count(prompt, 'SOURCE ELLIPSIS FIDELITY:'), 1, 'ellipsis rule once: ' + name);
                 contains(prompt, '"..." stays "..."');
                 contains(prompt, '"…" stays "…"');
@@ -145,7 +150,7 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 absent(prompt, 'Canonical names are the default');
                 absent(prompt, 'use the canonical name as the reference by default');
                 absent(prompt, 'not “그/그녀/그의/그녀의”');
-                contains(prompt, 'a new paragraph alone does not mandate a name');
+                contains(prompt, 'do not add a reference to every sentence or every paragraph mechanically');
                 absent(prompt, 'At each new narrative paragraph, speaker change, or actor change');
                 contains(prompt, 'Do not guess an uncertain referent');
                 contains(prompt, 'not first/second-person dialogue address');

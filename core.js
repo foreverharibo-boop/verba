@@ -1366,7 +1366,7 @@ FACT, REFERENT, AND FORCE LOCK
 - Stability words such as secure/anchor/support/prevent slipping do not create escape or resistance. Use restraint language only when the source contains an actual attempt to leave or physical restraint.
 - Preserve intensity both ways. Gentle stays gentle; firm stays firm; rough or explicit stays equally rough or explicit. Natural prose is neither censorship nor escalation.
 - Preserve the source's specificity. Do not turn generic bedding into goose down, a fee into a contractual penalty, or mild movement into struggling.
-- Keep actor, listener, and owner unambiguous. Follow PRIMARY CAST REFERENCES below for natural names, pronouns, and subject/possessive omission; a paragraph break alone does not require repeating a name.
+- Follow PRIMARY CAST REFERENCES below for names, pronouns, subject re-anchoring, and omission; keep actor, listener, and owner clear.
 
 ${madKoreanNativeWritingRules()}
 
@@ -1431,8 +1431,8 @@ ${madKoreanNamePriorityRule()}`;
 function madKoreanNamePriorityRule() {
     return `NATURAL PERSON REFERENCES — PRIMARY CAST REFERENCES
 - “그/그녀/그의/그녀의” and grammatically inflected forms are ALLOWED. Use names and pronouns naturally; do not treat them as inherently redundant or as translationese. Do not mechanically replace he/she/him/her/his/her with names, omit them in bulk, or repeat a reference in every sentence.
-- OMIT ONLY WHEN MORE NATURAL: omit a subject or possessive only when its referent is unmistakable in the immediately connected context AND omission reads more naturally than an explicit reference. Mere recoverability is insufficient. After another person, situational description, or interior reflection intervenes, re-establish the actor with a name or pronoun when returning to action if this improves flow or clarity. A clear directly linked action may omit the repeated subject.
-- Name the actor or speaker when a change or genuine ambiguity requires it; a new paragraph alone does not mandate a name. Keep consecutive dialogue turns attributable without backtracking; use existing attribution or restructure, never invent an action or insert a tag inside a dialogue-only target.
+- OMIT ONLY WHEN MORE NATURAL: omit a subject or possessive only in directly linked context where the referent is unmistakable AND omission reads more naturally. Mere recoverability is insufficient. Do not let one opening name license a long chain of subjectless sentences.
+- RE-ANCHOR THE SUBJECT: use a name or pronoun when the actor/speaker changes, or when returning to action after extended situational, sensory, or interior description, EVEN IF THE SAME PERSON CONTINUES. At a new paragraph linking speech and action, normally identify whose speech/action it is; do not wait for ambiguity. Prefer 그/그녀 when clear to avoid repeating names. Directly connected actions may omit the repeated subject; do not add a reference to every sentence or every paragraph mechanically. Preserve attribution without inventing actions or inserting narration into a dialogue-only target.
 - SPELLING, NOT FREQUENCY: when writing a name for a context-confirmed person, the user's fixed Korean spelling takes priority. Otherwise preserve the source name's scope: do not expand a given name into a full name merely because the identity reference contains a surname. Display names do not force name repetition.
 - Do not rotate through “여자/남자/녀석/상대/사람/사내/청년/작은 몸” as substitute labels for a known named person. A role or descriptive noun is allowed only when the person is genuinely unnamed or that description itself matters to the scene; do not erase actual gender/age/size facts.
 - Do not guess an uncertain referent, invent a name/surname, or print unknown-identity placeholders. Keep unresolved references faithful to source context.

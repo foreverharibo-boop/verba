@@ -28,7 +28,10 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.equal(prompt.split(marker).length-1,1,`${name}: recomposition occurs once`);
    assert.match(prompt,/scene evidence, not a wording template/);
    assert.equal(prompt.split('You are a highly skilled Korean web-novel author.').length-1,1);
-   assert.match(prompt,/completely destroy and rebuild sentence structure and replace EVERY word and expression/);
+   assert.equal(prompt.split('MANDATORY REAUTHORING:').length-1,1);
+   assert.match(prompt,/discard the source sentence structure and expression system; reconstruct the entire passage in original Korean/);
+   assert.doesNotMatch(prompt,/You may completely destroy/);
+   assert.match(prompt,/exact names/);
    assert.match(prompt,/Translationese is unacceptable/);
    assert.match(prompt,/actor→action→target/);
    assert.match(prompt,/plot-relevant/);
@@ -38,7 +41,7 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.doesNotMatch(prompt,/Do not erase a meaningful image|Preserve meaningful imagery and wordplay effects/);
    assert.equal(build({...settings,developerMode:false}).includes(marker),false);
    assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes(marker),false);
-   checks+=13;
+   checks+=16;
   }
   assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes(marker),false);
  }

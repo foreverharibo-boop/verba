@@ -37,7 +37,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.6';
+const EXTENSION_VERSION = '0.5.9';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -209,6 +209,7 @@ const DEFAULT_SETTINGS = {
     debugMode: false,
     developerMode: false,
     developerAccessFingerprint: '',
+    developerCompressedPromptEnabled: false,
     qualityAuditEnabled: false,
     qualityAuditMeaning: true,
     qualityAuditReferent: true,
@@ -329,7 +330,9 @@ if (
     settings.developerRelationshipExperimentEnabled = false;
     settings.developerHongjinFlavorEnabled = false;
     settings.developerMadKoreanOutputEnabled = false;
+    settings.developerCompressedPromptEnabled = false;
 }
+settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
 settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
 settings.qualityAuditMeaning = settings.qualityAuditMeaning !== false;
 settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
@@ -1021,6 +1024,91 @@ function normalizedPromptPresetSaveScope(value, translationSettings = null) {
         : PROMPT_PRESET_SCOPE_PROMPTS;
 }
 
+function normalizedPromptPresetDeveloperSettings(value = null) {
+    if (!value || typeof value !== 'object') return null;
+    const raw = value;
+    const valid = (options, candidate, fallback) => (
+        options.some(option => option.value === candidate) ? candidate : fallback
+    );
+    const base = normalizeBaseTranslationCustom(raw.baseTranslationCustom);
+
+    return {
+        developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true,
+        qualityAuditEnabled: raw.qualityAuditEnabled === true,
+        qualityAuditMeaning: raw.qualityAuditMeaning !== false,
+        qualityAuditReferent: raw.qualityAuditReferent !== false,
+        qualityAuditVoice: raw.qualityAuditVoice !== false,
+        qualityAuditTranslationese: raw.qualityAuditTranslationese !== false,
+        qualityAuditContinuity: raw.qualityAuditContinuity !== false,
+
+        developerRelationshipExperimentEnabled: raw.developerRelationshipExperimentEnabled === true,
+        developerSpeechDistance: valid(DEVELOPER_SPEECH_DISTANCE_OPTIONS, raw.developerSpeechDistance, DEFAULT_SETTINGS.developerSpeechDistance),
+        developerTargetToUserAddress: String(raw.developerTargetToUserAddress || '').trim().slice(0, 40),
+        developerTargetToUserAddressStrength: valid(DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS, raw.developerTargetToUserAddressStrength, DEFAULT_SETTINGS.developerTargetToUserAddressStrength),
+        developerTargetToUserAddressFrequency: valid(DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS, raw.developerTargetToUserAddressFrequency, DEFAULT_SETTINGS.developerTargetToUserAddressFrequency),
+        developerTargetToUserRegister: valid(DEVELOPER_AUDIENCE_REGISTER_OPTIONS, raw.developerTargetToUserRegister, DEFAULT_SETTINGS.developerTargetToUserRegister),
+        developerTargetToOtherRegister: valid(DEVELOPER_AUDIENCE_REGISTER_OPTIONS, raw.developerTargetToOtherRegister, DEFAULT_SETTINGS.developerTargetToOtherRegister),
+        developerRegisterShiftMonitor: raw.developerRegisterShiftMonitor === true,
+
+        developerMadKoreanOutputEnabled: raw.developerMadKoreanOutputEnabled === true,
+        developerMadKoreanTargetToUserRegister: valid(DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS, raw.developerMadKoreanTargetToUserRegister, DEFAULT_SETTINGS.developerMadKoreanTargetToUserRegister),
+        developerMadKoreanUserToTargetRegister: valid(DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS, raw.developerMadKoreanUserToTargetRegister, DEFAULT_SETTINGS.developerMadKoreanUserToTargetRegister),
+
+        developerHongjinFlavorEnabled: raw.developerHongjinFlavorEnabled === true,
+        developerHongjinTranscreation: valid(DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS, raw.developerHongjinTranscreation, DEFAULT_SETTINGS.developerHongjinTranscreation),
+        developerHongjinProfanity: valid(DEVELOPER_HONGJIN_PROFANITY_OPTIONS, raw.developerHongjinProfanity, DEFAULT_SETTINGS.developerHongjinProfanity),
+        developerHongjinTeasing: valid(DEVELOPER_HONGJIN_TEASING_OPTIONS, raw.developerHongjinTeasing, DEFAULT_SETTINGS.developerHongjinTeasing),
+        developerHongjinVulgarity: valid(DEVELOPER_HONGJIN_VULGARITY_OPTIONS, raw.developerHongjinVulgarity, DEFAULT_SETTINGS.developerHongjinVulgarity),
+        developerHongjinPlayfulness: valid(DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS, raw.developerHongjinPlayfulness, DEFAULT_SETTINGS.developerHongjinPlayfulness),
+        developerHongjinAgeBand: valid(DEVELOPER_HONGJIN_AGE_OPTIONS, raw.developerHongjinAgeBand, DEFAULT_SETTINGS.developerHongjinAgeBand),
+        developerHongjinOppaFrequency: valid(DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS, raw.developerHongjinOppaFrequency, DEFAULT_SETTINGS.developerHongjinOppaFrequency),
+
+        baseTranslationCustom: {
+            enabled: base.enabled,
+            prompt: base.prompt,
+            draft: base.draft,
+            selectedId: String(raw.baseTranslationCustom?.selectedId || ''),
+            name: String(raw.baseTranslationCustom?.name || '').slice(0, 60),
+        },
+    };
+}
+
+function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
+    return normalizedPromptPresetDeveloperSettings({
+        developerCompressedPromptEnabled: source.developerCompressedPromptEnabled,
+        qualityAuditEnabled: source.qualityAuditEnabled,
+        qualityAuditMeaning: source.qualityAuditMeaning,
+        qualityAuditReferent: source.qualityAuditReferent,
+        qualityAuditVoice: source.qualityAuditVoice,
+        qualityAuditTranslationese: source.qualityAuditTranslationese,
+        qualityAuditContinuity: source.qualityAuditContinuity,
+
+        developerRelationshipExperimentEnabled: source.developerRelationshipExperimentEnabled,
+        developerSpeechDistance: source.developerSpeechDistance,
+        developerTargetToUserAddress: source.developerTargetToUserAddress,
+        developerTargetToUserAddressStrength: source.developerTargetToUserAddressStrength,
+        developerTargetToUserAddressFrequency: source.developerTargetToUserAddressFrequency,
+        developerTargetToUserRegister: source.developerTargetToUserRegister,
+        developerTargetToOtherRegister: source.developerTargetToOtherRegister,
+        developerRegisterShiftMonitor: source.developerRegisterShiftMonitor,
+
+        developerMadKoreanOutputEnabled: source.developerMadKoreanOutputEnabled,
+        developerMadKoreanTargetToUserRegister: source.developerMadKoreanTargetToUserRegister,
+        developerMadKoreanUserToTargetRegister: source.developerMadKoreanUserToTargetRegister,
+
+        developerHongjinFlavorEnabled: source.developerHongjinFlavorEnabled,
+        developerHongjinTranscreation: source.developerHongjinTranscreation,
+        developerHongjinProfanity: source.developerHongjinProfanity,
+        developerHongjinTeasing: source.developerHongjinTeasing,
+        developerHongjinVulgarity: source.developerHongjinVulgarity,
+        developerHongjinPlayfulness: source.developerHongjinPlayfulness,
+        developerHongjinAgeBand: source.developerHongjinAgeBand,
+        developerHongjinOppaFrequency: source.developerHongjinOppaFrequency,
+
+        baseTranslationCustom: source.baseTranslationCustom,
+    });
+}
+
 function normalizedPromptPresetTranslationSettings(value = {}) {
     const raw = value && typeof value === 'object' ? value : {};
     const valid = (options, candidate, fallback) => (
@@ -1029,6 +1117,7 @@ function normalizedPromptPresetTranslationSettings(value = {}) {
 
     return {
         translationRuleOrder: normalizeTranslationRuleOrder(raw.translationRuleOrder),
+        developerSettings: normalizedPromptPresetDeveloperSettings(raw.developerSettings),
 
         relationTemperatureEnabled: raw.relationTemperatureEnabled !== false,
         relationTemperature: RELATION_TEMPERATURE_OPTIONS.some(option => option.value === raw.relationTemperature)
@@ -1072,6 +1161,7 @@ function normalizedPromptPresetTranslationSettings(value = {}) {
 function currentPromptPresetTranslationSettingsSnapshot() {
     return normalizedPromptPresetTranslationSettings({
         translationRuleOrder: settings.translationRuleOrder,
+        developerSettings: currentPromptPresetDeveloperSettingsSnapshot(),
 
         relationTemperatureEnabled: settings.relationTemperatureEnabled,
         relationTemperature: settings.relationTemperature,
@@ -1568,8 +1658,61 @@ function setRadioGroupValue(name, value) {
     });
 }
 
+function applyPromptPresetDeveloperSettings(value) {
+    const next = normalizedPromptPresetDeveloperSettings(value);
+    if (!next) return false;
+
+    settings.qualityAuditEnabled = next.qualityAuditEnabled;
+    settings.developerCompressedPromptEnabled = next.developerCompressedPromptEnabled;
+    settings.qualityAuditMeaning = next.qualityAuditMeaning;
+    settings.qualityAuditReferent = next.qualityAuditReferent;
+    settings.qualityAuditVoice = next.qualityAuditVoice;
+    settings.qualityAuditTranslationese = next.qualityAuditTranslationese;
+    settings.qualityAuditContinuity = next.qualityAuditContinuity;
+
+    settings.developerRelationshipExperimentEnabled = next.developerRelationshipExperimentEnabled;
+    settings.developerSpeechDistance = next.developerSpeechDistance;
+    settings.developerTargetToUserAddress = next.developerTargetToUserAddress;
+    settings.developerTargetToUserAddressStrength = next.developerTargetToUserAddressStrength;
+    settings.developerTargetToUserAddressFrequency = next.developerTargetToUserAddressFrequency;
+    settings.developerTargetToUserRegister = next.developerTargetToUserRegister;
+    settings.developerTargetToOtherRegister = next.developerTargetToOtherRegister;
+    settings.developerRegisterShiftMonitor = next.developerRegisterShiftMonitor;
+
+    settings.developerMadKoreanOutputEnabled = next.developerMadKoreanOutputEnabled;
+    settings.developerMadKoreanTargetToUserRegister = next.developerMadKoreanTargetToUserRegister;
+    settings.developerMadKoreanUserToTargetRegister = next.developerMadKoreanUserToTargetRegister;
+
+    settings.developerHongjinFlavorEnabled = next.developerHongjinFlavorEnabled;
+    settings.developerHongjinTranscreation = next.developerHongjinTranscreation;
+    settings.developerHongjinProfanity = next.developerHongjinProfanity;
+    settings.developerHongjinTeasing = next.developerHongjinTeasing;
+    settings.developerHongjinVulgarity = next.developerHongjinVulgarity;
+    settings.developerHongjinPlayfulness = next.developerHongjinPlayfulness;
+    settings.developerHongjinAgeBand = next.developerHongjinAgeBand;
+    settings.developerHongjinOppaFrequency = next.developerHongjinOppaFrequency;
+
+    const currentBase = normalizeBaseTranslationCustom(settings.baseTranslationCustom);
+    const matchingBasePreset = currentBase.presets.find(row => (
+        row.id === next.baseTranslationCustom.selectedId
+        && row.prompt === next.baseTranslationCustom.prompt
+    ));
+    settings.baseTranslationCustom = normalizeBaseTranslationCustom({
+        ...currentBase,
+        enabled: next.baseTranslationCustom.enabled,
+        prompt: next.baseTranslationCustom.prompt,
+        draft: next.baseTranslationCustom.draft,
+        selectedId: matchingBasePreset?.id || '',
+        name: next.baseTranslationCustom.name,
+        presets: currentBase.presets,
+    });
+
+    return true;
+}
+
 function applyPromptPresetTranslationSettings(value) {
     const next = normalizedPromptPresetTranslationSettings(value);
+    const appliedDeveloperSettings = applyPromptPresetDeveloperSettings(next.developerSettings);
 
     settings.translationRuleOrder = [...next.translationRuleOrder];
 
@@ -1642,12 +1785,16 @@ function applyPromptPresetTranslationSettings(value) {
     setControlValue('#verba-english-flavor-meme', settings.englishFlavorMemeDensity);
     setCheckedValue('#verba-english-flavor-referent-repeat', settings.englishFlavorReduceReferentRepetition);
 
+    if (appliedDeveloperSettings) refreshSettingsPanelForDeveloperMode();
     syncDeveloperQualityControls(document.querySelector('#verba-settings'));
     if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
 }
 
 function defaultPromptPresetTranslationSettingsSnapshot() {
-    return normalizedPromptPresetTranslationSettings(DEFAULT_SETTINGS);
+    return normalizedPromptPresetTranslationSettings({
+        ...DEFAULT_SETTINGS,
+        developerSettings: currentPromptPresetDeveloperSettingsSnapshot(DEFAULT_SETTINGS),
+    });
 }
 
 function resetPromptPresetWorkspace(scope = PROMPT_PRESET_SCOPE_PROMPTS) {
@@ -1731,7 +1878,7 @@ function requestPromptPresetNewStartScope() {
 
                     <button type="button" class="menu_button" data-verba-new-start-scope="prompts_translation">
                         <b>프롬프트 + 번역 설정 초기화</b>
-                        <small>프롬프트 + 규칙 우선순위 · 미세 조정 · 말끝 · 표현 디테일 · 한캐/영캐를 기본값으로 복원</small>
+                        <small>프롬프트 + 번역 스타일 · 개발자 기능 · 현재 기본 번역 지침을 기본값으로 복원<br>개발자 잠금과 기본 지침 전용 프리셋 목록은 유지</small>
                     </button>
                 </div>
             </section>`;
@@ -1995,6 +2142,7 @@ function renderCurrentAppliedRules() {
                 ['금지어', banned.length ? `${banned.length}개 · ${banned.join(' / ')}` : '없음'],
                 ['우선순위', priority],
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
+                ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['미친 한출의 맛', settings.developerMode && settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
                 ['캐릭터 → USER 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanTargetToUserRegister)?.label || '원문·문맥')
@@ -2010,8 +2158,10 @@ function renderCurrentAppliedRules() {
                     ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
-                    ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외`
-                    : '기존 설정 전체 적용'],
+                    ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외${settings.developerCompressedPromptEnabled ? ' · 압축 테스트' : ''}`
+                    : (settings.developerMode && settings.developerCompressedPromptEnabled
+                        ? '기존 설정 전체 적용 · 압축 테스트'
+                        : '기존 설정 전체 적용')],
             ])}
         </div>`;
 }
@@ -8907,6 +9057,17 @@ function developerSettingsMarkup() {
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
                     ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
 
+                    <details id="verba-developer-compressed-prompt-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>❌️개발자 테스트용 사용 금지❌️ <small>프롬프트 압축 실험</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-compressed-prompt-enabled" ${settings.developerCompressedPromptEnabled ? 'checked' : ''}>
+                                <span>압축 프롬프트 사용</span>
+                            </label>
+                            <div class="verba-help">베르바 내부의 반복 지침만 짧게 합칩니다. 직접 작성한 프롬프트는 줄이지 않으며 번역 품질이 달라질 수 있는 테스트 기능입니다.</div>
+                        </div>
+                    </details>
+
                     <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
                         <div class="verba-tool-details-content">
@@ -9362,7 +9523,7 @@ function injectSettingsPanel() {
                             <option value="prompts">프롬프트만</option>
                             <option value="prompts_translation">프롬프트 + 번역 설정</option>
                         </select>
-                        <div class="verba-help">기존 프리셋은 ‘프롬프트만’으로 유지됩니다. ‘프롬프트 + 번역 설정’을 선택하면 아래 번역 스타일 설정도 함께 저장·적용합니다.</div>
+                        <div class="verba-help">기존 프리셋은 ‘프롬프트만’으로 유지됩니다. ‘프롬프트 + 번역 설정’을 선택하면 번역 스타일과 개발자 기능 설정도 함께 저장·적용합니다.</div>
 
                         <div class="verba-prompt-preset-actions">
                             <button type="button" id="verba-prompt-preset-save" class="menu_button">저장</button>
@@ -9376,9 +9537,9 @@ function injectSettingsPanel() {
                             <small>항상 저장</small>
                             <span>전체 번역 전역 · 모든 대사 공통 · 캐릭터 대사 전용 · NPC·USER 대사 전용 + 각 슬롯 ON/OFF</span>
                             <small>‘프롬프트 + 번역 설정’ 선택 시 추가 저장</small>
-                            <span>번역 규칙 우선순위 · 번역 미세 조정 · 대사 말끝 취향 · 표현 디테일 · 한캐의 맛 · 영캐의 맛</span>
+                            <span>번역 규칙 우선순위 · 번역 미세 조정 · 대사 말끝 · 표현 디테일 · 한캐/영캐의 맛 · 미친 한출 · 김홍진 · 관계/검수 · 현재 기본 번역 지침</span>
                             <small>저장하지 않음</small>
-                            <span>연결 프로필 · 성능 통계 · 이름 고정 · 금지어 · 개발자/비밀번호/관계 실험실 · 백업 · 디버그 · 캐시/임시 상태</span>
+                            <span>연결 프로필 · 성능 통계 · 이름 고정 · 금지어 · 개발자 비밀번호/잠금 해제 · 기본 지침 전용 프리셋 목록 · 백업 · 디버그 · 캐시/임시 상태</span>
                         </div>
 
                         <details id="verba-prompt-preset-backups" class="verba-prompt-preset-backups">
@@ -9813,6 +9974,7 @@ function injectSettingsPanel() {
 
         if (target.closest('#verba-developer-mode-off')) {
             settings.developerMode = false;
+            settings.developerCompressedPromptEnabled = false;
             settings.qualityAuditEnabled = false;
             settings.developerRelationshipExperimentEnabled = false;
             settings.developerHongjinFlavorEnabled = false;
@@ -9835,6 +9997,17 @@ function injectSettingsPanel() {
     panel.addEventListener('change', event => {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
+
+        if (target.id === 'verba-developer-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
+            settings.developerCompressedPromptEnabled = target.checked;
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            notify(
+                target.checked ? '개발자 테스트용 압축 프롬프트를 켰어요.' : '기존 전체 프롬프트로 돌아왔어요.',
+                'info',
+            );
+            return;
+        }
 
         if (target.id === 'verba-beginner-character-enabled' && target instanceof HTMLInputElement) {
             settings.beginnerCharacterGuideEnabled = target.checked;

@@ -1,6 +1,7 @@
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
 import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
+import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse } from './diagnostics.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -37,7 +38,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.10';
+const EXTENSION_VERSION = '0.5.12';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -629,7 +630,7 @@ function notify(message, type = 'info') {
         const diagnostic = settings.debugMode
             ? createDebugDiagnostic('generic-error', null, String(message || '오류가 발생했습니다.'))
             : null;
-        if (diagnostic) lastDebugDiagnostic = diagnostic;
+        if (diagnostic) storeDebugDiagnostic(diagnostic);
         showBottomError(message, diagnostic);
         try {
             globalThis.toastr?.error?.(message, '베르바');
@@ -648,32 +649,11 @@ function notify(message, type = 'info') {
     logger(`[베르바] ${message}`);
 }
 
-function sanitizeDebugValue(value, limit = 6000) {
-    return String(value ?? '')
-        .replace(/Bearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer [REDACTED]')
-        .replace(/((?:api[-_ ]?key|authorization|token|secret|password)\s*[:=]\s*["']?)[^\s"',}]+/gi, '$1[REDACTED]')
-        .replace(/\bsk-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED_KEY]')
-        .slice(0, Math.max(200, Number(limit) || 6000));
-}
-
-function debugErrorChain(error) {
-    const chain = [];
-    const seen = new Set();
-    let current = error;
-    while (current && !seen.has(current) && chain.length < 6) {
-        seen.add(current);
-        chain.push({
-            name: sanitizeDebugValue(current?.name || '', 120),
-            message: sanitizeDebugValue(current?.message || String(current || ''), 1800),
-            code: sanitizeDebugValue(current?.code || '', 200),
-            status: sanitizeDebugValue(current?.status ?? current?.statusCode ?? current?.response?.status ?? '', 120),
-            statusText: sanitizeDebugValue(current?.response?.statusText || '', 300),
-            details: sanitizeDebugValue(current?.details || current?.response?.data?.error?.message || current?.response?.data?.message || '', 1800),
-            stack: sanitizeDebugValue(current?.stack || '', 4500),
-        });
-        current = current?.cause;
-    }
-    return chain;
+function storeDebugDiagnostic(diagnostic) {
+    if (!settings.debugMode) return;
+    lastDebugDiagnostic = diagnostic;
+    const copy = document.querySelector('#verba-copy-last-debug');
+    if (copy) copy.disabled = !diagnostic;
 }
 
 function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage = '') {
@@ -689,13 +669,15 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
     const source = latest ? messageSource(latest.message) : '';
     const configured = configuredProfiles();
     const viewport = globalThis.visualViewport;
+    const errorChain = debugErrorChain(error);
     return {
         report: 'VERBA_DEBUG_DIAGNOSTIC',
         verbaVersion: EXTENSION_VERSION,
         time: new Date().toISOString(),
         stage: sanitizeDebugValue(stage, 160),
         displayMessage: sanitizeDebugValue(displayMessage, 2200),
-        errorChain: debugErrorChain(error),
+        classification: classifyDebugError(errorChain, displayMessage),
+        errorChain,
         environment: {
             userAgent: sanitizeDebugValue(globalThis.navigator?.userAgent || '', 1000),
             viewport: {
@@ -729,7 +711,8 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             timeoutSeconds: Number(settings.timeoutSeconds) || 0,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
-        privacy: '메시지 원문·번역문·프롬프트·프로필 ID·API 키는 포함하지 않음',
+        privacy: '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
+        limitation: '터먹스·서버 터미널에만 출력되고 브라우저에 전달되지 않은 로그는 읽을 수 없음',
     };
 }
 
@@ -739,14 +722,14 @@ function debugDiagnosticText(diagnostic) {
 }
 
 async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
-    if (!diagnostic) throw new Error('복사할 최근 오류 진단이 없습니다.');
+    if (!settings.debugMode || !diagnostic) throw new Error('복사할 최근 오류 로그가 없습니다.');
     await copyText(debugDiagnosticText(diagnostic));
 }
 
 function reportError(stage, error, displayMessage = '') {
     const message = String(displayMessage || errorText(error) || '오류가 발생했습니다.');
     const diagnostic = settings.debugMode ? createDebugDiagnostic(stage, error, message) : null;
-    if (diagnostic) lastDebugDiagnostic = diagnostic;
+    if (diagnostic) storeDebugDiagnostic(diagnostic);
 
     // Keep the diagnostic-capable bottom notice, but also use SillyTavern's
     // normal error toast so a translation failure can never end silently.
@@ -854,31 +837,6 @@ function showBottomError(message, diagnostic = null) {
     text.textContent = `베르바 · ${String(message || '오류가 발생했습니다.')}`;
     const actions = document.createElement('div');
     actions.className = 'verba-error-actions';
-    if (settings.debugMode && diagnostic) {
-        const copy = document.createElement('button');
-        copy.type = 'button';
-        copy.className = 'menu_button verba-debug-copy';
-        copy.textContent = '진단 복사';
-        copy.setAttribute('aria-label', '오류 진단 정보 복사');
-        copy.addEventListener('click', async () => {
-            const previous = copy.textContent;
-            copy.disabled = true;
-            try {
-                await copyDebugDiagnostic(diagnostic);
-                copy.textContent = '복사됨';
-            } catch (error) {
-                copy.textContent = '복사 실패';
-                console.error('[베르바] 오류 진단 복사 실패', error);
-            } finally {
-                setTimeout(() => {
-                    if (!copy.isConnected) return;
-                    copy.disabled = false;
-                    copy.textContent = previous;
-                }, 1200);
-            }
-        });
-        actions.append(copy);
-    }
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'verba-error-close';
@@ -2792,7 +2750,12 @@ async function sendProfileRequest(prompt, options = {}) {
             ));
             const response = await Promise.race([request, hardStop]);
 
-            if (!extractResponseText(response).trim()) throw new Error('AI가 빈 응답을 반환했습니다.');
+            if (!extractResponseText(response).trim()) {
+                const error = new Error('AI가 빈 응답을 반환했습니다.');
+                error.code = 'VERBA_RESPONSE_EMPTY';
+                if (settings.debugMode) rememberRequestError(error, { ...options, profileSlot }, response);
+                throw error;
+            }
             attemptSucceeded = true;
             return response;
         };
@@ -2811,12 +2774,23 @@ async function sendProfileRequest(prompt, options = {}) {
             const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
             timeoutError.code = 'VERBA_TIMEOUT';
             timeoutError.cause = error;
+            if (settings.debugMode) rememberRequestError(timeoutError, { ...options, profileSlot });
             attemptError = timeoutError;
             throw timeoutError;
         }
         if (controller.signal.aborted) {
             attemptError = abortError();
             throw attemptError;
+        }
+        // The connection manager may strip the upstream body. Preserve only
+        // what it actually exposes; never intercept global fetch or terminal logs.
+        if (settings.debugMode && error?.code !== 'VERBA_RESPONSE_EMPTY') {
+            try {
+                const raw = await readErrorResponse(error);
+                if (settings.debugMode) error = rememberRequestError(error, { ...options, profileSlot }, raw);
+            } catch {
+                // Diagnostics must never replace the original request failure.
+            }
         }
         attemptError = error;
         throw error;
@@ -3057,6 +3031,8 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
             lastError = parseError || new Error(
                 `번역 결과 누락: ${pending.map(segment => segment.id).join(', ')}`,
             );
+            lastError.code = 'VERBA_RESPONSE_FORMAT';
+            if (settings.debugMode) rememberRequestError(lastError, { ...options, stage: 'segment-parse' }, response);
         } catch (error) {
             if (isAbort(error, options.signal)) throw error;
             lastError = error;
@@ -3096,7 +3072,13 @@ Do not add markdown fences, commentary, or explanations.`
 
         try {
             const response = await sendWithRetry(prompt + repair, options);
-            return parseSelectionCandidateResponse(extractResponseText(response), 3);
+            try {
+                return parseSelectionCandidateResponse(extractResponseText(response), 3);
+            } catch (error) {
+                error.code = 'VERBA_RESPONSE_FORMAT';
+                if (settings.debugMode) rememberRequestError(error, { ...options, stage: 'selection-candidate-parse' }, response);
+                throw error;
+            }
         } catch (error) {
             if (isAbort(error, options.signal)) throw error;
 
@@ -9919,14 +9901,14 @@ function injectSettingsPanel() {
                 </details>
 
                 <details id="verba-debug-settings" class="verba-tool-details">
-                    <summary>디버그 <small>오류 진단 복사</small></summary>
+                    <summary>디버그 <small>마지막 오류 로그</small></summary>
                     <div class="verba-tool-details-content">
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
                             <span>디버그 모드</span>
                         </label>
-                        <div class="verba-help">켜면 베르바 오류 알림에 ‘진단 복사’ 버튼이 생깁니다. 복사한 내용을 그대로 제보하면 오류 단계·코드·스택·기기 환경을 확인할 수 있어요. 메시지 내용·번역문·프롬프트·프로필 ID·API 키는 넣지 않습니다.</div>
-                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${lastDebugDiagnostic ? '' : 'disabled'}>최근 오류 진단 복사</button>
+                        <div class="verba-help">켜 둔 동안 마지막 오류 1건만 기록합니다. 오류 분류·발생 위치·전달받은 서버 원본을 복사합니다. 끄거나 새로고침하면 지워집니다. 서버 터미널에만 뜬 로그는 가져올 수 없어요. 원본에 본문 일부가 섞일 수 있으니 공유 전에 확인해 주세요.</div>
+                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode && lastDebugDiagnostic ? '' : 'disabled'}>로그 복사</button>
                     </div>
                 </details>
                 ${developerSettingsMarkup()}
@@ -10421,17 +10403,18 @@ function injectSettingsPanel() {
     };
     debugModeInput?.addEventListener('change', event => {
         settings.debugMode = event.target.checked;
+        if (!settings.debugMode) lastDebugDiagnostic = null;
         saveSettings();
         syncDebugCopyButton();
-        notify(settings.debugMode ? '디버그 모드를 켰어요. 다음 오류부터 진단 복사를 사용할 수 있어요.' : '디버그 모드를 껐어요.', 'info');
+        notify(settings.debugMode ? '디버그 모드를 켰어요. 다음 오류부터 마지막 로그 1건을 기록해요.' : '디버그 모드를 끄고 오류 로그를 지웠어요.', 'info');
     });
     debugCopyButton?.addEventListener('click', async () => {
         try {
             await copyDebugDiagnostic();
-            notify('최근 오류 진단을 복사했어요.', 'success');
+            notify('마지막 오류 로그를 복사했어요.', 'success');
         } catch (error) {
             console.error('[베르바] 최근 오류 진단 복사 실패', error);
-            notify('복사할 최근 오류 진단이 없어요.', 'warning');
+            notify(lastDebugDiagnostic ? '로그 복사에 실패했어요. 클립보드 권한을 확인해 주세요.' : '복사할 최근 오류 로그가 없어요.', 'warning');
         }
     });
     syncDebugCopyButton();

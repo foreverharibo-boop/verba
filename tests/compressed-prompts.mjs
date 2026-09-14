@@ -47,17 +47,31 @@ const count = (p, word) => p.split(word).length - 1;
 const measures = [];
 const madWritingRoutes = new Set(['full', 'narration', 'target_dialogue', 'other_dialogue', 'tagged_content',
     'selection', 'selectionDialogue', 'selectionCandidates', 'multi', 'qa', 'bannedRepair', 'tokenRepair', 'untranslatedRepair']);
+const writingStart = 'KOREAN-ORIGINAL COMPOSITION — SHARED WRITING STANDARD';
+const writingEnd = 'END KOREAN-ORIGINAL COMPOSITION';
+let sharedWritingBlock;
 for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerMadKoreanOutputEnabled: true, developerHongjinFlavorEnabled: true }]) {
     for (const [name, build] of Object.entries(builders)) {
         const s = { ...short, ...flags };
         const full = build(core, { ...s, developerCompressedPromptEnabled: false });
         const compact = build(core, s);
-        // v0.5.10 deliberately changes Mad Korean writing rules in BOTH prompt variants.
+        // Mad Korean writing changes in BOTH variants; all other routes must stay unchanged.
         const changedMadRule = flags.developerMadKoreanOutputEnabled && madWritingRoutes.has(name);
         if (baseline && !changedMadRule) equal(full, build(baseline, { ...s, developerCompressedPromptEnabled: false }), 'legacy drift: ' + name);
+        if (baseline && !changedMadRule) equal(compact, build(baseline, s), 'compact drift: ' + name);
         equal(build(core, { ...s, developerMode: false }), build(core, { ...s, developerMode: false, developerCompressedPromptEnabled: false }), 'developer gate: ' + name);
         if (changedMadRule) {
             for (const prompt of [full, compact]) {
+                equal(count(prompt, writingStart), 1, 'shared writing standard once: ' + name);
+                equal(count(prompt, writingEnd), 1, 'complete writing standard: ' + name);
+                const block = prompt.slice(prompt.indexOf(writingStart), prompt.indexOf(writingEnd) + writingEnd.length);
+                sharedWritingBlock ??= block;
+                equal(block, sharedWritingBlock, 'same writing criteria/examples in all Mad routes: ' + name);
+                absent(prompt, 'Prefer the shortest complete utterance');
+                absent(prompt, 'varied short-to-medium beats');
+                absent(prompt, 'A figurative image is style, not scene truth');
+                absent(prompt, '너도 안 먹는다는데 굳이 식탁까지');
+                absent(prompt, 'Is any sentence decorative');
                 equal(count(prompt, 'CANONICAL-NAME-FIRST — PRIMARY CAST REFERENCES'), 1, 'shared name policy once: ' + name);
                 contains(prompt, identity.characterName); contains(prompt, identity.userName);
                 contains(prompt, 'Omit only within an uninterrupted continuation');
@@ -68,9 +82,12 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 absent(prompt, 'Omit naturally; if ambiguity remains');
             }
         } else {
+            absent(full, writingStart); absent(compact, writingStart);
             absent(full, 'CANONICAL-NAME-FIRST'); absent(compact, 'CANONICAL-NAME-FIRST');
         }
         absent(build(core, { ...s, developerMode: false }), 'CANONICAL-NAME-FIRST');
+        absent(build(core, { ...s, developerMode: false }), writingStart);
+        if (changedMadRule && name === 'full') assert.ok(compact.length < full.length * 0.65, 'Mad compression must remain substantial');
         measures.push({ mode: flags.developerHongjinFlavorEnabled ? 'mad+hongjin' : flags.developerMadKoreanOutputEnabled ? 'mad' : 'standard', name,
             long: [...full].length, compact: [...compact].length, reduction: +((1 - [...compact].length / [...full].length) * 100).toFixed(1) });
     }

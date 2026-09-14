@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
 import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
-import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse } from './diagnostics.js';
+import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
 import { collectSegmentResponse } from './response-parser.js';
 import {
@@ -41,7 +41,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.34';
+const EXTENSION_VERSION = '0.5.35';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -708,6 +708,42 @@ function finishSegmentRecovery(diagnostic, status = '재시도로 복구 완료'
     }
 }
 
+function recordProtectedRecovery(invalid, segmented, translations, options) {
+    if (!settings.debugMode) return null;
+    try {
+        const diagnostic = createDebugDiagnostic('protected-token-repair', null, '보호 표식 개수가 달라 추가 복구를 요청합니다.');
+        diagnostic.classification = { category: '보호 표식 불일치', evidence: '구간별 표식 종류·개수 차이', httpStatus: null };
+        diagnostic.privacy = '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.';
+        diagnostic.protectedRecovery = {
+            status: '복구 중', requestStage: sanitizeDebugValue(options.stage || 'output-translation', 160),
+            startedAt: new Date().toISOString(), attempts: 0,
+            before: protectedRecoverySnapshot(invalid, segmented, translations),
+            limitation: '표식 개수 차이를 기록합니다. 대명사 치환·다른 구간 이동 등 의미상 원인은 자동 확정하지 않습니다.',
+        };
+        storeDebugDiagnostic(diagnostic);
+        return diagnostic;
+    } catch (error) {
+        console.warn('[베르바] 보호 표식 진단 기록 실패', error);
+        return null;
+    }
+}
+
+function finishProtectedRecovery(diagnostic, status, started, attempts, remaining, segmented, translations, error = null) {
+    if (!settings.debugMode || !diagnostic || lastDebugDiagnostic !== diagnostic) return;
+    try {
+        Object.assign(diagnostic.protectedRecovery, {
+            status, attempts, elapsedSeconds: Math.max(0, performance.now() - started) / 1000,
+            remaining: protectedRecoverySnapshot(remaining, segmented, translations),
+            error: error ? sanitizeDebugValue(error.message || String(error), 1200) : '',
+        });
+        diagnostic.displayMessage = `보호 표식 복구: ${status}`;
+        // Preserve this evidence when the existing final-error UI replaces the log.
+        if (error && typeof error === 'object') error.verbaProtectedRecovery = diagnostic.protectedRecovery;
+    } catch (diagnosticError) {
+        console.warn('[베르바] 보호 표식 결과 기록 실패', diagnosticError);
+    }
+}
+
 function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage = '') {
     const context = liveContext();
     const latest = (() => {
@@ -730,6 +766,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
         displayMessage: sanitizeDebugValue(displayMessage, 2200),
         classification: classifyDebugError(errorChain, displayMessage),
         errorChain,
+        ...(settings.debugMode && error?.verbaProtectedRecovery ? { protectedRecovery: error.verbaProtectedRecovery } : {}),
         environment: {
             userAgent: sanitizeDebugValue(globalThis.navigator?.userAgent || '', 1000),
             viewport: {
@@ -763,7 +800,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             timeoutSeconds: Number(settings.timeoutSeconds) || 0,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
-        privacy: '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
+        privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
         limitation: '터먹스·서버 터미널에만 출력되고 브라우저에 전달되지 않은 로그는 읽을 수 없음',
     };
 }
@@ -3977,24 +4014,32 @@ async function repairSegmentsByOutputScope({
 async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = options.speakerScopes || {};
-    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
-        const invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
-        if (!invalid.length) return;
-        await repairSegmentsByOutputScope({
-            invalid,
-            segmented,
-            translations,
-            speakerScopes,
-            options: { ...options, speakerIdentity },
-            buildPrompt: buildProtectedTokenRepairPrompt,
-            stage: 'protected-token-repair',
-        });
-    }
-
-    const remaining = findProtectedTokenIntegrityProblems(segmented.segments, translations);
-    if (remaining.length) {
-        console.error('[베르바] 보호 요소 자동 복구 실패', remaining.map(row => row.id));
+    let invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
+    if (!invalid.length) return;
+    const started = performance.now();
+    const diagnostic = recordProtectedRecovery(invalid, segmented, translations, options);
+    let attempts = 0;
+    try {
+        for (; attempts < 5;) {
+            attempts += 1;
+            await repairSegmentsByOutputScope({
+                invalid, segmented, translations, speakerScopes,
+                options: { ...options, speakerIdentity },
+                buildPrompt: buildProtectedTokenRepairPrompt,
+                stage: 'protected-token-repair',
+            });
+            invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
+            if (!invalid.length) {
+                finishProtectedRecovery(diagnostic, '복구 완료', started, attempts, invalid, segmented, translations);
+                return;
+            }
+        }
+        console.error('[베르바] 보호 요소 자동 복구 실패', invalid.map(row => row.id));
         throw new Error('보호 요소 자동 복구에 실패했습니다. 다시 번역해 주세요.');
+    } catch (error) {
+        const remaining = findProtectedTokenIntegrityProblems(segmented.segments, translations);
+        finishProtectedRecovery(diagnostic, isAbort(error) ? '취소됨' : '복구 실패', started, attempts, remaining, segmented, translations, error);
+        throw error;
     }
 }
 
@@ -10185,7 +10230,7 @@ function injectSettingsPanel() {
                             <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
                             <span>디버그 모드</span>
                         </label>
-                        <div class="verba-help">마지막 오류·응답 형식 복구 1건을 기록합니다. 재시도로 해결된 형식 오류도 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 서버 터미널 로그는 제외하며, 원본 응답에 본문 일부가 섞일 수 있으니 공유 전에 확인해 주세요.</div>
+                        <div class="verba-help">마지막 오류·응답 형식·보호 표식 복구 1건을 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode && lastDebugDiagnostic ? '' : 'disabled'}>로그 복사</button>
                         <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>

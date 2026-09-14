@@ -127,3 +127,38 @@ export function classifyDebugError(chain, displayMessage = '') {
     if (chain.some(item => /^(?:ReferenceError|TypeError|RangeError|SyntaxError)$/.test(item.name) && !item.request)) return result('베르바 실행 오류 의심', 'JavaScript 예외; stage·stack에서 발생 위치 확인');
     return result('원인 미확정', '전달된 정보만으로 서버·모델·확장 원인을 단정할 수 없음');
 }
+
+// Bounded snapshots of only failing segments; never mutate source or translations.
+export function protectedRecoverySnapshot(invalid, segmented, translations) {
+    const entries = new Map([...(segmented.tokens || []), ...(segmented.nameTokens || [])].map(row => [row.token, row]));
+    const counts = text => {
+        const result = new Map();
+        for (const mark of String(text || '').match(/@@VERBA_(?:NAME_)?\d{4}@@/g) || []) result.set(mark, (result.get(mark) || 0) + 1);
+        return result;
+    };
+    const rows = invalid.slice(0, 12).map(segment => {
+        const before = String(segment.text || '');
+        const received = String(translations.get(segment.id) || '');
+        const expected = counts(before), actual = counts(received);
+        const marks = [...new Set([...expected.keys(), ...actual.keys()])];
+        const text = (value, limit) => sanitizeDebugValue(value, limit);
+        return {
+            segmentId: text(segment.id, 160), type: text(segment.type, 80),
+            sourceWithMarkers: text(before, 1800), translationBeforeRepair: text(received, 1800),
+            sourceCharacters: before.length, translationCharacters: received.length,
+            textLimit: 1800,
+            omittedMarks: Math.max(0, marks.length - 100),
+            marks: marks.slice(0, 100).map(mark => {
+                const entry = entries.get(mark);
+                const wanted = expected.get(mark) || 0, got = actual.get(mark) || 0;
+                return {
+                    marker: mark, kind: mark.includes('_NAME_') ? '이름·호칭 고정' : '구조·코드 보호',
+                    expected: wanted, actual: got, missing: Math.max(0, wanted - got), excess: Math.max(0, got - wanted),
+                    sourceValue: text(entry?.source ?? entry?.value ?? '(등록되지 않은 표식)', 500),
+                    restoredValue: text(entry?.value ?? '(등록되지 않은 표식)', 500),
+                };
+            }),
+        };
+    });
+    return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
+}

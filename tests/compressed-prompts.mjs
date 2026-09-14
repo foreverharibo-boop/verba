@@ -61,7 +61,31 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
         if (baseline && !changedMadRule) equal(compact, build(baseline, s), 'compact drift: ' + name);
         equal(build(core, { ...s, developerMode: false }), build(core, { ...s, developerMode: false, developerCompressedPromptEnabled: false }), 'developer gate: ' + name);
         if (changedMadRule) {
+            const policySection = (p, start, end) => p.slice(p.indexOf(start), p.indexOf(end) + end.length);
+            for (const [start, end] of [['TOP PRIORITY — NO MISOGYNY', 'END TOP PRIORITY'],
+                ['MODERN KOREAN — NARRATION AND ALL DIALOGUE', 'END MODERN KOREAN']]) {
+                assert.ok(policySection(compact, start, end).length < policySection(full, start, end).length * 0.65,
+                    'new policies must be materially shorter in compressed mode: ' + name); checks++;
+            }
             for (const prompt of [full, compact]) {
+                equal(count(prompt, 'TOP PRIORITY — NO MISOGYNY'), 1, 'misogyny rule once: ' + name);
+                equal(count(prompt, 'END TOP PRIORITY'), 1, 'complete top priority: ' + name);
+                assert.ok(prompt.indexOf('TOP PRIORITY — NO MISOGYNY') < prompt.indexOf('MAD KOREAN EXCLUSIVE'),
+                    'ban precedes style engine: ' + name); checks++;
+                contains(prompt, '네 년'); contains(prompt, '2026년/몇 년');
+                equal(count(prompt, '년/네 년/이년/저년/미친년/독한 년/씨발년/시발년/썅년/개년/김치녀/된장녀/맘충/보지년/걸레년/창녀/암캐/계집/계집애'), 1,
+                    'one prohibited-form list even with Hongjin: ' + name);
+                absent(prompt, 'HARD SAFETY / VOICE RULE — NO MISOGYNISTIC WORDING');
+                absent(prompt, 'ABSOLUTE LEXICAL BAN: Never use');
+                absent(prompt, 'Never use “년” as a person label or insult');
+                equal(count(prompt, 'MODERN KOREAN — NARRATION AND ALL DIALOGUE'), 1, 'modern style once: ' + name);
+                equal(count(prompt, 'END MODERN KOREAN'), 1, 'complete modern style: ' + name);
+                const modern = policySection(prompt, 'MODERN KOREAN — NARRATION AND ALL DIALOGUE', 'END MODERN KOREAN');
+                contains(modern, 'narration'); contains(modern, 'character-close');
+                contains(modern, 'personality'); contains(modern, 'hierarchy'); contains(modern, 'formal');
+                contains(modern, 'honorifics'); contains(modern, 'TARGET CHARACTER dialogue');
+                absent(prompt, 'Did Korean naturalization add slang, insult, threat');
+                absent(prompt, 'Did any speaker acquire an invented “-가놈/-놈/-녀석/-새끼” address');
                 equal(count(prompt, writingStart), 1, 'shared writing standard once: ' + name);
                 equal(count(prompt, writingEnd), 1, 'complete writing standard: ' + name);
                 const block = prompt.slice(prompt.indexOf(writingStart), prompt.indexOf(writingEnd) + writingEnd.length);
@@ -158,6 +182,15 @@ for (const age of ['early20s', 'late20s', 'thirties']) {
                     const twenties = age !== 'thirties';
                     const label = `${name}/${age}/${compressed}/${mad}/${profanity}`;
                     equal(count(prompt, '/ CONTEMPORARY EVERYDAY SPEECH'), active && twenties ? 1 : 0, 'age scope: ' + label);
+                    const policyActive = active || (mad && madWritingRoutes.has(name));
+                    equal(count(prompt, 'TOP PRIORITY — NO MISOGYNY'), policyActive ? 1 : 0, 'ban scope: ' + label);
+                    equal(count(prompt, 'MODERN KOREAN — NARRATION AND ALL DIALOGUE'), mad && madWritingRoutes.has(name) ? 1 : 0,
+                        'modern style belongs to Mad, not standalone Hongjin: ' + label);
+                    if (policyActive) {
+                        contains(prompt, 'spac'); contains(prompt, 'punctuation');
+                        contains(prompt, 'year units'); contains(prompt, 'non-gendered');
+                        contains(prompt, 'Before returning'); contains(prompt, 'every');
+                    }
                     if (active && twenties) {
                         contains(prompt, 'Build ordinary spoken clauses first; add the configured slyness/profanity afterward');
                         contains(prompt, 'casual 존댓말 remains 존댓말');
@@ -179,6 +212,7 @@ for (const age of ['early20s', 'late20s', 'thirties']) {
                         contains(prompt, 'retain 군벌 when it actually denotes a warlord');
                     }
                     absent(build(core, { ...settings, developerMode: false }), '/ CONTEMPORARY EVERYDAY SPEECH', 'developer off: ' + label);
+                    absent(build(core, { ...settings, developerMode: false }), 'TOP PRIORITY — NO MISOGYNY', 'developer ban gate: ' + label);
                     absent(build(core, { ...settings, developerHongjinFlavorEnabled: false }), '/ CONTEMPORARY EVERYDAY SPEECH', 'Hongjin off: ' + label);
                 }
             }

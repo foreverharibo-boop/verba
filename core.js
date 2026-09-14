@@ -1321,6 +1321,18 @@ Use the vocabulary/rhythm only when the meaning fits. Invent no intimacy or soft
 END EVERYDAY KOREAN EXAMPLES`;
 }
 
+function madKoreanTimeAndGroupRule(compact = false) {
+    return compact
+        ? `DIALOGUE TIME AND GROUP REFERENCES — mandatory, including NPCs and voice add-ons:
+- SPOKEN CLOCK TIMES: in dialogue, render a confirmed clock time as Korean 오전/오후/아침/저녁 + 시/분: 0600 → 오전 6시; around 0700 hours → 아침 7시쯤; 1830 → 오후 6시 30분. Never copy HHMM + 시 (0600시/0700시). Preserve the actual time, minutes, approximation, date and timezone; number fidelity means value here, not digit padding. Preserve codes/IDs, durations, literal time-code evidence, metadata layout and protected tokens; do not guess ambiguous numerals.
+- GROUP REFERENCES: your/my/his/her + men/people/team denotes affiliation, not a vocative. Use context/register-matched 너희 쪽 사람들/그쪽 병력/우리 팀 etc.; never 네 녀석들/너의 남자들 as a mechanical rendering of your men. Keep speaker, listener, group and affiliation; do not invent subordination, kinship or insults. Roughness follows voice settings; examples are not fixed substitutions.
+END DIALOGUE TIME AND GROUP REFERENCES`
+        : `DIALOGUE TIME AND GROUP REFERENCES — mandatory, including NPCs and voice add-ons:
+- SPOKEN CLOCK TIMES: when dialogue gives a confirmed time of day, rewrite it into natural Korean 오전/오후/아침/저녁 plus 시/분. Even military dialogue must not mechanically append 시 to HHMM: at 0600 → 오전 6시에; around 0700 hours → 아침 7시쯤에; 1830 → 오후 6시 30분. Never output 0600시/0700시 for these clock times. Keep every nonzero minute, approximation, day boundary and timezone unchanged; 0000 is 자정 and 1200 is 정오. If AM/PM is genuinely unknown, do not invent it. Number fidelity preserves the actual time value, not leading-zero padding or the English military format in speech. This is a display-form change, not permission to alter numbers or chronology. Do not apply it to codes/IDs, quantities, durations, literal time-code evidence, metadata layout, code or protected tokens. Verify the resulting hour/minute before returning.
+- GROUP REFERENCES: resolve possessive group expressions (your men, my people, his team, her staff) by affiliation and the current listener. Write natural Korean such as 너희 쪽 사람들, 그쪽 병력, 우리 팀 or 그녀의 직원들 when the relation/register fits. For Tell your men..., never mechanically write 네 녀석들한테 or 너의 남자들한테; the group belongs to the listener's side and is not being addressed as 너희들. Do not change who receives the instruction, infer a command rank, turn colleagues into subordinates, invent kinship, or replace an unresolved group with a named person. This is not a blanket ban on possessives or rough diction: keep configured profanity/teasing within its scope and use idiomatic syntax. These are contextual examples, not fixed substitutions. Check affiliation and sayability before returning.
+END DIALOGUE TIME AND GROUP REFERENCES`;
+}
+
 function madKoreanNativeWritingRules(compact = false) {
     return `KOREAN-ORIGINAL COMPOSITION — SHARED WRITING STANDARD
 - You are a contemporary Korean web-novel author skilled in lifelike everyday dialogue and vivid, natural narration. Write both as original Korean fiction.
@@ -1336,6 +1348,7 @@ ${madKoreanIdiomaticExpressionRule(compact)}
 - CLOSE-POV ROUGH DICTION: in source-supported character-close narration or thought, rough wording is allowed without a literal source swear. Preserve judgment and force; add no contempt, sexual meaning, threats, or harsher actions. Do not spread it to neutral narration or import the target character’s personality.
 - EVERYDAY OBJECT NAMES: prefer familiar Korean names over literal technical calques, preserving the object's function and meaningful material, contents, properties, and use. Do not replace a specific object with a vague category. For an unspecified everyday form, a context-compatible Korean equivalent is allowed when that form is incidental; never override an explicit description or a plot-relevant distinction. For example, a compressed protein block may be 단백질 바 rather than generic 보존식; instant noodles may be 컵라면 when context permits, but keep 라면 when the form is uncertain and matters, and never turn explicit packet noodles into a cup. These are contextual choices, not automatic substitutions.
 ${madKoreanEverydayExamples()}
+${madKoreanTimeAndGroupRule(compact)}
 END KOREAN-ORIGINAL COMPOSITION`;
 }
 
@@ -1516,6 +1529,7 @@ MAD KOREAN — ULTRA-COMPACT
 - EVERYDAY DIALOGUE: write actual spoken reactions for the speaker/listener, speech act, personality and register; replace mere abstract judgments with responses to behavior. Rebuild idiom/joke/metaphor effects; keep factual technical terms, genuine titles and plot-relevant wording. No invented event, motive, accusation or decorative metaphor. Casualness is not forced memes, extra profanity or universal 반말; voice settings control roughness. Never infer old/dialect speech from age/job/genre; avoid unsupported 드쇼/하쇼/구먼/일세/-인가/-하게/-라네.
 - EVERYDAY NARRATION: familiar, precise words; no abstract noun piles, stacked modifiers or inflated ordinary actions. Connect actions, break at changes/reactions, keep actors clear. Preserve information and force.
 ${madKoreanEverydayExamples()}
+${madKoreanTimeAndGroupRule(true)}
 - References: TARGET CHARACTER=${JSON.stringify(characterName)}; TARGET gender=${JSON.stringify(String(speakerIdentity.characterGender || 'unknown'))}; USER=${JSON.stringify(userName)}. Transliterate clear Latin-script human names into Hangul, excluding non-person terms; explicit name locks override transliteration. Never expand a short source name or repeat display names mechanically. PERSONAL PRONOUN DEFAULT: human he/him → 그, she/her → 그녀, his → 그의, possessive her → 그녀의, with grammatical particles. Prefer these when clear; never turn a source pronoun into 여자/남자/녀석 or another gender/age/size/role label for variety. Names clarify ambiguity, not replace pronouns mechanically. Omit a subject/possessive only when omission itself is clearly more natural in an immediately linked sentence; re-anchor with name/pronoun after actor changes or intervening description. Never rotate a known person through 여자/남자/녀석/상대/사람/사내/청년/작은 몸, guess an identity, split a name, or output particle-choice notation such as (이)는/이(가)/은(는).
 - Speech lock only for the named pair's direct conversation: TARGET→USER=${register(settings?.developerMadKoreanTargetToUserRegister)}; USER→TARGET=${register(settings?.developerMadKoreanUserToTargetRegister)}. JONDAETMAL normally uses conversational 해요체. Do not apply pair locks to NPC/quoted/ambiguous speech.
 - Preserve every source ellipsis sequence exactly in order and form: .../…/…… keep the same count and characters; invent none. Preserve stable terminology. Default only unstated cultural context to contemporary Korea; retain every explicit foreign location, institution, brand, garment, currency, historical/legal/fictional fact.

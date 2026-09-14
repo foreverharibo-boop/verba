@@ -84,7 +84,8 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 equal(count(prompt, writingStart), 1, 'shared writing standard once: ' + name);
                 equal(count(prompt, writingEnd), 1, 'complete writing standard: ' + name);
                 const block = prompt.slice(prompt.indexOf(writingStart), prompt.indexOf(writingEnd) + writingEnd.length);
-                const shared = block.replace(/NATURAL COLLOCATIONS AND SOURCE IMAGERY:[\s\S]*?END IDIOMATIC EXPRESSION/u, 'IDIOM_POLICY');
+                const shared = block.replace(/NATURAL COLLOCATIONS AND SOURCE IMAGERY:[\s\S]*?END IDIOMATIC EXPRESSION/u, 'IDIOM_POLICY')
+                    .replace(/DIALOGUE TIME AND GROUP REFERENCES —[\s\S]*?END DIALOGUE TIME AND GROUP REFERENCES/u, 'TIME_GROUP_POLICY');
                 sharedWritingBlock ??= shared;
                 equal(shared, sharedWritingBlock, 'remaining writing criteria/examples unchanged across modes: ' + name);
                 equal(count(block, 'END IDIOMATIC EXPRESSION'), 1, 'complete idiom policy once: ' + name);

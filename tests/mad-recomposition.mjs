@@ -12,6 +12,7 @@ const builders={
  output:s=>core.buildOutputPrompt(segmented,s,'',identity),
  narration:s=>core.buildScopedOutputPrompt({segments:segmented.segments,sourceContext:'',settings:s,scope:'narration',speakerIdentity:identity}),
  dialogue:s=>core.buildScopedOutputPrompt({segments:segmented.segments,sourceContext:'',settings:s,scope:'target_dialogue',speakerIdentity:identity}),
+ otherDialogue:s=>core.buildScopedOutputPrompt({segments:segmented.segments,sourceContext:'',settings:s,scope:'other_dialogue',speakerIdentity:identity}),
  selection:s=>core.buildSelectionPrompt({...selection,settings:s}),
  multi:s=>core.buildMultiSelectionPrompt({source:selection.source,translation:selection.translation,selections:[{id:'m0',selected:selection.selected,start:0,end:7}],settings:s,speakerIdentity:identity}),
  tokenRepair:s=>core.buildProtectedTokenRepairPrompt(segmented.segments,translations,s,identity),
@@ -43,6 +44,19 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.equal(prompt.split('PERSONAL PRONOUN DEFAULT:').length-1,1);
    assert.match(prompt,/he\/him → 그, she\/her → 그녀, his → 그의, possessive her → 그녀의/);
    assert.match(prompt,/여자\/남자\/녀석/);
+   assert.equal(prompt.split('DIALOGUE TIME AND GROUP REFERENCES —').length-1,1);
+   assert.match(prompt,/SPOKEN CLOCK TIMES:/);
+   assert.match(prompt,/0600 → 오전 6시/);
+   assert.match(prompt,/around 0700 hours → 아침 7시쯤/);
+   assert.match(prompt,/1830 → 오후 6시 30분/);
+   assert.match(prompt,/value.*not.*padding/);
+   assert.match(prompt,/codes\/IDs/);
+   assert.match(prompt,/durations/);
+   assert.match(prompt,/metadata layout/);
+   assert.match(prompt,/GROUP REFERENCES:/);
+   assert.match(prompt,/네 녀석들/);
+   assert.match(prompt,/affiliation/);
+   assert.match(prompt,/not fixed substitutions/);
    assert.doesNotMatch(prompt,/잠깐만요. 일단 얘기 좀 들어보세요/);
    assert.match(prompt,/actor→action→target/);
    assert.match(prompt,/plot-relevant/);
@@ -52,9 +66,12 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.doesNotMatch(prompt,/Do not erase a meaningful image|Preserve meaningful imagery and wordplay effects/);
    assert.equal(build({...settings,developerMode:false}).includes(marker),false);
    assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes(marker),false);
-   checks+=27;
+   assert.equal(build({...settings,developerMode:false}).includes('SPOKEN CLOCK TIMES:'),false);
+   assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes('GROUP REFERENCES:'),false);
+   checks+=42;
   }
   assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes(marker),false);
+  assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes('SPOKEN CLOCK TIMES:'),false);
  }
 }
 console.log(`PASS Mad recomposition: ${checks} routing/content checks, single rule per request in normal/compact/extreme, Hongjin ON/OFF, developer gate, non-Mad/input isolation. Prompt construction only; no live AI.`);

@@ -1,3 +1,5 @@
+import { collectSegmentResponse } from './response-parser.js';
+
 const PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
 const PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
@@ -839,17 +841,9 @@ function extractJsonObject(raw) {
 }
 
 export function parseSegmentResponse(raw, expectedSegments) {
-    const parsed = extractJsonObject(raw);
-    const rows = Array.isArray(parsed?.segments) ? parsed.segments : [];
-    const map = new Map();
-    for (const row of rows) {
-        if (!row || typeof row.id !== 'string' || typeof row.translation !== 'string') continue;
-        if (!map.has(row.id)) map.set(row.id, row.translation);
-    }
-    for (const segment of expectedSegments) {
-        if (!map.get(segment.id)?.trim()) throw new Error(`번역 결과 누락: ${segment.id}`);
-    }
-    return map;
+    const result = collectSegmentResponse(raw, expectedSegments);
+    if (result.parseError) throw result.parseError;
+    return result.partial;
 }
 
 export function parseSelectionCandidateResponse(raw, expectedCount = 3) {

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { createOutputTiming, outputTimingText } from '../timing.js';
 import { extractResponseText, parseSegmentResponse } from '../core.js';
 import { rememberRequestError, readErrorResponse } from '../diagnostics.js';
+import { collectSegmentResponse } from '../response-parser.js';
 
 let time = 0;
 const recorder = createOutputTiming({ now: () => time, date: () => '2026-09-14T00:00:00Z' });
@@ -65,6 +66,7 @@ const env = {
     liveContext: () => ({ ConnectionManagerRequestService: { sendRequest: (...args) => provider(...args) } }),
     enqueueRequest: execute => queue(execute), enqueueScopedParallelRequest: execute => queue(execute),
     extractResponseText, parseSegmentResponse, rememberRequestError, readErrorResponse,
+    collectSegmentResponse, recordSegmentRecovery: () => null, finishSegmentRecovery: () => {},
     recordProfileAttempt: () => {}, abortError: () => new DOMException('cancel', 'AbortError'),
     isAbort: (e, signal) => signal?.aborted || e.name === 'AbortError',
     configuredProfileCycle: () => ({ active: 'a', slot: 'A', fallbacks }),

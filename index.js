@@ -3,6 +3,7 @@ import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
+import { collectSegmentResponse } from './response-parser.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -40,7 +41,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.33';
+const EXTENSION_VERSION = '0.5.34';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -670,6 +671,41 @@ function storeDebugDiagnostic(diagnostic) {
     lastDebugDiagnostic = diagnostic;
     const copy = document.querySelector('#verba-copy-last-debug');
     if (copy) copy.disabled = !diagnostic;
+}
+
+function recordSegmentRecovery(result, response, options, attempt) {
+    if (!settings.debugMode || (!result.parseError && !result.repairs.length)) return null;
+    try {
+        const error = result.parseError || Object.assign(new Error('AI 응답 형식을 로컬에서 복구했습니다.'), { code: 'VERBA_RESPONSE_FORMAT' });
+        rememberRequestError(error, { ...options, stage: 'segment-parse', retryAttempt: attempt }, response);
+        const diagnostic = createDebugDiagnostic('segment-parse', error,
+            result.parseError ? '응답 형식·구간 문제로 미완료 구간을 재요청합니다.' : '응답 형식을 로컬에서 복구했습니다.');
+        diagnostic.recovery = {
+            status: result.parseError ? '재시도 예정' : '로컬 복구 완료',
+            requestStage: sanitizeDebugValue(options.stage || 'request', 160),
+            attempt: attempt + 1,
+            recoveredSegments: result.partial.size,
+            missingSegmentIds: result.missingIds.slice(0, 200),
+            missingSegmentCount: result.missingIds.length,
+            issues: result.issues,
+            localRepairs: result.repairs,
+        };
+        storeDebugDiagnostic(diagnostic);
+        return diagnostic;
+    } catch (error) {
+        console.warn('[베르바] 중간 응답 진단 기록 실패', error);
+        return null;
+    }
+}
+
+function finishSegmentRecovery(diagnostic, status = '재시도로 복구 완료') {
+    if (!settings.debugMode || !diagnostic || lastDebugDiagnostic !== diagnostic) return;
+    if (diagnostic.recovery?.status === '재시도 예정') {
+        diagnostic.recovery.status = status;
+        diagnostic.displayMessage = status === '재시도로 복구 완료'
+            ? '중간 응답 오류가 있었지만 미완료 구간 재요청으로 복구했습니다.'
+            : `응답 형식·구간 복구: ${status}`;
+    }
 }
 
 function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage = '') {
@@ -3009,20 +3045,7 @@ async function sendWithRetry(prompt, options = {}) {
 }
 
 function collectPartialSegmentTranslations(raw, expectedSegments) {
-    const partial = new Map();
-    let parseError = null;
-
-    for (const segment of expectedSegments || []) {
-        try {
-            const one = parseSegmentResponse(raw, [segment]);
-            const value = String(one.get(segment.id) || '');
-            if (value.trim()) partial.set(segment.id, value);
-        } catch (error) {
-            parseError ||= error;
-        }
-    }
-
-    return { partial, parseError };
+    return collectSegmentResponse(raw, expectedSegments);
 }
 
 async function requestSegments(prompt, expectedSegments, options = {}) {
@@ -3031,6 +3054,7 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
     const completed = new Map();
     let pending = [...(expectedSegments || [])];
     let lastError;
+    let recoveryDiagnostic = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
         if (!pending.length) return completed;
@@ -3052,20 +3076,27 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
         try {
             const response = await sendWithRetry(prompt + repair, { ...options, segmentAttempt: attempt });
             const raw = extractResponseText(response);
-            const { partial, parseError } = collectPartialSegmentTranslations(raw, pending);
+            const result = collectPartialSegmentTranslations(raw, pending);
+            const { partial, parseError } = result;
+            recoveryDiagnostic = recordSegmentRecovery(result, response, options, attempt) || recoveryDiagnostic;
 
             for (const [id, value] of partial) completed.set(id, value);
             pending = pending.filter(segment => !completed.has(segment.id));
 
-            if (!pending.length) return completed;
+            if (!pending.length) {
+                finishSegmentRecovery(recoveryDiagnostic);
+                return completed;
+            }
 
             lastError = parseError || new Error(
                 `번역 결과 누락: ${pending.map(segment => segment.id).join(', ')}`,
             );
             lastError.code = 'VERBA_RESPONSE_FORMAT';
-            if (settings.debugMode) rememberRequestError(lastError, { ...options, stage: 'segment-parse' }, response);
         } catch (error) {
-            if (isAbort(error, options.signal)) throw error;
+            if (isAbort(error, options.signal)) {
+                finishSegmentRecovery(recoveryDiagnostic, '취소됨');
+                throw error;
+            }
             lastError = error;
         }
 
@@ -3075,7 +3106,12 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
             `[베르바] 번역 결과 일부 실패 — 성공 구간 ${completed.size}개 유지, 남은 ${pending.length}개만 ${attempt + 1}/${maxRetries}회 재시도`,
             lastError,
         );
-        await outputTiming.wait(options.timing, () => wait(parseRetryDelays[attempt], options.signal));
+        try {
+            await outputTiming.wait(options.timing, () => wait(parseRetryDelays[attempt], options.signal));
+        } catch (error) {
+            finishSegmentRecovery(recoveryDiagnostic, '취소됨');
+            throw error;
+        }
     }
 
     const finalError = new Error(
@@ -3084,6 +3120,7 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
     );
     finalError.partialTranslations = completed;
     finalError.missingSegments = pending;
+    finishSegmentRecovery(recoveryDiagnostic, '재시도 종료·미복구');
     throw finalError;
 }
 async function requestSelectionCandidates(prompt, options = {}) {
@@ -10148,7 +10185,7 @@ function injectSettingsPanel() {
                             <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
                             <span>디버그 모드</span>
                         </label>
-                        <div class="verba-help">켜 둔 동안 마지막 오류 1건만 기록합니다. 오류 분류·발생 위치·전달받은 서버 원본을 복사합니다. 끄거나 새로고침하면 지워집니다. 서버 터미널에만 뜬 로그는 가져올 수 없어요. 원본에 본문 일부가 섞일 수 있으니 공유 전에 확인해 주세요.</div>
+                        <div class="verba-help">마지막 오류·응답 형식 복구 1건을 기록합니다. 재시도로 해결된 형식 오류도 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 서버 터미널 로그는 제외하며, 원본 응답에 본문 일부가 섞일 수 있으니 공유 전에 확인해 주세요.</div>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode && lastDebugDiagnostic ? '' : 'disabled'}>로그 복사</button>
                         <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>

@@ -33,12 +33,13 @@ import {
     parseSelectionCandidateResponse,
     replaceOutsideProtected,
     restoreProtected,
+    resolveOutputSpeakerIdentity,
     segmentSource,
     selectionTouchesDialogue,
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.15';
+const EXTENSION_VERSION = '0.5.17';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3653,9 +3654,9 @@ function speakerAttributionCacheKey(segmented, speakerIdentity = {}) {
         .map(segment => `${segment.id}\u0002${String(segment.text || '')}`)
         .join('\u0003');
     const source = String(segmented?.protectedText || '');
-    const characterName = String(speakerIdentity.characterName || '').trim();
+    const characterName = String(speakerIdentity.sourceCharacterName ?? speakerIdentity.characterName ?? '').trim();
     const characterGender = String(speakerIdentity.characterGender || 'unknown').trim();
-    const userName = String(speakerIdentity.userName || '').trim();
+    const userName = String(speakerIdentity.sourceUserName ?? speakerIdentity.userName ?? '').trim();
 
     return [
         hashText(`${source}\u0000${dialogue}\u0000${characterName}\u0000${characterGender}\u0000${userName}`),
@@ -4449,11 +4450,11 @@ function messageSource(message) {
 function outputSpeakerIdentity(message) {
     const context = liveContext();
     const character = currentCharacterReference()?.character;
-    return {
+    return resolveOutputSpeakerIdentity({
         characterName: String(message?.name || context.name2 || '').trim(),
         characterGender: detectCharacterGender(character),
         userName: String(context.name1 || '').trim(),
-    };
+    }, normalizedCharacterNameLocks(character));
 }
 
 function currentTranslationRecoveryScope() {

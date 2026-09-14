@@ -83,7 +83,7 @@
     cursor: pointer;
 }
 
-.verba-check-row input[type="checkbox"] {
+:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"] {
     appearance: none !important;
     -webkit-appearance: none !important;
     position: relative;
@@ -92,7 +92,10 @@
     min-width: 17px !important;
     flex: 0 0 17px !important;
     margin: 0 !important;
-    border: 1px solid color-mix(in srgb, var(--verba-border) 72%, transparent) !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    color: var(--verba-text) !important;
+    border: 1px solid color-mix(in srgb, var(--verba-text) 65%, transparent) !important;
     border-radius: 4px !important;
     background: color-mix(in srgb, var(--verba-text) 5%, transparent) !important;
     box-shadow: none !important;
@@ -100,25 +103,45 @@
     transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.verba-check-row input[type="checkbox"]::before {
+:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]::before {
     content: none !important;
 }
 
-.verba-check-row input[type="checkbox"]::after {
-    content: none !important;
+/* Draw the tick with theme text color; SVG data URLs cannot inherit it. */
+:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]::after {
+    content: "" !important;
+    display: none !important;
+    position: absolute !important;
+    box-sizing: border-box !important;
+    width: 32% !important;
+    height: 58% !important;
+    top: 43% !important;
+    left: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-right: 2px solid var(--verba-text) !important;
+    border-bottom: 2px solid var(--verba-text) !important;
+    border-radius: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    transform: translate(-50%, -50%) rotate(45deg) !important;
+    pointer-events: none;
 }
 
-.verba-check-row input[type="checkbox"]:checked {
-    border-color: #555 !important;
-    background-color: transparent !important;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M3 10.5l4.2 4.2L17 4.8' fill='none' stroke='%23111' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
-    background-repeat: no-repeat !important;
-    background-position: center !important;
-    background-size: 16px 16px !important;
+:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:checked {
+    border-color: var(--verba-text) !important;
+    background: color-mix(in srgb, var(--verba-text) 5%, transparent) !important;
     box-shadow: none !important;
 }
 
-.verba-check-row input[type="checkbox"]:focus-visible {
+:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:checked::after {
+    display: block !important;
+}
+
+:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:focus-visible {
     outline: 2px solid var(--verba-accent) !important;
     outline-offset: 2px;
 }
@@ -2923,10 +2946,6 @@
     height: 15px !important;
     min-width: 15px !important;
     flex-basis: 15px !important;
-}
-
-#verba-settings .verba-check-row input[type="checkbox"]:checked {
-    background-size: 14px 14px !important;
 }
 
 #verba-settings .verba-tool-details,

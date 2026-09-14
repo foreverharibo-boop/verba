@@ -61,13 +61,39 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
         if (baseline && !changedMadRule) equal(compact, build(baseline, s), 'compact drift: ' + name);
         equal(build(core, { ...s, developerMode: false }), build(core, { ...s, developerMode: false, developerCompressedPromptEnabled: false }), 'developer gate: ' + name);
         if (changedMadRule) {
+            const policySection = (p, start, end) => p.slice(p.indexOf(start), p.indexOf(end) + end.length);
+            for (const [start, end] of [['TOP PRIORITY — NO MISOGYNY', 'END TOP PRIORITY']]) {
+                assert.ok(policySection(compact, start, end).length < policySection(full, start, end).length * 0.65,
+                    'new policies must be materially shorter in compressed mode: ' + name); checks++;
+            }
             for (const prompt of [full, compact]) {
+                equal(count(prompt, 'TOP PRIORITY — NO MISOGYNY'), 1, 'misogyny rule once: ' + name);
+                equal(count(prompt, 'END TOP PRIORITY'), 1, 'complete top priority: ' + name);
+                assert.ok(prompt.indexOf('TOP PRIORITY — NO MISOGYNY') < prompt.indexOf('MAD KOREAN EXCLUSIVE'),
+                    'ban precedes style engine: ' + name); checks++;
+                contains(prompt, '네 년'); contains(prompt, '2026년/몇 년');
+                equal(count(prompt, '년/네 년/이년/저년/미친년/독한 년/씨발년/시발년/썅년/개년/김치녀/된장녀/맘충/보지년/걸레년/창녀/암캐/계집/계집애'), 1,
+                    'one prohibited-form list even with Hongjin: ' + name);
+                absent(prompt, 'HARD SAFETY / VOICE RULE — NO MISOGYNISTIC WORDING');
+                absent(prompt, 'ABSOLUTE LEXICAL BAN: Never use');
+                absent(prompt, 'Never use “년” as a person label or insult');
+                absent(prompt, 'MODERN KOREAN');
+                equal(count(prompt, 'CLOSE-POV ROUGH DICTION:'), 1, 'rough narration preserved once: ' + name);
+                absent(prompt, 'Did Korean naturalization add slang, insult, threat');
+                absent(prompt, 'Did any speaker acquire an invented “-가놈/-놈/-녀석/-새끼” address');
                 equal(count(prompt, writingStart), 1, 'shared writing standard once: ' + name);
                 equal(count(prompt, writingEnd), 1, 'complete writing standard: ' + name);
                 const block = prompt.slice(prompt.indexOf(writingStart), prompt.indexOf(writingEnd) + writingEnd.length);
                 sharedWritingBlock ??= block;
                 equal(block, sharedWritingBlock, 'same writing criteria/examples in all Mad routes: ' + name);
                 equal(count(prompt, 'NATURAL VOCATIVES:'), 1, 'vocative rule once: ' + name);
+                equal(count(prompt, 'SUBJECT OR VOCATIVE:'), 1, 'subject/vocative rule once: ' + name);
+                contains(block, 'never turn a reference to a third person into direct address');
+                contains(block, 'neither 께서 nor playful honorifics are banned');
+                contains(block, 'Preserve configured 반말/존댓말 and established relationships');
+                contains(block, 'Do not place a comma after every name, omit subjects wholesale');
+                contains(block, 'omission must still meet the applicable subject/possessive rule');
+                contains(block, 'ellipsis fidelity remains unchanged');
                 equal(count(prompt, '3. Vocative:'), 1, 'vocative example once: ' + name);
                 contains(block, 'unless human identity itself matters');
                 contains(block, 'not valid surrounding narration');
@@ -83,7 +109,12 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 absent(prompt, 'Omit recoverable subjects/possessors when clear.');
                 equal(count(prompt, 'OMIT ONLY WHEN MORE NATURAL:'), 1, 'omission criterion once: ' + name);
                 contains(prompt, 'Mere recoverability is insufficient.');
-                contains(prompt, 'situational description, or interior reflection intervenes');
+                equal(count(prompt, 'RE-ANCHOR THE SUBJECT:'), 1, 'subject re-anchoring once: ' + name);
+                contains(prompt, 'EVEN IF THE SAME PERSON CONTINUES');
+                contains(prompt, 'At a new paragraph linking speech and action, normally identify');
+                contains(prompt, 'Prefer 그/그녀 when clear');
+                absent(prompt, 'a new paragraph alone does not mandate a name');
+                absent(prompt, 'a paragraph break alone does not require repeating a name');
                 equal(count(prompt, 'SOURCE ELLIPSIS FIDELITY:'), 1, 'ellipsis rule once: ' + name);
                 contains(prompt, '"..." stays "..."');
                 contains(prompt, '"…" stays "…"');
@@ -95,9 +126,9 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 contains(block, 'including zero when none exist');
                 contains(block, 'verify that the Korean idiom means the same thing');
                 contains(block, 'vigilant sleep is not distracted attention');
-                equal(count(prompt, 'NAME/TITLE ABUSE:'), 1, 'name/title abuse rule once: ' + name);
-                contains(block, 'whether joined or separated by spaces/particles');
-                contains(block, 'Voice-added profanity does not exempt this rule');
+                equal(count(prompt, 'NATURAL INSULT REFERENCES:'), 1, 'name/title abuse rule once: ' + name);
+                contains(block, 'an established name/title followed by a natural insult phrase is ALLOWED');
+                contains(block, 'Without a source insult or an applicable voice permission, use the ordinary name/pronoun');
                 equal(count(prompt, 'EVERYDAY OBJECT NAMES:'), 1, 'contextual object naming once: ' + name);
                 contains(block, 'never override an explicit description or a plot-relevant distinction');
                 contains(block, '단백질 바 rather than generic 보존식');
@@ -114,7 +145,7 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 absent(prompt, 'Canonical names are the default');
                 absent(prompt, 'use the canonical name as the reference by default');
                 absent(prompt, 'not “그/그녀/그의/그녀의”');
-                contains(prompt, 'a new paragraph alone does not mandate a name');
+                contains(prompt, 'do not add a reference to every sentence or every paragraph mechanically');
                 absent(prompt, 'At each new narrative paragraph, speaker change, or actor change');
                 contains(prompt, 'Do not guess an uncertain referent');
                 contains(prompt, 'not first/second-person dialogue address');
@@ -133,6 +164,63 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
     }
 }
 
+function hasHongjinVoice(prompt) {
+    return prompt.includes('DEVELOPER KIM HONGJIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY')
+        || prompt.includes('KIM HONG-JIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY');
+}
+// Contemporary twenties speech stays scoped to the target; natural insult references stay authorized and scoped at all profanity levels.
+for (const age of ['early20s', 'late20s', 'thirties']) {
+    for (const compressed of [false, true]) {
+        for (const mad of [false, true]) {
+            for (const profanity of ['low', 'natural', 'high']) {
+                for (const [name, build] of Object.entries(builders)) {
+                    const settings = { ...short, developerCompressedPromptEnabled: compressed,
+                        developerMadKoreanOutputEnabled: mad, developerHongjinFlavorEnabled: true,
+                        developerHongjinAgeBand: age, developerHongjinProfanity: profanity };
+                    const prompt = build(core, settings);
+                    const active = hasHongjinVoice(prompt);
+                    const twenties = age !== 'thirties';
+                    const label = `${name}/${age}/${compressed}/${mad}/${profanity}`;
+                    equal(count(prompt, '/ MANDATORY CASUAL DELIVERY'), active && twenties && !compressed ? 1 : 0, 'v23 age scope: ' + label);
+                    absent(prompt, '/ CONTEMPORARY EVERYDAY SPEECH');
+                    const policyActive = active || (mad && madWritingRoutes.has(name));
+                    equal(count(prompt, 'TOP PRIORITY — NO MISOGYNY'), policyActive ? 1 : 0, 'ban scope: ' + label);
+                    absent(prompt, 'MODERN KOREAN');
+                    if (policyActive) {
+                        contains(prompt, 'spac'); contains(prompt, 'punctuation');
+                        contains(prompt, 'year units'); contains(prompt, 'non-gendered');
+                        contains(prompt, 'Before returning'); contains(prompt, 'every');
+                    }
+                    if (active && twenties) {
+                        if (compressed) contains(prompt, 'mandatory contemporary casual');
+                        else {
+                            contains(prompt, 'Never make the line stiff, old-fashioned, literary, bureaucratic, or generically middle-aged.');
+                            contains(prompt, 'make even 존댓말 relaxed and naturally spoken');
+                        }
+                    }
+                    equal(count(prompt, 'NATURAL INSULT REFERENCES:'), active || (mad && madWritingRoutes.has(name)) ? 1 : 0, 'address guard once: ' + label);
+                    equal(count(prompt, 'SUBJECT OR VOCATIVE:'), active || (mad && madWritingRoutes.has(name)) ? 1 : 0, 'subject/vocative scope: ' + label);
+                    if (active) {
+                        contains(prompt, 'an established name/title followed by a natural insult phrase is ALLOWED');
+                        contains(prompt, 'Avoid awkward stacked forms such as “최 씨 놈”');
+                        contains(prompt, 'preserve name locks and the hard ban on misogynistic wording');
+                        absent(prompt, 'any name-plus-insult address');
+                        absent(prompt, 'A bare source name/title must remain a name/title, not become an insult');
+                        absent(prompt, 'Never manufacture a Korean-only abusive nickname');
+                    }
+                    if (mad && madWritingRoutes.has(name)) {
+                        absent(prompt, 'A joking warlord may be');
+                        contains(prompt, 'RE-ANCHOR THE SUBJECT:');
+                    }
+                    absent(build(core, { ...settings, developerMode: false }), '/ CONTEMPORARY EVERYDAY SPEECH', 'developer off: ' + label);
+                    absent(build(core, { ...settings, developerMode: false }), 'TOP PRIORITY — NO MISOGYNY', 'developer ban gate: ' + label);
+                    absent(build(core, { ...settings, developerHongjinFlavorEnabled: false }), '/ CONTEMPORARY EVERYDAY SPEECH', 'Hongjin off: ' + label);
+                }
+            }
+        }
+    }
+}
+
 // Every voice strength must defer to Mad composition, in both encodings and all routes.
 let sharedVoicePriority;
 for (const strength of ['light', 'strong', 'maximum']) {
@@ -140,8 +228,9 @@ for (const strength of ['light', 'strong', 'maximum']) {
         for (const [name, build] of Object.entries(builders)) {
             const settings = { ...short, developerCompressedPromptEnabled: compressed,
                 developerHongjinFlavorEnabled: true, developerHongjinTranscreation: strength };
-            // Hongjin by itself must keep the pre-existing behavior at every strength.
-            if (baseline) equal(build(core, settings), build(baseline, settings), 'standalone Hongjin unchanged: ' + name);
+            // Standalone Hongjin now shares the revised natural-reference rule; unaffected scopes stay byte-identical.
+            const standalone = build(core, settings);
+            if (baseline && !hasHongjinVoice(standalone)) equal(standalone, build(baseline, settings), 'standalone unaffected scope: ' + name);
             const mad = { ...settings, developerMadKoreanOutputEnabled: true };
             const prompt = build(core, mad);
             const voiceActive = prompt.includes('DEVELOPER KIM HONGJIN FLAVOR — TARGET CHARACTER DIALOGUE ONLY')
@@ -238,7 +327,8 @@ const stressed = { ...flavors, ...authored, ...hongjin, developerRelationshipExp
     baseTranslationCustom: { enabled: true, prompt: 'CUSTOM_BASE_SENTINEL' }, bannedWords: 'UNIQUE_BAN_SENTINEL' };
 for (const [name, build] of Object.entries(builders)) {
     const oldSettings = { ...stressed, developerCompressedPromptEnabled: false };
-    if (baseline) equal(build(core, oldSettings), build(baseline, oldSettings), 'populated legacy drift: ' + name);
+    const populated = build(core, oldSettings);
+    if (baseline && !hasHongjinVoice(populated)) equal(populated, build(baseline, oldSettings), 'populated unaffected scope: ' + name);
 }
 contains(builders.target_dialogue(core, stressed), 'ADDRESS_SENTINEL');
 contains(builders.target_dialogue(core, stressed), 'PERSONALITY_SENTINEL');

@@ -40,6 +40,9 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.match(prompt,/not a fixed substitution or a mandate for 반말/);
    assert.match(prompt,/EVERYDAY DIALOGUE/);
    assert.match(prompt,/EVERYDAY NARRATION/);
+   assert.equal(prompt.split('PERSONAL PRONOUN DEFAULT:').length-1,1);
+   assert.match(prompt,/he\/him → 그, she\/her → 그녀, his → 그의, possessive her → 그녀의/);
+   assert.match(prompt,/여자\/남자\/녀석/);
    assert.doesNotMatch(prompt,/잠깐만요. 일단 얘기 좀 들어보세요/);
    assert.match(prompt,/actor→action→target/);
    assert.match(prompt,/plot-relevant/);
@@ -49,7 +52,7 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.doesNotMatch(prompt,/Do not erase a meaningful image|Preserve meaningful imagery and wordplay effects/);
    assert.equal(build({...settings,developerMode:false}).includes(marker),false);
    assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes(marker),false);
-   checks+=24;
+   checks+=27;
   }
   assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes(marker),false);
  }

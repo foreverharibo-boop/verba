@@ -38,7 +38,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.14';
+const EXTENSION_VERSION = '0.5.15';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8810,6 +8810,114 @@ function refreshTranslationClasses() {
     scheduleSelectionHighlights();
 }
 
+function selectTranslationProfile(slot, expectedId = null) {
+    const profile = configuredProfiles().find(item => item.slot === slot);
+    if (!profile || (expectedId !== null && profile.id !== expectedId)) {
+        notify('연결 프로필 설정이 바뀌었어요. 다시 선택해 주세요.', 'warning');
+        return false;
+    }
+    settings.activeProfileSlot = profile.slot;
+    saveSettings();
+    refreshProfileToggleButton();
+    notify(`번역 프로필 ${profile.slot}: ${profileDisplayName(profile.id)}`, 'success');
+    return true;
+}
+
+function showTranslationProfileChoice() {
+    const existing = document.querySelector('#verba-profile-choice');
+    if (existing) {
+        existing.querySelector('button:not(:disabled)')?.focus();
+        return;
+    }
+    const configured = configuredProfiles();
+    if (!configured.length) {
+        notify('베르바 설정에서 연결 프로필을 먼저 선택해 주세요.', 'warning');
+        return;
+    }
+    const current = configuredProfileCycle().slot;
+    const menu = document.createElement('div');
+    menu.id = 'verba-profile-choice';
+    menu.className = 'verba-retranslate-target-menu';
+    menu.setAttribute('role', 'group');
+    menu.setAttribute('aria-label', '베르바 번역 프로필 선택');
+    let closed = false;
+    const close = () => {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('pointerdown', onOutside, true);
+        document.removeEventListener('keydown', onKey, true);
+        menu.remove();
+    };
+    const onOutside = event => { if (!menu.contains(event.target)) close(); };
+    const onKey = event => { if (event.key === 'Escape') close(); };
+    for (const slot of ['A', 'B', 'C']) {
+        const profile = configured.find(item => item.slot === slot);
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'menu_button';
+        option.disabled = !profile;
+        option.textContent = `${slot}${slot === current ? ' ✓' : ''}`;
+        option.title = profile ? `${slot}: ${profileDisplayName(profile.id)}` : `${slot}: 선택 가능한 연결 프로필이 없어요.`;
+        option.setAttribute('aria-label', option.title);
+        option.setAttribute('aria-pressed', String(slot === current));
+        option.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!profile) return;
+            close();
+            selectTranslationProfile(slot, profile.id);
+        });
+        menu.append(option);
+    }
+    (document.body || document.documentElement).append(menu);
+    const viewport = globalThis.visualViewport;
+    const left = viewport?.offsetLeft || 0;
+    const top = viewport?.offsetTop || 0;
+    const width = viewport?.width || innerWidth;
+    const height = viewport?.height || innerHeight;
+    const anchor = document.querySelector('#verba-profile-toggle') || document.querySelector('#send_but');
+    const rect = anchor?.getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
+    const menuWidth = bounds.width || 180;
+    const menuHeight = bounds.height || 42;
+    const anchorX = rect?.width && rect?.height ? rect.left + rect.width / 2 : left + width / 2;
+    const anchorY = rect?.width && rect?.height ? rect.top - menuHeight - 7 : top + height * 0.7;
+    menu.style.setProperty('left', `${Math.max(left + 8, Math.min(anchorX - menuWidth / 2, left + width - menuWidth - 8))}px`, 'important');
+    menu.style.setProperty('top', `${Math.max(top + 8, Math.min(anchorY, top + height - menuHeight - 8))}px`, 'important');
+    requestAnimationFrame(() => {
+        if (closed) return;
+        document.addEventListener('pointerdown', onOutside, true);
+        document.addEventListener('keydown', onKey, true);
+        menu.querySelector('button[aria-pressed="true"]:not(:disabled)')?.focus();
+    });
+}
+
+let verbaProfileSlashCommandRegistered = false;
+
+function registerVerbaProfileSlashCommand() {
+    if (verbaProfileSlashCommandRegistered) return;
+    const { SlashCommandParser, SlashCommand } = liveContext();
+    if (!SlashCommandParser?.addCommandObject || !SlashCommand?.fromProps) return;
+    try {
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'verba-profile',
+            callback: () => {
+                try {
+                    showTranslationProfileChoice();
+                } catch (error) {
+                    reportError('profile-choice', error, `프로필 선택창을 열지 못했어요: ${errorText(error)}`);
+                }
+                return '';
+            },
+            returns: '빈 문자열. 번역 프로필 선택창을 엽니다.',
+            helpString: '<div>베르바의 A·B·C 번역 프로필을 고릅니다. 현재 슬롯은 ✓로 표시되며, 미설정·중복 슬롯은 선택할 수 없습니다. 빠른답장에 <code>/verba-profile</code>만 입력하세요.</div>',
+        }));
+        verbaProfileSlashCommandRegistered = true;
+    } catch (error) {
+        console.error('[베르바] /verba-profile 등록 실패', error);
+    }
+}
+
 function createProfileToggleButton() {
     const button = document.createElement('button');
     button.id = 'verba-profile-toggle';
@@ -8830,11 +8938,7 @@ function createProfileToggleButton() {
             return;
         }
         const currentIndex = configured.findIndex(profile => profile.slot === activeProfileSlot());
-        settings.activeProfileSlot = configured[(currentIndex + 1) % configured.length].slot;
-        saveSettings();
-        refreshProfileToggleButton();
-        const profiles = configuredProfileCycle();
-        notify(`번역 프로필 ${profiles.slot}: ${profileDisplayName(profiles.active)}`, 'success');
+        selectTranslationProfile(configured[(currentIndex + 1) % configured.length].slot);
     });
     return button;
 }
@@ -11630,6 +11734,7 @@ function setupObserver() {
 function initialize() {
     clearTransientTranslationSelections();
     registerVerbaSlashCommand();
+    registerVerbaProfileSlashCommand();
 
     const stalePanels = [...document.querySelectorAll('#verba-settings, .verba-settings')];
     stalePanels.slice(1).forEach(panel => panel.remove());

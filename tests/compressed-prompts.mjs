@@ -45,16 +45,43 @@ function absent(p, s, reason = s) { assert.ok(!p.includes(s), reason); checks++;
 const short = { ...defaults, developerMode: true, developerCompressedPromptEnabled: true };
 const count = (p, word) => p.split(word).length - 1;
 const measures = [];
+const madWritingRoutes = new Set(['full', 'narration', 'target_dialogue', 'other_dialogue', 'tagged_content',
+    'selection', 'selectionDialogue', 'selectionCandidates', 'multi', 'qa', 'bannedRepair', 'tokenRepair', 'untranslatedRepair']);
 for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerMadKoreanOutputEnabled: true, developerHongjinFlavorEnabled: true }]) {
     for (const [name, build] of Object.entries(builders)) {
         const s = { ...short, ...flags };
         const full = build(core, { ...s, developerCompressedPromptEnabled: false });
         const compact = build(core, s);
-        if (baseline) equal(full, build(baseline, { ...s, developerCompressedPromptEnabled: false }), 'legacy drift: ' + name);
+        // v0.5.10 deliberately changes Mad Korean writing rules in BOTH prompt variants.
+        const changedMadRule = flags.developerMadKoreanOutputEnabled && madWritingRoutes.has(name);
+        if (baseline && !changedMadRule) equal(full, build(baseline, { ...s, developerCompressedPromptEnabled: false }), 'legacy drift: ' + name);
         equal(build(core, { ...s, developerMode: false }), build(core, { ...s, developerMode: false, developerCompressedPromptEnabled: false }), 'developer gate: ' + name);
+        if (changedMadRule) {
+            for (const prompt of [full, compact]) {
+                equal(count(prompt, 'CANONICAL-NAME-FIRST — PRIMARY CAST REFERENCES'), 1, 'shared name policy once: ' + name);
+                contains(prompt, identity.characterName); contains(prompt, identity.userName);
+                contains(prompt, 'Omit only within an uninterrupted continuation');
+                contains(prompt, 'At each new narrative paragraph, speaker change, or actor change');
+                contains(prompt, 'Do not guess an uncertain referent');
+                contains(prompt, 'not first/second-person dialogue address');
+                absent(prompt, '(1) omit the subject/possessor');
+                absent(prompt, 'Omit naturally; if ambiguity remains');
+            }
+        } else {
+            absent(full, 'CANONICAL-NAME-FIRST'); absent(compact, 'CANONICAL-NAME-FIRST');
+        }
+        absent(build(core, { ...s, developerMode: false }), 'CANONICAL-NAME-FIRST');
         measures.push({ mode: flags.developerHongjinFlavorEnabled ? 'mad+hongjin' : flags.developerMadKoreanOutputEnabled ? 'mad' : 'standard', name,
             long: [...full].length, compact: [...compact].length, reduction: +((1 - [...compact].length / [...full].length) * 100).toFixed(1) });
     }
+}
+
+// Resolve identities from the current request; do not hard-code any particular RP pair.
+for (const compressed of [false, true]) {
+    const renamed = core.buildOutputPrompt(segmented, { ...short, developerCompressedPromptEnabled: compressed, developerMadKoreanOutputEnabled: true }, '',
+        { characterName: 'NEW_CHARACTER_SENTINEL', userName: 'NEW_USER_SENTINEL' });
+    contains(renamed, 'NEW_CHARACTER_SENTINEL'); contains(renamed, 'NEW_USER_SENTINEL');
+    absent(renamed, identity.characterName); absent(renamed, identity.userName);
 }
 
 // Identities must not depend on either flavor being active.

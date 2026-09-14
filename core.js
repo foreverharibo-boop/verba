@@ -1271,7 +1271,7 @@ function developerMadKoreanOutputBlock(settings = {}, scope = 'mixed') {
 
 SUPREME COMMAND: KEEP THE SCENE TRUTH; DESTROY AND REBUILD EVERY SENTENCE
 1. SCENE TRUTH IS IMMUTABLE: preserve who does/says/feels what to whom, ownership, referents, chronology, causality, negation, quantity, meaningful tense/aspect, point of view, setting, names, numbers, relationship, dialogue intent, emotional direction, consent/refusal, intensity, and explicitness.
-2. ENGLISH EXPRESSION MUST BE DESTROYED: you MUST discard its word order, clause order, sentence count, subject repetition, pronoun pattern, possessive chains, passive structure, connectors, idioms, metaphors, jokes, sound/body packaging, modifiers, speech tags, and rhythm. Preserving any of these surfaces merely because they exist in English is a failure, not an acceptable option.
+2. ENGLISH EXPRESSION MUST BE DESTROYED: you MUST discard its word order, clause order, sentence count, English-driven subject repetition, pronoun pattern, possessive chains, passive structure, connectors, idioms, metaphors, jokes, sound/body packaging, modifiers, speech tags, and rhythm. Preserving any of these surfaces merely because they exist in English is a failure, not an acceptable option. Keep repeated canonical names required by the name-first attribution rule.
 3. Write the same scene as if a skilled contemporary Korean writer had conceived it only in Korean. Freely split, merge, compress, expand, or reorder expression inside each target segment. Omit expendable decoration and rebuild emphasis around Korean information flow.
 4. Native Korean means effortless, ordinary, and context-appropriate—not slangy, macho, aggressive, old-fashioned, trendy, cute, vulgar, or comically exaggerated unless the source or the sole permitted style add-on clearly requires it.
 5. Never add, remove, reverse, transfer, intensify, soften, or make more specific any fact, action, intention, reaction, insult, coercion, romance, pleasure, pain, object, event, or setting detail.
@@ -1288,9 +1288,9 @@ FACT, REFERENT, AND FORCE LOCK
 - Stability words such as secure/anchor/support/prevent slipping do not create escape or resistance. Use restraint language only when the source contains an actual attempt to leave or physical restraint.
 - Preserve intensity both ways. Gentle stays gentle; firm stays firm; rough or explicit stays equally rough or explicit. Natural prose is neither censorship nor escalation.
 - Preserve the source's specificity. Do not turn generic bedding into goose down, a fee into a contractual penalty, or mild movement into struggling.
-- Keep an established human identity intact. For the known TARGET CHARACTER and USER, do not render personal he/she/him/her or possessive his/her references as “그/그녀/그의/그녀의”. First omit the subject or possessor, or restructure the sentence naturally, whenever the referent remains clear in Korean.
-- If omission would make the actor, recipient, or owner ambiguous, use that person's established name directly. Use the name only where clarity requires it; do not mechanically repeat it in every sentence.
-- Do not over-omit names. At a speaker change, a new direct-dialogue paragraph, or an alternating action sequence between TARGET CHARACTER and USER, explicitly name the speaker or actor at the first natural narration beat whenever a Korean reader could momentarily assign the line or action to the other person.
+- Keep an established human identity intact. Resolve personal he/she/him/her and possessive his/her references to the known TARGET CHARACTER or USER's established name, not “그/그녀/그의/그녀의”. Canonical names are the default, not a last resort after omission.
+- At a new narrative paragraph, speaker change, or actor change, explicitly name the person at the first natural narration/attribution point. Clarity takes priority over avoiding name repetition.
+- Omit a repeated reference only within an uninterrupted continuation by the same already-named person, with no possible confusion about actor, recipient, or owner. Never omit merely to sound more Korean.
 - Consecutive dialogue paragraphs by the same person still require unmistakable attribution when a paragraph break or intervening action could reset the perceived speaker. Merge or restructure the passage naturally, or state the established name once. Never make the reader backtrack or rely on gender-coded wording to discover who spoke.
 - Never rotate through “남자/여자/상대/사람/사내/청년/작은 몸” or similar substitute labels for a named TARGET CHARACTER or USER. Generic role labels remain allowed only for genuinely unnamed NPCs when context requires them. A body phrase is allowed only when the body itself is the actual focus.
 - A figurative image is style, not scene truth. If it is unnatural in Korean, replace it with an equally warm/harsh native effect or omit it. If retained, never change its subject or social force and never add a new insult, threat, slang, or joke.
@@ -1326,7 +1326,7 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 - Does any dialogue sound translated, staged, old-fashioned, or unlike something this person would say aloud?
 - At every new dialogue paragraph and speaker transition, can a Korean reader identify the speaker immediately without backtracking? If not, add the established name at one natural attribution point or restructure the passage.
 - Is any sentence decorative, redundant, vague, grammatically malformed, physically impossible, or inconsistent in terminology?
-- Did a known TARGET CHARACTER or USER become “그/그녀/남자/여자/상대/사람/사내/청년” even though full context identifies that person? If yes, omit the reference naturally or use the canonical name.
+- Did a known TARGET CHARACTER or USER become “그/그녀/남자/여자/상대/사람/사내/청년”, or disappear through excessive omission? If yes, restore the canonical name; omit only a clear same-person continuation.
 - Did any speaker acquire an invented “-가놈/-놈/-녀석/-새끼” address, or an unsupported “-드쇼/-하쇼/-구먼/-일세/-인가/-하게/-라네” ending? If yes, rewrite it in ordinary contemporary Korean.
 - Did “년” or another gendered term become a label, suffix, address, or insult for a person? If yes, replace it with non-gendered wording of the same force. Do not confuse this with a calendar or elapsed-time year unit.
 
@@ -1342,7 +1342,7 @@ function madKoreanIdentityReferenceBlock(speakerIdentity = {}) {
     const characterName = String(speakerIdentity.characterName || '').trim() || '(unknown target character)';
     const userName = String(speakerIdentity.userName || '').trim() || '(unknown user)';
     const userExample = userName !== '(unknown user)'
-        ? `- Concrete mandatory example: when “the woman currently ...” refers to USER ${JSON.stringify(userName)}, write the sentence with ${JSON.stringify(userName)} or natural Korean ellipsis. Calling that USER “여자” is a failure.`
+        ? `- Concrete mandatory example: when “the woman currently ...” refers to USER ${JSON.stringify(userName)}, use ${JSON.stringify(userName)} as the reference by default. Calling that USER “여자” is a failure; omission is allowed only for the same already-named person's uninterrupted continuation.`
         : '';
     const characterExample = characterName !== '(unknown target character)'
         ? `- The same rule applies to TARGET CHARACTER ${JSON.stringify(characterName)} when the source rotates through “the man”, “the young man”, “the figure”, or a pronoun.`
@@ -1354,10 +1354,19 @@ function madKoreanIdentityReferenceBlock(speakerIdentity = {}) {
 - CURRENT USER / PERSONA canonical name: ${JSON.stringify(userName)}
 - Once full context establishes that a pronoun or generic English descriptor refers to either named primary person, the descriptor is only English reference packaging—not a scene fact that must be translated literally.
 - For either named primary person, never output a rotating substitute label such as “그/그녀/그의/그녀의/남자/여자/상대/사람/사내/청년/작은 몸” merely because the English says he, she, the man, the woman, the person, the figure, or uses a body-size description.
-- Korean rendering priority is absolute: (1) omit the subject/possessor or restructure naturally when identity remains clear; (2) otherwise use the canonical name above. Do not repeat a name when ellipsis is clearer.
+${madKoreanNamePriorityRule()}
 - This rule applies even when the generic descriptor appears literally in SOURCE. Preserve a descriptor only when it genuinely describes an unnamed NPC or when that distinction itself is narratively meaningful.
 ${userExample}
 ${characterExample}`;
+}
+
+function madKoreanNamePriorityRule() {
+    return `CANONICAL-NAME-FIRST — PRIMARY CAST REFERENCES
+- In narration and speech attribution, replace a resolved he/she/him/her/his/her or generic person descriptor with that person's established Korean name by default. Prefer a repeated name to an unclear omitted subject.
+- At each new narrative paragraph, speaker change, or actor change, explicitly name the person at the first natural narration/attribution point. Re-anchor dialogue paragraphs using an existing speech tag; do not invent an action or add a tag inside a dialogue-only target.
+- Omit only within an uninterrupted continuation by the same already-named person when actor, recipient, and owner stay unmistakable. Do not name every body part or mechanically repeat a name in every clause.
+- Do not replace names with 그/그녀/남자/여자/상대/사람/사내/청년/작은 몸 to avoid repetition. Do not guess an uncertain referent, invent a name/surname, or print unknown-identity placeholders. Keep an unresolved reference faithful to source context.
+- This concerns third-person reference, not first/second-person dialogue address. Keep 나/너, established vocatives, and configured speech levels as appropriate. Follow NAME LOCK token rules without inventing or duplicating protected tokens.`;
 }
 
 const MAD_KOREAN_REGISTER_LABELS = {
@@ -1430,8 +1439,9 @@ function compactMadKoreanExclusiveRules(settings = {}, scope = 'mixed', nameToke
     return `MAD KOREAN EXCLUSIVE — COMPACT EXPERIMENT
 - Re-author every supplied target directly as fluent contemporary Korean-original writing. English expression, syntax, clause order, rhetoric, and sentence boundaries MUST be discarded; freely split, merge, compress, expand, or reorder wording.
 - Preserve the scene ledger exactly: every fact, actor→action→target, possession, referent, role, body mechanic, direction, sequence, setting, intent, emotion, force, explicitness, consent, relationship, negation, number, tense/aspect, point of view, and narration/dialogue role. Naturalization may neither censor nor escalate.
-- Use concrete, physically possible Korean and natural dialogue. Remove translationese, redundant English modifiers, repeated subjects/possessives, decorative AI-web-fiction filler, malformed collocations, and reverse-engineerable English jokes.
-- Known primary people: TARGET CHARACTER=${JSON.stringify(characterName)}, USER=${JSON.stringify(userName)}. For either person, do not translate he/she/the man/the woman/the figure as 그/그녀/남자/여자/상대/사람/사내/청년/작은 몸. Omit naturally; if ambiguity remains, use the canonical name. At speaker/action changes, name the actor once when needed for immediate clarity.
+- Use concrete, physically possible Korean and natural dialogue. Remove translationese, redundant English modifiers, decorative AI-web-fiction filler, malformed collocations, and reverse-engineerable English jokes. Retain names needed for clear attribution.
+- Known primary people: TARGET CHARACTER=${JSON.stringify(characterName)}, USER=${JSON.stringify(userName)}.
+${madKoreanNamePriorityRule()}
 - Never output unresolved Korean particle notation such as “(이)는/이(가)/은(는)”. Names are indivisible; attach a correct particle only after the complete name.
 - TARGET CHARACTER→USER: ${registerRule(targetToUser)}. USER→TARGET CHARACTER: ${registerRule(userToTarget)}. These locks apply only to direct conversation between the named pair, never NPC dialogue or ambiguous speech; 존댓말 means natural conversational 해요체 unless context requires otherwise.
 - Never invent slang, insults, jokes, threats, dialect, macho/old-fashioned speech, or age/status/kinship terms. Never create person-directed “년” or 여성 비하 terms, name+가놈/놈/녀석/새끼 forms, or unsupported “드쇼/하쇼/구먼/일세/-인가/-하게/-라네” endings.

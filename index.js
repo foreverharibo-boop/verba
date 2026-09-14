@@ -39,7 +39,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.29';
+const EXTENSION_VERSION = '0.5.32';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -212,6 +212,7 @@ const DEFAULT_SETTINGS = {
     developerMode: false,
     developerAccessFingerprint: '',
     developerCompressedPromptEnabled: false,
+    developerExtremeCompressedPromptEnabled: false,
     qualityAuditEnabled: false,
     qualityAuditMeaning: true,
     qualityAuditReferent: true,
@@ -333,8 +334,11 @@ if (
     settings.developerHongjinFlavorEnabled = false;
     settings.developerMadKoreanOutputEnabled = false;
     settings.developerCompressedPromptEnabled = false;
+    settings.developerExtremeCompressedPromptEnabled = false;
 }
 settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
+settings.developerExtremeCompressedPromptEnabled = settings.developerExtremeCompressedPromptEnabled === true;
+if (settings.developerExtremeCompressedPromptEnabled) settings.developerCompressedPromptEnabled = false;
 settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
 settings.qualityAuditMeaning = settings.qualityAuditMeaning !== false;
 settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
@@ -990,9 +994,11 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
         options.some(option => option.value === candidate) ? candidate : fallback
     );
     const base = normalizeBaseTranslationCustom(raw.baseTranslationCustom);
+    const extremeCompressed = raw.developerExtremeCompressedPromptEnabled === true;
 
     return {
-        developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true,
+        developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true && !extremeCompressed,
+        developerExtremeCompressedPromptEnabled: extremeCompressed,
         qualityAuditEnabled: raw.qualityAuditEnabled === true,
         qualityAuditMeaning: raw.qualityAuditMeaning !== false,
         qualityAuditReferent: raw.qualityAuditReferent !== false,
@@ -1035,6 +1041,7 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
 function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
     return normalizedPromptPresetDeveloperSettings({
         developerCompressedPromptEnabled: source.developerCompressedPromptEnabled,
+        developerExtremeCompressedPromptEnabled: source.developerExtremeCompressedPromptEnabled,
         qualityAuditEnabled: source.qualityAuditEnabled,
         qualityAuditMeaning: source.qualityAuditMeaning,
         qualityAuditReferent: source.qualityAuditReferent,
@@ -1623,6 +1630,8 @@ function applyPromptPresetDeveloperSettings(value) {
 
     settings.qualityAuditEnabled = next.qualityAuditEnabled;
     settings.developerCompressedPromptEnabled = next.developerCompressedPromptEnabled;
+    settings.developerExtremeCompressedPromptEnabled = next.developerExtremeCompressedPromptEnabled;
+    if (settings.developerExtremeCompressedPromptEnabled) settings.developerCompressedPromptEnabled = false;
     settings.qualityAuditMeaning = next.qualityAuditMeaning;
     settings.qualityAuditReferent = next.qualityAuditReferent;
     settings.qualityAuditVoice = next.qualityAuditVoice;
@@ -2102,6 +2111,7 @@ function renderCurrentAppliedRules() {
                 ['우선순위', priority],
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
+                ['xxx미친압축xxx', settings.developerMode && settings.developerExtremeCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['미친 한출의 맛', settings.developerMode && settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
                 ['캐릭터 → USER 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanTargetToUserRegister)?.label || '원문·문맥')
@@ -2117,9 +2127,9 @@ function renderCurrentAppliedRules() {
                     ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
-                    ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외${settings.developerCompressedPromptEnabled ? ' · 압축 테스트' : ''}`
-                    : (settings.developerMode && settings.developerCompressedPromptEnabled
-                        ? '기존 설정 전체 적용 · 압축 테스트'
+                    ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외${settings.developerExtremeCompressedPromptEnabled ? ' · 미친압축' : settings.developerCompressedPromptEnabled ? ' · 압축 테스트' : ''}`
+                    : (settings.developerMode && (settings.developerCompressedPromptEnabled || settings.developerExtremeCompressedPromptEnabled)
+                        ? `기존 설정 전체 적용 · ${settings.developerExtremeCompressedPromptEnabled ? '미친압축' : '압축 테스트'}`
                         : '기존 설정 전체 적용')],
             ])}
         </div>`;
@@ -3477,21 +3487,46 @@ function sourceMapAfterSelection(sourceMap, start, end, replacement) {
     const rows = normalizedSourceMap(sourceMap);
     const delta = String(replacement).length - (end - start);
     const overlapping = rows.filter(row => start < row.end && end > row.start);
-    if (overlapping.length !== 1 || start < overlapping[0].start || end > overlapping[0].end) {
-        return rows.flatMap(row => {
-            if (row.end <= start) return [row];
-            if (row.start >= end) return [{ ...row, start: row.start + delta, end: row.end + delta }];
-            return [];
-        });
+    if (!overlapping.length) {
+        return rows.map(row => row.start >= end
+            ? { ...row, start: row.start + delta, end: row.end + delta }
+            : row);
     }
-    const target = overlapping[0];
-    return rows.map(row => {
-        if (row.id === target.id && row.start === target.start && row.end === target.end) {
-            return { ...row, end: row.end + delta };
+
+    // A browser selection can cross narration/dialogue or sentence segment
+    // boundaries. Replacing it used to discard every overlapping source row,
+    // so the newly translated text could no longer use “원문 보기”. Keep the
+    // affected source context as one row spanning the edited region instead.
+    const first = overlapping[0];
+    const sources = [...new Set(overlapping.map(row => row.source).filter(Boolean))];
+    const merged = {
+        id: overlapping.length === 1 ? first.id : `${first.id}__selection`,
+        source: sources.join('\n\n'),
+        start: Math.min(start, ...overlapping.map(row => row.start)),
+        end: Math.max(end, ...overlapping.map(row => row.end)) + delta,
+    };
+    const output = [];
+    let inserted = false;
+    for (const row of rows) {
+        if (row.end <= start) {
+            output.push(row);
+            continue;
         }
-        if (row.start >= end) return { ...row, start: row.start + delta, end: row.end + delta };
-        return row;
-    });
+        if (row.start >= end) {
+            if (!inserted) {
+                output.push(merged);
+                inserted = true;
+            }
+            output.push({ ...row, start: row.start + delta, end: row.end + delta });
+            continue;
+        }
+        if (!inserted) {
+            output.push(merged);
+            inserted = true;
+        }
+    }
+    if (!inserted) output.push(merged);
+    return output;
 }
 
 function refreshedSourceMap(sourceMap, translation) {
@@ -3691,7 +3726,7 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
     }
 
     try {
-        const prompt = buildSpeakerAttributionPrompt(segmented, speakerIdentity);
+        const prompt = buildSpeakerAttributionPrompt(segmented, speakerIdentity, settings);
         const classified = await requestSegments(prompt, dialogueSegments, {
             ...options,
             stage: 'speaker-attribution',
@@ -5752,6 +5787,7 @@ async function detectHistoricalNameForms(sourceName, currentName, knownNames = [
         sourceName,
         currentName,
         candidates: collected.candidates,
+        settings,
     });
     const expected = [{ id: 'seg_0000', type: 'name_history', text: currentName }];
     const result = await requestSegments(prompt, expected, options);
@@ -8222,6 +8258,7 @@ async function lockSelectionName(snapshot) {
             selected: currentName,
             start: snapshot.start,
             end: snapshot.end,
+            settings,
         });
         const expected = [{ id: 'seg_0000', type: 'name_match', text: currentName }];
         const result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'name-match' });
@@ -9198,6 +9235,11 @@ function developerSettingsMarkup() {
                                 <span>압축 프롬프트 사용</span>
                             </label>
                             <div class="verba-help">베르바 내부의 반복 지침만 짧게 합칩니다. 직접 작성한 프롬프트는 줄이지 않으며 번역 품질이 달라질 수 있는 테스트 기능입니다.</div>
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-extreme-compressed-prompt-enabled" ${settings.developerExtremeCompressedPromptEnabled ? 'checked' : ''}>
+                                <span>xxx미친압축xxx</span>
+                            </label>
+                            <div class="verba-help">한출·김홍진과 일반 출력·입력·재번역·복구·검수의 베르바 내부 지침을 극단적으로 줄입니다. 직접 작성한 지침 내용은 보존하며 결과 품질이 달라질 수 있습니다.</div>
                         </div>
                     </details>
 
@@ -9255,7 +9297,7 @@ function developerSettingsMarkup() {
                         </div>
                     </details>
 
-                    
+
 
                     <details id="verba-developer-relationship-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🧪 관계 번역 실험실 <small>개발자</small></summary>
@@ -10126,6 +10168,7 @@ function injectSettingsPanel() {
         if (target.closest('#verba-developer-mode-off')) {
             settings.developerMode = false;
             settings.developerCompressedPromptEnabled = false;
+            settings.developerExtremeCompressedPromptEnabled = false;
             settings.qualityAuditEnabled = false;
             settings.developerRelationshipExperimentEnabled = false;
             settings.developerHongjinFlavorEnabled = false;
@@ -10151,10 +10194,29 @@ function injectSettingsPanel() {
 
         if (target.id === 'verba-developer-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
             settings.developerCompressedPromptEnabled = target.checked;
+            if (target.checked) {
+                settings.developerExtremeCompressedPromptEnabled = false;
+                setCheckedValue('#verba-developer-extreme-compressed-prompt-enabled', false);
+            }
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             notify(
                 target.checked ? '개발자 테스트용 압축 프롬프트를 켰어요.' : '기존 전체 프롬프트로 돌아왔어요.',
+                'info',
+            );
+            return;
+        }
+
+        if (target.id === 'verba-developer-extreme-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
+            settings.developerExtremeCompressedPromptEnabled = target.checked;
+            if (target.checked) {
+                settings.developerCompressedPromptEnabled = false;
+                setCheckedValue('#verba-developer-compressed-prompt-enabled', false);
+            }
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            notify(
+                target.checked ? 'xxx미친압축xxx을 켰어요.' : '미친압축을 껐어요.',
                 'info',
             );
             return;

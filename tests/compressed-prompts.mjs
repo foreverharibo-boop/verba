@@ -67,6 +67,12 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 const block = prompt.slice(prompt.indexOf(writingStart), prompt.indexOf(writingEnd) + writingEnd.length);
                 sharedWritingBlock ??= block;
                 equal(block, sharedWritingBlock, 'same writing criteria/examples in all Mad routes: ' + name);
+                equal(count(prompt, 'NATURAL VOCATIVES:'), 1, 'vocative rule once: ' + name);
+                equal(count(prompt, '3. Vocative:'), 1, 'vocative example once: ' + name);
+                contains(block, 'unless human identity itself matters');
+                contains(block, 'not valid surrounding narration');
+                contains(block, 'not a fixed substitution or a mandate for 반말');
+                absent(block, '3. Dialogue intent:');
                 absent(prompt, 'Prefer the shortest complete utterance');
                 absent(prompt, 'varied short-to-medium beats');
                 absent(prompt, 'A figurative image is style, not scene truth');

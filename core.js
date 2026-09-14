@@ -1253,12 +1253,12 @@ function madKoreanNativeWritingRules() {
 - Vary short, medium, and long sentences by purpose. Link continuous movement or thought; give a meaningful realization or response room to land. Neither sentence-by-sentence English alignment nor uniformly clipped prose is the goal. Make each paragraph develop a connected beat rather than list isolated translated sentences.
 - Keep meaningful atmosphere, sensory detail, imagery, interiority, emotional progression, and lingering effects. Recast their expression in idiomatic Korean; remove only redundant or empty wording. Do not erase a meaningful image, flatten emotion, or summarize the scene. Preserve narrative viewpoint, distance, tense, and uncertainty; character-close thought is allowed only where supported, never invented.
 - Choose natural Korean subject–predicate, verb–object, and modifier–noun combinations. Keep the actual experiencer and physical action clear. Avoid mechanical possessives, noun chains, anatomy acting as a person, and ornamental voice/gaze wrappers; retain bodily or sound detail when it contributes meaning. Natural literary description is welcome, not a defect.
-- Rebuild dialogue around the complete speech act, subtext, timing, and listener. Use as much phrasing as the speaker needs, not the shortest possible utterance. Preserve configured speech levels and individual voice. Native writing does not require a stock personality, slang, banter, aggression, romance, a particular ending, or a new joke.
-- Apply canonical-name-first attribution without making every clause restart with a name. Keep speaker changes, action owners, and recipients unmistakable; preserve names and facts when restructuring.
+- Preserve dialogue intent, subtext, timing, listener, voice, and configured register; length follows intent, not forced brevity. Do not impose a stock personality or invent slang, humor, or hostility.
+- NATURAL VOCATIVES: rebuild teasing/insulting addresses as idiomatic Korean phrases, not stacked translated labels. Do not append 인간/사람 to an insult unless human identity itself matters. Keep the same referent, meaningful size/trait, and force; do not soften into affection or add profanity. This addresses dialogue wording, not valid surrounding narration.
 STRUCTURAL EXAMPLES — examples of expression only, never fixed substitutions or scene facts to import:
 1. Continuous action: “Rain soaked the coat. Water dripped onto the floor as the coat was hung by the door.” → “비에 흠뻑 젖은 외투를 문 옆에 걸자 바닥으로 물이 뚝뚝 떨어졌다.”
 2. Emphasis and interiority: “The seat was empty. The relief at that discovery lasted only a moment before unease returned.” → “자리는 비어 있었다. 안도한 것도 잠시, 다시 불안이 밀려왔다.”
-3. Dialogue intent: “We have plenty of time, so there is no need to decide right now.” → “시간은 넉넉하니까 지금 당장 정할 필요는 없어.” Follow the actual speaker's configured register; this example does not prescribe 반말.
+3. Vocative: “you giant idiot” → “덩치만 큰 바보야”, not “바보 인간” or stacked “덩치만 산더미만 한”. Adapt to the actual voice/register; this is not a fixed substitution or a mandate for 반말.
 END KOREAN-ORIGINAL COMPOSITION`;
 }
 
@@ -1451,7 +1451,7 @@ function compactMadKoreanExclusiveRules(settings = {}, scope = 'mixed', nameToke
         speakerIdentity,
     );
     return `MAD KOREAN EXCLUSIVE — COMPACT EXPERIMENT
-- Re-author every supplied target directly as fluent contemporary Korean-original writing. English-driven syntax, clause order, rhetoric, and sentence alignment MUST be discarded; freely reconstruct wording, without forcing an already natural expression to differ artificially.
+- Re-author targets directly in Korean. English-driven phrasing and sentence alignment MUST be discarded; do not force already natural expressions to differ artificially.
 - Preserve the scene ledger exactly: every fact, actor→action→target, possession, referent, role, body mechanic, direction, sequence, setting, intent, emotion, force, explicitness, consent, relationship, negation, number, tense/aspect, point of view, and narration/dialogue role. Naturalization may neither censor nor escalate.
 ${madKoreanNativeWritingRules()}
 - Known primary people: TARGET CHARACTER=${JSON.stringify(characterName)}, USER=${JSON.stringify(userName)}.

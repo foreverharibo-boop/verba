@@ -101,7 +101,8 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 contains(block, 'Do not place a comma after every name, omit subjects wholesale');
                 contains(block, 'omission must still meet the applicable subject/possessive rule');
                 contains(block, 'ellipsis fidelity remains unchanged');
-                equal(count(prompt, '3. Vocative:'), 1, 'vocative example once: ' + name);
+                equal(count(prompt, 'EVERYDAY KOREAN EXAMPLES —'), 1, 'everyday examples once: ' + name);
+                contains(block, '"I can explain." → "잠깐만, 말 좀 들어봐."');
                 contains(block, 'unless human identity itself matters');
                 contains(block, 'not valid surrounding narration');
                 contains(block, 'not a fixed substitution or a mandate for 반말');

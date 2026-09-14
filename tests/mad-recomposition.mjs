@@ -27,12 +27,20 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    const prompt=build(settings);
    assert.equal(prompt.split(marker).length-1,1,`${name}: recomposition occurs once`);
    assert.match(prompt,/scene evidence, not a wording template/);
-   assert.equal(prompt.split('You are a highly skilled Korean web-novel author.').length-1,1);
+   assert.equal(prompt.split('You are a contemporary Korean web-novel author skilled in lifelike everyday dialogue and vivid, natural narration.').length-1,1);
    assert.equal(prompt.split('MANDATORY REAUTHORING:').length-1,1);
    assert.match(prompt,/discard the source sentence structure and expression system; reconstruct the entire passage in original Korean/);
    assert.doesNotMatch(prompt,/You may completely destroy/);
    assert.match(prompt,/exact names/);
    assert.match(prompt,/Translationese is unacceptable/);
+   assert.equal(prompt.split('EVERYDAY KOREAN EXAMPLES —').length-1,1);
+   assert.equal(prompt.split('"I can explain." → "잠깐만, 말 좀 들어봐."').length-1,1);
+   assert.match(prompt,/진짜 너 때문에 못 살겠다/);
+   assert.match(prompt,/안도한 것도 잠시, 다시 불안해졌다/);
+   assert.match(prompt,/not a fixed substitution or a mandate for 반말/);
+   assert.match(prompt,/EVERYDAY DIALOGUE/);
+   assert.match(prompt,/EVERYDAY NARRATION/);
+   assert.doesNotMatch(prompt,/잠깐만요. 일단 얘기 좀 들어보세요/);
    assert.match(prompt,/actor→action→target/);
    assert.match(prompt,/plot-relevant/);
    assert.match(prompt,/speech act/);
@@ -41,7 +49,7 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.doesNotMatch(prompt,/Do not erase a meaningful image|Preserve meaningful imagery and wordplay effects/);
    assert.equal(build({...settings,developerMode:false}).includes(marker),false);
    assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes(marker),false);
-   checks+=16;
+   checks+=24;
   }
   assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes(marker),false);
  }

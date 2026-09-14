@@ -68,6 +68,13 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
                 sharedWritingBlock ??= block;
                 equal(block, sharedWritingBlock, 'same writing criteria/examples in all Mad routes: ' + name);
                 equal(count(prompt, 'NATURAL VOCATIVES:'), 1, 'vocative rule once: ' + name);
+                equal(count(prompt, 'SUBJECT OR VOCATIVE:'), 1, 'subject/vocative rule once: ' + name);
+                contains(block, 'never turn a reference to a third person into direct address');
+                contains(block, 'neither 께서 nor playful honorifics are banned');
+                contains(block, 'Preserve configured 반말/존댓말 and established relationships');
+                contains(block, 'Do not place a comma after every name, omit subjects wholesale');
+                contains(block, 'omission must still meet the applicable subject/possessive rule');
+                contains(block, 'ellipsis fidelity remains unchanged');
                 equal(count(prompt, '3. Vocative:'), 1, 'vocative example once: ' + name);
                 contains(block, 'unless human identity itself matters');
                 contains(block, 'not valid surrounding narration');
@@ -158,6 +165,7 @@ for (const age of ['early20s', 'late20s', 'thirties']) {
                         contains(prompt, 'does not soften intent/force or change the configured profanity frequency');
                     }
                     equal(count(prompt, 'NATURAL INSULT REFERENCES:'), active || (mad && madWritingRoutes.has(name)) ? 1 : 0, 'address guard once: ' + label);
+                    equal(count(prompt, 'SUBJECT OR VOCATIVE:'), active || (mad && madWritingRoutes.has(name)) ? 1 : 0, 'subject/vocative scope: ' + label);
                     if (active) {
                         contains(prompt, 'an established name/title followed by a natural insult phrase is ALLOWED');
                         contains(prompt, 'Avoid awkward stacked forms such as “최 씨 놈”');

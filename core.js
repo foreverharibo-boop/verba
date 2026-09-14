@@ -1144,6 +1144,12 @@ function hongjinModernTwentiesRule(age) {
 - Before returning, reread TARGET CHARACTER lines as spoken conversation and replace stiff wording, without imposing catchphrases, trendy slang, cute speech, or uniform endings.`;
 }
 
+function dialogueSubjectVocativeRule() {
+    return `SUBJECT OR VOCATIVE: in dialogue, choose whether a name, affectionate nickname, or title works more naturally as a grammatical subject or as direct address. If particles or honorific agreement make the connection awkward, separate an actual listener's name/address from the clause and rebuild the rest as spoken Korean. Preserve the actor and listener; never turn a reference to a third person into direct address.
+- Keep affectionate address and playful honorifics when supported by the source or authorized voice and natural in context. Do not add formal particles such as 께서 merely to match 시/계시 or make the grammar look ceremonious; neither 께서 nor playful honorifics are banned. Preserve configured 반말/존댓말 and established relationships.
+- Do not place a comma after every name, omit subjects wholesale, or invent a nickname or action. Use separation only when it sounds more natural aloud; omission must still meet the applicable subject/possessive rule, and ellipsis fidelity remains unchanged.`;
+}
+
 function naturalInsultReferenceRule() {
     return `NATURAL INSULT REFERENCES: when the source or the active TARGET CHARACTER voice settings authorize a rough reference, an established name/title followed by a natural insult phrase is ALLOWED. Prefer conversational syntax such as “최 씨, 그 새끼가” or, when the referent is clear, “그 새끼가”; punctuation follows the sentence, not a fixed template. Avoid awkward stacked forms such as “최 씨 놈” and fabricated surname compounds such as “최가놈”. These examples are not names or insults to insert automatically. Keep the same referent, configured profanity frequency, register, and emotional direction; do not turn teasing into genuine hostility or add a new target. Without a source insult or an applicable voice permission, use the ordinary name/pronoun. This concerns dialogue references, not routine narration labels. Before returning, check that the reference sounds natural aloud; preserve name locks and the hard ban on misogynistic wording.`;
 }
@@ -1220,7 +1226,7 @@ function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
 - HARD SAFETY / VOICE RULE — NO MISOGYNISTIC WORDING: Never use misogynistic slurs, woman-hating labels, gendered degradation, or language that reduces a woman to a sex object or treats women as an inferior class. This prohibition overrides every profanity, vulgarity, teasing, and transcreation setting.
 - ABSOLUTE LEXICAL BAN: Never use “년” as a label, noun, suffix, address, or insult for a female person—including standalone “년” and forms such as “이년/저년/그년/미친년/독한 년/씨발년/시발년/썅년/개년”. Also forbid “김치녀/된장녀/맘충/보지년/걸레년/창녀/암캐/계집/계집애” as person-directed wording. Calendar and elapsed-time uses such as “2026년/몇 년” remain allowed.
 - If the source itself contains misogynistic wording, preserve the relevant hostility, insult function, speaker intent, and scene consequence without repeating or embellishing the misogynistic term; replace it with a natural non-gendered or non-degrading Korean expression of matching force.
-${madKoreanExclusiveEnabled(settings) ? '' : naturalInsultReferenceRule()}
+${madKoreanExclusiveEnabled(settings) ? '' : `${dialogueSubjectVocativeRule()}\n${naturalInsultReferenceRule()}`}
 - Never apply this block to narration, USER/NPC/OTHER-speaker dialogue, quoted speech spoken by someone else, tagged content outside TARGET CHARACTER dialogue, or K→E input.
 
 ${DEVELOPER_HONGJIN_AGE_RULES[ageKey]}
@@ -1283,6 +1289,7 @@ function madKoreanNativeWritingRules() {
 - Preserve dialogue intent, subtext, timing, listener, voice, and configured register; length follows intent, not forced brevity. Do not impose a stock personality or invent slang, humor, or hostility.
 - SOURCE ELLIPSIS FIDELITY: keep each source hesitation/trailing-dot sequence exactly, including the dot count and character form: "..." stays "...", "…" stays "…", and "……" stays "……". Do not lengthen, shorten, normalize, omit, duplicate, or invent an ellipsis to dramatize the Korean. Stuttering/restarts, commas, sleepy speech, and sentence breaks do not authorize trailing dots: "W-what time is it?" can be "지, 지금 몇 시야?", not "지, 지금 몇 시야……?"; "So," does not supply "그럼……". Before returning, compare ellipsis sequences in each target with its source in order; preserve the same sequence count and exact characters, including zero when none exist. Place each at its corresponding pause in the translated passage; for selected fragments, preserve only pauses belonging to that fragment, never import surrounding ones. This also applies with the optional voice add-on enabled. It does not require matching the total number of sentence-ending periods after sentence restructuring; do not modify decimals, URLs, code, or protected tokens.
 - NATURAL VOCATIVES: rebuild teasing/insulting addresses as idiomatic Korean phrases, not stacked translated labels. Do not append 인간/사람 to an insult unless human identity itself matters. Keep the same referent, meaningful size/trait, and force; do not soften into affection. Added profanity requires the active voice exception. This addresses dialogue wording, not valid surrounding narration.
+- ${dialogueSubjectVocativeRule()}
 - ${naturalInsultReferenceRule()}
 - EVERYDAY OBJECT NAMES: prefer familiar Korean names over literal technical calques, preserving the object's function and meaningful material, contents, properties, and use. Do not replace a specific object with a vague category. For an unspecified everyday form, a context-compatible Korean equivalent is allowed when that form is incidental; never override an explicit description or a plot-relevant distinction. For example, a compressed protein block may be 단백질 바 rather than generic 보존식; instant noodles may be 컵라면 when context permits, but keep 라면 when the form is uncertain and matters, and never turn explicit packet noodles into a cup. These are contextual choices, not automatic substitutions.
 STRUCTURAL EXAMPLES — examples of expression only, never fixed substitutions or scene facts to import:
@@ -2432,7 +2439,7 @@ ${['early20s', 'late20s'].includes(settings.developerHongjinAgeBand) ? hongjinMo
 - Apply none of this voice to narration or USER/NPC/OTHER dialogue. If speaker/addressee is ambiguous, do not apply it.
 - Never add/change events, actions, facts, relationships, consent, sexual meaning, threats, accusations, or targets of abuse.
 - Never create person-directed gendered slurs or “년” forms, “드쇼/하쇼/구먼/일세” pseudo-old speech, or unsupported dialect.
-${madKoreanExclusiveEnabled(settings) ? '' : naturalInsultReferenceRule()}`;
+${madKoreanExclusiveEnabled(settings) ? '' : `${dialogueSubjectVocativeRule()}\n${naturalInsultReferenceRule()}`}`;
 }
 
 function compactRelationshipBlock(settings = {}, scope = 'mixed') {

@@ -2,6 +2,7 @@ import { extension_settings, getContext } from '../../../../scripts/extensions.j
 import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse } from './diagnostics.js';
+import { createOutputTiming, outputTimingText } from './timing.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -39,7 +40,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.32';
+const EXTENSION_VERSION = '0.5.33';
 const DEVELOPER_ACCESS_CODE = '091813';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -624,6 +625,8 @@ let lastTouchSelectionAt = 0;
 let lastDesktopSelectionPlacement = null;
 let lastDesktopSelectionAt = 0;
 let lastDebugDiagnostic = null;
+const outputTiming = createOutputTiming();
+outputTiming.setEnabled(settings.debugMode);
 let lastPromptConflicts = [];
 
 function liveContext() {
@@ -652,6 +655,14 @@ function notify(message, type = 'info') {
     }
     const logger = type === 'error' ? console.error : type === 'warning' ? console.warn : console.log;
     logger(`[베르바] ${message}`);
+}
+
+function renderOutputTiming() {
+    const record = outputTiming.latest();
+    const panel = document.querySelector('#verba-output-timing');
+    if (panel) panel.textContent = outputTimingText(record);
+    const button = document.querySelector('#verba-copy-output-timing');
+    if (button) button.disabled = !settings.debugMode || !record;
 }
 
 function storeDebugDiagnostic(diagnostic) {
@@ -2715,6 +2726,7 @@ async function sendProfileRequest(prompt, options = {}) {
     let attemptError = null;
     const outerSignal = options.signal || null;
     if (outerSignal?.aborted) throw abortError();
+    const timingRequest = outputTiming.enqueue(options.timing, { ...options, profileSlot });
 
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
@@ -2753,13 +2765,18 @@ async function sendProfileRequest(prompt, options = {}) {
             // plain `await sendRequest()` can leave Verba stuck on "번역 중"
             // forever. Race against Verba's own hard-stop Promise so each
             // attempt always returns or fails within the configured timeout.
-            const request = Promise.resolve().then(() => service.sendRequest(
-                profileId,
-                [{ role: 'user', content: prompt }],
-                VERBA_MAX_TOKENS,
-                { signal: controller.signal },
-            ));
+            const request = Promise.resolve().then(() => {
+                if (controller.signal.aborted) throw abortError();
+                outputTiming.sent(options.timing, timingRequest);
+                return service.sendRequest(
+                    profileId,
+                    [{ role: 'user', content: prompt }],
+                    VERBA_MAX_TOKENS,
+                    { signal: controller.signal },
+                );
+            });
             const response = await Promise.race([request, hardStop]);
+            outputTiming.received(options.timing, timingRequest);
 
             if (!extractResponseText(response).trim()) {
                 const error = new Error('AI가 빈 응답을 반환했습니다.');
@@ -2781,6 +2798,7 @@ async function sendProfileRequest(prompt, options = {}) {
         // "취소 중" until every earlier request had finished.
         return await Promise.race([queuedRequest, hardStop]);
     } catch (error) {
+        outputTiming.received(options.timing, timingRequest);
         if (timedOut) {
             const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
             timeoutError.code = 'VERBA_TIMEOUT';
@@ -2806,6 +2824,8 @@ async function sendProfileRequest(prompt, options = {}) {
         attemptError = error;
         throw error;
     } finally {
+        outputTiming.settled(options.timing, timingRequest,
+            attemptSucceeded ? '응답 수신' : outerSignal?.aborted ? '취소' : '오류');
         if (timer) clearTimeout(timer);
         removeHardStopAbort?.();
         outerSignal?.removeEventListener?.('abort', forwardAbort);
@@ -2970,7 +2990,7 @@ async function sendWithRetry(prompt, options = {}) {
                     cycleError,
                 );
 
-                await wait(delay, controller.signal);
+                await outputTiming.wait(options.timing, () => wait(delay, controller.signal));
                 state.delayMs = 0;
                 state.updatedAt = Date.now();
                 updateServerRetryIndicator();
@@ -3030,7 +3050,7 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
             : '';
 
         try {
-            const response = await sendWithRetry(prompt + repair, options);
+            const response = await sendWithRetry(prompt + repair, { ...options, segmentAttempt: attempt });
             const raw = extractResponseText(response);
             const { partial, parseError } = collectPartialSegmentTranslations(raw, pending);
 
@@ -3055,7 +3075,7 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
             `[베르바] 번역 결과 일부 실패 — 성공 구간 ${completed.size}개 유지, 남은 ${pending.length}개만 ${attempt + 1}/${maxRetries}회 재시도`,
             lastError,
         );
-        await wait(parseRetryDelays[attempt], options.signal);
+        await outputTiming.wait(options.timing, () => wait(parseRetryDelays[attempt], options.signal));
     }
 
     const finalError = new Error(
@@ -4301,6 +4321,7 @@ async function translateOutputText(source, options = {}) {
     const initialSegmented = segmentSource(source, characterNameLocks);
     const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
         signal: options.signal,
+        timing: options.timing,
     });
     const segmented = roleTermLocks.length
         ? segmentSource(source, [...characterNameLocks, ...roleTermLocks])
@@ -4355,6 +4376,7 @@ async function translateOutputText(source, options = {}) {
     // not be planned, without touching already locked terminology.
     await repairRepeatedRoleTermConsistency(segmented, translations, {
         signal: options.signal,
+        timing: options.timing,
     });
 
     // Validate against the original protected source, not merely against the
@@ -5187,6 +5209,11 @@ async function translateMessage(messageId, options = {}) {
 
     const outputJobStartedAt = performance.now();
     const outputJobSlot = activeProfileSlot();
+    const timing = outputTiming.begin({
+        retranslation: options.force === true, slot: outputJobSlot,
+        mode: settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? '미친압축'
+            : settings.developerMode && settings.developerCompressedPromptEnabled ? '압축' : '일반',
+    });
     let outputJobSuccess = null;
     let outputJobSuperseded = false;
     const controller = new AbortController();
@@ -5207,6 +5234,7 @@ async function translateMessage(messageId, options = {}) {
         try {
             const translated = await translateOutputText(source, {
                 signal: controller.signal,
+                timing,
                 oneTimeInstruction: options.oneTimeInstruction || '',
                 tuning: {
                     ...(options.tuning && typeof options.tuning === 'object' ? options.tuning : {}),
@@ -5216,6 +5244,7 @@ async function translateMessage(messageId, options = {}) {
                 stage: options.force ? 'output-retranslation' : 'output-translation',
             });
             if (controller.signal.aborted) throw controller.signal.reason || abortError();
+            outputTiming.applying(timing);
             const latestContext = liveContext();
             const latest = latestContext.chat?.[id];
             const latestSource = messageSource(latest);
@@ -5333,6 +5362,8 @@ async function translateMessage(messageId, options = {}) {
             clearProgress(toast);
             if (pendingOutputs.get(id)?.controller === controller) pendingOutputs.delete(id);
             refreshRetranslateButton();
+            outputTiming.finish(timing, controller.signal.aborted || outputJobSuperseded ? '취소·전환' : outputJobSuccess ? '완료' : '실패');
+            renderOutputTiming();
         }
         return outputJobSuccess === true;
     })();
@@ -10111,7 +10142,7 @@ function injectSettingsPanel() {
                 </details>
 
                 <details id="verba-debug-settings" class="verba-tool-details">
-                    <summary>디버그 <small>마지막 오류 로그</small></summary>
+                    <summary>디버그 <small>최근 오류·번역 시간</small></summary>
                     <div class="verba-tool-details-content">
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
@@ -10119,6 +10150,14 @@ function injectSettingsPanel() {
                         </label>
                         <div class="verba-help">켜 둔 동안 마지막 오류 1건만 기록합니다. 오류 분류·발생 위치·전달받은 서버 원본을 복사합니다. 끄거나 새로고침하면 지워집니다. 서버 터미널에만 뜬 로그는 가져올 수 없어요. 원본에 본문 일부가 섞일 수 있으니 공유 전에 확인해 주세요.</div>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode && lastDebugDiagnostic ? '' : 'disabled'}>로그 복사</button>
+                        <details class="verba-tool-details">
+                            <summary>마지막 출력 번역 소요 시간</summary>
+                            <div class="verba-tool-details-content">
+                                <div class="verba-help">디버그를 켠 뒤 시작한 출력 번역·전체 재번역 1건만 기록합니다. 인풋·선택 재번역은 제외합니다. 끄거나 새로고침하면 지워집니다.</div>
+                                <pre id="verba-output-timing">${escapeHtml(outputTimingText(outputTiming.latest()))}</pre>
+                                <button type="button" id="verba-copy-output-timing" class="menu_button verba-wide" ${settings.debugMode && outputTiming.latest() ? '' : 'disabled'}>소요 시간 복사</button>
+                            </div>
+                        </details>
                     </div>
                 </details>
                 ${developerSettingsMarkup()}
@@ -10635,9 +10674,11 @@ function injectSettingsPanel() {
     debugModeInput?.addEventListener('change', event => {
         settings.debugMode = event.target.checked;
         if (!settings.debugMode) lastDebugDiagnostic = null;
+        outputTiming.setEnabled(settings.debugMode);
+        renderOutputTiming();
         saveSettings();
         syncDebugCopyButton();
-        notify(settings.debugMode ? '디버그 모드를 켰어요. 다음 오류부터 마지막 로그 1건을 기록해요.' : '디버그 모드를 끄고 오류 로그를 지웠어요.', 'info');
+        notify(settings.debugMode ? '디버그를 켰어요. 다음 출력 번역 시간과 마지막 오류를 기록해요.' : '디버그를 끄고 오류·시간 기록을 지웠어요.', 'info');
     });
     debugCopyButton?.addEventListener('click', async () => {
         try {
@@ -10649,6 +10690,16 @@ function injectSettingsPanel() {
         }
     });
     syncDebugCopyButton();
+    panel.querySelector('#verba-copy-output-timing')?.addEventListener('click', async () => {
+        const record = outputTiming.latest();
+        if (!settings.debugMode || !record) return;
+        try {
+            await copyText(`베르바 v${EXTENSION_VERSION}\n${outputTimingText(record)}`);
+            notify('마지막 번역 소요 시간을 복사했어요.', 'success');
+        } catch {
+            notify('복사하지 못했어요. 클립보드 권한을 확인해 주세요.', 'warning');
+        }
+    });
     panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
         if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
         profileStatsState = normalizeProfileStats(null);

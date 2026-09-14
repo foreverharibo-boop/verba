@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as diagnostics from '../diagnostics.js';
 import { extractResponseText } from '../core.js';
+import { createOutputTiming } from '../timing.js';
 
 const { sanitizeDebugValue, debugRawText, rememberRequestError, debugErrorChain, classifyDebugError, readErrorResponse } = diagnostics;
 const category = error => classifyDebugError(debugErrorChain(error)).category;
@@ -52,6 +53,7 @@ const requestSource = index.slice(index.indexOf('async function sendProfileReque
 const settings = { debugMode: false, profileId: 'test', timeoutSeconds: 20 };
 let serviceImpl;
 const dependencies = {
+    outputTiming: createOutputTiming(),
     settings, profileSlotForId: () => 'A', profileList: () => [{ id: 'test' }], performance,
     AbortController, Promise, setTimeout, clearTimeout, VERBA_MAX_TOKENS: 1000,
     abortError: () => new DOMException('cancelled', 'AbortError'),

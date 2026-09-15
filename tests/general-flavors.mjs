@@ -44,7 +44,9 @@ assert.match(markup, /value="late20s" selected/);
 assert.match(markup, /value="often" selected/);
 assert.match(markup, /value="banmal" selected/);
 assert.match(markup, /value="jondaetmal" selected/);
-assert.ok(index.includes('${generalFlavorSettingsMarkup()}\n                ${developerSettingsMarkup()}'));
+assert.ok(index.includes('${generalFlavorSettingsMarkup()}\n\n                <details id="verba-beginner-character-guide"'));
+assert.doesNotMatch(markup, /🧪/);
+assert.ok(index.indexOf('id="verba-english-flavor"') < index.indexOf('${generalFlavorSettingsMarkup()}'));
 // Execute existing change branches with a locked mode: the UI keeps its old IDs
 // and setting keys so presets, saved values and change handlers need no migration.
 class Input {}

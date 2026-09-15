@@ -41,7 +41,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.45';
+const EXTENSION_VERSION = '0.5.47';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -9326,7 +9326,7 @@ function renderNameLockManager() {
 function generalFlavorSettingsMarkup() {
     return `
                     <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
+                        <summary>🇰🇷 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-developer-mad-korean-enabled" ${settings.developerMadKoreanOutputEnabled ? 'checked' : ''}>
@@ -9355,7 +9355,7 @@ function generalFlavorSettingsMarkup() {
                     </details>
 
                     <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
+                        <summary>🐯 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-developer-hongjin-enabled" ${settings.developerHongjinFlavorEnabled ? 'checked' : ''}>
@@ -10152,6 +10152,8 @@ function injectSettingsPanel() {
                         </div>
                     </details>
 
+                ${generalFlavorSettingsMarkup()}
+
                 <details id="verba-beginner-character-guide" class="verba-tool-details verba-beginner-character-guide">
                     <summary>신입 챗시 전용 <small>캐릭터 간편 설정 · 기본 OFF</small></summary>
                     <div class="verba-tool-details-content">
@@ -10241,7 +10243,6 @@ function injectSettingsPanel() {
                         </details>
                     </div>
                 </details>
-                ${generalFlavorSettingsMarkup()}
                 ${developerSettingsMarkup()}
 
             </div>

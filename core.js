@@ -1,4 +1,4 @@
-import { collectSegmentResponse } from './response-parser.js';
+import { collectSegmentResponse, repairUnexpectedProseBreaks } from './response-parser.js';
 
 const PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
@@ -806,7 +806,10 @@ export function assembleTranslation(segmented, translations) {
         if (typeof translated !== 'string' || !translated.trim()) {
             throw new Error(`번역 결과 누락: ${part.id}`);
         }
-        return translated;
+        // Also cover later repair passes; keep the same map for source mapping.
+        const repaired = repairUnexpectedProseBreaks(translated, part);
+        map.set(part.id, repaired);
+        return repaired;
     }).join('');
     const particlesRepaired = repairLockedTokenParticles(joined, segmented.nameTokens);
     const namesRestored = restoreProtected(particlesRepaired, segmented.nameTokens, { strict: true });
@@ -1333,6 +1336,10 @@ END DIALOGUE TIME AND GROUP REFERENCES`
 END DIALOGUE TIME AND GROUP REFERENCES`;
 }
 
+function madKoreanMetricUnitsRule() {
+    return `KOREAN METRIC UNITS: convert explicit distance/length/weight/temperature quantities in editable dialogue and narration to familiar Korean metric units (미터/센티미터/킬로그램/섭씨). Preserve the actual physical value; do not arbitrarily round: 50 yards → 45.72미터, never 50미터. This is an exception to preserving numeral spelling, not permission to change facts. Preserve source uncertainty and ranges. Keep product specifications, proper names and context-standard units (e.g. golf yards, screen inches). Do not change codes, IDs, protected tokens, code, attributes or literal quoted evidence. Metadata keeps its existing number/layout rules. Verify the conversion before returning.`;
+}
+
 function madKoreanNativeWritingRules(compact = false) {
     return `KOREAN-ORIGINAL COMPOSITION — SHARED WRITING STANDARD
 - You are a contemporary Korean web-novel author skilled in lifelike everyday dialogue and vivid, natural narration. Write both as original Korean fiction.
@@ -1349,6 +1356,7 @@ ${madKoreanIdiomaticExpressionRule(compact)}
 - EVERYDAY OBJECT NAMES: prefer familiar Korean names over literal technical calques, preserving the object's function and meaningful material, contents, properties, and use. Do not replace a specific object with a vague category. For an unspecified everyday form, a context-compatible Korean equivalent is allowed when that form is incidental; never override an explicit description or a plot-relevant distinction. For example, a compressed protein block may be 단백질 바 rather than generic 보존식; instant noodles may be 컵라면 when context permits, but keep 라면 when the form is uncertain and matters, and never turn explicit packet noodles into a cup. These are contextual choices, not automatic substitutions.
 ${madKoreanEverydayExamples()}
 ${madKoreanTimeAndGroupRule(compact)}
+${madKoreanMetricUnitsRule()}
 END KOREAN-ORIGINAL COMPOSITION`;
 }
 
@@ -1530,6 +1538,7 @@ MAD KOREAN — ULTRA-COMPACT
 - EVERYDAY NARRATION: familiar, precise words; no abstract noun piles, stacked modifiers or inflated ordinary actions. Connect actions, break at changes/reactions, keep actors clear. Preserve information and force.
 ${madKoreanEverydayExamples()}
 ${madKoreanTimeAndGroupRule(true)}
+${madKoreanMetricUnitsRule()}
 - References: TARGET CHARACTER=${JSON.stringify(characterName)}; TARGET gender=${JSON.stringify(String(speakerIdentity.characterGender || 'unknown'))}; USER=${JSON.stringify(userName)}. Transliterate clear Latin-script human names into Hangul, excluding non-person terms; explicit name locks override transliteration. Never expand a short source name or repeat display names mechanically. PERSONAL PRONOUN DEFAULT: human he/him → 그, she/her → 그녀, his → 그의, possessive her → 그녀의, with grammatical particles. Prefer these when clear; never turn a source pronoun into 여자/남자/녀석 or another gender/age/size/role label for variety. Names clarify ambiguity, not replace pronouns mechanically. Omit a subject/possessive only when omission itself is clearly more natural in an immediately linked sentence; re-anchor with name/pronoun after actor changes or intervening description. Never rotate a known person through 여자/남자/녀석/상대/사람/사내/청년/작은 몸, guess an identity, split a name, or output particle-choice notation such as (이)는/이(가)/은(는).
 - Speech lock only for the named pair's direct conversation: TARGET→USER=${register(settings?.developerMadKoreanTargetToUserRegister)}; USER→TARGET=${register(settings?.developerMadKoreanUserToTargetRegister)}. JONDAETMAL normally uses conversational 해요체. Do not apply pair locks to NPC/quoted/ambiguous speech.
 - Preserve every source ellipsis sequence exactly in order and form: .../…/…… keep the same count and characters; invent none. Preserve stable terminology. Default only unstated cultural context to contemporary Korea; retain every explicit foreign location, institution, brand, garment, currency, historical/legal/fictional fact.

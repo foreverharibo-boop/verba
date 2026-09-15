@@ -68,9 +68,17 @@ for(const flags of [{},{developerCompressedPromptEnabled:true},{developerExtreme
    assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes(marker),false);
    assert.equal(build({...settings,developerMode:false}).includes('SPOKEN CLOCK TIMES:'),false);
    assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes('GROUP REFERENCES:'),false);
-   checks+=42;
+   assert.equal(prompt.split('KOREAN METRIC UNITS:').length-1,1,`${name}: metric policy occurs once`);
+   assert.match(prompt,/Preserve the actual physical value; do not arbitrarily round/);
+   assert.match(prompt,/50 yards → 45.72미터, never 50미터/);
+   assert.match(prompt,/Keep product specifications, proper names and context-standard units/);
+   assert.match(prompt,/Metadata keeps its existing number\/layout rules/);
+   assert.equal(build({...settings,developerMode:false}).includes('KOREAN METRIC UNITS:'),false);
+   assert.equal(build({...settings,developerMadKoreanOutputEnabled:false}).includes('KOREAN METRIC UNITS:'),false);
+   checks+=49;
   }
   assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes(marker),false);
+  assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes('KOREAN METRIC UNITS:'),false);
   assert.equal(core.buildInputPrompt('안녕',settings,'male',identity).includes('SPOKEN CLOCK TIMES:'),false);
  }
 }

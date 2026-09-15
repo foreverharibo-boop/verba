@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { collectSegmentResponse } from '../response-parser.js';
-import { parseSegmentResponse, extractResponseText } from '../core.js';
+import { collectSegmentResponse, repairUnexpectedProseBreaks } from '../response-parser.js';
+import { parseSegmentResponse, extractResponseText, segmentSource, assembleTranslation, restoreProtected } from '../core.js';
 import { rememberRequestError, debugErrorChain, sanitizeDebugValue } from '../diagnostics.js';
 
 const targets = [{ id: 's1' }, { id: 's2' }];
@@ -149,3 +149,61 @@ await assert.rejects(request('prompt', targets, {}), e => e.missingSegments.leng
 assert.equal(calls.length, 6);
 assert.equal(log.latest().recovery.status, '재시도 종료·미복구');
 console.log('PASS: safe syntax recovery, exact text preservation, truncated-row salvage, malformed/ambiguous rejection, missing-only retry, intermediate recovered logs and debug OFF/reset (mock AI).');
+
+
+// Blank-line cleanup is local, scoped to single-line prose, and idempotent.
+const prose = { id: 'seg_0000', type: 'narration', text: 'She could hardly believe it.' };
+const breakCases = [
+    ['믿을\n\n 수 없었다.', '믿을 수 없었다.'],
+    ['머리\n\n 위였다.', '머리 위였다.'],
+    ['엎질\n\n러진 커피였다.', '엎질러진 커피였다.'],
+    ['그러\r\n\r\n셨어요?', '그러셨어요?'],
+    ['믿을 \n\n수 없었다.', '믿을 수 없었다.'],
+    ['그의 말.\n\n그녀의 대답.', '그의 말.\n\n그녀의 대답.'],
+    ['한 줄\n다음 줄', '한 줄\n다음 줄'],
+    ['문자 그대로 \\n\\n 표시', '문자 그대로 \\n\\n 표시'],
+];
+for (const [before, after] of breakCases) {
+    assert.equal(repairUnexpectedProseBreaks(before, prose), after);
+    assert.equal(repairUnexpectedProseBreaks(after, prose), after);
+    for (const wire of [encode([{ id: prose.id, translation: before }]),
+        encode([{ id: prose.id, translation: before }]).replaceAll('\\n', '\n').replaceAll('\\r', '\r')]) {
+        // Literal backslash text is checked above; do not corrupt its escaping here.
+        if (before.includes('\\')) continue;
+        const parsed = collectSegmentResponse(wire, [prose]);
+        assert.equal(parsed.parseError, null);
+        assert.equal(parsed.partial.get(prose.id), after);
+    }
+}
+for (const type of ['tagged_content', 'user_input', 'name_match', 'role_term']) {
+    assert.equal(repairUnexpectedProseBreaks('믿을\n\n 수', { ...prose, type }), '믿을\n\n 수');
+}
+assert.equal(repairUnexpectedProseBreaks('믿을\n\n 수', { ...prose, text: 'First\nSecond' }), '믿을\n\n 수');
+for (const text of ['`믿을\n\n 수`', '```text\n믿을\n\n 수\n```', '<div>믿을\n\n 수</div>']) {
+    assert.equal(repairUnexpectedProseBreaks(text, prose), text);
+}
+for (const debugMode of [true, false]) {
+    settings.debugMode = debugMode; log.clear(); calls = []; waits = 0;
+    responses = [encode([{ id: prose.id, translation: '믿을\n\n 수 없었다.' }])];
+    const result = await request('unchanged prompt', [prose], { stage: 'output-translation' });
+    assert.equal(result.get(prose.id), '믿을 수 없었다.');
+    assert.equal(calls.length, 1); assert.equal(waits, 0);
+    if (debugMode) assert.match(log.latest().recovery.localRepairs.join(), /한글 사이 빈줄 제거/);
+    else assert.equal(log.latest(), null);
+}
+// Assembly also cleans later-pass text before building offsets. Protected blocks
+// and original paragraph gaps survive byte for byte.
+const source = 'She spilled coffee.\n\n`Keep this English.`\n\n```js\nconst x = "Keep";\n\n// code\n```\n\nHe replied.';
+const segmented = segmentSource(source);
+const translations = new Map(segmented.segments.map((s, i) => [s.id, i ? '그러\n\n셨어요?' : '엎질\n\n러진 커피였다.']));
+const assembled = assembleTranslation(segmented, translations);
+assert.equal(assembled, '엎질러진 커피였다.\n\n`Keep this English.`\n\n```js\nconst x = "Keep";\n\n// code\n```\n\n그러셨어요?');
+const mapBuilder = Function('restoreProtected', 'repairKoreanParticleAlternatives',
+    slice('function restoredSegmentText(', 'const CONSISTENCY_ROLE_TERMS') + '\nreturn buildSourceMap;')(restoreProtected, value => value); // No particle alternatives in this fixture.
+const sourceMap = mapBuilder(segmented, translations, assembled);
+assert.equal(sourceMap.length, segmented.segments.length);
+for (const entry of sourceMap) {
+    assert.equal(assembled.slice(entry.start, entry.end), translations.get(entry.id));
+    assert.equal(entry.source, segmented.segments.find(s => s.id === entry.id).text);
+}
+console.log('PASS: unexpected prose blank lines, protected layout, source-map offsets and one-call cleanup with debug ON/OFF.');

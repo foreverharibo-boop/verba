@@ -5,6 +5,17 @@ function segmentNumberKey(id) {
     return match ? match[1].replace(/^0+(?=\d)/, '') : null;
 }
 
+// Source paragraph separators live outside these segments. Remove only an
+// unexpected blank line between Hangul characters in a single-line prose span.
+// Keep existing horizontal whitespace; never guess new spaces or edit code.
+export function repairUnexpectedProseBreaks(translation, segment) {
+    if (!['narration', 'dialogue_candidate', 'selection', 'multi_selection'].includes(segment?.type)
+        || typeof segment.text !== 'string' || /[\r\n]/u.test(segment.text)
+        || /[`~<>]/u.test(translation)) return translation;
+    return translation.replace(/([가-힣])([\t ]*(?:\r?\n[\t ]*){2,})(?=[가-힣])/gu,
+        (_match, before, gap) => before + (/[\t ]/u.test(gap) ? ' ' : ''));
+}
+
 function normalizeSyntax(text) {
     let result = '', quoted = false, escaped = false;
     const fixes = new Set();
@@ -149,6 +160,15 @@ export function collectSegmentResponse(raw, expectedSegments = []) {
     }
     for (const id of conflicts) partial.delete(id);
     if (conflicts.size) issues.push('동일 구간 ID의 서로 다른 번역');
+    for (const segment of expectedSegments) {
+        const original = partial.get(segment.id);
+        if (typeof original !== 'string') continue;
+        const repaired = repairUnexpectedProseBreaks(original, segment);
+        if (repaired !== original) {
+            partial.set(segment.id, repaired);
+            repairs.push(`원문에 없는 한글 사이 빈줄 제거: ${segment.id}`);
+        }
+    }
     const missingIds = [...expected].filter(id => !partial.has(id));
     if (missingIds.length) issues.push('요청 구간 누락·불일치');
     const parseError = missingIds.length ? new Error(

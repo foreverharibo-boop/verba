@@ -41,8 +41,8 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.44';
-const DEVELOPER_ACCESS_CODE = '091813';
+const EXTENSION_VERSION = '0.5.45';
+const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
 const STATE_KEY = 'verba_current_translation';
@@ -327,16 +327,9 @@ if (
     settings.developerMode
     && settings.developerAccessFingerprint !== DEVELOPER_ACCESS_FINGERPRINT
 ) {
-    // A missing/old fingerprint means this developer session was unlocked by
-    // an older access code. Lock it in memory immediately. No settings save is
-    // triggered here; entering the current code is required to unlock again.
+    // Lock older sessions without resetting any saved experiment or flavor values.
+    // Developer-only features remain gated by developerMode until re-unlocked.
     settings.developerMode = false;
-    settings.qualityAuditEnabled = false;
-    settings.developerRelationshipExperimentEnabled = false;
-    settings.developerHongjinFlavorEnabled = false;
-    settings.developerMadKoreanOutputEnabled = false;
-    settings.developerCompressedPromptEnabled = false;
-    settings.developerExtremeCompressedPromptEnabled = false;
 }
 settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
 settings.developerExtremeCompressedPromptEnabled = settings.developerExtremeCompressedPromptEnabled === true;
@@ -375,8 +368,7 @@ settings.developerMadKoreanUserToTargetRegister = DEVELOPER_MAD_KOREAN_REGISTER_
     : 'source';
 
 function madKoreanExclusiveMode() {
-    return settings.developerMode === true
-        && settings.developerMadKoreanOutputEnabled === true;
+    return settings.developerMadKoreanOutputEnabled === true;
 }
 
 settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === settings.developerHongjinTranscreation)
@@ -2196,22 +2188,22 @@ function renderCurrentAppliedRules() {
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['xxx미친압축xxx', settings.developerMode && settings.developerExtremeCompressedPromptEnabled === true ? 'ON' : 'OFF'],
-                ['미친 한출의 맛', settings.developerMode && settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
+                ['미친 한출의 맛', settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
                 ['캐릭터 → USER 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanTargetToUserRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
                 ['USER → 캐릭터 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanUserToTargetRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
-                ['김홍진의 맛', settings.developerMode && settings.developerHongjinFlavorEnabled === true ? 'ON' : 'OFF'],
-                ['김홍진 연령대', settings.developerMode && settings.developerHongjinFlavorEnabled === true
+                ['김홍진의 맛', settings.developerHongjinFlavorEnabled === true ? 'ON' : 'OFF'],
+                ['김홍진 연령대', settings.developerHongjinFlavorEnabled === true
                     ? (DEVELOPER_HONGJIN_AGE_OPTIONS.find(option => option.value === settings.developerHongjinAgeBand)?.label || '미지정')
                     : '적용 안 함'],
-                ['김홍진 오빠 자칭', settings.developerMode && settings.developerHongjinFlavorEnabled === true
+                ['김홍진 오빠 자칭', settings.developerHongjinFlavorEnabled === true
                     ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
-                    ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외${settings.developerExtremeCompressedPromptEnabled ? ' · 미친압축' : settings.developerCompressedPromptEnabled ? ' · 압축 테스트' : ''}`
+                    ? `미친 한출 단독${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''} · 나머지 설정 일시 제외${settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? ' · 미친압축' : settings.developerMode && settings.developerCompressedPromptEnabled ? ' · 압축 테스트' : ''}`
                     : (settings.developerMode && (settings.developerCompressedPromptEnabled || settings.developerExtremeCompressedPromptEnabled)
                         ? `기존 설정 전체 적용 · ${settings.developerExtremeCompressedPromptEnabled ? '미친압축' : '압축 테스트'}`
                         : '기존 설정 전체 적용')],
@@ -9331,6 +9323,101 @@ function renderNameLockManager() {
 }
 
 
+function generalFlavorSettingsMarkup() {
+    return `
+                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-mad-korean-enabled" ${settings.developerMadKoreanOutputEnabled ? 'checked' : ''}>
+                                <span>미친 한출의 맛 사용</span>
+                            </label>
+                            <div id="verba-developer-mad-korean-controls" class="${settings.developerMadKoreanOutputEnabled ? '' : 'verba-control-disabled'}">
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-mad-korean-target-user-register">캐릭터 → USER</label>
+                                    <select id="verba-developer-mad-korean-target-user-register" class="text_pole">
+                                        ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+                                </section>
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-mad-korean-user-target-register">USER → 캐릭터</label>
+                                    <select id="verba-developer-mad-korean-user-target-register" class="text_pole">
+                                        ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanUserToTargetRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+                                </section>
+                            </div>
+                            <div class="verba-help verba-hongjin-help">
+                                <span>사실·관계·강도는 유지하고 영문 구조를 버린 뒤, 처음부터 자연스러운 한국어로 씁니다.</span>
+                                <span>두 사람의 말투를 방향별로 고정할 수 있으며 NPC 대사에는 적용하지 않습니다.</span>
+                                <span><b>사용 중에는 김홍진의 맛만 함께 적용되고 나머지 프롬프트는 전송하지 않습니다. 기존 설정값은 유지됩니다.</b></span>
+                            </div>
+                        </div>
+                    </details>
+
+                    <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-hongjin-enabled" ${settings.developerHongjinFlavorEnabled ? 'checked' : ''}>
+                                <span>김홍진의 맛 사용</span>
+                            </label>
+
+                            <div id="verba-developer-hongjin-controls" class="${settings.developerHongjinFlavorEnabled ? '' : 'verba-control-disabled'}">
+                                <div class="verba-help verba-hongjin-help">
+                                    <span><b>고정 성격 프롬프트</b></span>
+                                    <span>이 캐릭터는 능글맞고 장난기가 많은 성격이며 츤데레식, 능글맞은, 천박한 말투를 사용한다.</span>
+                                    <span>원문의 사실·행동·관계는 유지하면서 TARGET CHARACTER 대사를 이 성격과 말투로 과감하게 재창작합니다.</span>
+                                </div>
+
+                                <label for="verba-developer-hongjin-transcreation">초월 의역 강도</label>
+                                <select id="verba-developer-hongjin-transcreation" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTranscreation === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <label for="verba-developer-hongjin-profanity">욕설 농도</label>
+                                <select id="verba-developer-hongjin-profanity" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_PROFANITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinProfanity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">원문에 욕설이 없어도 캐릭터 말맛을 위해 감탄·강조·짜증·장난 자리에 욕설/비속어를 추가할 수 있습니다. 의미나 공격 대상을 새로 만들지는 않습니다.</div>
+
+                                <label for="verba-developer-hongjin-teasing">능글거림·약올리기</label>
+                                <select id="verba-developer-hongjin-teasing" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_TEASING_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTeasing === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <label for="verba-developer-hongjin-vulgarity">천박한 말맛</label>
+                                <select id="verba-developer-hongjin-vulgarity" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_VULGARITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinVulgarity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <label for="verba-developer-hongjin-playfulness">장난기</label>
+                                <select id="verba-developer-hongjin-playfulness" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinPlayfulness === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+
+                                <label for="verba-developer-hongjin-age-band">연령대</label>
+                                <select id="verba-developer-hongjin-age-band" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_AGE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinAgeBand === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">대사의 어휘·호흡만 연령대에 맞춥니다. 20대 초반·후반은 무조건 현대적이고 캐주얼하게 말하며, 실제 나이·관계·호칭은 새로 만들지 않습니다.</div>
+
+                                <label for="verba-developer-hongjin-oppa-frequency">자기 자신을 ‘오빠’라고 부르는 빈도</label>
+                                <select id="verba-developer-hongjin-oppa-frequency" class="text_pole">
+                                    ${DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinOppaFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                </select>
+                                <div class="verba-help">현재 캐릭터가 USER에게 직접 말할 때만 ‘내가’ 대신 ‘오빠가’처럼 자신을 지칭합니다. NPC·타인과의 대사에는 사용하지 않습니다.</div>
+
+                                <div class="verba-help verba-hongjin-help">
+                                    <span>E→K 아웃풋의 TARGET CHARACTER 직접 대사에만 적용합니다.</span>
+                                    <span>서술·USER/NPC 대사·K→E 인풋에는 적용하지 않습니다.</span>
+                                    <span>욕설/비속어/비꼼/장난은 추가할 수 있지만 새로운 사건·행동·관계·성적 의미·동의 변화·새로운 협박/비난 대상을 만들지는 않습니다.</span>
+                                    <span><b>욕설 농도와 관계없이 여성혐오·여성 비하·성별 대상화 표현은 사용하지 않습니다.</b></span>
+                                </div>
+                            </div>
+                        </div>
+                    </details>`;
+}
+
 function developerSettingsMarkup() {
     return `
         <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings" open>
@@ -9381,34 +9468,7 @@ function developerSettingsMarkup() {
                         </div>
                     </details>
 
-                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-mad-korean-enabled" ${settings.developerMadKoreanOutputEnabled ? 'checked' : ''}>
-                                <span>미친 한출의 맛 사용</span>
-                            </label>
-                            <div id="verba-developer-mad-korean-controls" class="${settings.developerMadKoreanOutputEnabled ? '' : 'verba-control-disabled'}">
-                                <section class="verba-relationship-section">
-                                    <label for="verba-developer-mad-korean-target-user-register">캐릭터 → USER</label>
-                                    <select id="verba-developer-mad-korean-target-user-register" class="text_pole">
-                                        ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                    </select>
-                                </section>
-                                <section class="verba-relationship-section">
-                                    <label for="verba-developer-mad-korean-user-target-register">USER → 캐릭터</label>
-                                    <select id="verba-developer-mad-korean-user-target-register" class="text_pole">
-                                        ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanUserToTargetRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                    </select>
-                                </section>
-                            </div>
-                            <div class="verba-help verba-hongjin-help">
-                                <span>사실·관계·강도는 유지하고 영문 구조를 버린 뒤, 처음부터 자연스러운 한국어로 씁니다.</span>
-                                <span>두 사람의 말투를 방향별로 고정할 수 있으며 NPC 대사에는 적용하지 않습니다.</span>
-                                <span><b>사용 중에는 김홍진의 맛만 함께 적용되고 나머지 프롬프트는 전송하지 않습니다. 기존 설정값은 유지됩니다.</b></span>
-                            </div>
-                        </div>
-                    </details>
+
 
 
 
@@ -9513,68 +9573,7 @@ function developerSettingsMarkup() {
                         </div>
                     </details>
 
-                    <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-hongjin-enabled" ${settings.developerHongjinFlavorEnabled ? 'checked' : ''}>
-                                <span>김홍진의 맛 사용</span>
-                            </label>
 
-                            <div id="verba-developer-hongjin-controls" class="${settings.developerHongjinFlavorEnabled ? '' : 'verba-control-disabled'}">
-                                <div class="verba-help verba-hongjin-help">
-                                    <span><b>고정 성격 프롬프트</b></span>
-                                    <span>이 캐릭터는 능글맞고 장난기가 많은 성격이며 츤데레식, 능글맞은, 천박한 말투를 사용한다.</span>
-                                    <span>원문의 사실·행동·관계는 유지하면서 TARGET CHARACTER 대사를 이 성격과 말투로 과감하게 재창작합니다.</span>
-                                </div>
-
-                                <label for="verba-developer-hongjin-transcreation">초월 의역 강도</label>
-                                <select id="verba-developer-hongjin-transcreation" class="text_pole">
-                                    ${DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTranscreation === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-
-                                <label for="verba-developer-hongjin-profanity">욕설 농도</label>
-                                <select id="verba-developer-hongjin-profanity" class="text_pole">
-                                    ${DEVELOPER_HONGJIN_PROFANITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinProfanity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-                                <div class="verba-help">원문에 욕설이 없어도 캐릭터 말맛을 위해 감탄·강조·짜증·장난 자리에 욕설/비속어를 추가할 수 있습니다. 의미나 공격 대상을 새로 만들지는 않습니다.</div>
-
-                                <label for="verba-developer-hongjin-teasing">능글거림·약올리기</label>
-                                <select id="verba-developer-hongjin-teasing" class="text_pole">
-                                    ${DEVELOPER_HONGJIN_TEASING_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTeasing === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-
-                                <label for="verba-developer-hongjin-vulgarity">천박한 말맛</label>
-                                <select id="verba-developer-hongjin-vulgarity" class="text_pole">
-                                    ${DEVELOPER_HONGJIN_VULGARITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinVulgarity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-
-                                <label for="verba-developer-hongjin-playfulness">장난기</label>
-                                <select id="verba-developer-hongjin-playfulness" class="text_pole">
-                                    ${DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinPlayfulness === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-
-                                <label for="verba-developer-hongjin-age-band">연령대</label>
-                                <select id="verba-developer-hongjin-age-band" class="text_pole">
-                                    ${DEVELOPER_HONGJIN_AGE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinAgeBand === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-                                <div class="verba-help">대사의 어휘·호흡만 연령대에 맞춥니다. 20대 초반·후반은 무조건 현대적이고 캐주얼하게 말하며, 실제 나이·관계·호칭은 새로 만들지 않습니다.</div>
-
-                                <label for="verba-developer-hongjin-oppa-frequency">자기 자신을 ‘오빠’라고 부르는 빈도</label>
-                                <select id="verba-developer-hongjin-oppa-frequency" class="text_pole">
-                                    ${DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinOppaFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
-                                </select>
-                                <div class="verba-help">현재 캐릭터가 USER에게 직접 말할 때만 ‘내가’ 대신 ‘오빠가’처럼 자신을 지칭합니다. NPC·타인과의 대사에는 사용하지 않습니다.</div>
-
-                                <div class="verba-help verba-hongjin-help">
-                                    <span>E→K 아웃풋의 TARGET CHARACTER 직접 대사에만 적용합니다.</span>
-                                    <span>서술·USER/NPC 대사·K→E 인풋에는 적용하지 않습니다.</span>
-                                    <span>욕설/비속어/비꼼/장난은 추가할 수 있지만 새로운 사건·행동·관계·성적 의미·동의 변화·새로운 협박/비난 대상을 만들지는 않습니다.</span>
-                                    <span><b>욕설 농도와 관계없이 여성혐오·여성 비하·성별 대상화 표현은 사용하지 않습니다.</b></span>
-                                </div>
-                            </div>
-                        </div>
-                    </details>
 
                     <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
                 ` : `
@@ -10242,6 +10241,7 @@ function injectSettingsPanel() {
                         </details>
                     </div>
                 </details>
+                ${generalFlavorSettingsMarkup()}
                 ${developerSettingsMarkup()}
 
             </div>
@@ -10292,8 +10292,6 @@ function injectSettingsPanel() {
             settings.developerExtremeCompressedPromptEnabled = false;
             settings.qualityAuditEnabled = false;
             settings.developerRelationshipExperimentEnabled = false;
-            settings.developerHongjinFlavorEnabled = false;
-            settings.developerMadKoreanOutputEnabled = false;
             saveSettings();
             lastQualityAuditSummary = '개발자 모드 비활성화';
             refreshSettingsPanelForDeveloperMode();

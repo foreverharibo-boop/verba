@@ -165,8 +165,7 @@ for (const flags of [{}, { developerMadKoreanOutputEnabled: true }, { developerM
             absent(full, writingStart); absent(compact, writingStart);
             absent(full, 'NATURAL PERSON REFERENCES'); absent(compact, 'NATURAL PERSON REFERENCES');
         }
-        absent(build(core, { ...s, developerMode: false }), 'NATURAL PERSON REFERENCES');
-        absent(build(core, { ...s, developerMode: false }), writingStart);
+        equal(build(core, { ...s, developerMode: false }), build(core, { ...s, developerMode: true, developerCompressedPromptEnabled: false, developerExtremeCompressedPromptEnabled: false }), 'general flavors survive lock: ' + name);
         if (changedMadRule && name === 'full') assert.ok(compact.length < full.length * 0.65, 'Mad compression must remain substantial');
         measures.push({ mode: flags.developerHongjinFlavorEnabled ? 'mad+hongjin' : flags.developerMadKoreanOutputEnabled ? 'mad' : 'standard', name,
             long: [...full].length, compact: [...compact].length, reduction: +((1 - [...compact].length / [...full].length) * 100).toFixed(1) });
@@ -221,8 +220,7 @@ for (const age of ['early20s', 'late20s', 'thirties']) {
                         absent(prompt, 'A joking warlord may be');
                         contains(prompt, 'RE-ANCHOR THE SUBJECT:');
                     }
-                    absent(build(core, { ...settings, developerMode: false }), '/ CONTEMPORARY EVERYDAY SPEECH', 'developer off: ' + label);
-                    absent(build(core, { ...settings, developerMode: false }), 'TOP PRIORITY — NO MISOGYNY', 'developer ban gate: ' + label);
+                    equal(build(core, { ...settings, developerMode: false }), build(core, { ...settings, developerMode: true, developerCompressedPromptEnabled: false, developerExtremeCompressedPromptEnabled: false }), 'general voice and ban remain active: ' + label);
                     absent(build(core, { ...settings, developerHongjinFlavorEnabled: false }), '/ CONTEMPORARY EVERYDAY SPEECH', 'Hongjin off: ' + label);
                 }
             }
@@ -260,8 +258,7 @@ for (const strength of ['light', 'strong', 'maximum']) {
             }
             absent(build(core, { ...mad, developerHongjinFlavorEnabled: false }), 'MAD KOREAN + HONGJIN — VOICE-ONLY PRIORITY', 'Hongjin off: ' + label);
             const disabled = { ...mad, developerMode: false };
-            absent(build(core, disabled), 'MAD KOREAN + HONGJIN — VOICE-ONLY PRIORITY', 'developer off: ' + label);
-            if (baseline) equal(build(core, disabled), build(baseline, disabled), 'developer off unchanged: ' + label);
+            equal(build(core, disabled), build(core, { ...mad, developerCompressedPromptEnabled: false, developerExtremeCompressedPromptEnabled: false }), 'locked mode retains full flavor prompt: ' + label);
         }
     }
 }
@@ -360,7 +357,9 @@ equal(Object.hasOwn(preset, 'developerAccessFingerprint'), false);
 const offStart = index.indexOf("if (target.closest('#verba-developer-mode-off'))");
 const offBody = index.slice(offStart, index.indexOf('saveSettings();', offStart)).split('\n').slice(1).join('\n');
 Function('settings', offBody)(state);
-for (const key of ['developerMode', 'developerCompressedPromptEnabled', 'developerHongjinFlavorEnabled', 'developerMadKoreanOutputEnabled']) equal(state[key], false);
+for (const key of ['developerMode', 'developerCompressedPromptEnabled']) equal(state[key], false);
+equal(state.developerHongjinFlavorEnabled, preset.developerHongjinFlavorEnabled);
+equal(state.developerMadKoreanOutputEnabled, preset.developerMadKoreanOutputEnabled);
 state.developerMode = true; equal(state.developerCompressedPromptEnabled, false);
 equal(preset.developerCompressedPromptEnabled, true, 'preset asset must survive OFF');
 helpers.apply(preset); equal(state.developerCompressedPromptEnabled, true);

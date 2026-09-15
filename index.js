@@ -41,7 +41,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.47';
+const EXTENSION_VERSION = '0.5.48';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -9325,7 +9325,7 @@ function renderNameLockManager() {
 
 function generalFlavorSettingsMarkup() {
     return `
-                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
+                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details">
                         <summary>🇰🇷 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
@@ -9354,7 +9354,7 @@ function generalFlavorSettingsMarkup() {
                         </div>
                     </details>
 
-                    <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
+                    <details id="verba-developer-hongjin-lab" class="verba-tool-details">
                         <summary>🐯 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">

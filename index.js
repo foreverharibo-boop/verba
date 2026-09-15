@@ -41,7 +41,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.48';
+const EXTENSION_VERSION = '0.5.49';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -1828,6 +1828,19 @@ function applyPromptPresetTranslationSettings(value) {
     setControlValue('#verba-english-flavor-interjection', settings.englishFlavorInterjectionTone);
     setControlValue('#verba-english-flavor-meme', settings.englishFlavorMemeDensity);
     setCheckedValue('#verba-english-flavor-referent-repeat', settings.englishFlavorReduceReferentRepetition);
+
+    // General flavor controls now live outside the refreshed developer panel.
+    setCheckedValue('#verba-developer-mad-korean-enabled', settings.developerMadKoreanOutputEnabled);
+    setCheckedValue('#verba-developer-hongjin-enabled', settings.developerHongjinFlavorEnabled);
+    setControlValue('#verba-developer-mad-korean-target-user-register', settings.developerMadKoreanTargetToUserRegister);
+    setControlValue('#verba-developer-mad-korean-user-target-register', settings.developerMadKoreanUserToTargetRegister);
+    setControlValue('#verba-developer-hongjin-transcreation', settings.developerHongjinTranscreation);
+    setControlValue('#verba-developer-hongjin-profanity', settings.developerHongjinProfanity);
+    setControlValue('#verba-developer-hongjin-teasing', settings.developerHongjinTeasing);
+    setControlValue('#verba-developer-hongjin-vulgarity', settings.developerHongjinVulgarity);
+    setControlValue('#verba-developer-hongjin-playfulness', settings.developerHongjinPlayfulness);
+    setControlValue('#verba-developer-hongjin-age-band', settings.developerHongjinAgeBand);
+    setControlValue('#verba-developer-hongjin-oppa-frequency', settings.developerHongjinOppaFrequency);
 
     if (appliedDeveloperSettings) refreshSettingsPanelForDeveloperMode();
     syncDeveloperQualityControls(document.querySelector('#verba-settings'));

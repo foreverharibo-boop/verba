@@ -33,7 +33,7 @@ export function createOutputTiming({ now = () => performance.now(), date = () =>
         begin({ retranslation = false, mode = '', slot = '?' } = {}) {
             if (!enabled) return null;
             return { id: ++sequence, epoch, start: now(), at: date(), retranslation,
-                mode: ['일반', '압축', '미친압축'].includes(mode) ? mode : '일반',
+                mode: ['일반', '압축', '미친압축', '최소 프롬프트'].includes(mode) ? mode : '일반',
                 slot: ['A', 'B', 'C'].includes(slot) ? slot : '?', requests: [], waits: [], finishAt: null, end: null };
         },
         enqueue(job, options = {}) {

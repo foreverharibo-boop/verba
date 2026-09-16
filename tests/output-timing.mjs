@@ -159,6 +159,26 @@ for (const force of [false, true]) {
     assert.equal(recorder.latest().counts.total, 1); assert.equal(recorder.latest().durations.primary, 100);
     assert.equal(recorder.latest().durations.apply, 20); assert.equal(recorder.latest().status, '완료');
 }
+// Preserve the selected mode through the REAL recorder, summary and rendered log.
+// Minimal wins over compression only while the developer gate is open.
+for (const [developerMode, minimal, compressed, extreme, expectedMode] of [
+    [true, true, false, false, '최소 프롬프트'],
+    [true, true, true, true, '최소 프롬프트'],
+    [false, true, true, true, '일반'],
+    [true, false, true, false, '압축'],
+    [true, false, true, true, '미친압축'],
+    [true, false, false, false, '일반'],
+]) {
+    Object.assign(env.settings, { developerMode, developerMinimalPromptEnabled: minimal,
+        developerCompressedPromptEnabled: compressed, developerExtremeCompressedPromptEnabled: extreme });
+    for (const force of [false, true]) {
+        await translate(0, { force, automatic: !force });
+        assert.equal(seenTrace.mode, expectedMode);
+        assert.equal(recorder.latest().mode, expectedMode);
+        assert.ok(outputTimingText(recorder.latest()).includes(`프로필 A · ${expectedMode}\n`));
+    }
+}
+Object.assign(env.settings, { developerMode: true, developerMinimalPromptEnabled: true });
 applied = false; assert.equal(await translate(0, {}), undefined);
 assert.equal(recorder.latest().status, '실패');
 recorder.setEnabled(false); applied = true;
@@ -186,6 +206,7 @@ Function(...Object.keys(uiEnv), uiBody)(...Object.values(uiEnv));
 assert.match(element('#verba-output-timing').textContent, /AI 요청: 1회/);
 assert.equal(element('#verba-copy-output-timing').disabled, false);
 await element('#verba-copy-output-timing').handlers.click();
+assert.match(copied, /프로필 A · 최소 프롬프트/);
 assert.match(copied, /베르바 vtest/); assert.ok(!copied.includes('private'));
 element('#verba-debug-mode').handlers.change({ target: { checked: false } });
 assert.equal(recorder.latest(), null); assert.equal(element('#verba-copy-output-timing').disabled, true);

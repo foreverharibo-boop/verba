@@ -10,7 +10,6 @@ const nodes = new Map();
 const pairs = [
  ['output-split-count','developerOutputSplitCount',3],
  ['relationship-enabled','developerRelationshipExperimentEnabled',true],
- ['register-shift-monitor','developerRegisterShiftMonitor',true],
  ['speech-distance','developerSpeechDistance','casual'],
  ['target-user-register','developerTargetToUserRegister','banmal'],
  ['target-other-register','developerTargetToOtherRegister','jondaetmal'],
@@ -117,3 +116,11 @@ for(const dev of [false,true])for(const minimal of [false,true])for(const count 
  api.apply(preset);assert.equal(api.settings.developerOutputSplitCount,1);
 }
 console.log('PASS: independent split count in translation presets, prompt-only preservation, legacy defaults, invalid values, no developer auto-unlock.');
+
+// Retired monitor is ignored in older presets and never re-saved.
+const legacyMonitor=api.save('prompts_translation');
+legacyMonitor.translationSettings.developerSettings.developerRegisterShiftMonitor=true;
+api.apply(legacyMonitor);
+assert.equal(api.settings.developerRegisterShiftMonitor,undefined);
+assert.ok(!('developerRegisterShiftMonitor' in api.save('prompts_translation').translationSettings.developerSettings));
+console.log('PASS: removed register monitor does not return through legacy presets.');

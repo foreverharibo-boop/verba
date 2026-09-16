@@ -53,7 +53,7 @@ console.log('PASS: implicit defaults and explicit Hongjin/pair-register override
 for (const mode of [{}, {developerCompressedPromptEnabled:true}, {developerExtremeCompressedPromptEnabled:true}]) {
  for (const flavor of [{}, {englishFlavorEnabled:true}, {developerMadKoreanOutputEnabled:true}]) {
   const prompt=core.buildOutputPrompt(segmented,{...defaults,developerMode:true,...mode,...flavor},'',who);
-  for (const rule of ['Use context-correct senses.', 'actor/action/target/direction', 'Fix accidental repetition, contradictory motion and unnatural collocations before output; retain deliberate style.']) {
+  for (const rule of ['actor/action/target/direction', 'Render polysemy/metaphors by contextual meaning, not literal modifiers, using natural target-language collocations and subject–predicate agreement; retain deliberate style.']) {
    assert.equal(prompt.split(rule).length,2,'shared accuracy appears once: '+rule);
   }
  }

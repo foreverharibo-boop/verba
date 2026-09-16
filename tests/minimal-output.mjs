@@ -114,7 +114,7 @@ console.log('PASS: minimal-only prompt and actual entry path, lock/enable gates,
 // Real developer markup and delegated toggle, including escaped user text.
 const defs=between('const RELATION_TEMPERATURE_OPTIONS','const baseContext =');
 const escapeHtml=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary','lastRegisterShiftMonitorSummary',defs+'\n'+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn developerSettingsMarkup();');
+const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+'\n'+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn developerSettingsMarkup();');
 settings.developerMinimalPrompt='</textarea><script>TEST</script>';
 assert.match(markup(settings,escapeHtml,()=>'', '', ''), /&lt;\/textarea&gt;/);
 assert.ok(!markup({...settings,developerMode:false},escapeHtml,()=>'', '', '').includes('id="verba-developer-minimal-prompt"'));

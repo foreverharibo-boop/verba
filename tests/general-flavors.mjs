@@ -32,9 +32,9 @@ for (const oldFingerprint of [saved.developerAccessFingerprint, '', fingerprint]
 // General split/relationship controls stay visible; flavors require developer mode.
 const state = structuredClone(saved); state.developerMode = false;
 const markupCode=between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(');
-const render=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary','lastRegisterShiftMonitorSummary',definitions+'\n'+markupCode+'\nreturn {general:generalTranslationSettingsMarkup(),developer:developerSettingsMarkup()};');
-const {general:markup,developer:locked}=render(state,String,()=>'', '', '');
-const {general:markupOn,developer:unlocked}=render({...state,developerMode:true},String,()=>'', '', '');
+const render=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',definitions+'\n'+markupCode+'\nreturn {general:generalTranslationSettingsMarkup(),developer:developerSettingsMarkup()};');
+const {general:markup,developer:locked}=render(state,String,()=>'', '');
+const {general:markupOn,developer:unlocked}=render({...state,developerMode:true},String,()=>'', '');
 assert.equal(markup,markupOn);
 for(const id of ['output-split','relationship']) {
  assert.ok(markup.includes(`id="verba-developer-${id}-lab"`));

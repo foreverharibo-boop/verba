@@ -32,7 +32,7 @@ for (const oldFingerprint of [saved.developerAccessFingerprint, '', fingerprint]
 // General split/relationship controls stay visible; flavors require developer mode.
 const state = structuredClone(saved); state.developerMode = false;
 const markupCode=between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(');
-const render=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',definitions+'\n'+markupCode+'\nreturn {general:generalTranslationSettingsMarkup(),developer:developerSettingsMarkup()};');
+const render=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',definitions+'\n'+markupCode+'\nreturn {general:generalSplitSettingsMarkup()+generalRelationshipSettingsMarkup(),developer:developerSettingsMarkup()};');
 const {general:markup,developer:locked}=render(state,String,()=>'', '');
 const {general:markupOn,developer:unlocked}=render({...state,developerMode:true},String,()=>'', '');
 assert.equal(markup,markupOn);
@@ -49,8 +49,9 @@ for(const id of ['mad-korean','hongjin']) {
 }
 assert.ok(!markup.includes('verba-developer-lab"'));
 for(const value of ['maximum','late20s','often','banmal','jondaetmal']) assert.match(unlocked,new RegExp(`value="${value}" selected`));
-assert.ok(index.includes('${generalTranslationSettingsMarkup()}\n\n                <details id="verba-beginner-character-guide"'));
-assert.ok(index.indexOf('id="verba-english-flavor"') < index.indexOf('${generalTranslationSettingsMarkup()}'));
+assert.ok(index.includes('${generalSplitSettingsMarkup()}\n\n                <details id="verba-prompt-conflict-settings"'));
+assert.ok(index.indexOf('id="verba-expression-detail"') < index.indexOf('${generalRelationshipSettingsMarkup()}'));
+assert.ok(index.indexOf('${generalRelationshipSettingsMarkup()}') < index.indexOf('id="verba-korean-flavor"'));
 // Execute existing change branches with a locked mode: the UI keeps its old IDs
 // and setting keys so presets, saved values and change handlers need no migration.
 class Input {}

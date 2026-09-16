@@ -124,7 +124,7 @@ for(const value of ['1','2','3']){
 assert.equal(saved,3);
 const disable=between("        if (target.closest('#verba-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');
 Function('settings',disable)(settings);assert.equal(outputSplitCount(settings),3);assert.equal(settings.developerOutputSplitCount,3);
-const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn generalTranslationSettingsMarkup();');
+const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn generalSplitSettingsMarkup()+generalRelationshipSettingsMarkup();');
 assert.ok(markup(settings,String,()=>'', '').includes('verba-developer-output-split-count'));
 settings.developerMode=true;assert.match(markup(settings,String,()=>'', ''),/value="3" selected/);
 console.log('PASS: independent 1/2/3 split gate, full coverage, unchanged normal/compact/extreme prompts, scope isolation, whole-output planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI.');

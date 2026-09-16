@@ -44,7 +44,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.68';
+const EXTENSION_VERSION = '0.5.69';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -9366,7 +9366,7 @@ function developerFlavorSettingsMarkup() {
                     </details>`;
 }
 
-function generalTranslationSettingsMarkup() {
+function generalSplitSettingsMarkup() {
     return `
 <details id="verba-developer-output-split-lab" class="verba-tool-details">
                         <summary>분할 번역 <small>출력·전체 재번역</small></summary>
@@ -9381,6 +9381,11 @@ function generalTranslationSettingsMarkup() {
                         </div>
                     </details>
 
+                    `;
+}
+
+function generalRelationshipSettingsMarkup() {
+    return `
 <details id="verba-developer-relationship-lab" class="verba-tool-details">
                         <summary>말투·호칭 설정 <small>상대별 말투</small></summary>
                         <div class="verba-tool-details-content">
@@ -9871,6 +9876,8 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+                ${generalSplitSettingsMarkup()}
+
                 <details id="verba-prompt-conflict-settings" class="verba-tool-details">
                     <summary>프롬프트 충돌 확인 <small id="verba-prompt-conflict-count">충돌 없음</small></summary>
                     <div class="verba-tool-details-content">
@@ -9963,6 +9970,8 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+
+                ${generalRelationshipSettingsMarkup()}
 
                 <details id="verba-korean-flavor" class="verba-tool-details verba-korean-flavor">
                         <summary>🍚 한캐의 맛 <small>한국어 말맛 커스텀</small></summary>
@@ -10103,8 +10112,6 @@ function injectSettingsPanel() {
                             </div>
                         </div>
                     </details>
-
-                ${generalTranslationSettingsMarkup()}
 
                 <details id="verba-beginner-character-guide" class="verba-tool-details verba-beginner-character-guide">
                     <summary>신입 챗시 전용 <small>캐릭터 간편 설정 · 기본 OFF</small></summary>

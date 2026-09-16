@@ -10,7 +10,23 @@ export function bindPromptExpandEditors(panel) {
         const button = doc.createElement('button');
         button.type = 'button';
         button.className = 'menu_button verba-prompt-expand';
-        button.textContent = '⤢';
+        // Draw the icon directly: a Unicode arrow inherits the user's theme font
+        // and can become a tiny serif glyph on mobile.
+        const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        icon.setAttribute('viewBox', '0 0 24 24');
+        icon.setAttribute('width', '18');
+        icon.setAttribute('height', '18');
+        icon.setAttribute('aria-hidden', 'true');
+        icon.setAttribute('focusable', 'false');
+        const arrows = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
+        arrows.setAttribute('d', 'M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7');
+        arrows.setAttribute('fill', 'none');
+        arrows.setAttribute('stroke', 'currentColor');
+        arrows.setAttribute('stroke-width', '2');
+        arrows.setAttribute('stroke-linecap', 'round');
+        arrows.setAttribute('stroke-linejoin', 'round');
+        icon.append(arrows);
+        button.append(icon);
         button.title = `${title} 크게 편집`;
         button.setAttribute('aria-label', button.title);
         button.setAttribute('aria-haspopup', 'dialog');

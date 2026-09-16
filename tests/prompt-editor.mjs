@@ -45,7 +45,7 @@ class Element extends Events {
 }
 const viewport=new Events(); Object.assign(viewport,{width:390,height:844,offsetLeft:0,offsetTop:0});
 const win=new Events(); Object.assign(win,{Event,visualViewport:viewport,innerWidth:1280,innerHeight:900});
-const doc={defaultView:win,activeElement:null,createElement:tag=>new Element(tag,doc),getElementById:id=>doc.documentElement.querySelector('#'+id)};
+const doc={defaultView:win,activeElement:null,createElement:tag=>new Element(tag,doc),createElementNS:(ns,tag)=>{const el=new Element(tag,doc);el.namespaceURI=ns;return el;},getElementById:id=>doc.documentElement.querySelector('#'+id)};
 doc.documentElement=new Element('html',doc);
 const panel=doc.createElement('div');doc.documentElement.append(panel);
 const rows=[['global','globalPrompt'],['all-dialogue','allDialoguePrompt'],['dialogue','dialoguePrompt'],['other-dialogue','otherDialoguePrompt']];
@@ -68,7 +68,15 @@ Function('panel','settings','saveSettings','renderPromptConflictInspector','sche
 bindPromptExpandEditors(panel);
 const buttons=panel.querySelectorAll('.verba-prompt-expand');
 assert.equal(buttons.length,4,'idempotent binding');
-assert.ok(buttons.every(button=>button.textContent==='⤢' && button.attributes['aria-label'].includes('크게 편집')),'icon retains accessible label');
+assert.ok(buttons.every(button=>button.textContent==='' && button.attributes['aria-label'].includes('크게 편집')),'icon retains accessible label without a font glyph');
+for(const button of buttons) {
+    const icon=button.querySelector('svg');
+    assert.equal(icon.namespaceURI,'http://www.w3.org/2000/svg');
+    assert.equal(icon.attributes.viewBox,'0 0 24 24');
+    assert.equal(icon.attributes['aria-hidden'],'true');
+    assert.equal(icon.attributes.width,'18');
+    assert.equal(icon.querySelector('path').attributes.stroke,'currentColor');
+}
 let checks=1;
 for (const [i,[slug,key]] of rows.entries()) {
     const button=buttons[i],source=panel.querySelector(`#verba-${slug}-prompt`);

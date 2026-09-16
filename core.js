@@ -166,8 +166,8 @@ export function parseBannedWords(value) {
 }
 
 function developerGenderedInsultGuardEnabled(settings = {}) {
-    return settings?.developerMadKoreanOutputEnabled === true
-        || settings?.developerHongjinFlavorEnabled === true;
+    return settings?.developerMode === true && (settings?.developerMadKoreanOutputEnabled === true
+        || settings?.developerHongjinFlavorEnabled === true);
 }
 
 function findDeveloperGenderedInsults(text) {
@@ -1028,8 +1028,7 @@ const DEVELOPER_USER_ADDRESS_STRENGTH_RULES = {
 
 function developerRelationshipExperimentBlock(settings = {}, scope = 'narration') {
     if (
-        settings?.developerMode !== true
-        || settings?.developerRelationshipExperimentEnabled !== true
+        settings?.developerRelationshipExperimentEnabled !== true
         || scope !== 'target_dialogue'
     ) {
         return '';
@@ -1201,7 +1200,8 @@ const DEVELOPER_HONGJIN_OPPA_FREQUENCY_RULES = {
 
 function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
     if (
-        settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerMode !== true
+        || settings?.developerHongjinFlavorEnabled !== true
         || scope !== 'target_dialogue'
     ) {
         return '';
@@ -1359,7 +1359,8 @@ END KOREAN-ORIGINAL COMPOSITION`;
 
 function developerMadKoreanOutputBlock(settings = {}, scope = 'mixed') {
     if (
-        settings?.developerMadKoreanOutputEnabled !== true
+        settings?.developerMode !== true
+        || settings?.developerMadKoreanOutputEnabled !== true
     ) {
         return '';
     }
@@ -1425,7 +1426,7 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 }
 
 function madKoreanExclusiveEnabled(settings = {}) {
-    return settings?.developerMadKoreanOutputEnabled === true;
+    return settings?.developerMode === true && settings?.developerMadKoreanOutputEnabled === true;
 }
 
 function madKoreanHongjinVoiceRule(settings = {}) {
@@ -1493,7 +1494,8 @@ ${directionRule(`USER ${JSON.stringify(userName)}`, `TARGET CHARACTER ${JSON.str
 
 function madKoreanHongjinAudienceFirewall(settings = {}, speakerIdentity = {}, scope = 'mixed') {
     if (
-        settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerMode !== true
+        || settings?.developerHongjinFlavorEnabled !== true
         || !['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope)
     ) {
         return '';
@@ -2466,7 +2468,8 @@ const COMPACT_LOCALIZATION_RULES = {
 
 function extremeHongjinFlavorBlock(settings = {}, scope = 'mixed', speakerIdentity = {}) {
     if (
-        settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerMode !== true
+        || settings?.developerHongjinFlavorEnabled !== true
         || !['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope)
     ) return '';
 
@@ -2503,7 +2506,8 @@ function extremeHongjinFlavorBlock(settings = {}, scope = 'mixed', speakerIdenti
 
 function compactHongjinFlavorBlock(settings = {}, scope = 'mixed', speakerIdentity = {}) {
     if (
-        settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerMode !== true
+        || settings?.developerHongjinFlavorEnabled !== true
         || !['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope)
     ) return '';
 
@@ -2564,8 +2568,7 @@ ${madKoreanExclusiveEnabled(settings) ? '' : `${dialogueSubjectVocativeRule()}\n
 
 function compactRelationshipBlock(settings = {}, scope = 'mixed') {
     if (
-        settings?.developerMode !== true
-        || settings?.developerRelationshipExperimentEnabled !== true
+        settings?.developerRelationshipExperimentEnabled !== true
         || !['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope)
     ) return '';
     const address = String(settings.developerTargetToUserAddress || '').trim().slice(0, 40);

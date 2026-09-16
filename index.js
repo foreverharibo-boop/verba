@@ -43,7 +43,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.58';
+const EXTENSION_VERSION = '0.5.59';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -376,7 +376,7 @@ settings.developerMadKoreanUserToTargetRegister = DEVELOPER_MAD_KOREAN_REGISTER_
     : 'source';
 
 function madKoreanExclusiveMode() {
-    return settings.developerMadKoreanOutputEnabled === true;
+    return settings.developerMode === true && settings.developerMadKoreanOutputEnabled === true;
 }
 
 settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === settings.developerHongjinTranscreation)
@@ -1847,7 +1847,7 @@ function applyPromptPresetTranslationSettings(value) {
     setControlValue('#verba-english-flavor-meme', settings.englishFlavorMemeDensity);
     setCheckedValue('#verba-english-flavor-referent-repeat', settings.englishFlavorReduceReferentRepetition);
 
-    // General flavor controls now live outside the refreshed developer panel.
+    // Sync moved general controls explicitly; developer refresh only rebuilds its own panel.
     setCheckedValue('#verba-developer-mad-korean-enabled', settings.developerMadKoreanOutputEnabled);
     setCheckedValue('#verba-developer-hongjin-enabled', settings.developerHongjinFlavorEnabled);
     setControlValue('#verba-developer-mad-korean-target-user-register', settings.developerMadKoreanTargetToUserRegister);
@@ -1859,6 +1859,16 @@ function applyPromptPresetTranslationSettings(value) {
     setControlValue('#verba-developer-hongjin-playfulness', settings.developerHongjinPlayfulness);
     setControlValue('#verba-developer-hongjin-age-band', settings.developerHongjinAgeBand);
     setControlValue('#verba-developer-hongjin-oppa-frequency', settings.developerHongjinOppaFrequency);
+
+    setControlValue('#verba-developer-output-split-count', settings.developerOutputSplitCount);
+    setCheckedValue('#verba-developer-relationship-enabled', settings.developerRelationshipExperimentEnabled);
+    setCheckedValue('#verba-developer-register-shift-monitor', settings.developerRegisterShiftMonitor);
+    setControlValue('#verba-developer-speech-distance', settings.developerSpeechDistance);
+    setControlValue('#verba-developer-target-user-register', settings.developerTargetToUserRegister);
+    setControlValue('#verba-developer-target-other-register', settings.developerTargetToOtherRegister);
+    setControlValue('#verba-developer-target-user-address', settings.developerTargetToUserAddress);
+    setControlValue('#verba-developer-target-user-address-strength', settings.developerTargetToUserAddressStrength);
+    setControlValue('#verba-developer-target-user-address-frequency', settings.developerTargetToUserAddressFrequency);
 
     if (appliedDeveloperSettings) refreshSettingsPanelForDeveloperMode();
     syncDeveloperQualityControls(document.querySelector('#verba-settings'));
@@ -2230,18 +2240,18 @@ function renderCurrentAppliedRules() {
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['xxx미친압축xxx', settings.developerMode && settings.developerExtremeCompressedPromptEnabled === true ? 'ON' : 'OFF'],
-                ['미친 한출의 맛', settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
+                ['미친 한출의 맛', (settings.developerMode && settings.developerMadKoreanOutputEnabled) ? 'ON' : 'OFF'],
                 ['캐릭터 → USER 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanTargetToUserRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
                 ['USER → 캐릭터 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanUserToTargetRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
-                ['김홍진의 맛', settings.developerHongjinFlavorEnabled === true ? 'ON' : 'OFF'],
-                ['김홍진 연령대', settings.developerHongjinFlavorEnabled === true
+                ['김홍진의 맛', (settings.developerMode && settings.developerHongjinFlavorEnabled) ? 'ON' : 'OFF'],
+                ['김홍진 연령대', (settings.developerMode && settings.developerHongjinFlavorEnabled)
                     ? (DEVELOPER_HONGJIN_AGE_OPTIONS.find(option => option.value === settings.developerHongjinAgeBand)?.label || '미지정')
                     : '적용 안 함'],
-                ['김홍진 오빠 자칭', settings.developerHongjinFlavorEnabled === true
+                ['김홍진 오빠 자칭', (settings.developerMode && settings.developerHongjinFlavorEnabled)
                     ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
@@ -4230,8 +4240,7 @@ function runDeveloperRegisterShiftMonitor(segmented, translations, speakerScopes
     if (
         madKoreanExclusiveMode()
         ||
-        !settings.developerMode
-        || !settings.developerRelationshipExperimentEnabled
+        !settings.developerRelationshipExperimentEnabled
         || !settings.developerRegisterShiftMonitor
     ) {
         return { issues: [] };
@@ -9369,9 +9378,9 @@ function renderNameLockManager() {
 }
 
 
-function generalFlavorSettingsMarkup() {
+function developerFlavorSettingsMarkup() {
     return `
-                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details">
+                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🇰🇷 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
@@ -9400,7 +9409,7 @@ function generalFlavorSettingsMarkup() {
                         </div>
                     </details>
 
-                    <details id="verba-developer-hongjin-lab" class="verba-tool-details">
+                    <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🐯 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
@@ -9464,15 +9473,10 @@ function generalFlavorSettingsMarkup() {
                     </details>`;
 }
 
-function developerSettingsMarkup() {
+function generalTranslationSettingsMarkup() {
     return `
-        <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings" open>
-            <summary>개발자 모드 <small>${settings.developerMode ? '품질 검수 실험실' : '번호 입력'}</small></summary>
-            <div class="verba-tool-details-content">
-                ${settings.developerMode ? `
-                    <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
-                    <details id="verba-developer-output-split-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 분할 번역 실험 <small>출력·전체 재번역</small></summary>
+<details id="verba-developer-output-split-lab" class="verba-tool-details">
+                        <summary>분할 번역 <small>출력·전체 재번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label for="verba-developer-output-split-count">동시 번역 분할 수</label>
                             <select id="verba-developer-output-split-count" class="text_pole">
@@ -9480,72 +9484,12 @@ function developerSettingsMarkup() {
                             </select>
                             <div class="verba-help">최소 프롬프트와 독립 설정입니다. 한출·홍진 등 현재 적용 중인 지침을 유지하며 원문을 나눠 동시에 번역합니다. 최소 프롬프트를 켜면 그 모드의 지침을 사용합니다.</div>
                             <div class="verba-help">구간 수가 적으면 더 적게 나눕니다. 서버에 따라 3분할이 더 느릴 수 있고, 묶음 사이의 말투·용어가 달라질 수 있습니다. 화자별 분리·복구·검수 요청은 추가될 수 있습니다.</div>
-                            <div class="verba-help">인풋·선택 재번역은 제외합니다. 개발자 모드를 끄면 분할을 적용하지 않으며 선택값은 보관합니다.</div>
-                        </div>
-                    </details>
-                    <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 최소 프롬프트 실험 <small>출력·전체 재번역</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
-                                <span>최소 프롬프트 사용</span>
-                            </label>
-                            <label for="verba-developer-minimal-prompt">실험용 번역 지침</label>
-                            <textarea id="verba-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
-                            <div class="verba-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
-                            <div class="verba-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
-                            <div class="verba-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>
-                        </div>
-                    </details>
-                    ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
-
-                    <details id="verba-developer-compressed-prompt-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>❌️개발자 테스트용 사용 금지❌️ <small>프롬프트 압축 실험</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-compressed-prompt-enabled" ${settings.developerCompressedPromptEnabled ? 'checked' : ''}>
-                                <span>압축 프롬프트 사용</span>
-                            </label>
-                            <div class="verba-help">베르바 내부의 반복 지침만 짧게 합칩니다. 직접 작성한 프롬프트는 줄이지 않으며 번역 품질이 달라질 수 있는 테스트 기능입니다.</div>
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-extreme-compressed-prompt-enabled" ${settings.developerExtremeCompressedPromptEnabled ? 'checked' : ''}>
-                                <span>xxx미친압축xxx</span>
-                            </label>
-                            <div class="verba-help">한출·김홍진과 일반 출력·입력·재번역·복구·검수의 베르바 내부 지침을 극단적으로 줄입니다. 직접 작성한 지침 내용은 보존하며 결과 품질이 달라질 수 있습니다.</div>
+                            <div class="verba-help">인풋·선택 재번역은 제외합니다. 개발자 모드와 관계없이 선택한 분할 수를 적용합니다.</div>
                         </div>
                     </details>
 
-                    <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
-                                <span>품질 검수 사용</span>
-                            </label>
-                            <div class="verba-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
-
-                            <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}><span>의미 보존 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}><span>대명사·지칭 대상 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}><span>캐릭터 말투 유지 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}><span>번역투 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}><span>문맥 모순 검사</span></label>
-                            </div>
-
-                            <div class="verba-quality-audit-status-row">
-                                <span>최근 검수</span>
-                                <b id="verba-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
-                            </div>
-                            <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
-                        </div>
-                    </details>
-
-
-
-
-
-                    <details id="verba-developer-relationship-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 관계 번역 실험실 <small>개발자</small></summary>
+<details id="verba-developer-relationship-lab" class="verba-tool-details">
+                        <summary>관계 번역 실험실 <small>말투·호칭</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-developer-relationship-enabled" ${settings.developerRelationshipExperimentEnabled ? 'checked' : ''}>
@@ -9643,9 +9587,74 @@ function developerSettingsMarkup() {
                                 </section>
                             </div>
                         </div>
+                    </details>`;
+}
+
+function developerSettingsMarkup() {
+    return `
+        <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings" open>
+            <summary>개발자 모드 <small>${settings.developerMode ? '품질 검수 실험실' : '번호 입력'}</small></summary>
+            <div class="verba-tool-details-content">
+                ${settings.developerMode ? `
+                    <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+                    ${developerFlavorSettingsMarkup()}
+                    
+                    <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 최소 프롬프트 실험 <small>출력·전체 재번역</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
+                                <span>최소 프롬프트 사용</span>
+                            </label>
+                            <label for="verba-developer-minimal-prompt">실험용 번역 지침</label>
+                            <textarea id="verba-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
+                            <div class="verba-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
+                            <div class="verba-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
+                            <div class="verba-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>
+                        </div>
+                    </details>
+                    ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
+
+                    <details id="verba-developer-compressed-prompt-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>❌️개발자 테스트용 사용 금지❌️ <small>프롬프트 압축 실험</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-compressed-prompt-enabled" ${settings.developerCompressedPromptEnabled ? 'checked' : ''}>
+                                <span>압축 프롬프트 사용</span>
+                            </label>
+                            <div class="verba-help">베르바 내부의 반복 지침만 짧게 합칩니다. 직접 작성한 프롬프트는 줄이지 않으며 번역 품질이 달라질 수 있는 테스트 기능입니다.</div>
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-extreme-compressed-prompt-enabled" ${settings.developerExtremeCompressedPromptEnabled ? 'checked' : ''}>
+                                <span>xxx미친압축xxx</span>
+                            </label>
+                            <div class="verba-help">한출·김홍진과 일반 출력·입력·재번역·복구·검수의 베르바 내부 지침을 극단적으로 줄입니다. 직접 작성한 지침 내용은 보존하며 결과 품질이 달라질 수 있습니다.</div>
+                        </div>
                     </details>
 
+                    <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
+                                <span>품질 검수 사용</span>
+                            </label>
+                            <div class="verba-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
 
+                            <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}><span>의미 보존 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}><span>대명사·지칭 대상 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}><span>캐릭터 말투 유지 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}><span>번역투 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}><span>문맥 모순 검사</span></label>
+                            </div>
+
+                            <div class="verba-quality-audit-status-row">
+                                <span>최근 검수</span>
+                                <b id="verba-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
+                            </div>
+                            <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
+                        </div>
+                    </details>
 
                     <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
                 ` : `
@@ -10224,7 +10233,7 @@ function injectSettingsPanel() {
                         </div>
                     </details>
 
-                ${generalFlavorSettingsMarkup()}
+                ${generalTranslationSettingsMarkup()}
 
                 <details id="verba-beginner-character-guide" class="verba-tool-details verba-beginner-character-guide">
                     <summary>신입 챗시 전용 <small>캐릭터 간편 설정 · 기본 OFF</small></summary>
@@ -10365,7 +10374,6 @@ function injectSettingsPanel() {
             settings.developerCompressedPromptEnabled = false;
             settings.developerExtremeCompressedPromptEnabled = false;
             settings.qualityAuditEnabled = false;
-            settings.developerRelationshipExperimentEnabled = false;
             saveSettings();
             lastQualityAuditSummary = '개발자 모드 비활성화';
             refreshSettingsPanelForDeveloperMode();

@@ -1,7 +1,7 @@
 // Splitting changes scheduling only; prompt selection remains independent.
 export function outputSplitCount(settings = {}) {
     const count = Number(settings.developerOutputSplitCount);
-    return settings.developerMode === true && [2, 3].includes(count) ? count : 1;
+    return [2, 3].includes(count) ? count : 1;
 }
 
 // Keep complete targets in contiguous groups. Prefer nearby paragraph breaks.

@@ -8,6 +8,15 @@ class Select { value = ''; disabled = false; }
 class Textarea {}
 const nodes = new Map();
 const pairs = [
+ ['output-split-count','developerOutputSplitCount',3],
+ ['relationship-enabled','developerRelationshipExperimentEnabled',true],
+ ['register-shift-monitor','developerRegisterShiftMonitor',true],
+ ['speech-distance','developerSpeechDistance','casual'],
+ ['target-user-register','developerTargetToUserRegister','banmal'],
+ ['target-other-register','developerTargetToOtherRegister','jondaetmal'],
+ ['target-user-address','developerTargetToUserAddress','선배님'],
+ ['target-user-address-strength','developerTargetToUserAddressStrength','strict'],
+ ['target-user-address-frequency','developerTargetToUserAddressFrequency','often'],
  ['mad-korean-enabled','developerMadKoreanOutputEnabled',true],
  ['hongjin-enabled','developerHongjinFlavorEnabled',true],
  ['mad-korean-target-user-register','developerMadKoreanTargetToUserRegister','banmal'],
@@ -43,7 +52,7 @@ const check = expected => {
  for (const [id,key] of pairs) {
   assert.equal(api.settings[key],expected[key],key+' saved value');
   const el=nodes.get(`#verba-developer-${id}`);
-  assert.equal(el instanceof Input?el.checked:el.value,expected[key],key+' visible value');
+  assert.equal(el instanceof Input?el.checked:el.value,el instanceof Input?expected[key]:String(expected[key]),key+' visible value');
  }
  for (const name of ['mad-korean','hongjin']) {
   const enabled=nodes.get(`#verba-developer-${name}-enabled`).checked;

@@ -48,3 +48,14 @@ for(const mode of [{},{developerCompressedPromptEnabled:true},{developerExtremeC
  assert.ok(core.buildOutputPrompt(segmented,{...settings,developerMadKoreanUserToTargetRegister:'jondaetmal'},'',who).includes('USER→TARGET=natural 해요체'));
 }
 console.log('PASS: implicit defaults and explicit Hongjin/pair-register overrides in all three modes.');
+
+// Shared accuracy policy applies across built-in style/compression paths.
+for (const mode of [{}, {developerCompressedPromptEnabled:true}, {developerExtremeCompressedPromptEnabled:true}]) {
+ for (const flavor of [{}, {englishFlavorEnabled:true}, {developerMadKoreanOutputEnabled:true}]) {
+  const prompt=core.buildOutputPrompt(segmented,{...defaults,developerMode:true,...mode,...flavor},'',who);
+  for (const rule of ['Use context-correct senses.', 'actor/action/target/direction', 'Fix accidental repetition, contradictory motion and unnatural collocations before output; retain deliberate style.']) {
+   assert.equal(prompt.split(rule).length,2,'shared accuracy appears once: '+rule);
+  }
+ }
+}
+console.log('PASS: shared accuracy policy across built-in styles and compression modes.');

@@ -1,5 +1,5 @@
 {
-  "version": "0.5.67",
+  "version": "0.5.68",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -134,7 +134,7 @@
     {
       "check": "source-layout.mjs",
       "status": "PASS",
-      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.361 ms/local pass (container, not phone)."
+      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.350 ms/local pass (container, not phone)."
     },
     {
       "check": "source-map-selection.mjs",
@@ -143,12 +143,13 @@
     }
   ],
   "changed_files": [
+    "PROMPTS_KO.md",
     "README.md",
     "index.js",
     "manifest.json",
     "prompt-builders.js",
-    "tests/selection-range-only.mjs"
+    "tests/mad-recomposition.mjs"
   ],
-  "scope": "Selection-only retranslation context sends selected Korean and mapped source only; no surrounding text or full-source fallback",
+  "scope": "General and MAD Korean E-to-K prompts use source-language syntax/wording so every foreign source language receives the same naturalization or reauthoring rule",
   "live_mobile_test": false
 }

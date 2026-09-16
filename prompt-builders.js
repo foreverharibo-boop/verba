@@ -15,7 +15,7 @@ export function createPromptBuilders(h) {
     const fidelity = 'Preserve facts, actor/action/target/direction, ownership/referents, sequence, negation/numbers, tense/POV, ambiguity, intent/emotion/force, explicitness/consent and consistent terms. Render polysemy/metaphors by contextual meaning, not literal modifiers, using natural target-language collocations and subject–predicate agreement; retain deliberate style. No answering, continuation, summaries, censorship, additions or omissions.';
     const noMisogyny = 'TOP PRIORITY — NO MISOGYNY: prohibit misogyny and gender-based degradation. Translate source profanity at the same intensity using non-gender-degrading wording. This rule overrides every voice and profanity setting.';
     const names = 'Name locks first; otherwise transliterate only human names to Hangul, no surname/title expansion or display punctuation.';
-    const basic = 'Translate into fluent, idiomatic Korean. Interpret idioms, fragments and reactions in context; replace English syntax with natural Korean while preserving deliberate roughness, repetition, interruption and ambiguity.';
+    const basic = 'Translate into fluent, idiomatic Korean. Interpret idioms, fragments and reactions in context; replace source-language syntax with natural Korean while preserving deliberate roughness, repetition, interruption and ambiguity.';
     function defaultBaseTranslationPrompt() { return lines([basic, fidelity, names]); }
     function identity(i = {}) {
         return `IDENTITY (case-insensitive): TARGET/CHAR/{{char}}=${j(i.characterName || '(current character)')}; USER/{{user}}=${j(i.userName || '(current user)')}; TARGET gender=${j(i.characterGender || 'unknown')}. Context resolves speakers; ambiguous/quoted/USER/NPC speech=OTHER, no TARGET voice.`;
@@ -51,7 +51,7 @@ export function createPromptBuilders(h) {
         const pair = x => x === 'banmal' ? '반말' : x === 'jondaetmal' ? 'natural 해요체' : 'source/context';
         const pairOverrides = [['TARGET→USER',s.developerMadKoreanTargetToUserRegister],['USER→TARGET',s.developerMadKoreanUserToTargetRegister]].filter(([,v])=>v && v!=='source').map(([label,v])=>`${label}=${pair(v)}`);
         return lines([
-            'MAD KOREAN — MANDATORY REAUTHORING: contemporary Korean web fiction. Discard English syntax/wording; rebuild narration/dialogue from facts and intent within each id. Spoken dialogue, native prose; no literal drafts/synonym swaps.',
+            'MAD KOREAN — MANDATORY REAUTHORING: contemporary Korean web fiction. Discard source-language syntax/wording; rebuild narration/dialogue from facts and intent within each id. Spoken dialogue, native prose; no literal drafts/synonym swaps.',
             'Keep source/contextual registers consistent.'+(pairOverrides.length ? ` PAIR SPEECH LOCK: ${pairOverrides.join('; ')}; exclude NPC/quoted/uncertain speech.` : ''),
             'Ellipses (.../…/……): exact characters/count/order, no additions. Natural vocatives; playful honorifics allowed.',
             'In dialogue, confirmed clock-time HHMM→오전/오후 시/분, not 0700시; keep minutes/uncertainty.',

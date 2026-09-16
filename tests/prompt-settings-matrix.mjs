@@ -31,3 +31,20 @@ for(const mode of [{},{developerCompressedPromptEnabled:true},{developerExtremeC
  assert.equal(JSON.stringify(who),identityBefore);assert.equal(JSON.stringify(segmented),sourceBefore);assert.equal(JSON.stringify(base),settingsBefore);
 }
 console.log(`PASS: ${checks} option/mode sensitivity checks; settings, identity, source and custom notes preserved.`);
+
+// v.55: default controls are implicit; explicitly changed controls still travel.
+for(const mode of [{},{developerCompressedPromptEnabled:true},{developerExtremeCompressedPromptEnabled:true}]) {
+ const settings={...defaults,developerMode:true,...mode,developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:true};
+ const prompt=core.buildOutputPrompt(segmented,settings,'',who);
+ for(const key of ['profanity=natural','teasing=natural','vulgarity=natural','playfulness=natural','age=source','rewrite=']) assert.ok(!prompt.includes(key),'default redundancy removed: '+key);
+ for(const key of ['developerHongjinProfanity','developerHongjinTeasing','developerHongjinVulgarity','developerHongjinPlayfulness','developerHongjinAgeBand','developerHongjinOppaFrequency']) {
+  const outputs=options[key].map(({value})=>core.buildOutputPrompt(segmented,{...settings,[key]:value},'',who));
+  assert.equal(new Set(outputs).size,options[key].length,'MAD override effective: '+key);
+ }
+ assert.ok(prompt.includes('USER-DIRECTED INSULT FIREWALL'));
+ assert.ok(prompt.includes('do not add self-reference'));
+ assert.ok(core.buildOutputPrompt(segmented,{...settings,developerHongjinOppaFrequency:'often'},'',who).includes('TARGET (male only)→USER exclusively'));
+ assert.ok(core.buildOutputPrompt(segmented,{...settings,developerMadKoreanTargetToUserRegister:'banmal'},'',who).includes('TARGET→USER=반말'));
+ assert.ok(core.buildOutputPrompt(segmented,{...settings,developerMadKoreanUserToTargetRegister:'jondaetmal'},'',who).includes('USER→TARGET=natural 해요체'));
+}
+console.log('PASS: implicit defaults and explicit Hongjin/pair-register overrides in all three modes.');

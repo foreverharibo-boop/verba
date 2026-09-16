@@ -106,7 +106,7 @@ for (const gender of ['male', 'female', 'unknown']) {
 for (const mad of [false, true]) {
     for (const scope of ['mixed', 'narration', 'target_dialogue', 'other_dialogue', 'tagged_content']) {
         const flags = { developerMadKoreanOutputEnabled: mad };
-        has(scoped(flags, scope), 'Latin human names → Hangul');
+        has(scoped(flags, scope), 'transliterate only human names to Hangul');
         const p = scoped(flags, scope, null, { ...identity, nameLocks: [{ source: 'Alex', target: '알렉스고정' }] });
         has(p, '알렉스고정');
         has(p, 'FIXED-SPELLING PRIORITY');

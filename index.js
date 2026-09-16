@@ -4,6 +4,7 @@ import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTr
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
 import { collectSegmentResponse } from './response-parser.js';
+import { minimalOutputEnabled, translateMinimalOutput } from './minimal-output.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -41,7 +42,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.49';
+const EXTENSION_VERSION = '0.5.50';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -213,6 +214,8 @@ const DEFAULT_SETTINGS = {
     debugMode: false,
     developerMode: false,
     developerAccessFingerprint: '',
+    developerMinimalPromptEnabled: false,
+    developerMinimalPrompt: '자연스럽게 한국어로 번역하라.',
     developerCompressedPromptEnabled: false,
     developerExtremeCompressedPromptEnabled: false,
     qualityAuditEnabled: false,
@@ -332,6 +335,8 @@ if (
     settings.developerMode = false;
 }
 settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
+settings.developerMinimalPromptEnabled = settings.developerMinimalPromptEnabled === true;
+settings.developerMinimalPrompt = typeof settings.developerMinimalPrompt === 'string' ? settings.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt;
 settings.developerExtremeCompressedPromptEnabled = settings.developerExtremeCompressedPromptEnabled === true;
 if (settings.developerExtremeCompressedPromptEnabled) settings.developerCompressedPromptEnabled = false;
 settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
@@ -1073,6 +1078,8 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
     const extremeCompressed = raw.developerExtremeCompressedPromptEnabled === true;
 
     return {
+        developerMinimalPromptEnabled: raw.developerMinimalPromptEnabled === true,
+        developerMinimalPrompt: typeof raw.developerMinimalPrompt === 'string' ? raw.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt,
         developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true && !extremeCompressed,
         developerExtremeCompressedPromptEnabled: extremeCompressed,
         qualityAuditEnabled: raw.qualityAuditEnabled === true,
@@ -1116,6 +1123,8 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
 
 function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
     return normalizedPromptPresetDeveloperSettings({
+        developerMinimalPromptEnabled: source.developerMinimalPromptEnabled,
+        developerMinimalPrompt: source.developerMinimalPrompt,
         developerCompressedPromptEnabled: source.developerCompressedPromptEnabled,
         developerExtremeCompressedPromptEnabled: source.developerExtremeCompressedPromptEnabled,
         qualityAuditEnabled: source.qualityAuditEnabled,
@@ -1704,6 +1713,8 @@ function applyPromptPresetDeveloperSettings(value) {
     const next = normalizedPromptPresetDeveloperSettings(value);
     if (!next) return false;
 
+    settings.developerMinimalPromptEnabled = next.developerMinimalPromptEnabled;
+    settings.developerMinimalPrompt = next.developerMinimalPrompt;
     settings.qualityAuditEnabled = next.qualityAuditEnabled;
     settings.developerCompressedPromptEnabled = next.developerCompressedPromptEnabled;
     settings.developerExtremeCompressedPromptEnabled = next.developerExtremeCompressedPromptEnabled;
@@ -2071,6 +2082,16 @@ function currentRulesSimpleCard(title, rows = []) {
 function renderCurrentAppliedRules() {
     const host = document.querySelector('#verba-current-rules-content');
     if (!host) return;
+
+    if (minimalOutputEnabled(settings)) {
+        host.innerHTML = currentRulesSimpleCard('최소 프롬프트 실험 · 출력/전체 재번역', [
+            ['직접 지침', settings.developerMinimalPrompt.trim() || '자연스럽게 한국어로 번역하라.'],
+            ['함께 전송', '최소 JSON·구간·보호 토큰 규칙, 원문, 이름 토큰 대응표(있을 때), 이번 재번역 요구사항(있을 때)'],
+            ['일시 제외', '기존 프롬프트·한출/홍진·미세조정·금지어·화자 분류·용어 계획·AI 검수'],
+            ['유지', '이름 고정·원문 연결·코드 보호·형식 오류 복구. 인풋/선택 재번역은 기존 설정 적용'],
+        ]);
+        return;
+    }
 
     const relationEnabled = settings.relationTemperatureEnabled !== false;
     const relationLabel = optionLabel(RELATION_TEMPERATURE_OPTIONS, settings.relationTemperature);
@@ -4406,6 +4427,9 @@ async function runExperimentalQualityAudit({
 async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const initialSegmented = segmentSource(source, characterNameLocks);
+    if (minimalOutputEnabled(settings)) {
+        return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap });
+    }
     const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
         signal: options.signal,
         timing: options.timing,
@@ -5298,7 +5322,8 @@ async function translateMessage(messageId, options = {}) {
     const outputJobSlot = activeProfileSlot();
     const timing = outputTiming.begin({
         retranslation: options.force === true, slot: outputJobSlot,
-        mode: settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? '미친압축'
+        mode: minimalOutputEnabled(settings) ? '최소 프롬프트'
+            : settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? '미친압축'
             : settings.developerMode && settings.developerCompressedPromptEnabled ? '압축' : '일반',
     });
     let outputJobSuccess = null;
@@ -9438,6 +9463,20 @@ function developerSettingsMarkup() {
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+                    <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 최소 프롬프트 실험 <small>출력·전체 재번역</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
+                                <span>최소 프롬프트 사용</span>
+                            </label>
+                            <label for="verba-developer-minimal-prompt">실험용 번역 지침</label>
+                            <textarea id="verba-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
+                            <div class="verba-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
+                            <div class="verba-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
+                            <div class="verba-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>
+                        </div>
+                    </details>
                     ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
 
                     <details id="verba-developer-compressed-prompt-lab" class="verba-tool-details verba-developer-lab">
@@ -10302,6 +10341,7 @@ function injectSettingsPanel() {
 
         if (target.closest('#verba-developer-mode-off')) {
             settings.developerMode = false;
+            settings.developerMinimalPromptEnabled = false;
             settings.developerCompressedPromptEnabled = false;
             settings.developerExtremeCompressedPromptEnabled = false;
             settings.qualityAuditEnabled = false;
@@ -10324,6 +10364,13 @@ function injectSettingsPanel() {
     panel.addEventListener('change', event => {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
+
+        if (target.id === 'verba-developer-minimal-prompt-enabled' && target instanceof HTMLInputElement) {
+            settings.developerMinimalPromptEnabled = target.checked;
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
 
         if (target.id === 'verba-developer-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
             settings.developerCompressedPromptEnabled = target.checked;
@@ -11162,6 +11209,13 @@ function injectSettingsPanel() {
         if (!currentRulesDetails?.open) return;
         setTimeout(renderCurrentAppliedRules, 0);
     };
+    panel.addEventListener('input', event => {
+        const target = event.target;
+        if (target instanceof HTMLTextAreaElement && target.id === 'verba-developer-minimal-prompt') {
+            settings.developerMinimalPrompt = target.value;
+            saveSettings();
+        }
+    });
     panel.addEventListener('input', refreshCurrentRulesIfOpen);
     panel.addEventListener('change', refreshCurrentRulesIfOpen);
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createOutputTiming, outputTimingText } from '../timing.js';
+import { minimalOutputEnabled } from '../minimal-output.js';
 import { extractResponseText, parseSegmentResponse } from '../core.js';
 import { rememberRequestError, readErrorResponse } from '../diagnostics.js';
 import { collectSegmentResponse } from '../response-parser.js';
@@ -133,6 +134,7 @@ const context = { chat: [message] };
 let applied = true;
 let seenTrace;
 const lifecycleEnv = {
+    minimalOutputEnabled,
     settings: env.settings, outputTiming: recorder, performance: env.performance, AbortController,
     liveContext: () => context, isNameReplacementMessage: () => true, messageSource: m => m?.mes || '',
     isPredominantlyKorean: () => false, hasForeignText: () => true, currentRecord: () => null,

@@ -75,3 +75,20 @@ for (const devMode of [false,true]) {
  api.apply(legacy);check(desired);
 }
 console.log('PASS: preset JSON roundtrip, ON/OFF, all 9 choices, visible controls and disabled states, re-save, legacy and prompt-only, developer locked/unlocked.');
+
+// Minimal experiment settings roundtrip through the same translation preset.
+for(const dev of [false,true]) {
+ api.settings.developerMode=dev;
+ api.settings.developerMinimalPromptEnabled=true;
+ api.settings.developerMinimalPrompt='직접 지침\n두 번째 줄 </textarea>';
+ const preset=JSON.parse(JSON.stringify(api.save('prompts_translation')));
+ api.settings.developerMinimalPromptEnabled=false;
+ api.settings.developerMinimalPrompt='변경됨';
+ api.apply(preset);
+ assert.equal(api.settings.developerMinimalPromptEnabled,true);
+ assert.equal(api.settings.developerMinimalPrompt,'직접 지침\n두 번째 줄 </textarea>');
+ assert.equal(api.settings.developerMode,dev);
+ const promptOnly=api.save('prompts');api.apply(promptOnly);
+ assert.equal(api.settings.developerMinimalPromptEnabled,true);
+}
+console.log('PASS: minimal experiment flag/text persist in translation presets without unlocking developer mode.');

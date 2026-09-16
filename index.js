@@ -5,6 +5,7 @@ import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberReques
 import { createOutputTiming, outputTimingText } from './timing.js';
 import { collectSegmentResponse } from './response-parser.js';
 import { minimalOutputEnabled, translateMinimalOutput } from './minimal-output.js';
+import { outputSplitCount, runOutputBatches, createSplitRequestQueue } from './output-splitting.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -42,7 +43,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.52';
+const EXTENSION_VERSION = '0.5.53';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -214,6 +215,7 @@ const DEFAULT_SETTINGS = {
     debugMode: false,
     developerMode: false,
     developerAccessFingerprint: '',
+    developerOutputSplitCount: 1,
     developerMinimalPromptEnabled: false,
     developerMinimalPrompt: '자연스럽게 한국어로 번역하라.',
     developerCompressedPromptEnabled: false,
@@ -335,6 +337,7 @@ if (
     settings.developerMode = false;
 }
 settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
+settings.developerOutputSplitCount = [2, 3].includes(Number(settings.developerOutputSplitCount)) ? Number(settings.developerOutputSplitCount) : 1;
 settings.developerMinimalPromptEnabled = settings.developerMinimalPromptEnabled === true;
 settings.developerMinimalPrompt = typeof settings.developerMinimalPrompt === 'string' ? settings.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt;
 settings.developerExtremeCompressedPromptEnabled = settings.developerExtremeCompressedPromptEnabled === true;
@@ -596,6 +599,7 @@ const transientLockedMessages = new Set();
 const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
 const scopedParallelRequestQueue = [];
 let scopedParallelRequestActive = 0;
+const enqueueSplitOutputRequest = createSplitRequestQueue(3);
 let requestTail = Promise.resolve();
 let lastQualityAuditSummary = '아직 실행되지 않음';
 let lastRegisterShiftMonitorSummary = '아직 실행되지 않음';
@@ -1078,6 +1082,7 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
     const extremeCompressed = raw.developerExtremeCompressedPromptEnabled === true;
 
     return {
+        developerOutputSplitCount: [2, 3].includes(Number(raw.developerOutputSplitCount)) ? Number(raw.developerOutputSplitCount) : 1,
         developerMinimalPromptEnabled: raw.developerMinimalPromptEnabled === true,
         developerMinimalPrompt: typeof raw.developerMinimalPrompt === 'string' ? raw.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt,
         developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true && !extremeCompressed,
@@ -1123,6 +1128,7 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
 
 function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
     return normalizedPromptPresetDeveloperSettings({
+        developerOutputSplitCount: source.developerOutputSplitCount,
         developerMinimalPromptEnabled: source.developerMinimalPromptEnabled,
         developerMinimalPrompt: source.developerMinimalPrompt,
         developerCompressedPromptEnabled: source.developerCompressedPromptEnabled,
@@ -1713,6 +1719,7 @@ function applyPromptPresetDeveloperSettings(value) {
     const next = normalizedPromptPresetDeveloperSettings(value);
     if (!next) return false;
 
+    settings.developerOutputSplitCount = next.developerOutputSplitCount;
     settings.developerMinimalPromptEnabled = next.developerMinimalPromptEnabled;
     settings.developerMinimalPrompt = next.developerMinimalPrompt;
     settings.qualityAuditEnabled = next.qualityAuditEnabled;
@@ -2085,7 +2092,7 @@ function renderCurrentAppliedRules() {
 
     if (minimalOutputEnabled(settings)) {
         host.innerHTML = currentRulesSimpleCard('최소 프롬프트 실험 · 출력/전체 재번역', [
-            ['처리 방식', '두 묶음 동시 번역 후 순서대로 합침. 번역 구간이 하나면 1회 요청'],
+            ['처리 방식', outputSplitCount(settings) > 1 ? `${outputSplitCount(settings)}분할 동시 번역` : '분할 안 함'],
             ['직접 지침', settings.developerMinimalPrompt.trim() || '자연스럽게 한국어로 번역하라.'],
             ['함께 전송', '최소 JSON·구간·보호 토큰 규칙, 원문, 이름 토큰 대응표(있을 때), 이번 재번역 요구사항(있을 때)'],
             ['일시 제외', '기존 프롬프트·한출/홍진·미세조정·금지어·화자 분류·용어 계획·AI 검수'],
@@ -2889,7 +2896,9 @@ async function sendProfileRequest(prompt, options = {}) {
         };
 
         const queuedRequest = (
-            options.parallelRequest === true
+            options.splitRequest === true
+                ? enqueueSplitOutputRequest(executeRequest)
+                : options.parallelRequest === true
                 ? enqueueScopedParallelRequest(executeRequest)
                 : enqueueRequest(executeRequest)
         );
@@ -3930,6 +3939,17 @@ async function requestScopedGroupTranslations({
     }
 }
 async function requestScopedOutputTranslations(segmented, speakerScopes, options = {}) {
+    // Split only the initial translation request. Existing speaker isolation,
+    // prompts, full-message planning, repair and quality checks remain intact.
+    const splitCount = outputSplitCount(settings);
+    if (splitCount > 1 && !options.splitBatchCount) {
+        return runOutputBatches(segmented, splitCount, options, (segments, batchOptions) =>
+            requestScopedOutputTranslations({
+                ...segmented,
+                segments,
+                nameTokens: nameTokensForSegments(segmented, segments),
+            }, speakerScopes, batchOptions));
+    }
     const translations = new Map();
     const groups = segmentsGroupedByOutputScope(segmented.segments, speakerScopes);
     const strictIsolationNeeded = madKoreanExclusiveMode()
@@ -5322,7 +5342,7 @@ async function translateMessage(messageId, options = {}) {
     const outputJobStartedAt = performance.now();
     const outputJobSlot = activeProfileSlot();
     const timing = outputTiming.begin({
-        retranslation: options.force === true, slot: outputJobSlot,
+        retranslation: options.force === true, slot: outputJobSlot, splitCount: outputSplitCount(settings),
         mode: minimalOutputEnabled(settings) ? '최소 프롬프트'
             : settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? '미친압축'
             : settings.developerMode && settings.developerCompressedPromptEnabled ? '압축' : '일반',
@@ -9464,16 +9484,27 @@ function developerSettingsMarkup() {
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+                    <details id="verba-developer-output-split-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>🧪 분할 번역 실험 <small>출력·전체 재번역</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label for="verba-developer-output-split-count">동시 번역 분할 수</label>
+                            <select id="verba-developer-output-split-count" class="text_pole">
+                                ${[1, 2, 3].map(count => `<option value="${count}" ${Number(settings.developerOutputSplitCount) === count ? 'selected' : ''}>${count === 1 ? '분할 안 함' : `${count}분할`}</option>`).join('')}
+                            </select>
+                            <div class="verba-help">최소 프롬프트와 독립 설정입니다. 한출·홍진 등 현재 적용 중인 지침을 유지하며 원문을 나눠 동시에 번역합니다. 최소 프롬프트를 켜면 그 모드의 지침을 사용합니다.</div>
+                            <div class="verba-help">구간 수가 적으면 더 적게 나눕니다. 서버에 따라 3분할이 더 느릴 수 있고, 묶음 사이의 말투·용어가 달라질 수 있습니다. 화자별 분리·복구·검수 요청은 추가될 수 있습니다.</div>
+                            <div class="verba-help">인풋·선택 재번역은 제외합니다. 개발자 모드를 끄면 분할을 적용하지 않으며 선택값은 보관합니다.</div>
+                        </div>
+                    </details>
                     <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🧪 최소 프롬프트 실험 <small>출력·전체 재번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
-                                <span>최소 프롬프트 · 2분할 동시 번역</span>
+                                <span>최소 프롬프트 사용</span>
                             </label>
                             <label for="verba-developer-minimal-prompt">실험용 번역 지침</label>
                             <textarea id="verba-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
-                            <div class="verba-help">원문을 두 묶음으로 나눠 동시에 번역합니다. 번역 구간이 하나면 한 번만 요청합니다. 서버에 따라 속도 차이가 있으며, 두 묶음의 말투가 달라질 수 있습니다.</div>
                             <div class="verba-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
                             <div class="verba-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
                             <div class="verba-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>
@@ -10366,6 +10397,13 @@ function injectSettingsPanel() {
     panel.addEventListener('change', event => {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
+
+        if (target.id === 'verba-developer-output-split-count' && target instanceof HTMLSelectElement) {
+            settings.developerOutputSplitCount = [2, 3].includes(Number(target.value)) ? Number(target.value) : 1;
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
 
         if (target.id === 'verba-developer-minimal-prompt-enabled' && target instanceof HTMLInputElement) {
             settings.developerMinimalPromptEnabled = target.checked;

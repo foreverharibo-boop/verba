@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createOutputTiming, outputTimingText } from '../timing.js';
+import { outputSplitCount, createSplitRequestQueue } from '../output-splitting.js';
 import { minimalOutputEnabled, translateMinimalOutput } from '../minimal-output.js';
 import { extractResponseText, parseSegmentResponse, segmentSource } from '../core.js';
 import { rememberRequestError, readErrorResponse } from '../diagnostics.js';
@@ -60,13 +61,14 @@ const slice = (start, end) => index.slice(index.indexOf(start), index.indexOf(en
 let provider = async () => ({ content: 'ok' });
 let queue = execute => execute();
 let parallelQueue = execute => execute();
+let splitQueue = createSplitRequestQueue(3);
 let fallbacks = [];
 const env = {
     outputTiming: recorder, settings: { debugMode: true, profileId: 'a', timeoutSeconds: 20 },
     profileSlotForId: () => 'A', profileList: () => [{ id: 'a' }, { id: 'b' }],
     performance: { now: () => time }, AbortController, Promise, setTimeout, clearTimeout, VERBA_MAX_TOKENS: 1000,
     liveContext: () => ({ ConnectionManagerRequestService: { sendRequest: (...args) => provider(...args) } }),
-    enqueueRequest: execute => queue(execute), enqueueScopedParallelRequest: execute => parallelQueue(execute),
+    enqueueRequest: execute => queue(execute), enqueueScopedParallelRequest: execute => parallelQueue(execute), enqueueSplitOutputRequest: execute => splitQueue(execute),
     extractResponseText, parseSegmentResponse, rememberRequestError, readErrorResponse,
     collectSegmentResponse, recordSegmentRecovery: () => null, finishSegmentRecovery: () => {},
     recordProfileAttempt: () => {}, abortError: () => new DOMException('cancel', 'AbortError'),
@@ -117,7 +119,7 @@ return enqueueScopedParallelRequest;
 parallelQueue = actualParallelQueue;
 queue = () => { throw Error('minimal halves must not use serial queue'); };
 const splitSource = segmentSource('First paragraph.\n\nSecond paragraph.');
-const minimalSettings = { developerMinimalPrompt: '자연스럽게 한국어로 번역하라.' };
+const minimalSettings = { developerMode: true, developerOutputSplitCount: 2, developerMinimalPrompt: '자연스럽게 한국어로 번역하라.' };
 let deliveries = [];
 provider = async (_profile, messages) => {
     const targets = JSON.parse(messages[0].content.split('TARGETS\n')[1]);
@@ -134,6 +136,17 @@ r=recorder.latest();assert.equal(r.counts.total,2);assert.equal(r.durations.prim
 assert.equal(r.rows.reduce((sum,row)=>sum+row.responseMs,0),300);
 assert.match(outputTimingText(r),/본 번역 \(1\/2\)/);
 assert.match(outputTimingText(r),/본 번역 \(2\/2\)/);
+// Three-part transport actually starts all three, with correct diagnostics.
+const thirdSource=segmentSource('First part.\n\nSecond part.\n\nThird part.');
+time=0;deliveries=[];
+const tripleJob=recorder.begin({slot:'A',mode:'최소 프롬프트',splitCount:3});
+const tripleWork=translateMinimalOutput(thirdSource,{...minimalSettings,developerOutputSplitCount:3},{timing:tripleJob},{requestSegments:api.requestSegments,buildSourceMap:()=>[]});
+await new Promise(resolve=>setImmediate(resolve));assert.equal(deliveries.length,3);
+time=100;deliveries[2]();time=200;deliveries[1]();time=300;deliveries[0]();
+await tripleWork;recorder.finish(tripleJob,'완료');
+assert.equal(recorder.latest().counts.total,3);assert.equal(recorder.latest().durations.primary,300);
+const tripleLog=outputTimingText(recorder.latest());assert.match(tripleLog,/최소 프롬프트 · 3분할/);
+for(const i of [1,2,3])assert.ok(tripleLog.includes(`본 번역 (${i}/3)`));
 // Bad JSON in half 1 retries only half 1; half 2's result is reused.
 let halfCalls = [0,0];
 provider=async(_profile,messages)=>{
@@ -179,7 +192,7 @@ const context = { chat: [message] };
 let applied = true;
 let seenTrace;
 const lifecycleEnv = {
-    minimalOutputEnabled,
+    minimalOutputEnabled, outputSplitCount,
     settings: env.settings, outputTiming: recorder, performance: env.performance, AbortController,
     liveContext: () => context, isNameReplacementMessage: () => true, messageSource: m => m?.mes || '',
     isPredominantlyKorean: () => false, hasForeignText: () => true, currentRecord: () => null,

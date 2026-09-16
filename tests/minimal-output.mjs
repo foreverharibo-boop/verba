@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { minimalOutputEnabled, buildMinimalOutputPrompt, translateMinimalOutput, splitMinimalOutputSegments } from '../minimal-output.js';
+import { minimalOutputEnabled, buildMinimalOutputPrompt, translateMinimalOutput } from '../minimal-output.js';
+import { splitOutputSegments } from '../output-splitting.js';
+const splitMinimalOutputSegments = segmented => splitOutputSegments(segmented, 2);
 import { segmentSource, restoreProtected, assembleTranslation, buildOutputPrompt } from '../core.js';
 import { collectSegmentResponse } from '../response-parser.js';
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const between=(a,b)=>index.slice(index.indexOf(a),index.indexOf(b,index.indexOf(a)));
 const buildSourceMap=Function('restoreProtected', between('function escapeRegularExpression(', 'function repairIndivisibleIdentityNames(') + between('function hasKoreanFinalConsonant(', 'function outputScopeForSegment(') + between('function restoredSegmentText(', 'const CONSISTENCY_ROLE_TERMS')+'\nreturn buildSourceMap;')(restoreProtected);
-const settings={developerMode:true,developerMinimalPromptEnabled:true,developerMinimalPrompt:'자연스럽게 한국어로 번역하라.',
+const settings={developerMode:true,developerOutputSplitCount:2,developerMinimalPromptEnabled:true,developerMinimalPrompt:'자연스럽게 한국어로 번역하라.',
  developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:true,developerExtremeCompressedPromptEnabled:true,
  qualityAuditEnabled:true,developerRelationshipExperimentEnabled:true,globalPrompt:'GLOBAL_SENTINEL',dialoguePrompt:'VOICE_SENTINEL',bannedWords:'번역'};
 for (const dev of [false,true]) for (const toggle of [false,true]) assert.equal(minimalOutputEnabled({...settings,developerMode:dev,developerMinimalPromptEnabled:toggle}),dev&&toggle);
@@ -33,6 +35,13 @@ assert.equal(calls.length,2);assert.ok(calls.every(c=>c.opts.parallelRequest));a
 assert.ok(result.sourceMap.length>0);assert.ok(result.sourceMap.some(r=>r.source.includes('Hong-jin')));
 for(const row of result.sourceMap) assert.ok(result.translation.slice(row.start,row.end));
 assert.deepEqual(settings,before);
+for(const count of [1,2,3]){
+ calls=[];
+ const merged=await translateMinimalOutput(segmented,{...settings,developerOutputSplitCount:count},{},{requestSegments,buildSourceMap});
+ assert.equal(calls.length,count);
+ assert.equal(merged.translation,result.translation);assert.deepEqual(merged.sourceMap,result.sourceMap);
+}
+
 // Actual entry point must branch before any optional planning, classification,
 // banned-word repair or quality audit, even when all those options are enabled.
 const route=Function('settings','normalizedCharacterNameLocks','segmentSource','minimalOutputEnabled','translateMinimalOutput','requestSegments','buildSourceMap','planRepeatedRoleTermLocks',between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;');
@@ -70,7 +79,7 @@ assert.equal(splitMinimalOutputSegments(segmentSource('He waited. "Here."')).len
 let releases=[], received=[];
 const inFlight=translateMinimalOutput(balanced,settings,{oneTimeInstruction:'KEEP_ONETIME'}, {
  buildSourceMap, requestSegments:(prompt,ss,opts)=>{
-  assert.equal(opts.parallelRequest,true);assert.equal(opts.minimalBatchCount,2);
+  assert.equal(opts.parallelRequest,true);assert.equal(opts.splitBatchCount,2);
   assert.match(prompt,/KEEP_ONETIME/);received.push(ss);
   return new Promise(resolve=>releases.push(()=>resolve(new Map(ss.map(x=>[x.id,`번역_${x.id}`])))));
  }});
@@ -93,7 +102,7 @@ assert.equal(started,2);cancel.abort();await assert.rejects(cancellation,{name:'
 let siblingAborted=false;
 await assert.rejects(translateMinimalOutput(balanced,settings,{}, {
  buildSourceMap:()=>{throw Error('partial result must not be applied');},
- requestSegments:(_p,_ss,opts)=>opts.minimalBatchIndex===1?Promise.reject(Error('FINAL_FAILURE')):
+ requestSegments:(_p,_ss,opts)=>opts.splitBatchIndex===1?Promise.reject(Error('FINAL_FAILURE')):
  new Promise((_resolve,reject)=>opts.signal.addEventListener('abort',()=>{siblingAborted=true;reject(new DOMException('cancel','AbortError'));},{once:true}))
 }),/FINAL_FAILURE/);assert.equal(siblingAborted,true);
 calls=[];const codeOnly=segmentSource('```js\nconst n = 1;\n```');

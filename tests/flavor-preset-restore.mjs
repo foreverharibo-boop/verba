@@ -92,3 +92,19 @@ for(const dev of [false,true]) {
  assert.equal(api.settings.developerMinimalPromptEnabled,true);
 }
 console.log('PASS: minimal experiment flag/text persist in translation presets without unlocking developer mode.');
+
+// Split selection persists independently of minimal mode and developer access.
+for(const dev of [false,true])for(const minimal of [false,true])for(const count of [1,2,3]){
+ Object.assign(api.settings,{developerMode:dev,developerMinimalPromptEnabled:minimal,developerOutputSplitCount:count});
+ const preset=JSON.parse(JSON.stringify(api.save('prompts_translation')));
+ assert.equal(preset.translationSettings.developerSettings.developerOutputSplitCount,count);
+ Object.assign(api.settings,{developerOutputSplitCount:1,developerMinimalPromptEnabled:!minimal});
+ api.apply(preset);assert.equal(api.settings.developerOutputSplitCount,count);
+ assert.equal(api.settings.developerMinimalPromptEnabled,minimal);assert.equal(api.settings.developerMode,dev);
+ api.apply(api.save('prompts'));assert.equal(api.settings.developerOutputSplitCount,count);
+ const legacy=structuredClone(preset);delete legacy.translationSettings.developerSettings.developerOutputSplitCount;
+ api.apply(legacy);assert.equal(api.settings.developerOutputSplitCount,1);
+ preset.translationSettings.developerSettings.developerOutputSplitCount=99;
+ api.apply(preset);assert.equal(api.settings.developerOutputSplitCount,1);
+}
+console.log('PASS: independent split count in translation presets, prompt-only preservation, legacy defaults, invalid values, no developer auto-unlock.');

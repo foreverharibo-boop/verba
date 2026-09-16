@@ -14,8 +14,8 @@ function describe(options) {
     const kind = retry ? 'retry' : /repair|:single$/.test(stage) ? 'repair' : PRIMARY.test(stage) ? 'primary' : 'aux';
     const reason = options.fallback ? '대체 프로필' : Number(options.retryAttempt) > 0 ? '요청 오류 재시도'
         : Number(options.segmentAttempt) > 0 ? '응답 형식·구간 누락 재시도' : '';
-    const batch = options.minimalBatchCount === 2 && [1, 2].includes(options.minimalBatchIndex)
-        ? ` (${options.minimalBatchIndex}/2)` : '';
+    const batch = [2, 3].includes(options.splitBatchCount) && Number.isInteger(options.splitBatchIndex) && options.splitBatchIndex >= 1 && options.splitBatchIndex <= options.splitBatchCount
+        ? ` (${options.splitBatchIndex}/${options.splitBatchCount})` : '';
     return { kind, label: label + batch, reason, slot: ['A', 'B', 'C'].includes(options.profileSlot) ? options.profileSlot : '?' };
 }
 
@@ -32,9 +32,10 @@ export function createOutputTiming({ now = () => performance.now(), date = () =>
             epoch += 1;
             latest = null;
         },
-        begin({ retranslation = false, mode = '', slot = '?' } = {}) {
+        begin({ retranslation = false, mode = '', slot = '?', splitCount = 1 } = {}) {
             if (!enabled) return null;
             return { id: ++sequence, epoch, start: now(), at: date(), retranslation,
+                splitCount: [2, 3].includes(splitCount) ? splitCount : 1,
                 mode: ['일반', '압축', '미친압축', '최소 프롬프트'].includes(mode) ? mode : '일반',
                 slot: ['A', 'B', 'C'].includes(slot) ? slot : '?', requests: [], waits: [], finishAt: null, end: null };
         },
@@ -99,7 +100,7 @@ function summarize(job, status) {
     }
     const sent = job.requests.filter(r => r.sent != null);
     return {
-        at: job.at, status, mode: job.mode, slot: job.slot, retranslation: job.retranslation,
+        at: job.at, status, mode: job.mode, slot: job.slot, retranslation: job.retranslation, splitCount: job.splitCount,
         totalMs: job.end - job.start, durations,
         counts: { total: sent.length, repair: sent.filter(r => r.kind === 'repair').length,
             retry: sent.filter(r => r.kind === 'retry').length, aux: sent.filter(r => r.kind === 'aux').length },
@@ -117,7 +118,7 @@ export function outputTimingText(record) {
     const d = record.durations;
     return [
         `마지막 출력 ${record.retranslation ? '재번역' : '번역'} · ${record.status} · 총 ${seconds(record.totalMs)}`,
-        `${record.at} · 프로필 ${record.slot} · ${record.mode}`,
+        `${record.at} · 프로필 ${record.slot} · ${record.mode}${record.splitCount > 1 ? ` · ${record.splitCount}분할` : ''}`,
         `요청 전 준비·기타 처리: ${seconds(d.other)}`,
         `베르바 요청 대기열: ${seconds(d.queue)}`,
         `본 번역 응답 대기: ${seconds(d.primary)}`,

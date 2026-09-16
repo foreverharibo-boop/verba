@@ -53,8 +53,8 @@ assert.equal(core.resolveOutputSpeakerIdentity({userName:'Dr. A.'}, locks).userN
 assert.equal(core.resolveOutputSpeakerIdentity({userName:'담은.'}, [{source:'담은',target:'다미'}, {source:'담은.',target:'다솜'}]).userName, '담은');
 assert.equal(core.resolveOutputSpeakerIdentity({userName:'Dam-eun'}, [{source:'Dam-eun',target:'담은.'}]).userName, '담은.'); // User-saved literal untouched.
 const attribution = core.buildSpeakerAttributionPrompt(segmented, resolved);
-check(attribution.includes('USER: "Dam-eun"'), 'original user label retained for classification');
-check(attribution.includes('TARGET CHARACTER: "Hong-jin"'), 'original character label retained for classification');
+check(attribution.includes('USER/{{user}}="Dam-eun"'), 'original user label retained for classification');
+check(attribution.includes('TARGET/CHAR/{{char}}="Hong-jin"'), 'original character label retained for classification');
 const routes = ['full', 'narration', 'target_dialogue', 'other_dialogue', 'tagged_content', 'selection', 'selectionDialogue', 'selectionCandidates', 'multi', 'qa', 'bannedRepair', 'tokenRepair', 'untranslatedRepair'];
 for (const developerMode of [false, true]) for (const developerCompressedPromptEnabled of [false,true])
 for (const developerMadKoreanOutputEnabled of [false,true]) for (const developerHongjinFlavorEnabled of [false,true]) {

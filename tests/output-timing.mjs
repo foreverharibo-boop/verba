@@ -150,7 +150,7 @@ for(const i of [1,2,3])assert.ok(tripleLog.includes(`본 번역 (${i}/3)`));
 // Bad JSON in half 1 retries only half 1; half 2's result is reused.
 let halfCalls = [0,0];
 provider=async(_profile,messages)=>{
- const targets=JSON.parse(messages[0].content.split('TARGETS\n')[1].split('\n\nYour previous response')[0]);
+ const targets=JSON.parse(messages[0].content.split('TARGETS\n')[1].split('\n\nRetry ')[0]);
  const half=targets[0].id===splitSource.segments[0].id?0:1;
  halfCalls[half]++;time+=10;
  if(half===0&&halfCalls[half]===1)return {content:'bad JSON'};

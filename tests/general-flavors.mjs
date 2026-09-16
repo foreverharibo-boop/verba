@@ -77,8 +77,8 @@ for (const mad of [false, true]) for (const hongjin of [false, true]) {
     assert.equal(core.buildOutputPrompt(segmented, { ...s, developerMode: true }, '', identity), ordinary);
     assert.equal(core.buildOutputPrompt(segmented, { ...s, developerExtremeCompressedPromptEnabled: true, developerCompressedPromptEnabled: true }, '', identity), ordinary);
     assert.equal(core.buildInputPrompt('안녕', s, 'male', identity), core.buildInputPrompt('안녕', defaults, 'male', identity));
-    assert.equal(ordinary.includes('SCENE-FIRST RECOMPOSITION:'), mad);
-    assert.equal(ordinary.includes('DEVELOPER KIM HONGJIN FLAVOR'), hongjin);
+    assert.equal(ordinary.includes('MAD KOREAN — MANDATORY REAUTHORING'), mad);
+    assert.equal(ordinary.includes('KIM HONG-JIN VOICE'), hongjin);
 }
 console.log('PASS: new password, old-session relock without setting loss, general controls/handlers, flavor independence and developer-only gates (local mocks).');
 

@@ -43,7 +43,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.53';
+const EXTENSION_VERSION = '0.5.54';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3136,14 +3136,8 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
         const repair = attempt
             ? `
 
-Your previous response was invalid or incomplete.
-This is retry ${attempt}/${maxRetries}.
-KEEP all previously successful segment translations unchanged on the client side.
-Return STRICT JSON only for the STILL-MISSING segment ids listed below.
-STILL-MISSING IDS: ${JSON.stringify(missingIds)}
-Do not return already completed ids.
-Include every still-missing id exactly once.
-Do not add markdown fences, commentary, explanations, or extra ids.`
+Retry ${attempt}/${maxRetries}: prior JSON was invalid/incomplete. Override the target list: return ONLY these still-missing ids, each once, in the same JSON schema. No fences/commentary/extra ids. Completed translations are retained locally.
+STILL-MISSING IDS: ${JSON.stringify(missingIds)}`
             : '';
 
         try {
@@ -3205,10 +3199,7 @@ async function requestSelectionCandidates(prompt, options = {}) {
         const repair = attempt
             ? `
 
-Your previous response was invalid or incomplete.
-This is retry ${attempt}/${maxRetries}.
-Return STRICT JSON only with exactly three distinct candidates.
-Do not add markdown fences, commentary, or explanations.`
+Retry ${attempt}/${maxRetries}: correct invalid/incomplete JSON. Return exactly three distinct candidates in the required schema; no fences/commentary.`
             : '';
 
         try {
@@ -8330,11 +8321,7 @@ async function retranslateSelectionBundle() {
         if (unchangedIds.length) {
             const changedPrompt = `${prompt}\n\nMANDATORY BUNDLE RETRANSLATION CORRECTION
 Your previous response echoed the existing Korean wording for these ids: ${JSON.stringify(unchangedIds)}.
-- Return every required id again in the same JSON schema.
-- For each listed id, the translation MUST differ from selected_korean after Unicode and whitespace normalization.
-- Do not merely change spacing or punctuation.
-- Rephrase wording, syntax, or rhythm while preserving the exact source meaning, referents, tense, intensity, explicitness, and grammatical role.
-- Follow the user's one-time request. Do not return an unchanged selection.`;
+Return all required ids in the same schema. For listed ids, rephrase beyond Unicode/spacing/punctuation changes; retain meaning, referents, tense, force, explicitness and grammar role. Apply the one-time instruction.`;
             const retryResult = await requestSegments(changedPrompt, expected, {
                 signal: controller.signal,
                 stage: 'multi-selection-retranslation-unchanged-retry',

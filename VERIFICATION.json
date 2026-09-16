@@ -1,5 +1,5 @@
 {
-  "version": "0.5.63",
+  "version": "0.5.64",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -109,7 +109,7 @@
     {
       "check": "prompt-editor.mjs",
       "status": "PASS",
-      "output": "PASS: 76 DOM/event assertions; actual save handlers, four slots, whitespace/empty/IME, close/Escape, reopening, focus, viewport listeners and cleanup. Rendering/live ST not tested."
+      "output": "PASS: 76 existing DOM/event assertions plus icon/ancestry and capture/bubble drawer regressions; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested."
     },
     {
       "check": "prompt-settings-matrix.mjs",
@@ -129,7 +129,7 @@
     {
       "check": "source-layout.mjs",
       "status": "PASS",
-      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.345 ms/local pass (container, not phone)."
+      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.342 ms/local pass (container, not phone)."
     },
     {
       "check": "source-map-selection.mjs",
@@ -145,9 +145,8 @@
     "manifest.json",
     "tests/prompt-editor.mjs"
   ],
-  "ui_event_test": "76 DOM/event assertions with actual source input handlers",
+  "regression": "Host outside-click capture and bubble checks; detached close-click target; Escape; unrelated host clicks; autosave",
   "live_browser_test": false,
   "rendering_test": false,
-  "live_model_test": false,
-  "limitation": "Browser environment blocked the local fixture; native rendering and physical phone keyboard remain untested."
+  "live_model_test": false
 }

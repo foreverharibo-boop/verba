@@ -68,6 +68,7 @@ Function('panel','settings','saveSettings','renderPromptConflictInspector','sche
 bindPromptExpandEditors(panel);
 const buttons=panel.querySelectorAll('.verba-prompt-expand');
 assert.equal(buttons.length,4,'idempotent binding');
+assert.ok(buttons.every(button=>button.textContent==='⤢' && button.attributes['aria-label'].includes('크게 편집')),'icon retains accessible label');
 let checks=1;
 for (const [i,[slug,key]] of rows.entries()) {
     const button=buttons[i],source=panel.querySelector(`#verba-${slug}-prompt`);
@@ -128,4 +129,55 @@ assert.equal(dialog.styles.get('--verba-editor-height'),'900px','window fallback
 win.innerHeight=600;win.dispatchEvent(new Event('resize'));
 assert.equal(dialog.styles.get('--verba-editor-height'),'600px');
 dialog.close();
-console.log(`PASS: ${checks+11} DOM/event assertions; actual save handlers, four slots, whitespace/empty/IME, close/Escape, reopening, focus, viewport listeners and cleanup. Rendering/live ST not tested.`);
+
+// Model host drawer listeners in both capture and bubble phases. Freeze the
+// event path before dispatch, like browsers do, including when the target is
+// removed inside a click listener. Plain EventTarget does not model DOM bubbling.
+let drawerCloses=0,globalClicks=0;
+const insidePanel=el=>el===panel || Boolean(el?.parentElement && insidePanel(el.parentElement));
+const host=(event)=>{
+    if (['click','pointerdown','touchstart'].includes(event.type) && !insidePanel(event.target)) drawerCloses++;
+};
+function dispatchDomEvent(target,type,key='') {
+    const event=new Event(type,{bubbles:true,cancelable:true});
+    Object.defineProperty(event,'target',{value:target});
+    Object.defineProperty(event,'key',{value:key});
+    const path=[];
+    for(let el=target;el;el=el.parentElement)path.push(el);
+    host(event); // document capture outside-click check runs before the popup.
+    for(const el of path) {
+        for(const handler of el.handlers.get(type)||[])handler.call(el,event);
+        if(event.cancelBubble)break;
+        if(el===doc.documentElement) {
+            if(type==='click')globalClicks++;
+            host(event);
+            if(type==='keydown'&&key==='Escape')drawerCloses++;
+        }
+    }
+    return event;
+}
+dispatchDomEvent(buttons[0],'click');
+dialog=doc.getElementById('verba-prompt-editor');editor=dialog.querySelector('textarea');
+assert.equal(dialog.parentElement,panel,'top-layer dialog belongs to extension drawer');
+for(const type of ['click','pointerdown','pointerup','mousedown','mouseup','touchstart','touchend']) {
+    assert.equal(dispatchDomEvent(editor,type).cancelBubble,true,type+' stays within dialog');
+}
+editor.value='닫아도 저장';dispatchDomEvent(editor,'input');
+dispatchDomEvent(dialog.querySelector('button'),'pointerdown');
+dispatchDomEvent(dialog.querySelector('button'),'click');
+assert.equal(doc.getElementById('verba-prompt-editor'),null);
+assert.equal(settings.globalPrompt,'닫아도 저장');
+assert.equal(drawerCloses,0,'close click does not close parent drawer');
+assert.equal(globalClicks,0,'no leaking click after target removal');
+dispatchDomEvent(buttons[0],'click');
+dialog=doc.getElementById('verba-prompt-editor');editor=dialog.querySelector('textarea');
+const escapeEvent=dispatchDomEvent(editor,'keydown','Escape');
+assert.equal(escapeEvent.cancelBubble,true,'host Escape listener not reached');
+assert.equal(escapeEvent.defaultPrevented,false,'native dialog cancel remains available');
+dialog.dispatchEvent(new Event('cancel',{cancelable:true}));
+assert.equal(doc.getElementById('verba-prompt-editor'),null);
+assert.equal(drawerCloses,0,'Escape closes only popup');
+const outside=doc.createElement('button');doc.documentElement.append(outside);
+dispatchDomEvent(outside,'click');
+assert.ok(drawerCloses>0&&globalClicks>0,'unrelated host outside-click behavior remains active');
+console.log(`PASS: ${checks+11} existing DOM/event assertions plus icon/ancestry and capture/bubble drawer regressions; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested.`);

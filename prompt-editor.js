@@ -10,17 +10,26 @@ export function bindPromptExpandEditors(panel) {
         const button = doc.createElement('button');
         button.type = 'button';
         button.className = 'menu_button verba-prompt-expand';
-        button.textContent = '확대';
+        button.textContent = '⤢';
         button.title = `${title} 크게 편집`;
         button.setAttribute('aria-label', button.title);
         button.setAttribute('aria-haspopup', 'dialog');
         header.insertBefore(button, header.querySelector('.verba-prompt-slot-toggle'));
 
-        button.addEventListener('click', () => {
+        button.addEventListener('click', event => {
+            event.stopPropagation();
             if (doc.getElementById('verba-prompt-editor')) return;
             const dialog = doc.createElement('dialog');
             dialog.id = 'verba-prompt-editor';
             dialog.setAttribute('aria-labelledby', 'verba-prompt-editor-title');
+            // Keep interactions local: SillyTavern's global outside-click and
+            // Escape handlers must not also close the extension drawer.
+            for (const type of ['click', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend']) {
+                dialog.addEventListener(type, event => event.stopPropagation());
+            }
+            dialog.addEventListener('keydown', event => {
+                if (event.key === 'Escape') event.stopPropagation();
+            });
             const heading = doc.createElement('strong');
             heading.id = 'verba-prompt-editor-title';
             heading.textContent = title;
@@ -72,13 +81,25 @@ export function bindPromptExpandEditors(panel) {
                 dialog.remove();
                 if (button.isConnected) button.focus({ preventScroll: true });
             };
-            close.addEventListener('click', finish);
+            close.addEventListener('click', event => {
+                // Stop before removing the dialog: document-level handlers may
+                // otherwise treat the now-detached target as an outside click.
+                event.stopPropagation();
+                finish();
+            });
             dialog.addEventListener('cancel', event => {
+                event.stopPropagation();
                 event.preventDefault();
                 finish();
             });
-            dialog.addEventListener('close', finish);
-            doc.documentElement.append(dialog);
+            dialog.addEventListener('close', event => {
+                event.stopPropagation();
+                finish();
+            });
+            // Native dialogs render in the top layer even when nested here.
+            // This ancestry also lets capture-phase drawer checks recognize the
+            // popup as part of the extension before its own listeners run.
+            panel.append(dialog);
             resize();
             viewport?.addEventListener('resize', resize);
             viewport?.addEventListener('scroll', resize);

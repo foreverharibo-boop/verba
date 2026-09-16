@@ -15,11 +15,11 @@
 #verba-settings .verba-prompt-slot-head > .verba-prompt-expand {
     flex: 0 0 auto !important;
     width: auto !important;
-    min-width: 40px;
+    min-width: 28px;
     min-height: 28px;
     margin: 0 !important;
-    padding: 3px 6px !important;
-    font-size: 0.78em !important;
+    padding: 2px 4px !important;
+    font-size: 18px !important;
     line-height: 1.2;
     white-space: nowrap;
 }
@@ -66,7 +66,7 @@
     overflow-wrap: anywhere;
 }
 
-#verba-prompt-editor > textarea {
+#verba-settings #verba-prompt-editor > textarea {
     box-sizing: border-box;
     flex: 1 1 0 !important;
     width: 100% !important;
@@ -75,22 +75,22 @@
     height: auto !important;
     max-height: none !important;
     margin: 0 !important;
-    padding: 12px;
+    padding: 12px !important;
     resize: none;
     overflow: auto;
     overscroll-behavior: contain;
     font-family: inherit !important;
     font-size: 16px !important;
-    line-height: 1.55;
+    line-height: 1.55 !important;
     text-shadow: none !important;
 }
 
-#verba-prompt-editor > .verba-prompt-editor-close {
+#verba-settings #verba-prompt-editor > .verba-prompt-editor-close {
     box-sizing: border-box;
     align-self: stretch;
     flex: 0 0 auto !important;
     width: 100% !important;
-    min-height: 42px;
+    min-height: 42px !important;
     margin: 0 !important;
     font-family: inherit;
     font-size: 15px !important;

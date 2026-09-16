@@ -5,15 +5,32 @@ function segmentNumberKey(id) {
     return match ? match[1].replace(/^0+(?=\d)/, '') : null;
 }
 
-// Source paragraph separators live outside these segments. Remove only an
-// unexpected blank line between Hangul characters in a single-line prose span.
-// Keep existing horizontal whitespace; never guess new spaces or edit code.
+// Source paragraph separators live outside these segments. A single-line prose
+// target cannot acquire line breaks, even after a sentence or quote. Never align
+// multi-line translations by character offsets: rewording makes that ambiguous.
 export function repairUnexpectedProseBreaks(translation, segment) {
-    if (!['narration', 'dialogue_candidate', 'selection', 'multi_selection'].includes(segment?.type)
-        || typeof segment.text !== 'string' || /[\r\n]/u.test(segment.text)
-        || /[`~<>]/u.test(translation)) return translation;
-    return translation.replace(/([가-힣])([\t ]*(?:\r?\n[\t ]*){2,})(?=[가-힣])/gu,
-        (_match, before, gap) => before + (/[\t ]/u.test(gap) ? ' ' : ''));
+    if (typeof translation !== 'string'
+        || !['narration', 'dialogue_candidate', 'target_dialogue', 'other_dialogue', 'selection', 'multi_selection'].includes(segment?.type)
+        || typeof segment.text !== 'string' || !segment.text.trim()
+        || /[\r\n\u0085\u2028\u2029]/u.test(segment.text)
+        || /[`<>]|~{3}/u.test(segment.text)) return translation;
+
+    // Real markup/code belongs to protected or tagged-content paths. Only a
+    // newly invented bare <br> in otherwise plain prose is treated as a break.
+    const text = translation.replace(/<br\s*\/?\s*>/giu, '\n');
+    if (/[`<>]|~{3}/u.test(text) || !/[\r\n\u0085\u2028\u2029]/u.test(text)) return translation;
+    return text.replace(/[\t ]*(?:(?:\r\n|[\r\n\u0085\u2028\u2029])[\t ]*)+/gu,
+        (gap, offset) => {
+            const before = text[offset - 1] || '';
+            const after = text[offset + gap.length] || '';
+            if (!before || !after) return '';
+            // Keep the previous repair for blank lines inserted inside Hangul
+            // words (그러 + 셨어요). Horizontal spaces remain a word boundary.
+            const breaks = gap.match(/\r\n|[\r\n\u0085\u2028\u2029]/gu) || [];
+            if (breaks.length > 1 && !/[\t ]/u.test(gap) && /[가-힣]/u.test(before) && /[가-힣]/u.test(after)) return '';
+            if (/[(\[“‘「『]/u.test(before) || /[.,!?;:…\)\]”’」』]/u.test(after)) return '';
+            return ' ';
+        });
 }
 
 function normalizeSyntax(text) {
@@ -166,7 +183,7 @@ export function collectSegmentResponse(raw, expectedSegments = []) {
         const repaired = repairUnexpectedProseBreaks(original, segment);
         if (repaired !== original) {
             partial.set(segment.id, repaired);
-            repairs.push(`원문에 없는 한글 사이 빈줄 제거: ${segment.id}`);
+            repairs.push(`원문 한 줄 구간의 추가 줄바꿈 제거: ${segment.id}`);
         }
     }
     const missingIds = [...expected].filter(id => !partial.has(id));

@@ -11,18 +11,16 @@ for(const compression of [{},{developerCompressedPromptEnabled:true},{developerE
  const s={...defaults,developerMode:true,...compression,developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:hongjin,developerMadKoreanTargetToUserRegister:'banmal',developerMadKoreanUserToTargetRegister:'jondaetmal'};
  for(const scope of ['mixed','narration','target_dialogue','other_dialogue','tagged_content']) {
   const p=core.buildScopedOutputPrompt({segments,sourceContext:'CONTEXT_SENTINEL',settings:s,scope,speakerIdentity:who});
-  for(const rule of ['MANDATORY REAUTHORING','within each id','TOP PRIORITY — NO MISOGYNY','2026년/몇 년','Human pronouns→그/그녀','+의 for possessives','Omit only if more natural','re-anchor after digressions/actor changes','Correct whole-name particles','not descriptive labels or forced names','.../…/……','0700시','50 yards=45.72미터','네 부하들','CLOSE-POV ROUGH DICTION','TARGET→USER=반말','USER→TARGET=natural 해요체','playful honorifics','CONTEXT_SENTINEL'])assert.ok(p.includes(rule),rule);
+  for(const rule of ['MANDATORY REAUTHORING','within each id','TOP PRIORITY — NO MISOGYNY','.../…/……','0700시','50 yards→50미터','context-needed precision','TARGET→USER=반말','USER→TARGET=natural 해요체','playful honorifics','CONTEXT_SENTINEL'])assert.ok(p.includes(rule),rule);
   const off=core.buildScopedOutputPrompt({segments,sourceContext:'CONTEXT_SENTINEL',settings:{...s,developerMadKoreanOutputEnabled:false},scope,speakerIdentity:who});
-  for(const rule of ['Human pronouns→그/그녀','Omit only if more natural','Correct whole-name particles']) {
-   assert.equal(p.split(rule).length,2,'MAD rule exactly once: '+rule);
-   assert.ok(!off.includes(rule),'MAD-only rule absent when disabled: '+rule);
-  }
+  for(const removed of ['2026년/몇 년','Human pronouns→그/그녀','CLOSE-POV ROUGH DICTION','50 yards=45.72미터','네 부하들','compressed protein blocks','Intent example:']) assert.ok(!p.includes(removed),'removed from shortened prompt: '+removed);
+  assert.ok(!off.includes('50 yards→50미터'));
   for(const result of [p,off]) assert.ok(result.includes('Name locks first; otherwise transliterate only human names to Hangul'));
   assert.equal(p.includes('KIM HONG-JIN VOICE'),hongjin&&['mixed','target_dialogue'].includes(scope));
   assert.equal(p.split('TOP PRIORITY — NO MISOGYNY').length,2);
-  if(hongjin&&['mixed','target_dialogue'].includes(scope)) assert.ok(p.includes('USER-DIRECTED INSULT FIREWALL'));
+  if(hongjin&&['mixed','target_dialogue'].includes(scope)) assert.ok(p.includes('USER-DIRECTED PROFANITY GUARD'));
  }
  const input=core.buildInputPrompt('안녕',s,'unknown',who);
  assert.ok(!input.includes('MANDATORY REAUTHORING')&&!input.includes('KIM HONG-JIN VOICE'));
 }
-console.log('PASS: MAD facts/recomposition/pronouns/punctuation/time/units/register/abuse guards across modes and scopes.');
+console.log('PASS: User-approved MAD recomposition/punctuation/time/units/register/abuse guards across modes and scopes.');

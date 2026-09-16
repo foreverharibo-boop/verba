@@ -85,7 +85,7 @@ for (const dev of [false,true]) for (const mad of [false,true]) for (const hongj
  if(!dev) {
   assert.equal(prompt,core.buildOutputPrompt(segmented,{...defaults,developerMode:false},'',identity));
   assert.deepEqual(core.findBannedWords('미친년',settings),[]);
-  assert.ok(!core.buildBannedRepairPrompt(segmented.segments,new Map(),settings,identity).includes('USER-directed insult firewall'));
+  assert.ok(!core.buildBannedRepairPrompt(segmented.segments,new Map(),settings,identity).includes('USER-directed profanity guard'));
  }
 }
 // Relationship style works while locked, applies to TARGET only, preserves values.

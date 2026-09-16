@@ -80,7 +80,7 @@ for(const mode of [{},{developerCompressedPromptEnabled:true},{developerExtremeC
  for(const route of ['tokenRepair','bannedRepair']) {
   const repaired=builders[route](core,{...config,developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:true});
   assert.ok(!repaired.includes('MANDATORY REAUTHORING'),'local repair avoids full style prompt');
-  assert.ok(repaired.includes('USER-directed insult firewall'));
+  assert.ok(repaired.includes('USER-directed profanity guard'));
   assert.ok(repaired.includes('BAN_LITERAL'));
  }
 }

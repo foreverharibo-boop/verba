@@ -159,8 +159,8 @@ const breakCases = [
     ['엎질\n\n러진 커피였다.', '엎질러진 커피였다.'],
     ['그러\r\n\r\n셨어요?', '그러셨어요?'],
     ['믿을 \n\n수 없었다.', '믿을 수 없었다.'],
-    ['그의 말.\n\n그녀의 대답.', '그의 말.\n\n그녀의 대답.'],
-    ['한 줄\n다음 줄', '한 줄\n다음 줄'],
+    ['그의 말.\n\n그녀의 대답.', '그의 말. 그녀의 대답.'],
+    ['한 줄\n다음 줄', '한 줄 다음 줄'],
     ['문자 그대로 \\n\\n 표시', '문자 그대로 \\n\\n 표시'],
 ];
 for (const [before, after] of breakCases) {
@@ -182,13 +182,18 @@ assert.equal(repairUnexpectedProseBreaks('믿을\n\n 수', { ...prose, text: 'Fi
 for (const text of ['`믿을\n\n 수`', '```text\n믿을\n\n 수\n```', '<div>믿을\n\n 수</div>']) {
     assert.equal(repairUnexpectedProseBreaks(text, prose), text);
 }
-for (const debugMode of [true, false]) {
+for (const debugMode of [true, false]) for (const [before, after] of [
+    ['믿을\n\n 수 없었다.', '믿을 수 없었다.'],
+    ['기다렸다.\n웃었다.', '기다렸다. 웃었다.'],
+    ['“왔어?”\n\n“응.”', '“왔어?” “응.”'],
+    ['안녕~<br>또 왔네.', '안녕~ 또 왔네.'],
+]) {
     settings.debugMode = debugMode; log.clear(); calls = []; waits = 0;
-    responses = [encode([{ id: prose.id, translation: '믿을\n\n 수 없었다.' }])];
+    responses = [encode([{ id: prose.id, translation: before }])];
     const result = await request('unchanged prompt', [prose], { stage: 'output-translation' });
-    assert.equal(result.get(prose.id), '믿을 수 없었다.');
+    assert.equal(result.get(prose.id), after);
     assert.equal(calls.length, 1); assert.equal(waits, 0);
-    if (debugMode) assert.match(log.latest().recovery.localRepairs.join(), /한글 사이 빈줄 제거/);
+    if (debugMode) assert.match(log.latest().recovery.localRepairs.join(), /추가 줄바꿈 제거/);
     else assert.equal(log.latest(), null);
 }
 // Assembly also cleans later-pass text before building offsets. Protected blocks

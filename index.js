@@ -3,7 +3,7 @@ import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
-import { collectSegmentResponse } from './response-parser.js';
+import { collectSegmentResponse, repairUnexpectedProseBreaks } from './response-parser.js';
 import { minimalOutputEnabled, translateMinimalOutput } from './minimal-output.js';
 import { outputSplitCount, runOutputBatches, createSplitRequestQueue } from './output-splitting.js';
 import {
@@ -43,7 +43,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.60';
+const EXTENSION_VERSION = '0.5.62';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8453,7 +8453,7 @@ async function retranslateSelection(snapshot) {
         let replacement = '';
         if (candidateMode) {
             const received = (await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' }))
-                .map(candidate => repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(candidate, speakerIdentity)));
+                .map(candidate => repairUnexpectedProseBreaks(repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(candidate, speakerIdentity)), expected[0]));
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;

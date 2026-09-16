@@ -41,8 +41,9 @@ for(const mode of [{},{developerCompressedPromptEnabled:true},{developerExtremeC
   const outputs=options[key].map(({value})=>core.buildOutputPrompt(segmented,{...settings,[key]:value},'',who));
   assert.equal(new Set(outputs).size,options[key].length,'MAD override effective: '+key);
  }
- assert.ok(prompt.includes('USER-DIRECTED INSULT FIREWALL'));
- assert.ok(prompt.includes('do not add self-reference'));
+ assert.ok(prompt.includes('USER-DIRECTED PROFANITY GUARD'));
+ assert.ok(!prompt.includes('do not add self-reference'));
+ assert.ok(!prompt.includes('오빠:'));
  assert.ok(core.buildOutputPrompt(segmented,{...settings,developerHongjinOppaFrequency:'often'},'',who).includes('TARGET (male only)→USER exclusively'));
  assert.ok(core.buildOutputPrompt(segmented,{...settings,developerMadKoreanTargetToUserRegister:'banmal'},'',who).includes('TARGET→USER=반말'));
  assert.ok(core.buildOutputPrompt(segmented,{...settings,developerMadKoreanUserToTargetRegister:'jondaetmal'},'',who).includes('USER→TARGET=natural 해요체'));

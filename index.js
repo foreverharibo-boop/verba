@@ -44,7 +44,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.65';
+const EXTENSION_VERSION = '0.5.67';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -5485,7 +5485,7 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
                 ${showContextChoice ? `
                     <fieldset class="verba-context-choice">
                         <legend>AI가 참고할 현재 메시지 문맥</legend>
-                        <label><input type="radio" name="verba-context-mode" value="narrow"> 선택 주변</label>
+                        <label><input type="radio" name="verba-context-mode" value="selection"> 선택 범위만</label>
                         <label><input type="radio" name="verba-context-mode" value="paragraph" checked> 현재 문단</label>
                         <label><input type="radio" name="verba-context-mode" value="message"> 메시지 전체</label>
                     </fieldset>
@@ -7987,11 +7987,12 @@ function toggleSelectionLock(snapshot) {
 
 function selectionSourceContext(snapshot, contextMode) {
     if (contextMode === 'message') return snapshot.source;
+    const selectionOnly = contextMode === 'selection' || contextMode === 'narrow';
     const rows = normalizedSourceMap(snapshot.sourceMap);
     const matchedIndexes = rows.flatMap((row, index) => (
         snapshot.start < row.end && snapshot.end > row.start ? [index] : []
     ));
-    if (!matchedIndexes.length) return snapshot.source;
+    if (!matchedIndexes.length) return selectionOnly ? '' : snapshot.source;
     let first = Math.min(...matchedIndexes);
     let last = Math.max(...matchedIndexes);
     if (contextMode === 'paragraph') {

@@ -14,8 +14,8 @@ export function bindPromptExpandEditors(panel) {
         // and can become a tiny serif glyph on mobile.
         const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
         icon.setAttribute('viewBox', '0 0 24 24');
-        icon.setAttribute('width', '18');
-        icon.setAttribute('height', '18');
+        icon.setAttribute('width', '12');
+        icon.setAttribute('height', '12');
         icon.setAttribute('aria-hidden', 'true');
         icon.setAttribute('focusable', 'false');
         const arrows = doc.createElementNS('http://www.w3.org/2000/svg', 'path');

@@ -74,7 +74,7 @@ for(const button of buttons) {
     assert.equal(icon.namespaceURI,'http://www.w3.org/2000/svg');
     assert.equal(icon.attributes.viewBox,'0 0 24 24');
     assert.equal(icon.attributes['aria-hidden'],'true');
-    assert.equal(icon.attributes.width,'18');
+    assert.equal(icon.attributes.width,'12');
     assert.equal(icon.querySelector('path').attributes.stroke,'currentColor');
 }
 let checks=1;

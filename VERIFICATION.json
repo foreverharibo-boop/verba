@@ -1,5 +1,5 @@
 {
-  "version": "0.5.65",
+  "version": "0.5.67",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -127,9 +127,14 @@
       "output": "PASS: safe syntax recovery, exact text preservation, truncated-row salvage, malformed/ambiguous rejection, missing-only retry, intermediate recovered logs and debug OFF/reset (mock AI).\nPASS: unexpected prose blank lines, protected layout, source-map offsets and one-call cleanup with debug ON/OFF."
     },
     {
+      "check": "selection-range-only.mjs",
+      "status": "PASS",
+      "output": "PASS: selection-only retranslation sends no surrounding Korean or full-source fallback."
+    },
+    {
       "check": "source-layout.mjs",
       "status": "PASS",
-      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.379 ms/local pass (container, not phone)."
+      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.361 ms/local pass (container, not phone)."
     },
     {
       "check": "source-map-selection.mjs",
@@ -140,13 +145,10 @@
   "changed_files": [
     "README.md",
     "index.js",
-    "prompt-editor.js",
-    "style.css",
     "manifest.json",
-    "tests/prompt-editor.mjs"
+    "prompt-builders.js",
+    "tests/selection-range-only.mjs"
   ],
-  "regression": "SVG namespace/size/accessibility/theme color plus popup-only close and autosave checks",
-  "live_browser_test": false,
-  "rendering_test": false,
-  "live_model_test": false
+  "scope": "Selection-only retranslation context sends selected Korean and mapped source only; no surrounding text or full-source fallback",
+  "live_mobile_test": false
 }

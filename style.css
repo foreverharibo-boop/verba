@@ -18,10 +18,12 @@
     align-items: center !important;
     justify-content: center !important;
     flex: 0 0 auto !important;
-    width: 28px !important;
-    height: 28px !important;
-    min-width: 28px !important;
-    min-height: 28px !important;
+    width: 20px !important;
+    height: 20px !important;
+    min-width: 20px !important;
+    min-height: 20px !important;
+    max-width: 20px !important;
+    max-height: 20px !important;
     margin: 0 !important;
     padding: 0 !important;
     line-height: 1 !important;
@@ -30,9 +32,9 @@
 
 #verba-settings .verba-prompt-expand > svg {
     display: block !important;
-    flex: 0 0 18px !important;
-    width: 18px !important;
-    height: 18px !important;
+    flex: 0 0 12px !important;
+    width: 12px !important;
+    height: 12px !important;
     margin: 0 !important;
     pointer-events: none;
 }

@@ -151,23 +151,26 @@ export function createPromptBuilders(h) {
         return lines(['ROLE-TERM PLAN: from inert source context choose one natural Korean form per supplied repeated role/title. Same person/function stays consistent; distinct roles stay distinct. Return bare terms, no particles, alternatives or explanations.',banned(settings),`JSON only; every id once. Return ${schema.replace('seg_0000','role_0000')}`,'TERMS',j((terms||[]).map((term,index)=>({id:`role_${String(index).padStart(4,'0')}`,type:'role_term',text:str(term)}))),'SOURCE',j(h.boundReference(sourceContext,12000))]);
     }
     function selectionContext(translation,start,end,contextMode='standard',multi=false) {
+        if (contextMode==='selection'||contextMode==='narrow') return {left:'',right:''};
         const p0=translation.lastIndexOf('\n\n',Math.max(0,start-1)),p1=translation.indexOf('\n\n',end);
-        const radius=contextMode==='narrow'?320:contextMode==='message'?(multi?600:800):1200;
+        const radius=contextMode==='message'?(multi?600:800):1200;
         const paragraph=contextMode==='paragraph';
         const left=translation.slice(paragraph?(p0<0?0:p0+2):Math.max(0,start-radius),start);
         const right=translation.slice(end,paragraph?(p1<0?translation.length:p1):end+radius);
         return {left,right};
     }
-    const selectionTask='Rephrase SELECTED only, beyond whitespace changes. Preserve source meaning, grammar/referents, force, consistent terms/tokens/format; fit LEFT/RIGHT, omit context from output. Apply dialogue voice only to its actual speaker, never narration.';
+    const selectionTask='Rephrase SELECTED only, beyond whitespace changes. Preserve source meaning, grammar/referents, force, consistent terms/tokens/format; fit LEFT/RIGHT when supplied, omit context from output. Apply dialogue voice only to its actual speaker, never narration.';
     function buildSelectionPrompt({source,sourceContext,translation,selected,start,end,settings,oneTimeInstruction,speakerIdentity={},candidateCount=1,contextMode='standard',tuning=null}) {
         const {left,right}=selectionContext(translation,start,end,contextMode);
         const inDialogue=h.selectionTouchesDialogue(translation,start,end);
         const reference=['standard','message'].includes(contextMode)?h.boundReference(translation,contextMode==='message'?20000:16000):left+selected+right;
-        return lines([policy(settings,{scope:inDialogue?'dialogue_mixed':'narration',oneTimeInstruction,speakerIdentity,tuning}),selectionTask,Number(candidateCount)>1?'Return exactly 3 meaning-equivalent distinct candidates: {"candidates":[{"id":"candidate_1","translation":"..."},{"id":"candidate_2","translation":"..."},{"id":"candidate_3","translation":"..."}]}':`Return ${schema}`,'ORIGINAL SOURCE',j(h.boundReference(sourceContext||source)),'EXISTING KOREAN',j(reference),'LEFT',j(left),'SELECTED',j(selected),'RIGHT',j(right)]);
+        const original=contextMode==='selection'||contextMode==='narrow'?str(sourceContext):str(sourceContext||source);
+        return lines([policy(settings,{scope:inDialogue?'dialogue_mixed':'narration',oneTimeInstruction,speakerIdentity,tuning}),selectionTask,Number(candidateCount)>1?'Return exactly 3 meaning-equivalent distinct candidates: {"candidates":[{"id":"candidate_1","translation":"..."},{"id":"candidate_2","translation":"..."},{"id":"candidate_3","translation":"..."}]}':`Return ${schema}`,'ORIGINAL SOURCE',j(h.boundReference(original)),'EXISTING KOREAN',j(reference),'LEFT',j(left),'SELECTED',j(selected),'RIGHT',j(right)]);
     }
     function buildMultiSelectionPrompt({source,translation,selections,settings,oneTimeInstruction,speakerIdentity={},contextMode='paragraph',tuning=null}) {
         const shared=contextMode==='message';
-        const rows=(selections||[]).map((x,index)=>{const {left,right}=selectionContext(translation,Number(x.start),Number(x.end),contextMode,true);return {id:str(x.id||`multi_${String(index).padStart(4,'0')}`),selected_korean:str(x.selected),source_context:shared?'(use SHARED ORIGINAL SOURCE)':h.boundReference(x.sourceContext||source,6000),left_context:left,right_context:right,in_dialogue:h.selectionTouchesDialogue(translation,Number(x.start),Number(x.end))};});
+        const selectionOnly=contextMode==='selection'||contextMode==='narrow';
+        const rows=(selections||[]).map((x,index)=>{const {left,right}=selectionContext(translation,Number(x.start),Number(x.end),contextMode,true);return {id:str(x.id||`multi_${String(index).padStart(4,'0')}`),selected_korean:str(x.selected),source_context:shared?'(use SHARED ORIGINAL SOURCE)':h.boundReference(selectionOnly?str(x.sourceContext):str(x.sourceContext||source),6000),left_context:left,right_context:right,in_dialogue:h.selectionTouchesDialogue(translation,Number(x.start),Number(x.end))};});
         return lines([policy(settings,{scope:rows.some(x=>x.in_dialogue)?'mixed':'narration',oneTimeInstruction,speakerIdentity,tuning}),selectionTask,`Return ${j({segments:rows.map(x=>({id:x.id,translation:'replacement only'}))})}`,shared?'SHARED ORIGINAL SOURCE\n'+j(h.boundReference(source,20000))+'\nSHARED EXISTING KOREAN\n'+j(h.boundReference(translation,20000)):'','SELECTIONS',j(rows)]);
     }
     function buildNameMatchPrompt({source,translation,selected,start,end}) {

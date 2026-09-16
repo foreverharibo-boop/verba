@@ -44,7 +44,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.69';
+const EXTENSION_VERSION = '0.5.70';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -9876,8 +9876,6 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
-                ${generalSplitSettingsMarkup()}
-
                 <details id="verba-prompt-conflict-settings" class="verba-tool-details">
                     <summary>프롬프트 충돌 확인 <small id="verba-prompt-conflict-count">충돌 없음</small></summary>
                     <div class="verba-tool-details-content">
@@ -9886,6 +9884,8 @@ function injectSettingsPanel() {
                         <button type="button" id="verba-refresh-prompt-conflicts" class="menu_button verba-wide">지금 다시 확인</button>
                     </div>
                 </details>
+
+                ${generalSplitSettingsMarkup()}
 
                 <details id="verba-translation-tuning" class="verba-tool-details">
                     <summary>번역 미세 조정 <small>관계 온도·현지화</small></summary>

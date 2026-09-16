@@ -49,7 +49,7 @@ for(const id of ['mad-korean','hongjin']) {
 }
 assert.ok(!markup.includes('verba-developer-lab"'));
 for(const value of ['maximum','late20s','often','banmal','jondaetmal']) assert.match(unlocked,new RegExp(`value="${value}" selected`));
-assert.ok(index.includes('${generalSplitSettingsMarkup()}\n\n                <details id="verba-prompt-conflict-settings"'));
+assert.ok(index.includes('${generalSplitSettingsMarkup()}\n\n                <details id="verba-translation-tuning"'));
 assert.ok(index.indexOf('id="verba-expression-detail"') < index.indexOf('${generalRelationshipSettingsMarkup()}'));
 assert.ok(index.indexOf('${generalRelationshipSettingsMarkup()}') < index.indexOf('id="verba-korean-flavor"'));
 // Execute existing change branches with a locked mode: the UI keeps its old IDs

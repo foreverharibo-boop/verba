@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { minimalOutputEnabled, buildMinimalOutputPrompt, translateMinimalOutput } from '../minimal-output.js';
+import { minimalOutputEnabled, buildMinimalOutputPrompt, translateMinimalOutput, splitMinimalOutputSegments } from '../minimal-output.js';
 import { segmentSource, restoreProtected, assembleTranslation, buildOutputPrompt } from '../core.js';
 import { collectSegmentResponse } from '../response-parser.js';
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
@@ -29,7 +29,7 @@ const requestSegments=async(prompt,segments,opts)=>{
 };
 const before=structuredClone(settings);
 const result=await translateMinimalOutput(segmented,settings,{}, {requestSegments,buildSourceMap});
-assert.equal(calls.length,1);assert.match(result.translation,/홍진/);assert.match(result.translation,/`KEEP_CODE`/);assert.match(result.translation,/<Info_panel>/);
+assert.equal(calls.length,2);assert.ok(calls.every(c=>c.opts.parallelRequest));assert.match(result.translation,/홍진/);assert.match(result.translation,/`KEEP_CODE`/);assert.match(result.translation,/<Info_panel>/);
 assert.ok(result.sourceMap.length>0);assert.ok(result.sourceMap.some(r=>r.source.includes('Hong-jin')));
 for(const row of result.sourceMap) assert.ok(result.translation.slice(row.start,row.end));
 assert.deepEqual(settings,before);
@@ -44,17 +44,58 @@ settings.developerMinimalPromptEnabled=false;await assert.rejects(run('He waited
 let attempts=0;const damaged=segmentSource('Hong-jin waited.\n\nShe nodded.',[{source:'Hong-jin',target:'홍진'}]);
 await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(prompt,segments,opts)=>{
  attempts++;assert.ok(!prompt.includes('HONGJIN FLAVOR'));
- if(attempts===1)return new Map(segments.map(s=>[s.id,'기다렸다.']));
+ if(opts.stage!=='protected-token-repair')return new Map(segments.map(s=>[s.id,'기다렸다.']));
  assert.equal(opts.stage,'protected-token-repair');assert.equal(segments.length,1);
  return new Map(segments.map(s=>[s.id,translated(s)]));
-}});assert.equal(attempts,2);
-attempts=0;await assert.rejects(translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(_p,ss)=>{attempts++;return new Map(ss.map(s=>[s.id,'누락']));}}),/보호 요소/);assert.equal(attempts,6);
+}});assert.equal(attempts,3);
+attempts=0;await assert.rejects(translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(_p,ss)=>{attempts++;return new Map(ss.map(s=>[s.id,'누락']));}}),/보호 요소/);assert.equal(attempts,7);
 const controller=new AbortController();controller.abort();calls=[];
 await assert.rejects(translateMinimalOutput(segmented,settings,{signal:controller.signal},{requestSegments,buildSourceMap}),{name:'AbortError'});assert.equal(calls.length,0);
 // Existing local newline cleanup and offsets still agree after assembly.
 const prose=segmentSource('She spilled coffee.');
 const cleaned=await translateMinimalOutput(prose,settings,{}, {requestSegments:async(_p,ss)=>new Map(ss.map(s=>[s.id,'커피를 엎질\n\n렀다.'])),buildSourceMap});
 assert.equal(cleaned.translation,'커피를 엎질렀다.');assert.equal(cleaned.sourceMap[0].end,cleaned.translation.length);
+// Two contiguous, non-overlapping groups, intact paragraph/target boundaries.
+assert.deepEqual(splitMinimalOutputSegments({segments:[],parts:[]}),[]);
+assert.equal(splitMinimalOutputSegments(prose).length,1);
+const split=splitMinimalOutputSegments(segmented);
+assert.deepEqual(split.flat(),segmented.segments);
+const balanced=segmentSource('First paragraph has some narration. "First dialogue."\n\nSecond paragraph also has narration. "Second dialogue."');
+const halves=splitMinimalOutputSegments(balanced);
+assert.equal(halves[0].at(-1).type,'dialogue_candidate');
+assert.equal(halves[1][0].type,'narration');
+// With a single paragraph, still split at a target boundary (never inside a word).
+assert.equal(splitMinimalOutputSegments(segmentSource('He waited. "Here."')).length,2);
+// Completion order must not change assembly or source offsets.
+let releases=[], received=[];
+const inFlight=translateMinimalOutput(balanced,settings,{oneTimeInstruction:'KEEP_ONETIME'}, {
+ buildSourceMap, requestSegments:(prompt,ss,opts)=>{
+  assert.equal(opts.parallelRequest,true);assert.equal(opts.minimalBatchCount,2);
+  assert.match(prompt,/KEEP_ONETIME/);received.push(ss);
+  return new Promise(resolve=>releases.push(()=>resolve(new Map(ss.map(x=>[x.id,`번역_${x.id}`])))));
+ }});
+assert.equal(releases.length,2,'both requests start before either completes');
+releases[1]();await Promise.resolve();releases[0]();
+const merged=await inFlight;
+const expectedMap=new Map(balanced.segments.map(x=>[x.id,`번역_${x.id}`]));
+assert.equal(merged.translation,assembleTranslation(balanced,expectedMap));
+assert.deepEqual(merged.sourceMap,buildSourceMap(balanced,expectedMap,merged.translation));
+assert.deepEqual(merged.sourceMap.map(row=>merged.translation.slice(row.start,row.end)),[...expectedMap.values()]);
+// Abort both in-flight halves and do not build/apply any partial source map.
+const cancel=new AbortController();let aborted=0,started=0;
+const cancellation=translateMinimalOutput(balanced,settings,{signal:cancel.signal},{
+ buildSourceMap:()=>{throw Error('partial result must not be applied');},
+ requestSegments:(_p,_ss,opts)=>new Promise((_resolve,reject)=>{
+  started++;opts.signal.addEventListener('abort',()=>{aborted++;reject(new DOMException('cancel','AbortError'));},{once:true});
+ })});
+assert.equal(started,2);cancel.abort();await assert.rejects(cancellation,{name:'AbortError'});assert.equal(aborted,2);
+// A terminal failure cancels the sibling instead of leaving an orphan request.
+let siblingAborted=false;
+await assert.rejects(translateMinimalOutput(balanced,settings,{}, {
+ buildSourceMap:()=>{throw Error('partial result must not be applied');},
+ requestSegments:(_p,_ss,opts)=>opts.minimalBatchIndex===1?Promise.reject(Error('FINAL_FAILURE')):
+ new Promise((_resolve,reject)=>opts.signal.addEventListener('abort',()=>{siblingAborted=true;reject(new DOMException('cancel','AbortError'));},{once:true}))
+}),/FINAL_FAILURE/);assert.equal(siblingAborted,true);
 calls=[];const codeOnly=segmentSource('```js\nconst n = 1;\n```');
 await translateMinimalOutput(codeOnly,settings,{}, {requestSegments,buildSourceMap});assert.equal(calls.length,0);
 const off={...settings,developerMode:false};

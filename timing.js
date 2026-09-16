@@ -14,7 +14,9 @@ function describe(options) {
     const kind = retry ? 'retry' : /repair|:single$/.test(stage) ? 'repair' : PRIMARY.test(stage) ? 'primary' : 'aux';
     const reason = options.fallback ? '대체 프로필' : Number(options.retryAttempt) > 0 ? '요청 오류 재시도'
         : Number(options.segmentAttempt) > 0 ? '응답 형식·구간 누락 재시도' : '';
-    return { kind, label, reason, slot: ['A', 'B', 'C'].includes(options.profileSlot) ? options.profileSlot : '?' };
+    const batch = options.minimalBatchCount === 2 && [1, 2].includes(options.minimalBatchIndex)
+        ? ` (${options.minimalBatchIndex}/2)` : '';
+    return { kind, label: label + batch, reason, slot: ['A', 'B', 'C'].includes(options.profileSlot) ? options.profileSlot : '?' };
 }
 
 export function createOutputTiming({ now = () => performance.now(), date = () => new Date().toISOString() } = {}) {

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createOutputTiming, outputTimingText } from '../timing.js';
-import { minimalOutputEnabled } from '../minimal-output.js';
-import { extractResponseText, parseSegmentResponse } from '../core.js';
+import { minimalOutputEnabled, translateMinimalOutput } from '../minimal-output.js';
+import { extractResponseText, parseSegmentResponse, segmentSource } from '../core.js';
 import { rememberRequestError, readErrorResponse } from '../diagnostics.js';
 import { collectSegmentResponse } from '../response-parser.js';
 
@@ -59,13 +59,14 @@ const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const slice = (start, end) => index.slice(index.indexOf(start), index.indexOf(end, index.indexOf(start)));
 let provider = async () => ({ content: 'ok' });
 let queue = execute => execute();
+let parallelQueue = execute => execute();
 let fallbacks = [];
 const env = {
     outputTiming: recorder, settings: { debugMode: true, profileId: 'a', timeoutSeconds: 20 },
     profileSlotForId: () => 'A', profileList: () => [{ id: 'a' }, { id: 'b' }],
     performance: { now: () => time }, AbortController, Promise, setTimeout, clearTimeout, VERBA_MAX_TOKENS: 1000,
     liveContext: () => ({ ConnectionManagerRequestService: { sendRequest: (...args) => provider(...args) } }),
-    enqueueRequest: execute => queue(execute), enqueueScopedParallelRequest: execute => queue(execute),
+    enqueueRequest: execute => queue(execute), enqueueScopedParallelRequest: execute => parallelQueue(execute),
     extractResponseText, parseSegmentResponse, rememberRequestError, readErrorResponse,
     collectSegmentResponse, recordSegmentRecovery: () => null, finishSegmentRecovery: () => {},
     recordProfileAttempt: () => {}, abortError: () => new DOMException('cancel', 'AbortError'),
@@ -103,6 +104,50 @@ await api.sendWithRetry('private', { timing: fallbackJob, stage: 'output-transla
 recorder.finish(fallbackJob, '완료'); r = recorder.latest();
 assert.equal(r.counts.total, 2); assert.equal(r.rows[1].slot, 'B'); assert.equal(r.rows[1].reason, '대체 프로필');
 fallbacks = [];
+
+// Minimal split -> real segment parser -> transport -> real shared parallel queue.
+// The serial queue would fail this test: both provider calls must start together.
+const actualParallelQueue = Function(`
+const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
+const scopedParallelRequestQueue = [];
+let scopedParallelRequestActive = 0;
+${slice('function drainScopedParallelRequestQueue(', 'async function runWithConcurrency(')}
+return enqueueScopedParallelRequest;
+`)();
+parallelQueue = actualParallelQueue;
+queue = () => { throw Error('minimal halves must not use serial queue'); };
+const splitSource = segmentSource('First paragraph.\n\nSecond paragraph.');
+const minimalSettings = { developerMinimalPrompt: '자연스럽게 한국어로 번역하라.' };
+let deliveries = [];
+provider = async (_profile, messages) => {
+    const targets = JSON.parse(messages[0].content.split('TARGETS\n')[1]);
+    return new Promise(resolve => deliveries.push(() => resolve({content:JSON.stringify({segments:targets.map(s=>({id:s.id,translation:`번역 ${s.id}`}))})})));
+};
+time = 0;
+const splitJob = recorder.begin({slot:'A',mode:'최소 프롬프트'});
+const splitWork = translateMinimalOutput(splitSource,minimalSettings,{timing:splitJob}, {requestSegments:api.requestSegments,buildSourceMap:()=>[]});
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(deliveries.length,2);
+time=100;deliveries[1]();await new Promise(resolve=>setImmediate(resolve));
+time=200;deliveries[0]();await splitWork;recorder.finish(splitJob,'완료');
+r=recorder.latest();assert.equal(r.counts.total,2);assert.equal(r.durations.primary,200);
+assert.equal(r.rows.reduce((sum,row)=>sum+row.responseMs,0),300);
+assert.match(outputTimingText(r),/본 번역 \(1\/2\)/);
+assert.match(outputTimingText(r),/본 번역 \(2\/2\)/);
+// Bad JSON in half 1 retries only half 1; half 2's result is reused.
+let halfCalls = [0,0];
+provider=async(_profile,messages)=>{
+ const targets=JSON.parse(messages[0].content.split('TARGETS\n')[1].split('\n\nYour previous response')[0]);
+ const half=targets[0].id===splitSource.segments[0].id?0:1;
+ halfCalls[half]++;time+=10;
+ if(half===0&&halfCalls[half]===1)return {content:'bad JSON'};
+ return {content:JSON.stringify({segments:targets.map(s=>({id:s.id,translation:`번역 ${s.id}`}))})};
+};
+const splitRetryJob=recorder.begin({slot:'A',mode:'최소 프롬프트'});
+await translateMinimalOutput(splitSource,minimalSettings,{timing:splitRetryJob},{requestSegments:api.requestSegments,buildSourceMap:()=>[]});
+recorder.finish(splitRetryJob,'완료');assert.deepEqual(halfCalls,[2,1]);
+assert.equal(recorder.latest().counts.retry,1);
+queue=execute=>execute();parallelQueue=execute=>execute();
 
 // Cancel queued request; it must never be counted as a sent AI request later.
 time = 0; const cancelled = begin(); let queued;

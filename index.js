@@ -42,7 +42,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.51';
+const EXTENSION_VERSION = '0.5.52';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -2085,6 +2085,7 @@ function renderCurrentAppliedRules() {
 
     if (minimalOutputEnabled(settings)) {
         host.innerHTML = currentRulesSimpleCard('최소 프롬프트 실험 · 출력/전체 재번역', [
+            ['처리 방식', '두 묶음 동시 번역 후 순서대로 합침. 번역 구간이 하나면 1회 요청'],
             ['직접 지침', settings.developerMinimalPrompt.trim() || '자연스럽게 한국어로 번역하라.'],
             ['함께 전송', '최소 JSON·구간·보호 토큰 규칙, 원문, 이름 토큰 대응표(있을 때), 이번 재번역 요구사항(있을 때)'],
             ['일시 제외', '기존 프롬프트·한출/홍진·미세조정·금지어·화자 분류·용어 계획·AI 검수'],
@@ -9468,10 +9469,11 @@ function developerSettingsMarkup() {
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
-                                <span>최소 프롬프트 사용</span>
+                                <span>최소 프롬프트 · 2분할 동시 번역</span>
                             </label>
                             <label for="verba-developer-minimal-prompt">실험용 번역 지침</label>
                             <textarea id="verba-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
+                            <div class="verba-help">원문을 두 묶음으로 나눠 동시에 번역합니다. 번역 구간이 하나면 한 번만 요청합니다. 서버에 따라 속도 차이가 있으며, 두 묶음의 말투가 달라질 수 있습니다.</div>
                             <div class="verba-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
                             <div class="verba-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
                             <div class="verba-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>

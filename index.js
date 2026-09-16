@@ -3,6 +3,7 @@ import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
+import { bindPromptExpandEditors } from './prompt-editor.js';
 import { collectSegmentResponse, repairUnexpectedProseBreaks } from './response-parser.js';
 import { minimalOutputEnabled, translateMinimalOutput } from './minimal-output.js';
 import { outputSplitCount, runOutputBatches, createSplitRequestQueue } from './output-splitting.js';
@@ -43,7 +44,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.62';
+const EXTENSION_VERSION = '0.5.63';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -11092,6 +11093,7 @@ function injectSettingsPanel() {
         renderPromptConflictInspector();
         schedulePromptEditorBackup();
     });
+    bindPromptExpandEditors(panel);
     panel.querySelector('#verba-banned-words').addEventListener('input', event => {
         settings.bannedWords = event.target.value;
         saveSettings();

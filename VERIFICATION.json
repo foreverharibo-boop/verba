@@ -1,5 +1,5 @@
 {
-  "version": "0.5.62",
+  "version": "0.5.63",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -27,6 +27,10 @@
     },
     {
       "check": "syntax/prompt-builders.js",
+      "status": "PASS"
+    },
+    {
+      "check": "syntax/prompt-editor.js",
       "status": "PASS"
     },
     {
@@ -103,6 +107,11 @@
       "output": "PASS: profile command registration, A/B/C popup, current marker, disabled/stale slots, persistence, dismissal, hidden-anchor placement and existing icon cycle. DOM adapter; no API calls."
     },
     {
+      "check": "prompt-editor.mjs",
+      "status": "PASS",
+      "output": "PASS: 76 DOM/event assertions; actual save handlers, four slots, whitespace/empty/IME, close/Escape, reopening, focus, viewport listeners and cleanup. Rendering/live ST not tested."
+    },
+    {
       "check": "prompt-settings-matrix.mjs",
       "status": "PASS",
       "output": "PASS: 192 option/mode sensitivity checks; settings, identity, source and custom notes preserved.\nPASS: implicit defaults and explicit Hongjin/pair-register overrides in all three modes.\nPASS: shared accuracy policy across built-in styles and compression modes."
@@ -120,7 +129,7 @@
     {
       "check": "source-layout.mjs",
       "status": "PASS",
-      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.359 ms/local pass (container, not phone)."
+      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.345 ms/local pass (container, not phone)."
     },
     {
       "check": "source-map-selection.mjs",
@@ -131,14 +140,14 @@
   "changed_files": [
     "README.md",
     "index.js",
-    "PROMPTS_KO.md",
+    "prompt-editor.js",
+    "style.css",
     "manifest.json",
-    "prompt-builders.js",
-    "tests/general-flavors.mjs",
-    "tests/mad-recomposition.mjs",
-    "tests/prompt-settings-matrix.mjs",
-    "tests/compressed-prompts.mjs"
+    "tests/prompt-editor.mjs"
   ],
+  "ui_event_test": "76 DOM/event assertions with actual source input handlers",
   "live_browser_test": false,
-  "live_model_test": false
+  "rendering_test": false,
+  "live_model_test": false,
+  "limitation": "Browser environment blocked the local fixture; native rendering and physical phone keyboard remain untested."
 }

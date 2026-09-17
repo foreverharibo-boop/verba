@@ -52,6 +52,7 @@ export function createPromptBuilders(h) {
         const pairOverrides = [['TARGET→USER',s.developerMadKoreanTargetToUserRegister],['USER→TARGET',s.developerMadKoreanUserToTargetRegister]].filter(([,v])=>v && v!=='source').map(([label,v])=>`${label}=${pair(v)}`);
         return lines([
             'MAD KOREAN — MANDATORY REAUTHORING: contemporary Korean web fiction. Discard source-language syntax/wording; rebuild narration/dialogue from facts and intent within each id. Spoken dialogue, native prose; no literal drafts/synonym swaps.',
+            'NARRATION: use an easy-to-read contemporary Korean fiction style. Convey actions, sensations and emotions directly with simple, everyday vocabulary; avoid overly solemn or grandiose phrasing, strings of abstract nouns and layers of modifiers.',
             'Keep source/contextual registers consistent.'+(pairOverrides.length ? ` PAIR SPEECH LOCK: ${pairOverrides.join('; ')}; exclude NPC/quoted/uncertain speech.` : ''),
             'Ellipses (.../…/……): exact characters/count/order, no additions. Natural vocatives; playful honorifics allowed.',
             'In dialogue, confirmed clock-time HHMM→오전/오후 시/분, not 0700시; keep minutes/uncertainty.',

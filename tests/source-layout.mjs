@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import fs from 'node:fs';
-import { repairUnexpectedProseBreaks as repair, collectSegmentResponse } from '../response-parser.js';
+import { repairUnexpectedProseBreaks as repair, repairSourceEllipses, collectSegmentResponse } from '../response-parser.js';
 import { segmentSource, assembleTranslation } from '../core.js';
 
 const prose = { id: 'seg_0000', type: 'narration', text: 'He waited. She smiled.' };
@@ -58,9 +58,9 @@ for (const gap of ['\n', '\n\n', '\r\n\r\n', '\n\n\n']) {
 // Exercise the exact candidate cleanup expression used by the UI without
 // browser dependencies; no network request is involved in this step.
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
-const expression = index.match(/\.map\(candidate => (repairUnexpectedProseBreaks\([^\n]+)\);/)[1];
-const cleanCandidate = Function('candidate', 'repairUnexpectedProseBreaks', 'repairKoreanParticleAlternatives', 'repairIndivisibleIdentityNames', 'speakerIdentity', 'expected', 'return ' + expression);
-assert.equal(cleanCandidate(candidate, repair, x => x, x => x, {}, [prose]), '첫 문장. 다음 문장.');
+const expression = index.match(/\.map\(candidate => (repairSourceEllipses\([^\n]+)\);/)[1];
+const cleanCandidate = Function('candidate', 'repairUnexpectedProseBreaks', 'repairKoreanParticleAlternatives', 'repairIndivisibleIdentityNames', 'speakerIdentity', 'expected', 'repairSourceEllipses', 'return ' + expression);
+assert.equal(cleanCandidate(candidate, repair, x => x, x => x, {}, [prose], repairSourceEllipses), '첫 문장. 다음 문장.');
 
 const sample = ('그는 기다렸다.\n\n그녀는 웃었다. '.repeat(1500));
 const t0 = performance.now();

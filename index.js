@@ -4,7 +4,7 @@ import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTr
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
 import { bindPromptExpandEditors } from './prompt-editor.js';
-import { collectSegmentResponse, repairUnexpectedProseBreaks } from './response-parser.js';
+import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, selectionEllipsisReference } from './response-parser.js';
 import { minimalOutputEnabled, translateMinimalOutput } from './minimal-output.js';
 import { outputSplitCount, runOutputBatches, createSplitRequestQueue } from './output-splitting.js';
 import {
@@ -44,7 +44,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.71';
+const EXTENSION_VERSION = '0.5.72';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -8192,7 +8192,7 @@ async function retranslateSelectionBundle() {
         id: `multi_${String(index).padStart(4, '0')}`,
         sourceContext: selectionSourceContext({ ...state, ...range }, contextMode),
     }));
-    const expected = selections.map(row => ({ id: row.id, type: 'multi_selection', text: row.selected }));
+    const expected = selections.map(row => ({ id: row.id, type: 'multi_selection', text: row.selected, ellipsisSource: selectionEllipsisReference({ ...state, ...row }) }));
     const prompt = buildMultiSelectionPrompt({
         source: state.source,
         translation: state.translation,
@@ -8447,7 +8447,7 @@ async function retranslateSelection(snapshot) {
         sourceContext: selectionSourceContext(snapshot, contextMode),
         tuning,
     });
-    const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected }];
+    const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected, ellipsisSource: selectionEllipsisReference(snapshot) }];
     let toast = showProgress(candidateMode
         ? '선택한 부분의 번역 후보 3개를 만드는 중입니다…'
         : '선택한 부분만 다시 번역 중입니다…');
@@ -8455,7 +8455,7 @@ async function retranslateSelection(snapshot) {
         let replacement = '';
         if (candidateMode) {
             const received = (await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' }))
-                .map(candidate => repairUnexpectedProseBreaks(repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(candidate, speakerIdentity)), expected[0]));
+                .map(candidate => repairSourceEllipses(repairUnexpectedProseBreaks(repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(candidate, speakerIdentity)), expected[0]), expected[0]));
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;

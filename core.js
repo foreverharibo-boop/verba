@@ -1,5 +1,5 @@
 import { createPromptBuilders } from './prompt-builders.js';
-import { collectSegmentResponse, repairUnexpectedProseBreaks } from './response-parser.js';
+import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses } from './response-parser.js';
 
 const PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
@@ -805,7 +805,7 @@ export function assembleTranslation(segmented, translations) {
             throw new Error(`번역 결과 누락: ${part.id}`);
         }
         // Also cover later repair passes; keep the same map for source mapping.
-        const repaired = repairUnexpectedProseBreaks(translated, part);
+        const repaired = repairSourceEllipses(repairUnexpectedProseBreaks(translated, part), part);
         map.set(part.id, repaired);
         return repaired;
     }).join('');

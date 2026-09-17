@@ -33,6 +33,49 @@ export function repairUnexpectedProseBreaks(translation, segment) {
         });
 }
 
+
+// Keep pause positions in the translation, restoring only source glyphs/length.
+// Equal occurrence counts are required: never guess missing or added pauses.
+export function repairSourceEllipses(translation, segment) {
+    const source = segment?.ellipsisSource ?? segment?.text;
+    if (typeof translation !== 'string' || typeof source !== 'string'
+        || !['narration', 'dialogue_candidate', 'target_dialogue', 'other_dialogue', 'selection', 'multi_selection'].includes(segment?.type)
+        || /[\x60<>]|~{3}/u.test(source) || /[\x60<>]|~{3}/u.test(translation)) return translation;
+    const pauses = text => {
+        // Mask opaque tokens, macros, URLs and paths without changing offsets.
+        const masked = text.replace(/@@[\s\S]*?@@|\{\{[\s\S]*?\}\}|\b(?:https?:\/\/|www\.)[^\s<>"']+|(?:\.\.[/\\])+\S*/gu,
+            token => ' '.repeat(token.length));
+        return [...masked.matchAll(/[.…]+/gu)].filter(match =>
+            (match[0].includes('…') || match[0].length >= 2)
+            && !/[0-9/\\]/u.test(masked[match.index - 1] || '')
+            && !/[0-9/\\]/u.test(masked[match.index + match[0].length] || ''));
+    };
+    const expected = pauses(source), received = pauses(translation);
+    if (!expected.length || expected.length !== received.length) return translation;
+    let repaired = '', offset = 0;
+    for (let i = 0; i < received.length; i += 1) {
+        const current = received[i];
+        repaired += translation.slice(offset, current.index) + expected[i][0];
+        offset = current.index + current[0].length;
+    }
+    return repaired + translation.slice(offset);
+}
+
+// Exact mapped spans can use original-source punctuation. A partial span has
+// no reliable sub-sentence alignment, so preserve its existing selected form.
+export function selectionEllipsisReference(snapshot = {}) {
+    const { selected, source, translation, start, end } = snapshot;
+    if (start === 0 && typeof translation === 'string' && end === translation.length
+        && typeof source === 'string' && source.trim()) return source;
+    const rows = Array.isArray(snapshot.sourceMap) ? snapshot.sourceMap.filter(row =>
+        Number.isFinite(row.start) && Number.isFinite(row.end) && row.start < row.end
+        && start < row.end && end > row.start) : [];
+    if (rows.length && rows.every(row => start <= row.start && end >= row.end && typeof row.source === 'string')) {
+        return rows.slice().sort((a, b) => a.start - b.start).map(row => row.source).join('\n\n');
+    }
+    return selected;
+}
+
 function normalizeSyntax(text) {
     let result = '', quoted = false, escaped = false;
     const fixes = new Set();
@@ -184,6 +227,14 @@ export function collectSegmentResponse(raw, expectedSegments = []) {
         if (repaired !== original) {
             partial.set(segment.id, repaired);
             repairs.push(`원문 한 줄 구간의 추가 줄바꿈 제거: ${segment.id}`);
+        }
+    }
+    for (const segment of expectedSegments) {
+        const original = partial.get(segment.id);
+        const repaired = repairSourceEllipses(original, segment);
+        if (repaired !== original) {
+            partial.set(segment.id, repaired);
+            repairs.push('원문 말줄임표 문자·길이 복구: ' + segment.id);
         }
     }
     const missingIds = [...expected].filter(id => !partial.has(id));

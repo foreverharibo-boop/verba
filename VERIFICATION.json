@@ -1,5 +1,5 @@
 {
-  "version": "0.5.76",
+  "version": "0.5.77",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -164,17 +164,23 @@
       "check": "subject-pronoun-omission.mjs",
       "status": "PASS",
       "output": "PASS: general and Mad Korean prompts no longer encourage subject/pronoun omission; explicit 한캐 option remains available."
+    },
+    {
+      "check": "voice-intensity-flexibility.mjs",
+      "status": "PASS",
+      "output": "PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (43 checks)."
     }
   ],
   "changed_files": [
     "core.js",
+    "prompt-builders.js",
     "README.md",
     "VERIFICATION.json",
     "index.js",
     "manifest.json",
     "tests/settings-layout.mjs",
-    "tests/subject-pronoun-omission.mjs"
+    "tests/voice-intensity-flexibility.mjs"
   ],
-  "scope": "Remove built-in subject/pronoun omission encouragement from general, Mad Korean, and Hongjin prompt paths while retaining the explicit Korean-character omission preference",
+  "scope": "Keep ordinary E-to-K and K-to-E prompts byte-identical to the previous release; remove the conflicting surface verbal-intensity ceiling only inside Mad Korean output paths while preserving events, facts, relationships, consent/refusal, emotional direction, explicit content, and plot-relevant physical degree; make authorized Hongjin voice visibly mandatory in every compression route",
   "live_mobile_test": false
 }

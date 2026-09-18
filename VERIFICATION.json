@@ -1,5 +1,5 @@
 {
-  "version": "0.5.75",
+  "version": "0.5.76",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -159,18 +159,22 @@
       "check": "source-map-selection.mjs",
       "status": "PASS",
       "output": "PASS: selection retranslation preserves source mapping across single, crossed, and repeated ranges."
+    },
+    {
+      "check": "subject-pronoun-omission.mjs",
+      "status": "PASS",
+      "output": "PASS: general and Mad Korean prompts no longer encourage subject/pronoun omission; explicit 한캐 option remains available."
     }
   ],
   "changed_files": [
+    "core.js",
     "README.md",
     "VERIFICATION.json",
     "index.js",
     "manifest.json",
-    "pair-coordinator.js",
-    "tests/output-timing.mjs",
-    "tests/pair-coordination.mjs",
-    "tests/settings-layout.mjs"
+    "tests/settings-layout.mjs",
+    "tests/subject-pronoun-omission.mjs"
   ],
-  "scope": "Verba and Verba Deep share one page-session display owner so only the active extension applies automatic input/output translations, restores display state, and handles translated-message gestures",
+  "scope": "Remove built-in subject/pronoun omission encouragement from general, Mad Korean, and Hongjin prompt paths while retaining the explicit Korean-character omission preference",
   "live_mobile_test": false
 }

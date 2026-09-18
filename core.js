@@ -947,7 +947,7 @@ const DEVELOPER_SPEECH_DISTANCE_RULES = {
 - Render TARGET CHARACTER dialogue in natural contemporary 반말/casual Korean where grammar permits.
 - Keep it relaxed and familiar without inventing slang, affection, flirtation, or a closer factual relationship.`,
     veryCasual: `VERY CASUAL / VERY COMFORTABLE
-- Render TARGET CHARACTER dialogue with strongly relaxed conversational distance: natural 반말, omission, contractions, and loose spoken rhythm where appropriate.
+- Render TARGET CHARACTER dialogue with strongly relaxed conversational distance: natural 반말, contractions, and loose spoken rhythm where appropriate.
 - Do not add profanity, pet names, affection, teasing, or intimacy that is absent from the source.`,
 };
 
@@ -1089,7 +1089,7 @@ const DEVELOPER_HONGJIN_TRANSCREATION_RULES = {
 - Prefer characterful Korean phrasing over dictionary-equivalent wording when both preserve the same intent.`,
     strong: `TRANSCREATION — STRONG
 - Rebuild the TARGET CHARACTER's dialogue aggressively as if this character had originally spoken it in Korean.
-- Preserve pragmatic intent and scene function rather than lexical wording. Freely reorder, compress, split, merge, drop recoverable subjects, and replace literal constructions with punchier Korean speech.`,
+- Preserve pragmatic intent and scene function rather than lexical wording. Freely reorder, compress, split, merge, and replace literal constructions with punchier Korean speech.`,
     maximum: `TRANSCREATION — MAXIMUM
 - Treat the source as semantic/scene constraints, NOT as wording to preserve.
 - Re-author the TARGET CHARACTER's dialogue from scratch in Korean so the line lands with the strongest sly, shameless, teasing, vulgar character voice compatible with the source.
@@ -1163,7 +1163,7 @@ function noDirectUserInsultRule(compact = false) {
 function dialogueSubjectVocativeRule() {
     return `SUBJECT OR VOCATIVE: in dialogue, choose whether a name, affectionate nickname, or title works more naturally as a grammatical subject or as direct address. If particles or honorific agreement make the connection awkward, separate an actual listener's name/address from the clause and rebuild the rest as spoken Korean. Preserve the actor and listener; never turn a reference to a third person into direct address.
 - Keep affectionate address and playful honorifics when supported by the source or authorized voice and natural in context. Do not add formal particles such as 께서 merely to match 시/계시 or make the grammar look ceremonious; neither 께서 nor playful honorifics are banned. Preserve configured 반말/존댓말 and established relationships.
-- Do not place a comma after every name, omit subjects wholesale, or invent a nickname or action. Use separation only when it sounds more natural aloud; omission must still meet the applicable subject/possessive rule, and ellipsis fidelity remains unchanged.`;
+- Do not place a comma after every name or invent a nickname or action. Use separation only when it sounds more natural aloud; ellipsis fidelity remains unchanged.`;
 }
 
 function naturalInsultReferenceRule() {
@@ -1269,23 +1269,23 @@ const LOCALIZATION_RULES = {
 - Correct only what Korean grammar requires. Do not freely rephrase merely to sound more native.`,
     light: `LIGHT LOCALIZATION
 - Remove only obvious translationese while staying close to the source wording and clause order.
-- Naturalize particles, word order, connective endings, and redundant explicit subjects or pronouns when the referent remains unmistakable.
+- Naturalize particles, word order, and connective endings.
 - Prefer direct Korean equivalents over literal calques, but avoid broad stylistic rewriting.`,
     balanced: `BALANCED KOREAN
 - Use idiomatic Korean sentence structure and ordinary Korean equivalents for stable idioms and conversational phrasing.
-- Reorder clauses, omit recoverable repeated subjects, and smooth stiff source-language connectors when needed for natural flow, while keeping the source's rhetorical shape recognizable.`,
+- Reorder clauses and smooth stiff source-language connectors when needed for natural flow, while keeping the source's rhetorical shape recognizable.`,
     naturalized: `NATURAL KOREAN
-- Actively remove English-style translationese: literal clause order, repeated explicit pronouns, awkward possessives, calqued idioms, stiff connectors, and unnatural repetition.
+- Actively remove English-style translationese: literal clause order, awkward possessives, calqued idioms, stiff connectors, and unnatural repetition.
 - Rebuild sentence rhythm and phrasing into fluent contemporary Korean while preserving every source fact, nuance, intensity, register, and referent.
-- A repeated pronoun may be omitted where Korean naturally omits it and the referent stays unambiguous; never replace it with an identity name merely for fluency.`,
+- Never replace a pronoun with an identity name merely for fluency.`,
     native: `NATIVE-KOREAN TRANSCREATION — MAXIMUM FREEDOM WITH FACTUAL FIDELITY
 - Recreate the passage as original Korean writing by an accomplished contemporary Korean web-fiction/RP writer. The result must pass a Korean-original test: a fluent Korean reader should not be able to infer the English wording, syntax, sentence rhythm, or translation path behind it.
 - Translate the scene's intended meaning, speech act, subtext, emotional effect, comic timing, sensuality, hostility, intimacy, and reader impact — NOT its individual words or grammatical packaging. Lexical and structural correspondence to English is unnecessary when a different Korean expression delivers the same scene truth and force more naturally.
 - Treat literal wording as disposable. Freely replace calques, stock English phrasing, idioms, metaphors, euphemisms, intensifiers, interjections, question tags, discourse markers, insults, flirting, jokes, slang, and rhetorical devices with context-native Korean equivalents. A surface-different rendering is welcome when its pragmatic meaning and impact are more faithful.
-- Freely compress or expand wording, reorder information, change clause linkage, merge or split sentences within the same paragraph, turn explicit subjects/possessives into Korean ellipsis, recast passive or noun-heavy English into active Korean, and rebuild emphasis around Korean information flow. Preserve paragraph boundaries and the actual sequence of events.
-- Do not preserve an English construction merely because it can be understood in Korean. If a Korean writer would normally express the same moment through a different verb, image, cadence, omission, sentence ending, or degree of explicitness, use that Korean-native choice.
-- DIALOGUE: write genuinely spoken contemporary Korean. Prioritize the character's intent, relationship distance, personality, rhythm, profanity level, teasing, hesitation, interruption, and emotional temperature. Use natural contractions, particles, omissions, sentence-final nuance, rhetorical compression, and situational Korean phrasing without tracing the source sentence structure.
-- NARRATION: rewrite into polished Korean web-fiction/RP prose rather than translated prose. Remove English-style subject repetition, possessive chains, body-part constructions, filter phrases, stiff connectors, and explanatory redundancy. Choose short beats, connected flow, reordered focus, vivid but source-supported verbs, and natural Korean sentence rhythm according to the scene.
+- Freely compress or expand wording, reorder information, change clause linkage, merge or split sentences within the same paragraph, recast passive or noun-heavy English into active Korean, and rebuild emphasis around Korean information flow. Preserve paragraph boundaries and the actual sequence of events.
+- Do not preserve an English construction merely because it can be understood in Korean. If a Korean writer would normally express the same moment through a different verb, image, cadence, sentence ending, or degree of explicitness, use that Korean-native choice.
+- DIALOGUE: write genuinely spoken contemporary Korean. Prioritize the character's intent, relationship distance, personality, rhythm, profanity level, teasing, hesitation, interruption, and emotional temperature. Use natural contractions, particles, sentence-final nuance, rhetorical compression, and situational Korean phrasing without tracing the source sentence structure.
+- NARRATION: rewrite into polished Korean web-fiction/RP prose rather than translated prose. Remove possessive chains, body-part constructions, filter phrases, stiff connectors, and explanatory redundancy. Choose short beats, connected flow, reordered focus, vivid but source-supported verbs, and natural Korean sentence rhythm according to the scene.
 - Preserve deliberate ambiguity, repetition, awkwardness, fragmentation, or foreign cultural texture only when it is meaningful to the scene or voice — never merely because the English surface contains it.
 - Preserve explicitness without censoring or euphemizing it. Likewise, never intensify mild material merely to sound vivid. Match the source's actual force even when the Korean wording changes substantially.
 - Target style examples for freedom of localization:
@@ -1389,7 +1389,7 @@ FACT, REFERENT, AND FORCE LOCK
 - Stability words such as secure/anchor/support/prevent slipping do not create escape or resistance. Use restraint language only when the source contains an actual attempt to leave or physical restraint.
 - Preserve intensity both ways. Gentle stays gentle; firm stays firm; rough or explicit stays equally rough or explicit. Natural prose is neither censorship nor escalation.
 - Preserve the source's specificity. Do not turn generic bedding into goose down, a fee into a contractual penalty, or mild movement into struggling.
-- Follow PRIMARY CAST REFERENCES below for names, pronouns, subject re-anchoring, and omission; keep actor, listener, and owner clear.
+- Follow PRIMARY CAST REFERENCES below for names, pronouns, and subject re-anchoring; keep actor, listener, and owner clear.
 
 ${madKoreanNativeWritingRules()}
 
@@ -1399,7 +1399,7 @@ NARRATION PRECISION
 - In intimate or explicit scenes, keep the exact tenderness, urgency, roughness, consent, discomfort, and explicitness. Prefer direct, physically intelligible Korean over euphemism chains or harsher invented action.
 
 KOREAN DIALOGUE
-- Recreate the speech act, subtext, timing, relationship, hierarchy, humor, and emotional temperature—not the English grammar. Use the omissions, particles, contractions, and endings this speaker would naturally use with this listener.
+- Recreate the speech act, subtext, timing, relationship, hierarchy, humor, and emotional temperature—not the English grammar. Use the particles, contractions, and endings this speaker would naturally use with this listener.
 - Express declarations, rhetorical questions, and legal/corporate jokes in natural Korean appropriate to the actual speaker. Preserve their premise and purpose; do not invent a reason or drop a destination to make a line sound smoother.
 - Do not invent a character voice. Ordinary contemporary Korean is the default. Outside the authorized voice settings, do not add rough masculine labels, profanity, fashionable shorthand, or Japanese-translated speech merely to sound lively. Avoid “녀석/놈들/너더러/자네/○○군/일절/말동무/꼼짝없이/공식 지정” when a simpler current expression carries the meaning.
 - Every speaker, including an unnamed NPC, must use coherent contemporary Korean appropriate to the established relationship. Never infer dialect, old age, period-drama speech, or a gangster caricature merely from a speaker's job, appearance, age, roughness, or the genre.
@@ -1437,7 +1437,7 @@ function madKoreanHongjinVoiceRule(settings = {}) {
     }[settings.developerHongjinTranscreation] || 'pronounced character-voice phrasing';
     return `MAD KOREAN + HONGJIN — VOICE-ONLY PRIORITY
 - Transcreation strength controls TARGET CHARACTER dialogue voice only: ${strength}. The separate profanity, teasing, vulgarity, playfulness, age, and self-reference controls still apply within their authorized scope.
-- KOREAN-ORIGINAL COMPOSITION and PRIMARY CAST REFERENCES govern sentence construction and subject/possessive omission at every voice strength. Do not retain English sentence shape for LIGHT or increase omission for STRONG/MAXIMUM. Follow SOURCE ELLIPSIS FIDELITY and NATURAL COLLOCATIONS AND SOURCE IMAGERY unchanged; voice settings never authorize added/altered ellipses or invented metaphors.
+- KOREAN-ORIGINAL COMPOSITION and PRIMARY CAST REFERENCES govern sentence construction and person references at every voice strength. Do not retain English sentence shape for LIGHT. Follow SOURCE ELLIPSIS FIDELITY and NATURAL COLLOCATIONS AND SOURCE IMAGERY unchanged; voice settings never authorize added/altered ellipses or invented metaphors.
 - The voice exception permits only the authorized surface diction/teasing. It cannot override configured speech levels, speaker/addressee, name locks, hard lexical bans, or source facts, emotional direction, force, and consent.`;
 }
 
@@ -1454,9 +1454,8 @@ ${madKoreanNamePriorityRule()}`;
 
 function madKoreanNamePriorityRule() {
     return `NATURAL PERSON REFERENCES — PRIMARY CAST REFERENCES
-- “그/그녀/그의/그녀의” and grammatically inflected forms are ALLOWED. PERSONAL PRONOUN DEFAULT: for human third-person reference, he/him → 그, she/her → 그녀, his → 그의, possessive her → 그녀의; choose Korean particles by grammatical role. Use these pronouns by default when the referent is clear, not 여자/남자/녀석 or another descriptive label. Never introduce gender/age/size/role nouns merely to vary a source pronoun. Use a name to clarify a referent, not to replace pronouns mechanically. Do not treat pronouns as translationese or omit them in bulk; omission follows the narrow rule below.
-- OMIT ONLY WHEN MORE NATURAL: omit a subject or possessive only in directly linked context where the referent is unmistakable AND omission reads more naturally. Mere recoverability is insufficient. Do not let one opening name license a long chain of subjectless sentences.
-- RE-ANCHOR THE SUBJECT: use a name or pronoun when the actor/speaker changes, or when returning to action after extended situational, sensory, or interior description, EVEN IF THE SAME PERSON CONTINUES. At a new paragraph linking speech and action, normally identify whose speech/action it is; do not wait for ambiguity. Prefer 그/그녀 when clear to avoid repeating names. Directly connected actions may omit the repeated subject; do not add a reference to every sentence or every paragraph mechanically. Preserve attribution without inventing actions or inserting narration into a dialogue-only target.
+- “그/그녀/그의/그녀의” and grammatically inflected forms are ALLOWED. PERSONAL PRONOUN DEFAULT: for human third-person reference, he/him → 그, she/her → 그녀, his → 그의, possessive her → 그녀의; choose Korean particles by grammatical role. Use these pronouns by default when the referent is clear, not 여자/남자/녀석 or another descriptive label. Never introduce gender/age/size/role nouns merely to vary a source pronoun. Use a name to clarify a referent, not to replace pronouns mechanically.
+- RE-ANCHOR THE SUBJECT: use a name or pronoun when the actor/speaker changes, or when returning to action after extended situational, sensory, or interior description, EVEN IF THE SAME PERSON CONTINUES. At a new paragraph linking speech and action, normally identify whose speech/action it is; do not wait for ambiguity. Prefer 그/그녀 when clear to avoid repeating names. Preserve attribution without inventing actions or inserting narration into a dialogue-only target.
 - SPELLING, NOT FREQUENCY: when writing a name for a context-confirmed person, the user's fixed Korean spelling takes priority. Otherwise preserve the source name's scope: do not expand a given name into a full name merely because the identity reference contains a surname. Display names do not force name repetition.
 - Do not rotate through “여자/남자/녀석/상대/사람/사내/청년/작은 몸” as substitute labels for a known named person. A role or descriptive noun is allowed only when the person is genuinely unnamed or that description itself matters to the scene; do not erase actual gender/age/size facts.
 - Do not guess an uncertain referent, invent a name/surname, or print unknown-identity placeholders. Keep unresolved references faithful to source context.
@@ -1508,7 +1507,7 @@ function madKoreanHongjinAudienceFirewall(settings = {}, speakerIdentity = {}, s
 - TARGET CHARACTER: ${JSON.stringify(characterName)}
 - The only listener eligible for added self-reference “오빠/오빠가/오빠는” is CURRENT USER/PERSONA ${JSON.stringify(userName)}.
 - Before writing “오빠”, identify the speaker and addressee of that exact source line. It is permitted only when TARGET CHARACTER is speaking directly and exclusively to the named USER above.
-- If TARGET CHARACTER addresses a guard, manager, executive, friend, stranger, named NPC, titled NPC, group, or anyone other than the named USER, added “오빠” is absolutely forbidden. Use “나/내가/나는” or natural subject omission instead.
+- If TARGET CHARACTER addresses a guard, manager, executive, friend, stranger, named NPC, titled NPC, group, or anyone other than the named USER, added “오빠” is absolutely forbidden.
 - KIM HONG-JIN FLAVOR must not alter any NPC/USER speaker's wording. For rough person references, follow NATURAL INSULT REFERENCES; natural name-plus-insult phrasing is allowed within the authorized TARGET CHARACTER voice. These restrictions override every frequency, profanity, teasing, vulgarity, and playfulness setting.`;
 }
 
@@ -1535,7 +1534,7 @@ MAD KOREAN — ULTRA-COMPACT
 ${madKoreanEverydayExamples()}
 ${madKoreanTimeAndGroupRule(true)}
 ${madKoreanMetricUnitsRule()}
-- References: TARGET CHARACTER=${JSON.stringify(characterName)}; TARGET gender=${JSON.stringify(String(speakerIdentity.characterGender || 'unknown'))}; USER=${JSON.stringify(userName)}. Transliterate clear Latin-script human names into Hangul, excluding non-person terms; explicit name locks override transliteration. Never expand a short source name or repeat display names mechanically. PERSONAL PRONOUN DEFAULT: human he/him → 그, she/her → 그녀, his → 그의, possessive her → 그녀의, with grammatical particles. Prefer these when clear; never turn a source pronoun into 여자/남자/녀석 or another gender/age/size/role label for variety. Names clarify ambiguity, not replace pronouns mechanically. Omit a subject/possessive only when omission itself is clearly more natural in an immediately linked sentence; re-anchor with name/pronoun after actor changes or intervening description. Never rotate a known person through 여자/남자/녀석/상대/사람/사내/청년/작은 몸, guess an identity, split a name, or output particle-choice notation such as (이)는/이(가)/은(는).
+- References: TARGET CHARACTER=${JSON.stringify(characterName)}; TARGET gender=${JSON.stringify(String(speakerIdentity.characterGender || 'unknown'))}; USER=${JSON.stringify(userName)}. Transliterate clear Latin-script human names into Hangul, excluding non-person terms; explicit name locks override transliteration. Never expand a short source name or repeat display names mechanically. PERSONAL PRONOUN DEFAULT: human he/him → 그, she/her → 그녀, his → 그의, possessive her → 그녀의, with grammatical particles. Prefer these when clear; never turn a source pronoun into 여자/남자/녀석 or another gender/age/size/role label for variety. Names clarify ambiguity, not replace pronouns mechanically. Re-anchor with a name or pronoun after actor changes or intervening description. Never rotate a known person through 여자/남자/녀석/상대/사람/사내/청년/작은 몸, guess an identity, split a name, or output particle-choice notation such as (이)는/이(가)/은(는).
 - Speech lock only for the named pair's direct conversation: TARGET→USER=${register(settings?.developerMadKoreanTargetToUserRegister)}; USER→TARGET=${register(settings?.developerMadKoreanUserToTargetRegister)}. JONDAETMAL normally uses conversational 해요체. Do not apply pair locks to NPC/quoted/ambiguous speech.
 - Preserve every source ellipsis sequence exactly in order and form: .../…/…… keep the same count and characters; invent none. Preserve stable terminology. Default only unstated cultural context to contemporary Korea; retain every explicit foreign location, institution, brand, garment, currency, historical/legal/fictional fact.
 - Translate visible natural language inside tags, including metadata/date/weekday/time/weather/location; preserve HTML/tag attributes, code/style/script, Markdown, macros, URLs, emoji, punctuation, numbers, layout, and protected tokens exactly. Return Korean-only valid JSON with every supplied id once.
@@ -1897,7 +1896,7 @@ function naturalKoreanBaselineRule() {
     return `NATURAL KOREAN BASELINE — ALWAYS ACTIVE
 - Interpret the source as discourse before wording it in Korean. Resolve idioms, phrasal verbs, ellipsis, sarcasm, rhetorical questions, clipped reactions, discourse markers, and fragmentary speech from context instead of following English word order mechanically.
 - Korean output must be grammatically and idiomatically readable even at the most source-faithful localization level. The localization setting controls HOW FAR stylistic restructuring may go; it never requires broken English-shaped Korean.
-- Do not mechanically preserve English articles, dummy subjects, repeated explicit pronouns, possessive chains, passive constructions, or clause order when Korean grammar naturally expresses the SAME meaning more cleanly.
+- Do not mechanically preserve English articles, dummy subjects, possessive chains, passive constructions, or clause order when Korean grammar naturally expresses the SAME meaning more cleanly.
 - Preserve deliberate fragments, interruptions, trailing-off lines, repetition, ambiguity, and incompleteness when they are meaningful. Do not finish, explain, or clarify something the source intentionally leaves unfinished or ambiguous.
 - Translate interjections and discourse markers by their pragmatic function in context rather than assigning one fixed Korean dictionary equivalent to each English word.
 - Preserve register, politeness, social distance, sarcasm, humor, vulgarity, intimacy, and character voice at the same force. Naturalization must never create a new relationship implication or emotional attitude.
@@ -1920,7 +1919,7 @@ function compactBaseTranslationPrompt(mode = 'scoped') {
     return `COMPACT E→K CORE — EXPERIMENTAL
 - Translate only the supplied ${targetLabel} into fluent, idiomatic Korean. Never answer, continue, censor, summarize, explain, add, or omit content.
 - Preserve meaning, facts, actor→action→target, possession, referents, intent, speech act, emotion, intensity, explicitness, consent, tense/aspect, negation, numbers, chronology, point of view, paragraph breaks, and narration/dialogue roles.
-- Rebuild English-shaped syntax into natural Korean: use context, natural omission, Korean clause order, and idiomatic reactions while preserving deliberate ambiguity, fragments, repetition, interruptions, and tone.
+- Rebuild English-shaped syntax into natural Korean: use context, Korean clause order, and idiomatic reactions while preserving deliberate ambiguity, fragments, repetition, interruptions, and tone.
 - Transliterate clear Latin-script human names into Hangul; do not transliterate brands, institutions, acronyms, handles, codes, files, URLs, or ambiguous non-person terms. NAME LOCK tokens override this rule.
 - Keep recurring roles, objects, institutions, places, and concepts terminologically consistent unless their meaning changes.
 - Never infer Korean age/kinship/status address terms from gender or generic “you”. Use them only when the source/context or an explicit active setting establishes them; otherwise omit naturally or use neutral wording.`;
@@ -1938,7 +1937,7 @@ export function legacyBaseTranslationPrompt(mode = 'scoped') {
     if (mode === 'mixed') return `- Translate the supplied source into natural Korean without answering, continuing, censoring, summarizing, adding, or omitting anything.
 ${absoluteFidelityRule()}
 ${naturalKoreanBaselineRule()}
-- TERMINOLOGY CONSISTENCY: When the same source term refers to the same stable role, object, institution, or concept, keep its Korean terminology consistent throughout the current message unless the source meaning genuinely changes. This does NOT require identical surface wording for ordinary pronouns, repeated person references, discourse markers, or grammatically inflected forms when natural Korean omission/restructuring preserves the same referent.
+- TERMINOLOGY CONSISTENCY: When the same source term refers to the same stable role, object, institution, or concept, keep its Korean terminology consistent throughout the current message unless the source meaning genuinely changes. This does NOT require identical surface wording for ordinary discourse markers or grammatically inflected forms when restructuring preserves the same referent.
 - KOREAN AGE / RELATIONSHIP ADDRESS SAFETY: Do not turn generic English "you" into Korean age-, kinship-, status-, or relationship-specific titles such as "오빠", "언니", "형", "누나", "선배", "선배님", "사장님", etc. unless the relevant relationship/status is clearly established in the supplied source context or explicitly required by the user's translation settings/prompts.
 - Gender alone is never enough evidence for "오빠/언니/형/누나". Relative age or the corresponding relationship must also be established.
 - When no such evidence exists, use a natural generic address/pronoun or omit the address in Korean when that is natural.
@@ -1948,7 +1947,7 @@ ${naturalKoreanBaselineRule()}
     return `- Translate the supplied targets into natural Korean without answering, continuing, censoring, summarizing, adding, or omitting anything.
 ${absoluteFidelityRule()}
 ${naturalKoreanBaselineRule()}
-- TERMINOLOGY CONSISTENCY: Keep stable role/object/institution/concept terminology consistent across this message, while allowing natural Korean omission, particles, inflection, and referent-safe restructuring instead of forcing identical surface wording.`;
+- TERMINOLOGY CONSISTENCY: Keep stable role/object/institution/concept terminology consistent across this message, while allowing natural Korean particles, inflection, and referent-safe restructuring instead of forcing identical surface wording.`;
 }
 
 export function defaultBaseTranslationPrompt(...args) {

@@ -53,8 +53,8 @@ assert.equal(core.resolveOutputSpeakerIdentity({userName:'Dr. A.'}, locks).userN
 assert.equal(core.resolveOutputSpeakerIdentity({userName:'담은.'}, [{source:'담은',target:'다미'}, {source:'담은.',target:'다솜'}]).userName, '담은');
 assert.equal(core.resolveOutputSpeakerIdentity({userName:'Dam-eun'}, [{source:'Dam-eun',target:'담은.'}]).userName, '담은.'); // User-saved literal untouched.
 const attribution = core.buildSpeakerAttributionPrompt(segmented, resolved);
-check(attribution.includes('USER: "Dam-eun"'), 'original user label retained for classification');
-check(attribution.includes('TARGET CHARACTER: "Hong-jin"'), 'original character label retained for classification');
+check(attribution.includes('USER/{{user}}="Dam-eun"'), 'original user label retained for classification');
+check(attribution.includes('TARGET/CHAR/{{char}}="Hong-jin"'), 'original character label retained for classification');
 const routes = ['full', 'narration', 'target_dialogue', 'other_dialogue', 'tagged_content', 'selection', 'selectionDialogue', 'selectionCandidates', 'multi', 'qa', 'bannedRepair', 'tokenRepair', 'untranslatedRepair'];
 for (const developerMode of [false, true]) for (const developerCompressedPromptEnabled of [false,true])
 for (const developerMadKoreanOutputEnabled of [false,true]) for (const developerHongjinFlavorEnabled of [false,true]) {
@@ -78,43 +78,6 @@ for (const compressed of [false,true]) {
 const token = protectedData.nameTokens[0].token;
 assert.equal(core.restoreProtected(token+'이 말했다. 담은의 말이다.', protectedData.nameTokens), '담은이 말했다. 담은의 말이다.');
 assert.equal(core.restoreProtected(core.restoreProtected(protectedData.protectedText, protectedData.nameTokens), protectedData.tokens), '담은 said. She waited. <b>Done.</b><style>.Dam-eun {color:red}</style>');
-const fallbackPrompt = core.buildIdentityNameFallbackPrompt({
-    characterName: '김홍진',
-    userName: '혜담은',
-    candidates: ['Hong-jin', 'Dam-eun'],
-});
-check(fallbackPrompt.includes('CURRENT TARGET CHARACTER DISPLAY NAME: "김홍진"'), 'fallback receives only current character display name');
-check(fallbackPrompt.includes('CURRENT USER / PERSONA DISPLAY NAME: "혜담은"'), 'fallback receives only current persona display name');
-check(fallbackPrompt.includes('"source_name":"Dam-eun"'), 'fallback receives source name candidates');
-check(fallbackPrompt.includes('__NO_MATCH__'), 'fallback can refuse uncertain identity matches');
-const flashNamePrompt = core.buildOutputPrompt(segmented, {
-    ...defaults,
-    developerMode: true,
-    developerMadKoreanOutputEnabled: true,
-    developerCompressedPromptEnabled: false,
-}, '', resolved);
-check(flashNamePrompt.includes('MANDATORY KOREAN NAME FORMS — LOCAL MECHANICAL GRAMMAR'), 'flash prompt contains dynamic local mechanical name table');
-check(flashNamePrompt.includes('"base":"담은","subject":"담은이","topic":"담은은","object":"담은을"'), 'flash prompt lists exact Korean particles');
-check(flashNamePrompt.includes('Never rewrite, sanitize, neutralize, shorten, or otherwise alter the surrounding dialogue'), 'name repair cannot sanitize surrounding voice');
-check(!flashNamePrompt.includes('This check overrides style and voice'), 'name repair no longer overrides character voice');
-const flashHongjinPrompt = core.buildOutputPrompt(segmented, {
-    ...defaults,
-    developerMode: true,
-    developerMadKoreanOutputEnabled: true,
-    developerHongjinFlavorEnabled: true,
-    developerCompressedPromptEnabled: false,
-    developerHongjinProfanity: 'natural',
-}, '', resolved);
-check(flashHongjinPrompt.indexOf('KIM HONG-JIN VOICE — FIRST EXECUTION GATE') < flashHongjinPrompt.indexOf('MANDATORY KOREAN NAME FORMS — LOCAL MECHANICAL GRAMMAR'), 'Hongjin voice execution gate precedes name grammar table');
-check(flashHongjinPrompt.includes('Name repair may edit only name/direct suffix'), 'early voice gate protects voice from later name repair');
-assert.equal(core.repairCanonicalKoreanNameSuffixes('담은이의 후드와 담은이를 잡았다.', ['담은']), '담은의 후드와 담은을 잡았다.');
-assert.equal(core.repairCanonicalKoreanVocatives('"담은이아!" 그가 외쳤다.', { type: 'dialogue_candidate', text: '"Dam-eun!" he shouted.' }, ['담은']), '"담은아!" 그가 외쳤다.');
-assert.equal(core.repairCanonicalKoreanVocatives('"담은이야!" 그가 외쳤다.', { type: 'dialogue_candidate', text: '"Dam-eun!" he shouted.' }, ['담은']), '"담은아!" 그가 외쳤다.');
-assert.equal(core.repairCanonicalKoreanVocatives('담은이 파이프를 휘둘렀다.', { type: 'narration', text: 'Dam-eun swung the pipe.' }, ['담은']), '담은이 파이프를 휘둘렀다.');
-assert.equal(core.repairCanonicalKoreanNameSuffixes('신이가 담은이를 불렀다.', ['신', '담은']), '신이 담은을 불렀다.');
-assert.equal(core.repairCanonicalKoreanVocatives('"신이아!" 그녀가 외쳤다.', { type: 'dialogue_candidate', text: '"Shin!" she shouted.' }, ['신']), '"신아!" 그녀가 외쳤다.');
 const indexSource = fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
 check(indexSource.includes('}, normalizedCharacterNameLocks(character));'), 'runtime passes character locks into output identity');
-check(indexSource.includes("stage: 'identity-name-fallback'"), 'runtime has cached fallback name planning stage');
-check(indexSource.includes('mergedNameLocks(explicitNameLocks, inferredNameLocks)'), 'saved name locks are merged before inferred names');
 console.log(`Name-lock routing: PASS (${checks} checks plus identity/restoration assertions; no live AI calls)`);

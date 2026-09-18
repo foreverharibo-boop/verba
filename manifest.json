@@ -1,8 +1,8 @@
 {
-  "name": "verba-deep",
-  "display_name": "베에르으바아",
-  "version": "0.5.97",
-  "description": "DeepSeek V4.1 Flash용 자연 번역·한국어 재구성·캐릭터 보이스 분리형 번역 확장",
+  "name": "verba",
+  "display_name": "베르바",
+  "version": "0.5.78",
+  "description": "선택 재번역과 캐릭터별 이름 고정을 지원하는 가벼운 자동번역기",
   "author": "담은",
   "js": "index.js",
   "css": "style.css",

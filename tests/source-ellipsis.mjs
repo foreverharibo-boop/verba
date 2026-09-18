@@ -59,7 +59,7 @@ const selection = { id: 'seg_0000', type: 'selection', text: '잠깐……', ell
 assert.equal(repair('잠깐만……', selection), '잠깐만...');
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const expression = index.match(/\.map\(candidate => (repairSourceEllipses\([^\n]+)\);/)[1];
-const clean = Function('candidate', 'repairSourceEllipses', 'repairUnexpectedProseBreaks', 'repairKoreanParticleAlternatives', 'repairOutputIdentityNames', 'speakerIdentity', 'expected', 'return ' + expression);
+const clean = Function('candidate', 'repairSourceEllipses', 'repairUnexpectedProseBreaks', 'repairKoreanParticleAlternatives', 'repairIndivisibleIdentityNames', 'speakerIdentity', 'expected', 'return ' + expression);
 const candidates = ['잠깐만......', '잠시……\n기다려.', '아니……<br>기다려.'];
 assert.deepEqual(candidates.map(c => clean(c, repair, repairUnexpectedProseBreaks, x => x, x => x, {}, [selection])),
  ['잠깐만...', '잠시... 기다려.', '아니... 기다려.']);

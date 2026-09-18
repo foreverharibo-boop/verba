@@ -13,21 +13,21 @@ assert.match(index, /promptSlotsCollapsed:\s*false,/);
 assert.match(index, /settings\.promptSlotsCollapsed\s*=\s*settings\.promptSlotsCollapsed === true;/);
 
 const markup = between(
-    '                <details id="verba-prompt-slots"',
-    '                <label for="verba-banned-words">',
+    '                <details id="verba-deep-prompt-slots"',
+    '                <label for="verba-deep-banned-words">',
 );
 assert.match(markup, /\$\{settings\.promptSlotsCollapsed \? '' : 'open'\}/);
 assert.match(markup, /<summary>프롬프트 입력창 <small>4개 한꺼번에 접기·펴기<\/small><\/summary>/);
-assert.equal([...markup.matchAll(/data-verba-prompt-slot="/g)].length, 4);
+assert.equal([...markup.matchAll(/data-verba-deep-prompt-slot="/g)].length, 4);
 for (const id of ['global', 'all-dialogue', 'dialogue', 'other-dialogue']) {
-    assert.match(markup, new RegExp(`data-verba-prompt-slot="${id}"`));
-    assert.match(markup, new RegExp(`id="verba-${id}-prompt-enabled"`));
-    assert.match(markup, new RegExp(`id="verba-${id}-prompt"`));
+    assert.match(markup, new RegExp(`data-verba-deep-prompt-slot="${id}"`));
+    assert.match(markup, new RegExp(`id="verba-deep-${id}-prompt-enabled"`));
+    assert.match(markup, new RegExp(`id="verba-deep-${id}-prompt"`));
 }
 
 const listenerSource = between(
-    "    const promptSlotsDetails = panel.querySelector('#verba-prompt-slots');",
-    "    panel.querySelector('#verba-global-prompt').addEventListener('input'",
+    "    const promptSlotsDetails = panel.querySelector('#verba-deep-prompt-slots');",
+    "    panel.querySelector('#verba-deep-global-prompt').addEventListener('input'",
 );
 let toggleHandler;
 const details = {
@@ -39,7 +39,7 @@ const details = {
 };
 const panel = {
     querySelector(selector) {
-        assert.equal(selector, '#verba-prompt-slots');
+        assert.equal(selector, '#verba-deep-prompt-slots');
         return details;
     },
 };

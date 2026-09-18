@@ -42,6 +42,62 @@ const count = (text, value) => text.split(value).length - 1;
 const base = { ...defaults, developerMode: true };
 const measures = [];
 
+for (const [mode, flags] of Object.entries({
+    standard: {},
+    mad: { developerMadKoreanOutputEnabled: true },
+    madHongjin: { developerMadKoreanOutputEnabled: true, developerHongjinFlavorEnabled: true },
+})) {
+    for (const [name, build] of Object.entries(builders)) {
+        const safe = build({ ...base, ...flags, developerCompressedPromptEnabled: true });
+        const extreme = build({ ...base, ...flags, developerExtremeCompressedPromptEnabled: true });
+        ok(extreme.length < safe.length, `${mode}/${name} must be shorter`);
+        ok(build({ ...defaults, ...flags, developerExtremeCompressedPromptEnabled: true }) === build({ ...defaults, ...flags }), `${mode}/${name} developer gate`);
+        measures.push({ mode, name, safe: safe.length, extreme: extreme.length, reduction: +(100 * (1 - extreme.length / safe.length)).toFixed(1) });
+    }
+}
+
+const standardSettings = {
+    ...base,
+    developerExtremeCompressedPromptEnabled: true,
+    globalPrompt: 'GLOBAL_SENTINEL',
+    allDialoguePrompt: 'ALL_DIALOGUE_SENTINEL',
+    dialoguePrompt: 'TARGET_DIALOGUE_SENTINEL',
+    otherDialoguePrompt: 'OTHER_DIALOGUE_SENTINEL',
+    bannedWords: 'BAN_SENTINEL',
+};
+const standardFull = builders.full(standardSettings);
+for (const value of ['GLOBAL_SENTINEL', 'ALL_DIALOGUE_SENTINEL', 'TARGET_DIALOGUE_SENTINEL', 'OTHER_DIALOGUE_SENTINEL', 'BAN_SENTINEL']) has(standardFull, value);
+has(builders.target(standardSettings), 'TARGET_DIALOGUE_SENTINEL');
+lacks(builders.target(standardSettings), 'OTHER_DIALOGUE_SENTINEL');
+has(builders.other(standardSettings), 'OTHER_DIALOGUE_SENTINEL');
+lacks(builders.other(standardSettings), 'TARGET_DIALOGUE_SENTINEL');
+lacks(builders.input(standardSettings), 'GLOBAL_SENTINEL');
+
+const madSettings = { ...standardSettings, developerMadKoreanOutputEnabled: true, developerHongjinFlavorEnabled: true };
+const madPrompt = builders.full(madSettings);
+has(madPrompt, 'MAD KOREAN — ULTRA-COMPACT');
+has(madPrompt, 'KIM HONG-JIN VOICE — ULTRA');
+has(madPrompt, 'DEEPSEEK HONGJIN VOICE PASS — hidden');
+has(madPrompt, 'Serious/urgent lines stay terse and serious, but serious does not mean clean');
+has(madPrompt, 'never aim it at USER');
+has(madPrompt, 'USER-DIRECTED PROFANITY GUARD');
+has(madPrompt, 'PERSONAL PRONOUN DEFAULT:');
+has(madPrompt, 'he/him → 그, she/her → 그녀, his → 그의, possessive her → 그녀의');
+has(madPrompt, '.../…/……');
+has(madPrompt, '여자/남자/녀석/상대/사람/사내/청년/작은 몸');
+has(madPrompt, 'metadata/date/weekday/time/weather/location');
+has(madPrompt, 'BAN_SENTINEL');
+for (const value of ['GLOBAL_SENTINEL', 'ALL_DIALOGUE_SENTINEL', 'TARGET_DIALOGUE_SENTINEL', 'OTHER_DIALOGUE_SENTINEL']) lacks(madPrompt, value);
+assert.equal(count(madPrompt, 'TOP PRIORITY — NO MISOGYNY'), 1); checks += 1;
+assert.equal(count(madPrompt, 'USER-DIRECTED PROFANITY GUARD'), 1); checks += 1;
+lacks(builders.narration(madSettings), 'KIM HONG-JIN VOICE — ULTRA');
+has(builders.target(madSettings), 'KIM HONG-JIN VOICE — ULTRA');
+
+for (const compressed of [false, true]) {
+    const prompt = builders.target({ ...base, developerCompressedPromptEnabled: compressed, developerHongjinFlavorEnabled: true });
+    has(prompt, 'USER-DIRECTED PROFANITY GUARD');
+}
+
 // Presets retain the extreme choice and normalize conflicting compression flags.
 const state = { ...defaults, baseTranslationCustom: normalizeBaseTranslationCustom({}) };
 const funcs = index.slice(index.indexOf('function normalizedPromptPresetDeveloperSettings('), index.indexOf('function normalizedPromptPresetTranslationSettings('));
@@ -54,9 +110,9 @@ helpers.apply(preset);
 assert.equal(state.developerCompressedPromptEnabled, false); checks += 1;
 assert.equal(state.developerExtremeCompressedPromptEnabled, true); checks += 1;
 
-for (const marker of ['xxx미친압축xxx', 'verba-developer-extreme-compressed-prompt-enabled', "settings.developerExtremeCompressedPromptEnabled = false"]) has(index, marker);
-const safeHandler = index.slice(index.indexOf("if (target.id === 'verba-developer-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-developer-extreme-compressed-prompt-enabled'"));
-const extremeHandler = index.slice(index.indexOf("if (target.id === 'verba-developer-extreme-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-beginner-character-enabled'"));
+for (const marker of ['xxx미친압축xxx', 'verba-deep-developer-extreme-compressed-prompt-enabled', "settings.developerExtremeCompressedPromptEnabled = false"]) has(index, marker);
+const safeHandler = index.slice(index.indexOf("if (target.id === 'verba-deep-developer-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-deep-developer-extreme-compressed-prompt-enabled'"));
+const extremeHandler = index.slice(index.indexOf("if (target.id === 'verba-deep-developer-extreme-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-deep-beginner-character-enabled'"));
 has(safeHandler, 'settings.developerExtremeCompressedPromptEnabled = false', 'safe compression disables extreme');
 has(extremeHandler, 'settings.developerCompressedPromptEnabled = false', 'extreme compression disables safe');
 
@@ -106,7 +162,7 @@ for (const gender of ['male', 'female', 'unknown']) {
 for (const mad of [false, true]) {
     for (const scope of ['mixed', 'narration', 'target_dialogue', 'other_dialogue', 'tagged_content']) {
         const flags = { developerMadKoreanOutputEnabled: mad };
-        has(scoped(flags, scope), 'transliterate only human names to Hangul');
+        has(scoped(flags, scope), 'Transliterate clear Latin-script human names into Hangul');
         const p = scoped(flags, scope, null, { ...identity, nameLocks: [{ source: 'Alex', target: '알렉스고정' }] });
         has(p, '알렉스고정');
         has(p, 'FIXED-SPELLING PRIORITY');
@@ -114,3 +170,4 @@ for (const mad of [false, true]) {
 }
 
 console.log(`PASS: ${checks} assertions; API calls: 0; live browser testing: not performed.`);
+console.table(measures.filter(row => row.mode === 'standard' || row.name === 'full'));

@@ -45,7 +45,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.77';
+const EXTENSION_VERSION = '0.5.78';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -287,6 +287,7 @@ const DEFAULT_SETTINGS = {
     dialoguePromptEnabled: true,
     otherDialoguePrompt: '',
     otherDialoguePromptEnabled: true,
+    promptSlotsCollapsed: false,
     promptPresets: [],
     selectedPromptPresetId: '',
     promptPresetBackups: [],
@@ -512,6 +513,7 @@ settings.allDialoguePrompt = typeof settings.allDialoguePrompt === 'string' ? se
 settings.allDialoguePromptEnabled = settings.allDialoguePromptEnabled !== false;
 settings.otherDialoguePrompt = typeof settings.otherDialoguePrompt === 'string' ? settings.otherDialoguePrompt : '';
 settings.otherDialoguePromptEnabled = settings.otherDialoguePromptEnabled !== false;
+settings.promptSlotsCollapsed = settings.promptSlotsCollapsed === true;
 settings.dialogueEndingPreferred = typeof settings.dialogueEndingPreferred === 'string' ? settings.dialogueEndingPreferred : '';
 settings.dialogueEndingAvoid = typeof settings.dialogueEndingAvoid === 'string' ? settings.dialogueEndingAvoid : '';
 settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(settings.dialogueEndingStrength)
@@ -9863,6 +9865,9 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+                <details id="verba-prompt-slots" class="verba-tool-details verba-prompt-slots" ${settings.promptSlotsCollapsed ? '' : 'open'}>
+                    <summary>프롬프트 입력창 <small>4개 한꺼번에 접기·펴기</small></summary>
+                    <div class="verba-tool-details-content">
                 <div class="verba-prompt-slot ${settings.globalPromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="global">
                     <div class="verba-prompt-slot-head">
                         <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
@@ -9910,6 +9915,8 @@ function injectSettingsPanel() {
                     <textarea id="verba-other-dialogue-prompt" class="text_pole" rows="5" placeholder="NPC·USER·기타 화자 대사에만 적용할 말투 규칙">${escapeHtml(settings.otherDialoguePrompt)}</textarea>
                     <div class="verba-help">현재 캐릭터가 아닌 NPC·USER·기타 화자의 직접 대사에만 추가 적용해요. NPC·USER 쪽 말투·어휘·표현 제한을 정하는 칸이며, 한영병기 같은 공통 출력 형식은 모든 대사 공통 프롬프트에 입력하세요.</div>
                 </div>
+                    </div>
+                </details>
 
                 <label for="verba-banned-words">번역 금지어</label>
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
@@ -11125,6 +11132,11 @@ function injectSettingsPanel() {
         });
     });
     syncPromptSlotUi();
+    const promptSlotsDetails = panel.querySelector('#verba-prompt-slots');
+    promptSlotsDetails?.addEventListener('toggle', () => {
+        settings.promptSlotsCollapsed = !promptSlotsDetails.open;
+        saveSettings();
+    });
 
     panel.querySelector('#verba-global-prompt').addEventListener('input', event => {
         settings.globalPrompt = event.target.value;

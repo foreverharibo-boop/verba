@@ -1,5 +1,5 @@
 {
-  "version": "0.5.77",
+  "version": "0.5.78",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -116,6 +116,11 @@
       "output": "PASS: profile command registration, A/B/C popup, current marker, disabled/stale slots, persistence, dismissal, hidden-anchor placement and existing icon cycle. DOM adapter; no API calls."
     },
     {
+      "check": "prompt-slots-collapse.mjs",
+      "status": "PASS",
+      "output": "PASS: four prompt slots collapse together, preserve their controls, default open, and persist UI state."
+    },
+    {
       "check": "prompt-editor.mjs",
       "status": "PASS",
       "output": "PASS: 76 existing DOM/event assertions plus icon/ancestry and capture/bubble drawer regressions; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested."
@@ -172,15 +177,13 @@
     }
   ],
   "changed_files": [
-    "core.js",
-    "prompt-builders.js",
-    "README.md",
-    "VERIFICATION.json",
     "index.js",
     "manifest.json",
+    "README.md",
+    "VERIFICATION.json",
     "tests/settings-layout.mjs",
-    "tests/voice-intensity-flexibility.mjs"
+    "tests/prompt-slots-collapse.mjs"
   ],
-  "scope": "Keep ordinary E-to-K and K-to-E prompts byte-identical to the previous release; remove the conflicting surface verbal-intensity ceiling only inside Mad Korean output paths while preserving events, facts, relationships, consent/refusal, emotional direction, explicit content, and plot-relevant physical degree; make authorized Hongjin voice visibly mandatory in every compression route",
+  "scope": "Group the four custom prompt editors in one persisted details control so they collapse and expand together without changing prompt text, per-slot enable state, autosave, or translation behavior",
   "live_mobile_test": false
 }

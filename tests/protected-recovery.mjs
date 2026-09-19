@@ -29,6 +29,7 @@ const env={settings, document:{querySelector:()=>button}, sanitizeDebugValue, pr
 const logs=Function(...Object.keys(env),'let lastDebugDiagnostic=null;\n'+slice('function storeDebugDiagnostic(', 'function createDebugDiagnostic(')+ '\nreturn {recordProtectedRecovery,finishProtectedRecovery,clear:()=>{lastDebugDiagnostic=null;},latest:()=>lastDebugDiagnostic,replace:storeDebugDiagnostic};')(...Object.values(env));
 let calls=0, action=()=>{translations.set('s1',`${a} opened ${b}`);now+=4900;};
 const deps={...env,...logs,findProtectedTokenIntegrityProblems,buildProtectedTokenRepairPrompt:()=>{},isAbort:e=>e.name==='AbortError',
+    normalizeLocallyRecoverableProtectedTokens:()=>{},
     repairSegmentsByOutputScope:async opts=>{calls++;assert.equal(opts.stage,'protected-token-repair');await action();}};
 const repair=Function(...Object.keys(deps),slice('async function repairProtectedTokenIntegrity(', 'function normalizedNumberTokens(')+'\nreturn repairProtectedTokenIntegrity;')(...Object.values(deps));
 await repair(segmented,translations,{stage:'output-retranslation'});

@@ -30,11 +30,13 @@ import {
     findProtectedTokenIntegrityProblems,
     findTranslationPromptConflicts,
     findUntranslatedSegments,
+    ensureBilingualDialogueFormat,
     hasForeignText,
     hasKorean,
     hashText,
     isPredominantlyKorean,
     normalizeStructuredMetadataTranslation,
+    normalizeLocallyRecoverableProtectedTokens,
     parseSegmentResponse,
     parseSelectionCandidateResponse,
     replaceOutsideProtected,
@@ -45,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.80';
+const EXTENSION_VERSION = '0.5.81';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -4062,6 +4064,7 @@ async function repairSegmentsByOutputScope({
 async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = options.speakerScopes || {};
+    normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
     let invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
     if (!invalid.length) return;
     const started = performance.now();
@@ -4076,6 +4079,7 @@ async function repairProtectedTokenIntegrity(segmented, translations, options = 
                 buildPrompt: buildProtectedTokenRepairPrompt,
                 stage: 'protected-token-repair',
             });
+            normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
             invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
             if (!invalid.length) {
                 finishProtectedRecovery(diagnostic, '복구 완료', started, attempts, invalid, segmented, translations);
@@ -4430,6 +4434,21 @@ async function translateOutputText(source, options = {}) {
     });
 
     normalizeTaggedOutputTranslations(segmented, translations);
+
+    // Build the requested source+Korean dialogue display locally. This also
+    // covers name-only and one-word dialogue without another AI request.
+    for (const segment of segmented.segments) {
+        if (segment.type !== 'dialogue_candidate') continue;
+        const current = String(translations.get(segment.id) || '');
+        translations.set(segment.id, ensureBilingualDialogueFormat(
+            segment,
+            current,
+            settings,
+            speakerScopes,
+            segmented.nameTokens || [],
+            segmented.tokens || [],
+        ));
+    }
 
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));

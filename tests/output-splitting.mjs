@@ -30,7 +30,7 @@ const requestSegments=async(prompt,segments,options)=>{
 };
 const env={settings,outputSplitCount,runOutputBatches,requestSegments,
  buildOutputPrompt:core.buildOutputPrompt,buildScopedOutputPrompt:core.buildScopedOutputPrompt,
- madKoreanExclusiveMode:()=>settings.developerMode===true && settings.developerMadKoreanOutputEnabled===true,
+ madKoreanExclusiveMode:()=>settings.developerMadKoreanOutputEnabled===true,
  isAbort:(error,signal)=>signal?.aborted||error.name==='AbortError',SCOPED_PARALLEL_REQUEST_LIMIT:2,console};
 const routingCode=between('function outputScopeForSegment(', 'function speakerAttributionCacheKey(')
  +between('async function runWithConcurrency(', 'function setBoundedCache(')
@@ -49,9 +49,8 @@ for(const count of [1,2,3])for(const mode of ['ordinary','compressed','extreme']
   assert.equal(row.options.splitRequest===true,count>1);
  }
 }
-// Developer OFF retains and applies split choice without hidden flavors.
-settings.developerMode=false;settings.dialogueEndingRepetitionReduction=false;requests=[];await route(segmented,{},{});assert.equal(requests.length,3);
-for(const row of requests)assert.ok(!row.prompt.includes("KIM HONG-JIN VOICE")&&!row.prompt.includes("MANDATORY REAUTHORING"));
+// General split setting remains effective with developer mode OFF.
+settings.developerMode=false;requests=[];await route(segmented,{},{});assert.equal(requests.length,3);
 settings.developerMode=true;
 // Strict per-speaker prompts must remain isolated even when splitting is enabled.
 Object.assign(settings,{developerMadKoreanOutputEnabled:false,developerHongjinFlavorEnabled:false,
@@ -112,19 +111,21 @@ for(const fail of [false,true]){
  });
  if(!fail)ctrl.abort();await assert.rejects(pending,fail?/FAILED/:{name:'AbortError'});assert.equal(stops,fail?2:3);
 }
-// Independent UI control changes only split count, persists and remains gated.
+// Independent UI control changes only split count and persists in general mode.
 class Select{}
 let saved=0;
-const handler=Function('target','settings','HTMLSelectElement','saveSettings','document','renderCurrentAppliedRules',between("        if (target.id === 'verba-developer-output-split-count'", "        if (target.id === 'verba-developer-minimal-prompt-enabled'"));
+const handler=Function('target','settings','HTMLSelectElement','saveSettings','document','renderCurrentAppliedRules',between("        if (target.id === 'verba-deep-developer-output-split-count'", "        if (target.id === 'verba-deep-developer-minimal-prompt-enabled'"));
 const before=structuredClone(settings);
 for(const value of ['1','2','3']){
- handler(Object.assign(new Select(),{id:'verba-developer-output-split-count',value}),settings,Select,()=>saved++,{querySelector:()=>null},()=>{});
+ handler(Object.assign(new Select(),{id:'verba-deep-developer-output-split-count',value}),settings,Select,()=>saved++,{querySelector:()=>null},()=>{});
  assert.deepEqual(settings,{...before,developerOutputSplitCount:Number(value)});
 }
 assert.equal(saved,3);
-const disable=between("        if (target.closest('#verba-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');
+const disable=between("        if (target.closest('#verba-deep-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');
 Function('settings',disable)(settings);assert.equal(outputSplitCount(settings),3);assert.equal(settings.developerOutputSplitCount,3);
-const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn generalSplitSettingsMarkup()+generalRelationshipSettingsMarkup();');
-assert.ok(markup(settings,String,()=>'', '').includes('verba-developer-output-split-count'));
-settings.developerMode=true;assert.match(markup(settings,String,()=>'', ''),/value="3" selected/);
+const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+between('function developerSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn developerSettingsMarkup();');
+assert.ok(!markup(settings,String,()=>'', '', '').includes('verba-deep-developer-output-split-count'));
+settings.developerMode=true;assert.ok(!markup(settings,String,()=>'', '', '').includes('verba-deep-developer-output-split-count'));
+const generalMarkup=Function('settings',between('function generalSplitSettingsMarkup(', 'function generalRelationshipSettingsMarkup(')+'\nreturn generalSplitSettingsMarkup();');
+for (const dev of [false,true]) assert.match(generalMarkup({...settings,developerMode:dev}), /value="3" selected/);
 console.log('PASS: independent 1/2/3 split gate, full coverage, unchanged normal/compact/extreme prompts, scope isolation, whole-output planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI.');

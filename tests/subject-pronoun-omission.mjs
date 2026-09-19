@@ -57,7 +57,6 @@ const explicit = core.buildScopedOutputPrompt({
     sourceContext: '',
     settings: {
         ...defaults,
-        developerMode: true,
         koreanFlavorEnabled: true,
         koreanFlavorPronounOmission: 'active',
         developerMadKoreanOutputEnabled: false,
@@ -65,5 +64,6 @@ const explicit = core.buildScopedOutputPrompt({
     scope: 'narration',
     speakerIdentity: identity,
 });
-assert.ok(explicit.includes('PronounOmission=active'));
+assert.ok(explicit.includes('SUBJECT / PRONOUN EXPRESSION — ACTIVE KOREAN OMISSION'));
 console.log('PASS: general and Mad Korean prompts no longer encourage subject/pronoun omission; explicit 한캐 option remains available.');
+

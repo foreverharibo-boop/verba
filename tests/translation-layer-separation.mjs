@@ -46,13 +46,12 @@ const voicePrompt = buildHongjinVoiceRewritePrompt({
         developerHongjinTeasing: 'active',
     },
 });
-assert.match(voicePrompt, /DEDICATED SECOND-PASS VOICE REWRITE/);
-assert.match(voicePrompt, /not a generic shouting tough guy/i);
-assert.match(voicePrompt, /Quoted retort/);
-assert.match(voicePrompt, /Tactical refusal/);
-assert.match(voicePrompt, /Reluctant care/);
-assert.match(voicePrompt, /Fake courtesy/);
-assert.match(voicePrompt, /Deflection/);
+assert.match(voicePrompt, /BLANK-PAGE DIALOGUE REWRITING/);
+assert.match(voicePrompt, /Do not translate the supplied source lines/);
+assert.match(voicePrompt, /write from blank/i);
+assert.match(voicePrompt, /ACROSS THE FULL DIALOGUE SET/);
+assert.match(voicePrompt, /ONLY CONTENT BOUNDARY/);
+assert.match(voicePrompt, /generic serious man/i);
 assert.match(voicePrompt, /"reauthoring":"maximum"/);
 assert.match(voicePrompt, /"teasing":"active"/);
 

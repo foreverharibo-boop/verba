@@ -9,7 +9,7 @@ assert.ok(start >= 0 && end > start);
 const listeners = new Map();
 const input = { checked: false, addEventListener: (type, fn) => listeners.set(type, fn) };
 const status = { textContent: '' };
-const panel = { querySelector: selector => selector === '#verba-auto-input' ? input : status };
+const panel = { querySelector: selector => selector === '#verba-deep-auto-input' ? input : status };
 let saves = 0;
 const context = vm.createContext({ settings: { autoInput: true }, saveSettings: () => saves++ });
 vm.runInContext(source.slice(start, end), context);
@@ -25,6 +25,6 @@ for (const value of [false, true, false]) {
 }
 assert.equal(saves, 3);
 assert.ok(source.indexOf('    bindAutoInputSetting(panel);') < source.indexOf('    bindBaseTranslationEditor(panel, settings,'));
-assert.equal(source.split("panel.querySelector('#verba-auto-input').addEventListener").length, 1, 'old duplicate handler removed');
+assert.equal(source.split("panel.querySelector('#verba-deep-auto-input').addEventListener").length, 1, 'old duplicate handler removed');
 context.bindAutoInputSetting({ querySelector: () => null });
 console.log('PASS: auto-input initial state, ON/OFF, change/save handling and early binding; DOM adapter, not native browser clicks.');

@@ -114,20 +114,20 @@ console.log('PASS: minimal-only prompt and actual entry path, lock/enable gates,
 // Real developer markup and delegated toggle, including escaped user text.
 const defs=between('const RELATION_TEMPERATURE_OPTIONS','const baseContext =');
 const escapeHtml=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+'\n'+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn developerSettingsMarkup();');
+const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+'\n'+between('function developerSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn developerSettingsMarkup();');
 settings.developerMinimalPrompt='</textarea><script>TEST</script>';
 assert.match(markup(settings,escapeHtml,()=>'', '', ''), /&lt;\/textarea&gt;/);
-assert.ok(!markup({...settings,developerMode:false},escapeHtml,()=>'', '', '').includes('id="verba-developer-minimal-prompt"'));
+assert.ok(!markup({...settings,developerMode:false},escapeHtml,()=>'', '', '').includes('id="verba-deep-developer-minimal-prompt"'));
 class Input {}
 let saves=0;
-const change=Function('target','settings','HTMLInputElement','saveSettings','document','renderCurrentAppliedRules',between("        if (target.id === 'verba-developer-minimal-prompt-enabled'", "        if (target.id === 'verba-developer-compressed-prompt-enabled'"));
+const change=Function('target','settings','HTMLInputElement','saveSettings','document','renderCurrentAppliedRules',between("        if (target.id === 'verba-deep-developer-minimal-prompt-enabled'", "        if (target.id === 'verba-deep-developer-compressed-prompt-enabled'"));
 const preserved=structuredClone(settings);
 for(const checked of [false,true]) {
- change(Object.assign(new Input(),{id:'verba-developer-minimal-prompt-enabled',checked}),settings,Input,()=>saves++,{querySelector:()=>null},()=>{});
+ change(Object.assign(new Input(),{id:'verba-deep-developer-minimal-prompt-enabled',checked}),settings,Input,()=>saves++,{querySelector:()=>null},()=>{});
  assert.deepEqual(settings,{...preserved,developerMinimalPromptEnabled:checked});
 }
 assert.equal(saves,2);
-const disable=between("        if (target.closest('#verba-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');
+const disable=between("        if (target.closest('#verba-deep-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');
 Function('settings',disable)(settings);
 assert.equal(settings.developerMode,false);assert.equal(settings.developerMinimalPromptEnabled,false);
 assert.equal(settings.developerMinimalPrompt,preserved.developerMinimalPrompt);

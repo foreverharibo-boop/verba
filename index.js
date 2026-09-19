@@ -11,12 +11,7 @@ import { activateTranslationExtension, isTranslationExtensionActive, registerTra
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
-    buildHongjinVoiceRewritePrompt,
     buildInputPrompt,
-    buildIdentityNameFallbackPrompt,
-    buildMadFlashV2AuditPrompt,
-    buildMadNarrationMicroAuditPrompt,
-    buildMadKoreanIntegratedRewritePrompt,
     buildMultiSelectionPrompt,
     buildNameHistoryFormsPrompt,
     buildNameMatchPrompt,
@@ -38,32 +33,26 @@ import {
     hasForeignText,
     hasKorean,
     hashText,
-    inferLocalTargetDialogueScopes,
     isPredominantlyKorean,
     normalizeStructuredMetadataTranslation,
     parseSegmentResponse,
     parseSelectionCandidateResponse,
     replaceOutsideProtected,
-    repairCanonicalKoreanNameSuffixes,
-    repairCanonicalKoreanVocatives,
-    repairDuplicateCanonicalIdentityNames,
-    repairLeadingLockedNameSubjectParticle,
-    repairProtectedTokenIntegrityLocally,
     restoreProtected,
     resolveOutputSpeakerIdentity,
     segmentSource,
     selectionTouchesDialogue,
 } from './core.js';
 
-const EXTENSION_KEY = 'verba-deep';
-const EXTENSION_VERSION = '0.5.126';
+const EXTENSION_KEY = 'verba';
+const EXTENSION_VERSION = '0.5.79';
 const DEVELOPER_ACCESS_CODE = '130918';
-const DEVELOPER_ACCESS_FINGERPRINT = `verba-deep-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
+const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
-const STATE_KEY = 'verba_deep_current_translation';
-const PEER_STATE_KEY = 'verba_current_translation';
-const SOURCE_VIEW_KEY = 'verba_deep_source_view';
-const CHARACTER_FIELD_KEY = 'verba-deep';
+const STATE_KEY = 'verba_current_translation';
+const PEER_STATE_KEY = 'verba_deep_current_translation';
+const SOURCE_VIEW_KEY = 'verba_source_view';
+const CHARACTER_FIELD_KEY = 'verba';
 const RELATION_TEMPERATURE_OPTIONS = [
     { value: 'cold', label: '차가움' },
     { value: 'distant', label: '거리감' },
@@ -219,7 +208,7 @@ const TRANSLATION_RULE_DEFINITIONS = [
 const DEFAULT_TRANSLATION_RULE_ORDER = TRANSLATION_RULE_DEFINITIONS.map(item => item.key);
 const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
 const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
-const PROFILE_STATS_STORAGE_KEY = 'verba-deep.profileStats.v1';
+const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const DEFAULT_SETTINGS = {
     profileId: '',
     fallbackProfileId: '',
@@ -331,6 +320,8 @@ extension_settings[EXTENSION_KEY] = Object.assign(
     extension_settings[EXTENSION_KEY] || {},
 );
 const settings = extension_settings[EXTENSION_KEY];
+// Retired local register-shift monitor: discard its obsolete saved flag.
+delete settings.developerRegisterShiftMonitor;
 
 // Performance stats are local telemetry, not configuration.
 // Read the old persisted value only as a migration fallback.
@@ -389,11 +380,7 @@ settings.developerMadKoreanUserToTargetRegister = DEVELOPER_MAD_KOREAN_REGISTER_
     : 'source';
 
 function madKoreanExclusiveMode() {
-    return settings.developerMadKoreanOutputEnabled === true;
-}
-
-function singlePassFlavorMode() {
-    return madKoreanExclusiveMode() || settings.developerHongjinFlavorEnabled === true;
+    return settings.developerMode === true && settings.developerMadKoreanOutputEnabled === true;
 }
 
 settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === settings.developerHongjinTranscreation)
@@ -577,7 +564,7 @@ delete settings.preserveNumbers;
 delete settings.preservePerspective;
 delete settings.preserveFormatting;
 settings.debugMode = settings.debugMode === true;
-const VERBA_DEEP_MAX_TOKENS = 15000;
+const VERBA_MAX_TOKENS = 15000;
 
 const pendingOutputs = new Map();
 const pendingSelectionTranslations = new Set();
@@ -590,12 +577,11 @@ const failedOutputSignatures = new Map();
 const serverRetryStates = new Map();
 const speakerAttributionCache = new Map();
 const roleTermPlanCache = new Map();
-const identityNameFallbackCache = new Map();
 const insteadRevisionTranslationSeen = new Map();
 
 // inSTead/other controllers can replace a message object and discard
 // extension-owned extra fields while keeping the same source text. Keep a
-// bounded recovery copy so returning to that revision can restore Verba Deep.
+// bounded recovery copy so returning to that revision can restore Verba.
 const TRANSLATION_RECOVERY_CACHE_LIMIT = 96;
 const translationRecoveryCache = new Map();
 
@@ -615,8 +601,7 @@ const pendingFallbackAssistantIds = new Set();
 
 const pendingInputControllers = new Set();
 const transientLockedMessages = new Set();
-const DEFAULT_SCOPED_PARALLEL_REQUEST_LIMIT = 3;
-const MAD_HONGJIN_SCOPED_PARALLEL_REQUEST_LIMIT = 4;
+const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
 const scopedParallelRequestQueue = [];
 let scopedParallelRequestActive = 0;
 const enqueueSplitOutputRequest = createSplitRequestQueue(3);
@@ -662,41 +647,41 @@ function notify(message, type = 'info') {
         if (diagnostic) storeDebugDiagnostic(diagnostic);
         showBottomError(message, diagnostic);
         try {
-            globalThis.toastr?.error?.(message, '긴르바 실험실');
+            globalThis.toastr?.error?.(message, '베르바');
         } catch {
             // Bottom notice above remains the fallback.
         }
-        console.error(`[긴르바 실험실] ${message}`);
+        console.error(`[베르바] ${message}`);
         return;
     }
     const toaster = globalThis.toastr;
     if (toaster && typeof toaster[type] === 'function') {
-        toaster[type](message, '긴르바 실험실');
+        toaster[type](message, '베르바');
         return;
     }
     const logger = type === 'error' ? console.error : type === 'warning' ? console.warn : console.log;
-    logger(`[긴르바 실험실] ${message}`);
+    logger(`[베르바] ${message}`);
 }
 
 function renderOutputTiming() {
     const record = outputTiming.latest();
-    const panel = document.querySelector('#verba-deep-output-timing');
+    const panel = document.querySelector('#verba-output-timing');
     if (panel) panel.textContent = outputTimingText(record);
-    const button = document.querySelector('#verba-deep-copy-output-timing');
+    const button = document.querySelector('#verba-copy-output-timing');
     if (button) button.disabled = !settings.debugMode || !record;
 }
 
 function storeDebugDiagnostic(diagnostic) {
     if (!settings.debugMode) return;
     lastDebugDiagnostic = diagnostic;
-    const copy = document.querySelector('#verba-deep-copy-last-debug');
+    const copy = document.querySelector('#verba-copy-last-debug');
     if (copy) copy.disabled = !diagnostic;
 }
 
 function recordSegmentRecovery(result, response, options, attempt) {
     if (!settings.debugMode || (!result.parseError && !result.repairs.length)) return null;
     try {
-        const error = result.parseError || Object.assign(new Error('AI 응답 형식을 로컬에서 복구했습니다.'), { code: 'VERBA_DEEP_RESPONSE_FORMAT' });
+        const error = result.parseError || Object.assign(new Error('AI 응답 형식을 로컬에서 복구했습니다.'), { code: 'VERBA_RESPONSE_FORMAT' });
         rememberRequestError(error, { ...options, stage: 'segment-parse', retryAttempt: attempt }, response);
         const diagnostic = createDebugDiagnostic('segment-parse', error,
             result.parseError ? '응답 형식·구간 문제로 미완료 구간을 재요청합니다.' : '응답 형식을 로컬에서 복구했습니다.');
@@ -713,7 +698,7 @@ function recordSegmentRecovery(result, response, options, attempt) {
         storeDebugDiagnostic(diagnostic);
         return diagnostic;
     } catch (error) {
-        console.warn('[긴르바 실험실] 중간 응답 진단 기록 실패', error);
+        console.warn('[베르바] 중간 응답 진단 기록 실패', error);
         return null;
     }
 }
@@ -743,7 +728,7 @@ function recordProtectedRecovery(invalid, segmented, translations, options) {
         storeDebugDiagnostic(diagnostic);
         return diagnostic;
     } catch (error) {
-        console.warn('[긴르바 실험실] 보호 표식 진단 기록 실패', error);
+        console.warn('[베르바] 보호 표식 진단 기록 실패', error);
         return null;
     }
 }
@@ -758,9 +743,9 @@ function finishProtectedRecovery(diagnostic, status, started, attempts, remainin
         });
         diagnostic.displayMessage = `보호 표식 복구: ${status}`;
         // Preserve this evidence when the existing final-error UI replaces the log.
-        if (error && typeof error === 'object') error.verbaDeepProtectedRecovery = diagnostic.protectedRecovery;
+        if (error && typeof error === 'object') error.verbaProtectedRecovery = diagnostic.protectedRecovery;
     } catch (diagnosticError) {
-        console.warn('[긴르바 실험실] 보호 표식 결과 기록 실패', diagnosticError);
+        console.warn('[베르바] 보호 표식 결과 기록 실패', diagnosticError);
     }
 }
 
@@ -779,14 +764,14 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
     const viewport = globalThis.visualViewport;
     const errorChain = debugErrorChain(error);
     return {
-        report: 'VERBA_DEEP_DEBUG_DIAGNOSTIC',
-        verbaDeepVersion: EXTENSION_VERSION,
+        report: 'VERBA_DEBUG_DIAGNOSTIC',
+        verbaVersion: EXTENSION_VERSION,
         time: new Date().toISOString(),
         stage: sanitizeDebugValue(stage, 160),
         displayMessage: sanitizeDebugValue(displayMessage, 2200),
         classification: classifyDebugError(errorChain, displayMessage),
         errorChain,
-        ...(settings.debugMode && error?.verbaDeepProtectedRecovery ? { protectedRecovery: error.verbaDeepProtectedRecovery } : {}),
+        ...(settings.debugMode && error?.verbaProtectedRecovery ? { protectedRecovery: error.verbaProtectedRecovery } : {}),
         environment: {
             userAgent: sanitizeDebugValue(globalThis.navigator?.userAgent || '', 1000),
             viewport: {
@@ -816,18 +801,18 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             relationTemperature: String(settings.relationTemperature || ''),
             narrationLocalizationLevel: String(settings.narrationLocalizationLevel || ''),
             dialogueLocalizationLevel: String(settings.dialogueLocalizationLevel || ''),
-            maxTokens: VERBA_DEEP_MAX_TOKENS,
+            maxTokens: VERBA_MAX_TOKENS,
             timeoutSeconds: Number(settings.timeoutSeconds) || 0,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
-        privacy: error?.verbaDeepProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
+        privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
         limitation: '터먹스·서버 터미널에만 출력되고 브라우저에 전달되지 않은 로그는 읽을 수 없음',
     };
 }
 
 function debugDiagnosticText(diagnostic) {
     if (!diagnostic) return '';
-    return `긴르바 실험실 오류 진단\n${JSON.stringify(diagnostic, null, 2)}`;
+    return `베르바 오류 진단\n${JSON.stringify(diagnostic, null, 2)}`;
 }
 
 async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
@@ -844,11 +829,11 @@ function reportError(stage, error, displayMessage = '') {
     // normal error toast so a translation failure can never end silently.
     showBottomError(message, diagnostic);
     try {
-        globalThis.toastr?.error?.(message, '긴르바 실험실');
+        globalThis.toastr?.error?.(message, '베르바');
     } catch {
         // Bottom notice above remains the fallback.
     }
-    console.error(`[긴르바 실험실] ${stage}`, error || message);
+    console.error(`[베르바] ${stage}`, error || message);
 }
 
 function compactPromptConflictExcerpt(value, limit = 72) {
@@ -867,8 +852,8 @@ function configuredPromptConflicts() {
 }
 
 function renderPromptConflictInspector(conflicts = null) {
-    const host = document.querySelector('#verba-deep-prompt-conflict-content');
-    const badge = document.querySelector('#verba-deep-prompt-conflict-count');
+    const host = document.querySelector('#verba-prompt-conflict-content');
+    const badge = document.querySelector('#verba-prompt-conflict-count');
     if (!host) return;
 
     const rows = Array.isArray(conflicts) ? conflicts : configuredPromptConflicts();
@@ -878,25 +863,25 @@ function renderPromptConflictInspector(conflicts = null) {
 
     if (!rows.length) {
         host.innerHTML = `
-            <div class="verba-deep-conflict-empty">
+            <div class="verba-conflict-empty">
                 현재 저장된 전역·모든 대사 공통·캐릭터 전용·NPC·USER 전용 프롬프트에서는 명백한 충돌이 감지되지 않았어요.
             </div>`;
         return;
     }
 
     host.innerHTML = rows.map((conflict, index) => `
-        <div class="verba-deep-conflict-card">
-            <div class="verba-deep-conflict-card-header">
+        <div class="verba-conflict-card">
+            <div class="verba-conflict-card-header">
                 <b>${index + 1}. ${escapeHtml(conflict.label || '번역 규칙')}</b>
                 <small>${escapeHtml(conflict.winner?.label || '')} 우선</small>
             </div>
-            <div class="verba-deep-conflict-side">
+            <div class="verba-conflict-side">
                 <span>${escapeHtml(conflict.left?.label || '')}</span>
                 <b>${escapeHtml(conflict.left?.directive || '')}</b>
                 <code>${escapeHtml(conflict.left?.excerpt || '')}</code>
             </div>
-            <div class="verba-deep-conflict-vs">↕ 서로 상충</div>
-            <div class="verba-deep-conflict-side">
+            <div class="verba-conflict-vs">↕ 서로 상충</div>
+            <div class="verba-conflict-side">
                 <span>${escapeHtml(conflict.right?.label || '')}</span>
                 <b>${escapeHtml(conflict.right?.directive || '')}</b>
                 <code>${escapeHtml(conflict.right?.excerpt || '')}</code>
@@ -936,19 +921,19 @@ function warnTranslationPromptConflicts({
 
 function showBottomError(message, diagnostic = null) {
     clearTimeout(bottomErrorTimer);
-    document.querySelector('#verba-deep-bottom-error')?.remove();
+    document.querySelector('#verba-bottom-error')?.remove();
     const notice = document.createElement('div');
-    notice.id = 'verba-deep-bottom-error';
-    notice.className = 'verba-deep-bottom-notice verba-deep-bottom-error';
+    notice.id = 'verba-bottom-error';
+    notice.className = 'verba-bottom-notice verba-bottom-error';
     notice.setAttribute('role', 'alert');
     const text = document.createElement('span');
-    text.className = 'verba-deep-error-text';
-    text.textContent = `긴르바 실험실 · ${String(message || '오류가 발생했습니다.')}`;
+    text.className = 'verba-error-text';
+    text.textContent = `베르바 · ${String(message || '오류가 발생했습니다.')}`;
     const actions = document.createElement('div');
-    actions.className = 'verba-deep-error-actions';
+    actions.className = 'verba-error-actions';
     const close = document.createElement('button');
     close.type = 'button';
-    close.className = 'verba-deep-error-close';
+    close.className = 'verba-error-close';
     close.textContent = '✕';
     close.setAttribute('aria-label', '오류 알림 닫기');
     close.addEventListener('click', () => {
@@ -962,7 +947,7 @@ function showBottomError(message, diagnostic = null) {
 }
 
 function updateServerRetryIndicator() {
-    let indicator = document.querySelector('#verba-deep-server-retry-indicator');
+    let indicator = document.querySelector('#verba-server-retry-indicator');
     if (!serverRetryStates.size) {
         indicator?.remove();
         return;
@@ -970,14 +955,14 @@ function updateServerRetryIndicator() {
     const state = [...serverRetryStates.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0];
     if (!indicator) {
         indicator = document.createElement('button');
-        indicator.id = 'verba-deep-server-retry-indicator';
-        indicator.className = 'verba-deep-bottom-notice';
+        indicator.id = 'verba-server-retry-indicator';
+        indicator.className = 'verba-bottom-notice';
         indicator.type = 'button';
         indicator.setAttribute('role', 'status');
         indicator.setAttribute('aria-live', 'polite');
         indicator.addEventListener('click', () => {
             indicator.disabled = true;
-            indicator.textContent = '긴르바 실험실 · 번역 재시도 취소 중…';
+            indicator.textContent = '베르바 · 번역 재시도 취소 중…';
             for (const retry of serverRetryStates.values()) retry.controller.abort();
             notify('번역 자동 재시도를 취소했어요.', 'info');
         });
@@ -985,14 +970,14 @@ function updateServerRetryIndicator() {
     }
     const timing = state.delayMs > 0 ? `${Math.ceil(state.delayMs / 1000)}초 후` : '요청 중';
     indicator.disabled = false;
-    indicator.textContent = `긴르바 실험실 · 번역 실패 · ${state.retryCount}/${state.maxRetries}회 ${timing} 재시도 · ✕`;
+    indicator.textContent = `베르바 · 번역 실패 · ${state.retryCount}/${state.maxRetries}회 ${timing} 재시도 · ✕`;
     indicator.title = '눌러서 번역 자동 재시도 취소';
     indicator.setAttribute('aria-label', indicator.title);
 }
 
 function showProgress(message, options = {}) {
     if (!globalThis.toastr?.info) return null;
-    const toast = globalThis.toastr.info(message, '긴르바 실험실', {
+    const toast = globalThis.toastr.info(message, '베르바', {
         timeOut: 0,
         extendedTimeOut: 0,
         tapToDismiss: false,
@@ -1001,8 +986,8 @@ function showProgress(message, options = {}) {
     });
 
     const element = toast?.[0] || toast;
-    element?.classList?.add?.('verba-deep-progress-toast');
-    toast?.addClass?.('verba-deep-progress-toast');
+    element?.classList?.add?.('verba-progress-toast');
+    toast?.addClass?.('verba-progress-toast');
     return toast;
 }
 
@@ -1063,12 +1048,12 @@ function sameRetranslationWording(left, right) {
 
 function isAbort(error, signal) {
     if (signal?.aborted || error?.name === 'AbortError') return true;
-    if (error?.code === 'VERBA_DEEP_TIMEOUT') return false;
+    if (error?.code === 'VERBA_TIMEOUT') return false;
     let current = error?.cause;
     const seen = new Set();
     while (current && !seen.has(current)) {
         seen.add(current);
-        if (current.code === 'VERBA_DEEP_TIMEOUT') return false;
+        if (current.code === 'VERBA_TIMEOUT') return false;
         if (current.name === 'AbortError') return true;
         current = current.cause;
     }
@@ -1455,10 +1440,10 @@ function applyPromptEditorSnapshot(snapshot) {
     settings.otherDialoguePromptEnabled = next.otherDialoguePromptEnabled;
 
     const values = {
-        '#verba-deep-global-prompt': settings.globalPrompt,
-        '#verba-deep-all-dialogue-prompt': settings.allDialoguePrompt,
-        '#verba-deep-dialogue-prompt': settings.dialoguePrompt,
-        '#verba-deep-other-dialogue-prompt': settings.otherDialoguePrompt,
+        '#verba-global-prompt': settings.globalPrompt,
+        '#verba-all-dialogue-prompt': settings.allDialoguePrompt,
+        '#verba-dialogue-prompt': settings.dialoguePrompt,
+        '#verba-other-dialogue-prompt': settings.otherDialoguePrompt,
     };
     for (const [selector, value] of Object.entries(values)) {
         const field = document.querySelector(selector);
@@ -1471,10 +1456,10 @@ function applyPromptEditorSnapshot(snapshot) {
 }
 
 function promptBackupPreviewSlotMarkup(label, text, enabled) {
-    return `<section class="verba-deep-backup-preview-slot">
-        <div class="verba-deep-backup-preview-slot-head">
+    return `<section class="verba-backup-preview-slot">
+        <div class="verba-backup-preview-slot-head">
             <b>${escapeHtml(label)}</b>
-            <span class="verba-deep-backup-preview-state ${enabled ? 'is-on' : 'is-off'}">${enabled ? 'ON' : 'OFF'}</span>
+            <span class="verba-backup-preview-state ${enabled ? 'is-on' : 'is-off'}">${enabled ? 'ON' : 'OFF'}</span>
         </div>
         <pre>${escapeHtml(String(text || '').trim() || '(비어 있음)')}</pre>
     </section>`;
@@ -1486,7 +1471,7 @@ function togglePromptEditorBackupPreview(row, backup, button) {
         return;
     }
 
-    const existing = row.querySelector('.verba-deep-prompt-preset-backup-inline-preview');
+    const existing = row.querySelector('.verba-prompt-preset-backup-inline-preview');
     if (existing) {
         existing.remove();
         if (button) button.textContent = '미리보기';
@@ -1494,22 +1479,22 @@ function togglePromptEditorBackupPreview(row, backup, button) {
     }
 
     // 한 번에 하나의 백업만 펼칩니다.
-    document.querySelectorAll('.verba-deep-prompt-preset-backup-inline-preview').forEach(preview => {
-        const otherRow = preview.closest('.verba-deep-prompt-preset-backup-row');
-        const otherButton = otherRow?.querySelector('.verba-deep-prompt-preset-backup-preview');
+    document.querySelectorAll('.verba-prompt-preset-backup-inline-preview').forEach(preview => {
+        const otherRow = preview.closest('.verba-prompt-preset-backup-row');
+        const otherButton = otherRow?.querySelector('.verba-prompt-preset-backup-preview');
         if (otherButton) otherButton.textContent = '미리보기';
         preview.remove();
     });
 
     const snapshot = normalizedPromptEditorSnapshot(backup.snapshot);
     const preview = document.createElement('div');
-    preview.className = 'verba-deep-prompt-preset-backup-inline-preview';
+    preview.className = 'verba-prompt-preset-backup-inline-preview';
     preview.innerHTML = `
-        <div class="verba-deep-backup-inline-preview-head">
+        <div class="verba-backup-inline-preview-head">
             <b>백업 내용</b>
             <small>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))} · ${escapeHtml(backup.reason)}</small>
         </div>
-        <div class="verba-deep-backup-preview-list">
+        <div class="verba-backup-preview-list">
             ${promptBackupPreviewSlotMarkup('전체 번역 전역 프롬프트', snapshot.globalPrompt, snapshot.globalPromptEnabled)}
             ${promptBackupPreviewSlotMarkup('모든 대사 공통 프롬프트', snapshot.allDialoguePrompt, snapshot.allDialoguePromptEnabled)}
             ${promptBackupPreviewSlotMarkup('캐릭터 대사 전용 프롬프트', snapshot.dialoguePrompt, snapshot.dialoguePromptEnabled)}
@@ -1521,8 +1506,8 @@ function togglePromptEditorBackupPreview(row, backup, button) {
 }
 
 function renderPromptPresetBackups() {
-    const list = document.querySelector('#verba-deep-prompt-preset-backup-list');
-    const count = document.querySelector('#verba-deep-prompt-preset-backup-count');
+    const list = document.querySelector('#verba-prompt-preset-backup-list');
+    const count = document.querySelector('#verba-prompt-preset-backup-count');
     const backups = normalizedPromptPresetBackups(settings.promptPresetBackups);
     settings.promptPresetBackups = backups;
 
@@ -1531,21 +1516,21 @@ function renderPromptPresetBackups() {
 
     list.innerHTML = backups.length
         ? backups.map(backup => `
-            <div class="verba-deep-prompt-preset-backup-row" data-backup-id="${escapeHtml(backup.id)}">
-                <div class="verba-deep-prompt-preset-backup-meta">
+            <div class="verba-prompt-preset-backup-row" data-backup-id="${escapeHtml(backup.id)}">
+                <div class="verba-prompt-preset-backup-meta">
                     <b>${escapeHtml(formatPromptPresetBackupTime(backup.createdAt))}</b>
                     <small>${escapeHtml(backup.reason)}</small>
                 </div>
-                <div class="verba-deep-prompt-preset-backup-actions">
-                    <button type="button" class="menu_button verba-deep-prompt-preset-backup-preview">미리보기</button>
-                    <button type="button" class="menu_button verba-deep-prompt-preset-backup-restore">복원</button>
-                    <button type="button" class="menu_button verba-deep-prompt-preset-backup-delete">삭제</button>
+                <div class="verba-prompt-preset-backup-actions">
+                    <button type="button" class="menu_button verba-prompt-preset-backup-preview">미리보기</button>
+                    <button type="button" class="menu_button verba-prompt-preset-backup-restore">복원</button>
+                    <button type="button" class="menu_button verba-prompt-preset-backup-delete">삭제</button>
                 </div>
             </div>
         `).join('')
-        : '<div class="verba-deep-prompt-preset-backup-empty">아직 자동 백업이 없어요.</div>';
+        : '<div class="verba-prompt-preset-backup-empty">아직 자동 백업이 없어요.</div>';
 
-    list.querySelectorAll('.verba-deep-prompt-preset-backup-preview').forEach(button => {
+    list.querySelectorAll('.verba-prompt-preset-backup-preview').forEach(button => {
         button.addEventListener('click', event => {
             event.preventDefault();
             event.stopPropagation();
@@ -1560,7 +1545,7 @@ function renderPromptPresetBackups() {
         });
     });
 
-    list.querySelectorAll('.verba-deep-prompt-preset-backup-restore').forEach(button => {
+    list.querySelectorAll('.verba-prompt-preset-backup-restore').forEach(button => {
         button.addEventListener('click', () => {
             const row = button.closest('[data-backup-id]');
             const backup = promptPresetBackupById(row?.dataset?.backupId);
@@ -1583,7 +1568,7 @@ function renderPromptPresetBackups() {
         });
     });
 
-    list.querySelectorAll('.verba-deep-prompt-preset-backup-delete').forEach(button => {
+    list.querySelectorAll('.verba-prompt-preset-backup-delete').forEach(button => {
         button.addEventListener('click', () => {
             const row = button.closest('[data-backup-id]');
             const backup = promptPresetBackupById(row?.dataset?.backupId);
@@ -1632,7 +1617,7 @@ function promptPresetSelectMarkup(selectedId = settings.selectedPromptPresetId) 
 }
 
 function renderPromptPresetManager(selectedId = null) {
-    const select = document.querySelector('#verba-deep-prompt-preset-select');
+    const select = document.querySelector('#verba-prompt-preset-select');
     if (!select) return;
     const requested = selectedId === null
         ? String(select.value || settings.selectedPromptPresetId || '')
@@ -1642,12 +1627,12 @@ function renderPromptPresetManager(selectedId = null) {
     select.value = keep;
     settings.selectedPromptPresetId = keep;
 
-    const count = document.querySelector('#verba-deep-prompt-preset-count');
+    const count = document.querySelector('#verba-prompt-preset-count');
     if (count) count.textContent = `${normalizedPromptPresets().length}개 저장`;
 
     const selectedPreset = promptPresetById(select.value);
     const hasSelection = Boolean(selectedPreset);
-    const nameField = document.querySelector('#verba-deep-prompt-preset-name');
+    const nameField = document.querySelector('#verba-prompt-preset-name');
     if (
         nameField instanceof HTMLInputElement
         || nameField instanceof HTMLTextAreaElement
@@ -1655,22 +1640,22 @@ function renderPromptPresetManager(selectedId = null) {
         nameField.value = selectedPreset?.name || '';
     }
     [
-        '#verba-deep-prompt-preset-rename',
-        '#verba-deep-prompt-preset-favorite',
-        '#verba-deep-prompt-preset-delete',
+        '#verba-prompt-preset-rename',
+        '#verba-prompt-preset-favorite',
+        '#verba-prompt-preset-delete',
     ].forEach(selector => {
         const button = document.querySelector(selector);
         if (button) button.disabled = !hasSelection;
     });
 
-    const saveScopeSelect = document.querySelector('#verba-deep-prompt-preset-save-scope');
+    const saveScopeSelect = document.querySelector('#verba-prompt-preset-save-scope');
     if (saveScopeSelect instanceof HTMLSelectElement) {
         saveScopeSelect.value = selectedPreset?.saveScope === PROMPT_PRESET_SCOPE_TRANSLATION
             ? PROMPT_PRESET_SCOPE_TRANSLATION
             : PROMPT_PRESET_SCOPE_PROMPTS;
     }
 
-    const favoriteButton = document.querySelector('#verba-deep-prompt-preset-favorite');
+    const favoriteButton = document.querySelector('#verba-prompt-preset-favorite');
     if (favoriteButton) {
         favoriteButton.textContent = selectedPreset?.favorite ? '★ 즐겨찾기 해제' : '☆ 즐겨찾기';
         favoriteButton.classList.toggle('is-favorite', selectedPreset?.favorite === true);
@@ -1680,11 +1665,11 @@ function renderPromptPresetManager(selectedId = null) {
 }
 
 function syncBeginnerCharacterGuideUi(root = document) {
-    const master = root?.querySelector?.('#verba-deep-beginner-character-enabled');
-    const controls = root?.querySelector?.('#verba-deep-beginner-character-controls');
+    const master = root?.querySelector?.('#verba-beginner-character-enabled');
+    const controls = root?.querySelector?.('#verba-beginner-character-controls');
     if (!controls) return;
     const enabled = Boolean(master?.checked);
-    controls.classList.toggle('verba-deep-control-disabled', !enabled);
+    controls.classList.toggle('verba-control-disabled', !enabled);
     controls.querySelectorAll('input, select').forEach(control => {
         control.disabled = !enabled;
     });
@@ -1698,13 +1683,13 @@ function syncPromptSlotUi() {
         ['other-dialogue', 'otherDialoguePromptEnabled'],
     ];
     for (const [slot, key] of slots) {
-        const wrapper = document.querySelector(`[data-verba-deep-prompt-slot="${slot}"]`);
-        const checkbox = document.querySelector(`#verba-deep-${slot}-prompt-enabled`);
+        const wrapper = document.querySelector(`[data-verba-prompt-slot="${slot}"]`);
+        const checkbox = document.querySelector(`#verba-${slot}-prompt-enabled`);
         const enabled = settings[key] !== false;
-        if (wrapper) wrapper.classList.toggle('verba-deep-prompt-slot-off', !enabled);
+        if (wrapper) wrapper.classList.toggle('verba-prompt-slot-off', !enabled);
         if (checkbox) {
             checkbox.checked = enabled;
-            const label = checkbox.closest('.verba-deep-prompt-slot-toggle')?.querySelector('span');
+            const label = checkbox.closest('.verba-prompt-slot-toggle')?.querySelector('span');
             if (label) label.textContent = enabled ? 'ON' : 'OFF';
         }
     }
@@ -1827,68 +1812,67 @@ function applyPromptPresetTranslationSettings(value) {
 
     renderTranslationRuleOrder();
 
-    setCheckedValue('#verba-deep-relation-temperature-enabled', settings.relationTemperatureEnabled);
-    setRadioGroupValue('verba-deep-relation-temperature', settings.relationTemperature);
-    setRadioGroupValue('verba-deep-narration-localization-level', settings.narrationLocalizationLevel);
-    setRadioGroupValue('verba-deep-dialogue-localization-level', settings.dialogueLocalizationLevel);
-    const fineTuningControls = document.querySelector('#verba-deep-fine-tuning-controls');
-    fineTuningControls?.classList.toggle('verba-deep-control-disabled', !settings.relationTemperatureEnabled);
+    setCheckedValue('#verba-relation-temperature-enabled', settings.relationTemperatureEnabled);
+    setRadioGroupValue('verba-relation-temperature', settings.relationTemperature);
+    setRadioGroupValue('verba-narration-localization-level', settings.narrationLocalizationLevel);
+    setRadioGroupValue('verba-dialogue-localization-level', settings.dialogueLocalizationLevel);
+    const fineTuningControls = document.querySelector('#verba-fine-tuning-controls');
+    fineTuningControls?.classList.toggle('verba-control-disabled', !settings.relationTemperatureEnabled);
     fineTuningControls?.querySelectorAll('input').forEach(input => {
         input.disabled = !settings.relationTemperatureEnabled;
     });
 
-    setControlValue('#verba-deep-dialogue-ending-preferred', settings.dialogueEndingPreferred);
-    setControlValue('#verba-deep-dialogue-ending-avoid', settings.dialogueEndingAvoid);
-    setControlValue('#verba-deep-dialogue-ending-strength', settings.dialogueEndingStrength);
-    setCheckedValue('#verba-deep-dialogue-ending-repetition-reduction', settings.dialogueEndingRepetitionReduction);
+    setControlValue('#verba-dialogue-ending-preferred', settings.dialogueEndingPreferred);
+    setControlValue('#verba-dialogue-ending-avoid', settings.dialogueEndingAvoid);
+    setControlValue('#verba-dialogue-ending-strength', settings.dialogueEndingStrength);
+    setCheckedValue('#verba-dialogue-ending-repetition-reduction', settings.dialogueEndingRepetitionReduction);
 
-    setControlValue('#verba-deep-expression-emphasis', settings.expressionEmphasisTaste);
-    setControlValue('#verba-deep-expression-disfluency', settings.expressionDisfluencyTaste);
-    setControlValue('#verba-deep-expression-idiom', settings.expressionIdiomMetaphorTaste);
+    setControlValue('#verba-expression-emphasis', settings.expressionEmphasisTaste);
+    setControlValue('#verba-expression-disfluency', settings.expressionDisfluencyTaste);
+    setControlValue('#verba-expression-idiom', settings.expressionIdiomMetaphorTaste);
 
-    setCheckedValue('#verba-deep-korean-flavor-enabled', settings.koreanFlavorEnabled);
-    setControlValue('#verba-deep-korean-flavor-rhythm', settings.koreanFlavorDialogueRhythm);
-    setControlValue('#verba-deep-korean-flavor-pronoun', settings.koreanFlavorPronounOmission);
-    setControlValue('#verba-deep-korean-flavor-profanity', settings.koreanFlavorProfanityTone);
-    setControlValue('#verba-deep-korean-flavor-interjection', settings.koreanFlavorInterjectionTone);
-    setControlValue('#verba-deep-korean-flavor-meme', settings.koreanFlavorMemeDensity);
-    setCheckedValue('#verba-deep-korean-flavor-referent-repeat', settings.koreanFlavorReduceReferentRepetition);
+    setCheckedValue('#verba-korean-flavor-enabled', settings.koreanFlavorEnabled);
+    setControlValue('#verba-korean-flavor-rhythm', settings.koreanFlavorDialogueRhythm);
+    setControlValue('#verba-korean-flavor-pronoun', settings.koreanFlavorPronounOmission);
+    setControlValue('#verba-korean-flavor-profanity', settings.koreanFlavorProfanityTone);
+    setControlValue('#verba-korean-flavor-interjection', settings.koreanFlavorInterjectionTone);
+    setControlValue('#verba-korean-flavor-meme', settings.koreanFlavorMemeDensity);
+    setCheckedValue('#verba-korean-flavor-referent-repeat', settings.koreanFlavorReduceReferentRepetition);
 
-    setCheckedValue('#verba-deep-english-flavor-enabled', settings.englishFlavorEnabled);
-    setControlValue('#verba-deep-english-flavor-rhythm', settings.englishFlavorDialogueRhythm);
-    setControlValue('#verba-deep-english-flavor-conversation', settings.englishFlavorConversationNaturalization);
-    setControlValue('#verba-deep-english-flavor-slang', settings.englishFlavorSlangDensity);
-    setControlValue('#verba-deep-english-flavor-profanity', settings.englishFlavorProfanityTone);
-    setControlValue('#verba-deep-english-flavor-interjection', settings.englishFlavorInterjectionTone);
-    setControlValue('#verba-deep-english-flavor-meme', settings.englishFlavorMemeDensity);
-    setCheckedValue('#verba-deep-english-flavor-referent-repeat', settings.englishFlavorReduceReferentRepetition);
+    setCheckedValue('#verba-english-flavor-enabled', settings.englishFlavorEnabled);
+    setControlValue('#verba-english-flavor-rhythm', settings.englishFlavorDialogueRhythm);
+    setControlValue('#verba-english-flavor-conversation', settings.englishFlavorConversationNaturalization);
+    setControlValue('#verba-english-flavor-slang', settings.englishFlavorSlangDensity);
+    setControlValue('#verba-english-flavor-profanity', settings.englishFlavorProfanityTone);
+    setControlValue('#verba-english-flavor-interjection', settings.englishFlavorInterjectionTone);
+    setControlValue('#verba-english-flavor-meme', settings.englishFlavorMemeDensity);
+    setCheckedValue('#verba-english-flavor-referent-repeat', settings.englishFlavorReduceReferentRepetition);
 
-    // General flavor controls now live outside the refreshed developer panel.
-    setCheckedValue('#verba-deep-developer-mad-korean-enabled', settings.developerMadKoreanOutputEnabled);
-    setCheckedValue('#verba-deep-developer-hongjin-enabled', settings.developerHongjinFlavorEnabled);
-    setControlValue('#verba-deep-developer-mad-korean-target-user-register', settings.developerMadKoreanTargetToUserRegister);
-    setControlValue('#verba-deep-developer-mad-korean-user-target-register', settings.developerMadKoreanUserToTargetRegister);
-    setControlValue('#verba-deep-developer-hongjin-transcreation', settings.developerHongjinTranscreation);
-    setControlValue('#verba-deep-developer-hongjin-profanity', settings.developerHongjinProfanity);
-    setControlValue('#verba-deep-developer-hongjin-teasing', settings.developerHongjinTeasing);
-    setControlValue('#verba-deep-developer-hongjin-vulgarity', settings.developerHongjinVulgarity);
-    setControlValue('#verba-deep-developer-hongjin-playfulness', settings.developerHongjinPlayfulness);
-    setControlValue('#verba-deep-developer-hongjin-age-band', settings.developerHongjinAgeBand);
-    setControlValue('#verba-deep-developer-hongjin-oppa-frequency', settings.developerHongjinOppaFrequency);
+    // Sync moved general controls explicitly; developer refresh only rebuilds its own panel.
+    setCheckedValue('#verba-developer-mad-korean-enabled', settings.developerMadKoreanOutputEnabled);
+    setCheckedValue('#verba-developer-hongjin-enabled', settings.developerHongjinFlavorEnabled);
+    setControlValue('#verba-developer-mad-korean-target-user-register', settings.developerMadKoreanTargetToUserRegister);
+    setControlValue('#verba-developer-mad-korean-user-target-register', settings.developerMadKoreanUserToTargetRegister);
+    setControlValue('#verba-developer-hongjin-transcreation', settings.developerHongjinTranscreation);
+    setControlValue('#verba-developer-hongjin-profanity', settings.developerHongjinProfanity);
+    setControlValue('#verba-developer-hongjin-teasing', settings.developerHongjinTeasing);
+    setControlValue('#verba-developer-hongjin-vulgarity', settings.developerHongjinVulgarity);
+    setControlValue('#verba-developer-hongjin-playfulness', settings.developerHongjinPlayfulness);
+    setControlValue('#verba-developer-hongjin-age-band', settings.developerHongjinAgeBand);
+    setControlValue('#verba-developer-hongjin-oppa-frequency', settings.developerHongjinOppaFrequency);
 
-    // These controls also live outside the developer panel; restore visible values.
-    setControlValue('#verba-deep-developer-output-split-count', settings.developerOutputSplitCount);
-    setCheckedValue('#verba-deep-developer-relationship-enabled', settings.developerRelationshipExperimentEnabled);
-    setControlValue('#verba-deep-developer-speech-distance', settings.developerSpeechDistance);
-    setControlValue('#verba-deep-developer-target-user-register', settings.developerTargetToUserRegister);
-    setControlValue('#verba-deep-developer-target-other-register', settings.developerTargetToOtherRegister);
-    setControlValue('#verba-deep-developer-target-user-address', settings.developerTargetToUserAddress);
-    setControlValue('#verba-deep-developer-target-user-address-strength', settings.developerTargetToUserAddressStrength);
-    setControlValue('#verba-deep-developer-target-user-address-frequency', settings.developerTargetToUserAddressFrequency);
+    setControlValue('#verba-developer-output-split-count', settings.developerOutputSplitCount);
+    setCheckedValue('#verba-developer-relationship-enabled', settings.developerRelationshipExperimentEnabled);
+    setControlValue('#verba-developer-speech-distance', settings.developerSpeechDistance);
+    setControlValue('#verba-developer-target-user-register', settings.developerTargetToUserRegister);
+    setControlValue('#verba-developer-target-other-register', settings.developerTargetToOtherRegister);
+    setControlValue('#verba-developer-target-user-address', settings.developerTargetToUserAddress);
+    setControlValue('#verba-developer-target-user-address-strength', settings.developerTargetToUserAddressStrength);
+    setControlValue('#verba-developer-target-user-address-frequency', settings.developerTargetToUserAddressFrequency);
 
     if (appliedDeveloperSettings) refreshSettingsPanelForDeveloperMode();
-    syncDeveloperQualityControls(document.querySelector('#verba-deep-settings'));
-    if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+    syncDeveloperQualityControls(document.querySelector('#verba-settings'));
+    if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
 }
 
 function defaultPromptPresetTranslationSettingsSnapshot() {
@@ -1924,10 +1908,10 @@ function resetPromptPresetWorkspace(scope = PROMPT_PRESET_SCOPE_PROMPTS) {
     settings.selectedPromptPresetId = '';
     setPromptFieldsFromPreset(resetPreset);
 
-    const select = document.querySelector('#verba-deep-prompt-preset-select');
+    const select = document.querySelector('#verba-prompt-preset-select');
     if (select instanceof HTMLSelectElement) select.value = '';
 
-    const name = document.querySelector('#verba-deep-prompt-preset-name');
+    const name = document.querySelector('#verba-prompt-preset-name');
     if (
         name instanceof HTMLInputElement
         || name instanceof HTMLTextAreaElement
@@ -1935,12 +1919,12 @@ function resetPromptPresetWorkspace(scope = PROMPT_PRESET_SCOPE_PROMPTS) {
         name.value = '';
     }
 
-    const scopeSelect = document.querySelector('#verba-deep-prompt-preset-save-scope');
+    const scopeSelect = document.querySelector('#verba-prompt-preset-save-scope');
     if (scopeSelect instanceof HTMLSelectElement) scopeSelect.value = resetScope;
 
     renderPromptPresetManager('');
     renderPromptConflictInspector();
-    if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+    if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
 
     notify(
         resetScope === PROMPT_PRESET_SCOPE_TRANSLATION
@@ -1951,33 +1935,33 @@ function resetPromptPresetWorkspace(scope = PROMPT_PRESET_SCOPE_PROMPTS) {
 }
 
 function requestPromptPresetNewStartScope() {
-    if (document.querySelector('#verba-deep-prompt-new-start-overlay')) return Promise.resolve(null);
+    if (document.querySelector('#verba-prompt-new-start-overlay')) return Promise.resolve(null);
 
     return new Promise(resolve => {
         const overlay = document.createElement('div');
-        overlay.id = 'verba-deep-prompt-new-start-overlay';
-        overlay.className = 'verba-deep-overlay verba-deep-prompt-new-start-overlay';
+        overlay.id = 'verba-prompt-new-start-overlay';
+        overlay.className = 'verba-overlay verba-prompt-new-start-overlay';
         if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
 
         overlay.innerHTML = `
-            <section class="verba-deep-modal verba-deep-prompt-new-start-modal" role="dialog" aria-modal="true" aria-labelledby="verba-deep-prompt-new-start-title">
-                <header class="verba-deep-modal-header">
-                    <strong id="verba-deep-prompt-new-start-title">새로 시작</strong>
-                    <button type="button" class="verba-deep-close" aria-label="닫기">✕</button>
+            <section class="verba-modal verba-prompt-new-start-modal" role="dialog" aria-modal="true" aria-labelledby="verba-prompt-new-start-title">
+                <header class="verba-modal-header">
+                    <strong id="verba-prompt-new-start-title">새로 시작</strong>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
 
-                <div class="verba-deep-help verba-deep-prompt-new-start-help">
+                <div class="verba-help verba-prompt-new-start-help">
                     현재 편집 중인 값을 기본 상태로 되돌립니다.<br>
                     저장된 프리셋 자체는 삭제하거나 수정하지 않습니다.
                 </div>
 
-                <div class="verba-deep-prompt-new-start-actions">
-                    <button type="button" class="menu_button" data-verba-deep-new-start-scope="prompts">
+                <div class="verba-prompt-new-start-actions">
+                    <button type="button" class="menu_button" data-verba-new-start-scope="prompts">
                         <b>프롬프트만 초기화</b>
                         <small>4개 프롬프트를 비우고 슬롯 ON/OFF만 기본값으로 복원<br>번역 설정은 현재 값 유지</small>
                     </button>
 
-                    <button type="button" class="menu_button" data-verba-deep-new-start-scope="prompts_translation">
+                    <button type="button" class="menu_button" data-verba-new-start-scope="prompts_translation">
                         <b>프롬프트 + 번역 설정 초기화</b>
                         <small>프롬프트 + 번역 스타일 · 개발자 기능 · 현재 기본 번역 지침을 기본값으로 복원<br>개발자 잠금과 기본 지침 전용 프리셋 목록은 유지</small>
                     </button>
@@ -2025,10 +2009,10 @@ function requestPromptPresetNewStartScope() {
             resolve(value);
         };
 
-        overlay.querySelector('.verba-deep-close')?.addEventListener('click', () => finish(null));
-        overlay.querySelectorAll('[data-verba-deep-new-start-scope]').forEach(button => {
+        overlay.querySelector('.verba-close')?.addEventListener('click', () => finish(null));
+        overlay.querySelectorAll('[data-verba-new-start-scope]').forEach(button => {
             button.addEventListener('click', () => {
-                const value = button.dataset.verbaDeepNewStartScope === PROMPT_PRESET_SCOPE_TRANSLATION
+                const value = button.dataset.verbaNewStartScope === PROMPT_PRESET_SCOPE_TRANSLATION
                     ? PROMPT_PRESET_SCOPE_TRANSLATION
                     : PROMPT_PRESET_SCOPE_PROMPTS;
                 finish(value);
@@ -2055,10 +2039,10 @@ function setPromptFieldsFromPreset(preset) {
     settings.otherDialoguePromptEnabled = preset.otherDialoguePromptEnabled !== false;
 
     const values = {
-        '#verba-deep-global-prompt': settings.globalPrompt,
-        '#verba-deep-all-dialogue-prompt': settings.allDialoguePrompt,
-        '#verba-deep-dialogue-prompt': settings.dialoguePrompt,
-        '#verba-deep-other-dialogue-prompt': settings.otherDialoguePrompt,
+        '#verba-global-prompt': settings.globalPrompt,
+        '#verba-all-dialogue-prompt': settings.allDialoguePrompt,
+        '#verba-dialogue-prompt': settings.dialoguePrompt,
+        '#verba-other-dialogue-prompt': settings.otherDialoguePrompt,
     };
     for (const [selector, value] of Object.entries(values)) {
         const field = document.querySelector(selector);
@@ -2067,7 +2051,7 @@ function setPromptFieldsFromPreset(preset) {
     syncPromptSlotUi();
 
     const saveScope = normalizedPromptPresetSaveScope(preset.saveScope, preset.translationSettings);
-    const scopeSelect = document.querySelector('#verba-deep-prompt-preset-save-scope');
+    const scopeSelect = document.querySelector('#verba-prompt-preset-save-scope');
     if (scopeSelect instanceof HTMLSelectElement) scopeSelect.value = saveScope;
 
     if (saveScope === PROMPT_PRESET_SCOPE_TRANSLATION && preset.translationSettings) {
@@ -2093,8 +2077,8 @@ function currentRulesPromptSlotMarkup(label, text, enabled) {
     const content = String(text || '').trim();
     const actuallyApplied = enabled && Boolean(content);
     const state = !enabled ? 'OFF · 제외' : content ? 'ON · 적용' : 'ON · 비어 있음';
-    return `<section class="verba-deep-current-rule-card ${actuallyApplied ? 'is-active' : 'is-muted'}">
-        <div class="verba-deep-current-rule-card-head">
+    return `<section class="verba-current-rule-card ${actuallyApplied ? 'is-active' : 'is-muted'}">
+        <div class="verba-current-rule-card-head">
             <b>${escapeHtml(label)}</b>
             <span>${escapeHtml(state)}</span>
         </div>
@@ -2104,16 +2088,16 @@ function currentRulesPromptSlotMarkup(label, text, enabled) {
 
 function currentRulesSimpleCard(title, rows = []) {
     const valid = rows.filter(row => row && row[1] !== undefined && row[1] !== null && String(row[1]) !== '');
-    return `<section class="verba-deep-current-rule-card">
-        <div class="verba-deep-current-rule-card-head"><b>${escapeHtml(title)}</b></div>
-        <div class="verba-deep-current-rule-lines">
+    return `<section class="verba-current-rule-card">
+        <div class="verba-current-rule-card-head"><b>${escapeHtml(title)}</b></div>
+        <div class="verba-current-rule-lines">
             ${valid.map(([label, value]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join('')}
         </div>
     </section>`;
 }
 
 function renderCurrentAppliedRules() {
-    const host = document.querySelector('#verba-deep-current-rules-content');
+    const host = document.querySelector('#verba-current-rules-content');
     if (!host) return;
 
     if (minimalOutputEnabled(settings)) {
@@ -2171,9 +2155,9 @@ function renderCurrentAppliedRules() {
         .join(' → ');
 
     host.innerHTML = `
-        <div class="verba-deep-current-rules-note">현재 아웃풋 E→K 번역에 적용되는 사용자 규칙을 정리해서 보여줍니다. 인풋 K→E 자동번역 규칙은 포함하지 않으며 API 호출도 하지 않습니다.</div>
+        <div class="verba-current-rules-note">현재 아웃풋 E→K 번역에 적용되는 사용자 규칙을 정리해서 보여줍니다. 인풋 K→E 자동번역 규칙은 포함하지 않으며 API 호출도 하지 않습니다.</div>
 
-        <div class="verba-deep-current-rule-grid">
+        <div class="verba-current-rule-grid">
             ${currentRulesPromptSlotMarkup('전체 번역 전역 프롬프트', settings.globalPrompt, settings.globalPromptEnabled !== false)}
             ${currentRulesPromptSlotMarkup('모든 대사 공통 프롬프트', settings.allDialoguePrompt, settings.allDialoguePromptEnabled !== false)}
             ${currentRulesPromptSlotMarkup('캐릭터 대사 전용 프롬프트', settings.dialoguePrompt, settings.dialoguePromptEnabled !== false)}
@@ -2256,18 +2240,18 @@ function renderCurrentAppliedRules() {
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['xxx미친압축xxx', settings.developerMode && settings.developerExtremeCompressedPromptEnabled === true ? 'ON' : 'OFF'],
-                ['미친 한출의 맛', settings.developerMadKoreanOutputEnabled === true ? 'ON' : 'OFF'],
+                ['미친 한출의 맛', (settings.developerMode && settings.developerMadKoreanOutputEnabled) ? 'ON' : 'OFF'],
                 ['캐릭터 → USER 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanTargetToUserRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
                 ['USER → 캐릭터 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanUserToTargetRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
-                ['김홍진의 맛', settings.developerHongjinFlavorEnabled === true ? 'ON' : 'OFF'],
-                ['김홍진 연령대', settings.developerHongjinFlavorEnabled === true
+                ['김홍진의 맛', (settings.developerMode && settings.developerHongjinFlavorEnabled) ? 'ON' : 'OFF'],
+                ['김홍진 연령대', (settings.developerMode && settings.developerHongjinFlavorEnabled)
                     ? (DEVELOPER_HONGJIN_AGE_OPTIONS.find(option => option.value === settings.developerHongjinAgeBand)?.label || '미지정')
                     : '적용 안 함'],
-                ['김홍진 오빠 자칭', settings.developerHongjinFlavorEnabled === true
+                ['김홍진 오빠 자칭', (settings.developerMode && settings.developerHongjinFlavorEnabled)
                     ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
@@ -2370,9 +2354,9 @@ function scheduleChatSave(chatReference) {
         const context = liveContext();
         if (context.chat !== chatReference) return;
         try {
-            context.saveChat?.()?.catch?.(error => console.warn('[긴르바 실험실] 채팅 저장 실패', error));
+            context.saveChat?.()?.catch?.(error => console.warn('[베르바] 채팅 저장 실패', error));
         } catch (error) {
-            console.warn('[긴르바 실험실] 채팅 저장 실패', error);
+            console.warn('[베르바] 채팅 저장 실패', error);
         }
     }, 250);
 }
@@ -2411,7 +2395,7 @@ function normalizedTranslationTuning(value = {}) {
 }
 
 function tuningChoiceMarkup(name, options, selected) {
-    return `<div class="verba-deep-tuning-options" role="radiogroup">
+    return `<div class="verba-tuning-options" role="radiogroup">
         ${options.map(option => `
             <label>
                 <input type="radio" name="${escapeHtml(name)}" value="${escapeHtml(option.value)}" ${option.value === selected ? 'checked' : ''}>
@@ -2436,17 +2420,17 @@ function normalizeTranslationRuleOrder(value) {
 }
 
 function renderTranslationRuleOrder() {
-    const host = document.querySelector('#verba-deep-rule-priority-list');
+    const host = document.querySelector('#verba-rule-priority-list');
     if (!host) return;
     settings.translationRuleOrder = normalizeTranslationRuleOrder(settings.translationRuleOrder);
     host.innerHTML = settings.translationRuleOrder.map((key, index, order) => {
         const definition = TRANSLATION_RULE_DEFINITIONS.find(item => item.key === key);
-        return `<div class="verba-deep-rule-priority-row" data-rule-key="${escapeHtml(key)}">
+        return `<div class="verba-rule-priority-row" data-rule-key="${escapeHtml(key)}">
             <b>${index + 1}</b>
             <span>${escapeHtml(definition?.label || key)}</span>
-            <div class="verba-deep-rule-priority-actions">
-                <button type="button" class="menu_button verba-deep-rule-move-up" aria-label="위로 이동" ${index === 0 ? 'disabled' : ''}>↑</button>
-                <button type="button" class="menu_button verba-deep-rule-move-down" aria-label="아래로 이동" ${index === order.length - 1 ? 'disabled' : ''}>↓</button>
+            <div class="verba-rule-priority-actions">
+                <button type="button" class="menu_button verba-rule-move-up" aria-label="위로 이동" ${index === 0 ? 'disabled' : ''}>↑</button>
+                <button type="button" class="menu_button verba-rule-move-down" aria-label="아래로 이동" ${index === order.length - 1 ? 'disabled' : ''}>↓</button>
             </div>
         </div>`;
     }).join('');
@@ -2486,14 +2470,14 @@ function loadLocalProfileStats(fallback = null) {
         const raw = globalThis.localStorage?.getItem(PROFILE_STATS_STORAGE_KEY);
         if (raw) stored = JSON.parse(raw);
     } catch (error) {
-        console.warn('[긴르바 실험실] 프로필 성능 기록 로컬 불러오기 실패', error);
+        console.warn('[베르바] 프로필 성능 기록 로컬 불러오기 실패', error);
     }
 
     const normalized = normalizeProfileStats(stored ?? fallback);
     try {
         globalThis.localStorage?.setItem(PROFILE_STATS_STORAGE_KEY, JSON.stringify(normalized));
     } catch (error) {
-        console.warn('[긴르바 실험실] 프로필 성능 기록 로컬 저장 실패', error);
+        console.warn('[베르바] 프로필 성능 기록 로컬 저장 실패', error);
     }
     return normalized;
 }
@@ -2503,7 +2487,7 @@ function saveLocalProfileStats() {
     try {
         globalThis.localStorage?.setItem(PROFILE_STATS_STORAGE_KEY, JSON.stringify(profileStatsState));
     } catch (error) {
-        console.warn('[긴르바 실험실] 프로필 성능 기록 로컬 저장 실패', error);
+        console.warn('[베르바] 프로필 성능 기록 로컬 저장 실패', error);
     }
 }
 
@@ -2588,7 +2572,7 @@ async function copyText(value) {
 }
 
 function renderProfileStats() {
-    const content = document.querySelector('#verba-deep-profile-stats-content');
+    const content = document.querySelector('#verba-profile-stats-content');
     if (!content) return;
     profileStatsState = normalizeProfileStats(profileStatsState);
     content.innerHTML = ['A', 'B', 'C'].map(slot => {
@@ -2603,7 +2587,7 @@ function renderProfileStats() {
             : '—';
         const profile = configuredProfiles().find(candidate => candidate.slot === slot);
         const name = profile ? profileDisplayName(profile.id) : '미설정';
-        return `<div class="verba-deep-stat-row">
+        return `<div class="verba-stat-row">
             <b>${slot}</b>
             <span title="${escapeHtml(name)}">${escapeHtml(name)}</span>
             <small>요청 ${stat.requests} · 성공 ${successRate}% · 평균 ${outputAverageLabel} · 재시도 ${stat.retries} · 대체 ${stat.fallbacks}</small>
@@ -2642,17 +2626,17 @@ function fillProfileSelect(select, selectedId, placeholder) {
 
 function refreshProfileSelect() {
     fillProfileSelect(
-        document.querySelector('#verba-deep-profile'),
+        document.querySelector('#verba-profile'),
         settings.profileId,
         '연결 프로필을 선택하세요',
     );
     fillProfileSelect(
-        document.querySelector('#verba-deep-fallback-profile'),
+        document.querySelector('#verba-fallback-profile'),
         settings.fallbackProfileId,
         '프로필 B를 사용하지 않음',
     );
     fillProfileSelect(
-        document.querySelector('#verba-deep-third-profile'),
+        document.querySelector('#verba-third-profile'),
         settings.thirdProfileId,
         '프로필 C를 사용하지 않음',
     );
@@ -2666,15 +2650,9 @@ function enqueueRequest(task) {
     return run;
 }
 
-function scopedParallelRequestLimit() {
-    return madKoreanExclusiveMode() && settings.developerHongjinFlavorEnabled === true
-        ? MAD_HONGJIN_SCOPED_PARALLEL_REQUEST_LIMIT
-        : DEFAULT_SCOPED_PARALLEL_REQUEST_LIMIT;
-}
-
 function drainScopedParallelRequestQueue() {
     while (
-        scopedParallelRequestActive < scopedParallelRequestLimit()
+        scopedParallelRequestActive < SCOPED_PARALLEL_REQUEST_LIMIT
         && scopedParallelRequestQueue.length
     ) {
         const item = scopedParallelRequestQueue.shift();
@@ -2772,7 +2750,7 @@ function abortError() {
 function outputAbortReason(code, message, silent = true) {
     return {
         name: 'AbortError',
-        verbaDeepCode: String(code || 'VERBA_DEEP_OUTPUT_ABORTED'),
+        verbaCode: String(code || 'VERBA_OUTPUT_ABORTED'),
         message: String(message || '출력 번역이 중단되었습니다.'),
         silent: Boolean(silent),
     };
@@ -2782,7 +2760,7 @@ function abortPendingOutput(messageId, reason) {
     const pending = pendingOutputs.get(Number(messageId));
     if (!pending || pending.controller.signal.aborted) return;
     pending.controller.abort(reason || outputAbortReason(
-        'VERBA_DEEP_OUTPUT_ABORTED',
+        'VERBA_OUTPUT_ABORTED',
         '출력 번역이 중단되었습니다.',
         false,
     ));
@@ -2879,7 +2857,7 @@ async function sendProfileRequest(prompt, options = {}) {
         const onAbort = () => {
             if (timedOut) {
                 const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
-                timeoutError.code = 'VERBA_DEEP_TIMEOUT';
+                timeoutError.code = 'VERBA_TIMEOUT';
                 reject(timeoutError);
                 return;
             }
@@ -2901,8 +2879,8 @@ async function sendProfileRequest(prompt, options = {}) {
 
             // Some ConnectionManager/provider implementations do not actually
             // settle their Promise when AbortSignal is aborted. In that case a
-            // plain `await sendRequest()` can leave Verba Deep stuck on "번역 중"
-            // forever. Race against Verba Deep's own hard-stop Promise so each
+            // plain `await sendRequest()` can leave Verba stuck on "번역 중"
+            // forever. Race against Verba's own hard-stop Promise so each
             // attempt always returns or fails within the configured timeout.
             const request = Promise.resolve().then(() => {
                 if (controller.signal.aborted) throw abortError();
@@ -2910,7 +2888,7 @@ async function sendProfileRequest(prompt, options = {}) {
                 return service.sendRequest(
                     profileId,
                     [{ role: 'user', content: prompt }],
-                    VERBA_DEEP_MAX_TOKENS,
+                    VERBA_MAX_TOKENS,
                     { signal: controller.signal },
                 );
             });
@@ -2919,7 +2897,7 @@ async function sendProfileRequest(prompt, options = {}) {
 
             if (!extractResponseText(response).trim()) {
                 const error = new Error('AI가 빈 응답을 반환했습니다.');
-                error.code = 'VERBA_DEEP_RESPONSE_EMPTY';
+                error.code = 'VERBA_RESPONSE_EMPTY';
                 if (settings.debugMode) rememberRequestError(error, { ...options, profileSlot }, response);
                 throw error;
             }
@@ -2934,7 +2912,7 @@ async function sendProfileRequest(prompt, options = {}) {
                 ? enqueueScopedParallelRequest(executeRequest)
                 : enqueueRequest(executeRequest)
         );
-        // Also race while the request is still waiting in Verba Deep's queue.
+        // Also race while the request is still waiting in Verba's queue.
         // Otherwise a cancelled queued translation would keep showing
         // "취소 중" until every earlier request had finished.
         return await Promise.race([queuedRequest, hardStop]);
@@ -2942,7 +2920,7 @@ async function sendProfileRequest(prompt, options = {}) {
         outputTiming.received(options.timing, timingRequest);
         if (timedOut) {
             const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
-            timeoutError.code = 'VERBA_DEEP_TIMEOUT';
+            timeoutError.code = 'VERBA_TIMEOUT';
             timeoutError.cause = error;
             if (settings.debugMode) rememberRequestError(timeoutError, { ...options, profileSlot });
             attemptError = timeoutError;
@@ -2954,7 +2932,7 @@ async function sendProfileRequest(prompt, options = {}) {
         }
         // The connection manager may strip the upstream body. Preserve only
         // what it actually exposes; never intercept global fetch or terminal logs.
-        if (settings.debugMode && error?.code !== 'VERBA_DEEP_RESPONSE_EMPTY') {
+        if (settings.debugMode && error?.code !== 'VERBA_RESPONSE_EMPTY') {
             try {
                 const raw = await readErrorResponse(error);
                 if (settings.debugMode) error = rememberRequestError(error, { ...options, profileSlot }, raw);
@@ -3041,11 +3019,8 @@ function notifyFallbackUsed(profileId) {
 async function sendWithRetry(prompt, options = {}) {
     const transientDelays = [3000, 5000, 8000, 12000, 18000];
     const generalDelays = [800, 1200, 1800, 2600, 4000];
-    // Mad Korean is intentionally a single-pass model path. A slow retry can
-    // cost more than the original Flash translation and often returns no
-    // better prose, so one selected split equals exactly one provider call.
-    const maxRetries = options.noModelFollowups === true ? 0 : 5;
-    const token = Symbol('verba-deep-translation-retry');
+    const maxRetries = 5;
+    const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
@@ -3082,10 +3057,10 @@ async function sendWithRetry(prompt, options = {}) {
                 // only temporary server/network/quota errors use B/C profiles.
                 // But the active profile itself is retried for EVERY non-abort
                 // failure, as requested.
-                if (options.noModelFollowups !== true && profiles.fallbacks.length && fallbackEligibleError(primaryError)) {
+                if (profiles.fallbacks.length && fallbackEligibleError(primaryError)) {
                     for (const fallback of profiles.fallbacks) {
                         console.warn(
-                            `[긴르바 실험실] 현재 선택 프로필 실패 — 프로필 ${fallback.slot} ${profileDisplayName(fallback.id)}(으)로 임시 전환`,
+                            `[베르바] 현재 선택 프로필 실패 — 프로필 ${fallback.slot} ${profileDisplayName(fallback.id)}(으)로 임시 전환`,
                             errors.at(-1),
                         );
                         try {
@@ -3100,7 +3075,7 @@ async function sendWithRetry(prompt, options = {}) {
                             return response;
                         } catch (fallbackError) {
                             if (isAbort(fallbackError, controller.signal)) throw fallbackError;
-                            console.warn(`[긴르바 실험실] 연결 프로필 ${fallback.slot} 요청도 실패했습니다.`, fallbackError);
+                            console.warn(`[베르바] 연결 프로필 ${fallback.slot} 요청도 실패했습니다.`, fallbackError);
                             errors.push(fallbackError);
                         }
                     }
@@ -3130,7 +3105,7 @@ async function sendWithRetry(prompt, options = {}) {
                 updateServerRetryIndicator();
 
                 console.warn(
-                    `[긴르바 실험실] 번역 요청 실패 — ${state.retryCount}/${state.maxRetries}회 재시도 예정`,
+                    `[베르바] 번역 요청 실패 — ${state.retryCount}/${state.maxRetries}회 재시도 예정`,
                     cycleError,
                 );
 
@@ -3157,7 +3132,7 @@ function collectPartialSegmentTranslations(raw, expectedSegments) {
 }
 
 async function requestSegments(prompt, expectedSegments, options = {}) {
-    const maxRetries = options.noModelFollowups === true ? 0 : 5;
+    const maxRetries = 5;
     const parseRetryDelays = [500, 700, 1000, 1400, 2000];
     const completed = new Map();
     let pending = [...(expectedSegments || [])];
@@ -3171,14 +3146,8 @@ async function requestSegments(prompt, expectedSegments, options = {}) {
         const repair = attempt
             ? `
 
-Your previous response was invalid or incomplete.
-This is retry ${attempt}/${maxRetries}.
-KEEP all previously successful segment translations unchanged on the client side.
-Return STRICT JSON only for the STILL-MISSING segment ids listed below.
-STILL-MISSING IDS: ${JSON.stringify(missingIds)}
-Do not return already completed ids.
-Include every still-missing id exactly once.
-Do not add markdown fences, commentary, explanations, or extra ids.`
+Retry ${attempt}/${maxRetries}: prior JSON was invalid/incomplete. Override the target list: return ONLY these still-missing ids, each once, in the same JSON schema. No fences/commentary/extra ids. Completed translations are retained locally.
+STILL-MISSING IDS: ${JSON.stringify(missingIds)}`
             : '';
 
         try {
@@ -3199,7 +3168,7 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
             lastError = parseError || new Error(
                 `번역 결과 누락: ${pending.map(segment => segment.id).join(', ')}`,
             );
-            lastError.code = 'VERBA_DEEP_RESPONSE_FORMAT';
+            lastError.code = 'VERBA_RESPONSE_FORMAT';
         } catch (error) {
             if (isAbort(error, options.signal)) {
                 finishSegmentRecovery(recoveryDiagnostic, '취소됨');
@@ -3211,7 +3180,7 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
         if (attempt === maxRetries) break;
 
         console.warn(
-            `[긴르바 실험실] 번역 결과 일부 실패 — 성공 구간 ${completed.size}개 유지, 남은 ${pending.length}개만 ${attempt + 1}/${maxRetries}회 재시도`,
+            `[베르바] 번역 결과 일부 실패 — 성공 구간 ${completed.size}개 유지, 남은 ${pending.length}개만 ${attempt + 1}/${maxRetries}회 재시도`,
             lastError,
         );
         try {
@@ -3231,75 +3200,8 @@ Do not add markdown fences, commentary, explanations, or extra ids.`
     finishSegmentRecovery(recoveryDiagnostic, '재시도 종료·미복구');
     throw finalError;
 }
-
-function parseSparseMadRepairResponse(raw, expectedSegments = []) {
-    const cleaned = String(raw || '')
-        .trim()
-        .replace(/^```(?:json)?\s*/iu, '')
-        .replace(/\s*```$/u, '');
-    const candidates = [cleaned];
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start >= 0 && end > start && (start !== 0 || end !== cleaned.length - 1)) {
-        candidates.push(cleaned.slice(start, end + 1));
-    }
-
-    let parsed;
-    let parseError;
-    for (const candidate of candidates) {
-        try {
-            parsed = JSON.parse(candidate);
-            break;
-        } catch (error) {
-            parseError = error;
-        }
-    }
-    if (!parsed || !Array.isArray(parsed.repairs)) {
-        throw new Error('부분 검수 응답의 repairs 배열을 찾지 못했습니다.', { cause: parseError });
-    }
-
-    const allowed = new Set((expectedSegments || []).map(segment => String(segment.id || '')));
-    const repairs = new Map();
-    for (const row of parsed.repairs) {
-        const id = String(row?.id || '');
-        const translation = typeof row?.translation === 'string' ? row.translation : '';
-        if (!allowed.has(id) || !translation.trim()) continue;
-        if (repairs.has(id) && repairs.get(id) !== translation) {
-            throw new Error(`부분 검수 응답에 서로 다른 중복 수정이 있습니다: ${id}`);
-        }
-        repairs.set(id, translation);
-    }
-    return repairs;
-}
-
-async function requestSparseMadRepairs(prompt, expectedSegments, options = {}) {
-    const maxParseRetries = Number.isInteger(options.maxParseRetries)
-        ? Math.max(0, Math.min(2, options.maxParseRetries))
-        : 2;
-    let lastError;
-    for (let attempt = 0; attempt <= maxParseRetries; attempt += 1) {
-        const reminder = attempt ? `
-
-Your previous sparse repair response was invalid. Return strict JSON only in this shape:
-{"repairs":[{"id":"seg_0000","translation":"complete corrected segment"}]}
-Use {"repairs":[]} when no correction is needed. Do not return explanations, markdown, unchanged rows or unknown ids.` : '';
-        try {
-            const response = await sendWithRetry(prompt + reminder, {
-                ...options,
-                repairAttempt: attempt,
-            });
-            return parseSparseMadRepairResponse(extractResponseText(response), expectedSegments);
-        } catch (error) {
-            if (isAbort(error, options.signal)) throw error;
-            lastError = error;
-        }
-    }
-    throw new Error(`미친 한출 부분 검수 응답을 해석하지 못했습니다: ${errorText(lastError)}`, {
-        cause: lastError,
-    });
-}
 async function requestSelectionCandidates(prompt, options = {}) {
-    const maxRetries = options.noModelFollowups === true ? 0 : 5;
+    const maxRetries = 5;
     const parseRetryDelays = [500, 700, 1000, 1400, 2000];
     let lastError;
 
@@ -3307,10 +3209,7 @@ async function requestSelectionCandidates(prompt, options = {}) {
         const repair = attempt
             ? `
 
-Your previous response was invalid or incomplete.
-This is retry ${attempt}/${maxRetries}.
-Return STRICT JSON only with exactly three distinct candidates.
-Do not add markdown fences, commentary, or explanations.`
+Retry ${attempt}/${maxRetries}: correct invalid/incomplete JSON. Return exactly three distinct candidates in the required schema; no fences/commentary.`
             : '';
 
         try {
@@ -3318,7 +3217,7 @@ Do not add markdown fences, commentary, or explanations.`
             try {
                 return parseSelectionCandidateResponse(extractResponseText(response), 3);
             } catch (error) {
-                error.code = 'VERBA_DEEP_RESPONSE_FORMAT';
+                error.code = 'VERBA_RESPONSE_FORMAT';
                 if (settings.debugMode) rememberRequestError(error, { ...options, stage: 'selection-candidate-parse' }, response);
                 throw error;
             }
@@ -3329,7 +3228,7 @@ Do not add markdown fences, commentary, or explanations.`
             if (attempt === maxRetries) break;
 
             console.warn(
-                `[긴르바 실험실] 선택 재번역 후보 해석 실패 — ${attempt + 1}/${maxRetries}회 재시도`,
+                `[베르바] 선택 재번역 후보 해석 실패 — ${attempt + 1}/${maxRetries}회 재시도`,
                 error,
             );
             await wait(parseRetryDelays[attempt], options.signal);
@@ -3342,27 +3241,21 @@ Do not add markdown fences, commentary, or explanations.`
     );
 }
 
-function restoredSegmentText(value, segmented, useSourceNames = false, speakerIdentity = {}, sourceSegment = {}) {
+function restoredSegmentText(value, segmented, useSourceNames = false) {
     const nameTokens = (segmented.nameTokens || []).map(entry => ({
         token: entry.token,
         value: useSourceNames ? entry.source : entry.value,
     }));
     const namesRestored = restoreProtected(value, nameTokens, { strict: false });
     const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: false });
-    if (useSourceNames) return fullyRestored;
-    // Keep this helper usable by the minimal-output module and its isolated
-    // tests, which intentionally load it without the full identity pipeline.
-    const identityRepaired = typeof repairOutputIdentityNames === 'function'
-        ? repairOutputIdentityNames(fullyRestored, speakerIdentity, sourceSegment, segmented.nameTokens || [])
-        : fullyRestored;
-    return repairKoreanParticleAlternatives(identityRepaired);
+    return useSourceNames ? fullyRestored : repairKoreanParticleAlternatives(fullyRestored);
 }
 
-function buildSourceMap(segmented, translations, completeTranslation, speakerIdentity = {}) {
+function buildSourceMap(segmented, translations, completeTranslation) {
     const entries = [];
     let cursor = 0;
     for (const segment of segmented.segments || []) {
-        const translated = restoredSegmentText(String(translations.get(segment.id) || ''), segmented, false, speakerIdentity, segment);
+        const translated = restoredSegmentText(String(translations.get(segment.id) || ''), segmented, false);
         const source = restoredSegmentText(segment.text, segmented, true);
         if (!translated.trim() || !source.trim()) continue;
         let start = completeTranslation.indexOf(translated, cursor);
@@ -3409,7 +3302,7 @@ function roleTermsForReferentConsistency(segments) {
     const ordered = [];
     let totalMentions = 0;
     for (const segment of segments || []) {
-        const source = String(segment?.text || '').replace(/@@VERBA_DEEP_[A-Z0-9_]+@@/g, ' ');
+        const source = String(segment?.text || '').replace(/@@VERBA_[A-Z0-9_]+@@/g, ' ');
         for (const match of source.matchAll(matcher)) {
             const term = normalizedRoleMention(match[0]);
             if (!term) continue;
@@ -3423,7 +3316,7 @@ function roleTermsForReferentConsistency(segments) {
 function repeatedRoleTerms(segments) {
     const counts = new Map();
     for (const segment of segments || []) {
-        const source = String(segment?.text || '').replace(/@@VERBA_DEEP_[A-Z0-9_]+@@/g, ' ');
+        const source = String(segment?.text || '').replace(/@@VERBA_[A-Z0-9_]+@@/g, ' ');
         for (const match of source.matchAll(/[A-Za-z][A-Za-z'’-]{2,}/g)) {
             let term = match[0].toLocaleLowerCase();
             term = term.replace(/[’']s$/u, '').replace(/[’']$/u, '');
@@ -3449,7 +3342,7 @@ function segmentContainsRoleTerm(segment, terms) {
 }
 
 async function planRepeatedRoleTermLocks(segmented, options = {}) {
-    if (singlePassFlavorMode()) return [];
+    if (madKoreanExclusiveMode()) return [];
     const terms = repeatedRoleTerms(segmented?.segments);
     if (!terms.length) return [];
 
@@ -3503,14 +3396,14 @@ async function planRepeatedRoleTermLocks(segmented, options = {}) {
         return locks;
     } catch (error) {
         if (isAbort(error, options.signal)) throw error;
-        console.warn('[긴르바 실험실] 반복 직책 표기 계획에 실패하여 번역 후 보정으로 전환합니다.', error);
+        console.warn('[베르바] 반복 직책 표기 계획에 실패하여 번역 후 보정으로 전환합니다.', error);
         return [];
     }
 }
 function protectedTokensIntact(previous, next) {
     const collect = value => {
         const counts = new Map();
-        for (const token of String(value || '').match(/@@VERBA_DEEP_(?:NAME_)?\d{4}@@/g) || []) {
+        for (const token of String(value || '').match(/@@VERBA_(?:NAME_)?\d{4}@@/g) || []) {
             counts.set(token, (counts.get(token) || 0) + 1);
         }
         return counts;
@@ -3522,7 +3415,7 @@ function protectedTokensIntact(previous, next) {
 }
 
 async function repairRepeatedRoleTermConsistency(segmented, translations, options = {}) {
-    if (singlePassFlavorMode()) return;
+    if (madKoreanExclusiveMode()) return;
     // Unlike the pre-translation lock (which handles exact repeated source terms),
     // this final pass also compares different role/title words that may point to
     // the same person, e.g. manager -> team lead. If context confirms the same
@@ -3562,7 +3455,7 @@ async function repairRepeatedRoleTermConsistency(segmented, translations, option
         }
     } catch (error) {
         if (isAbort(error, options.signal)) throw error;
-        console.warn('[긴르바 실험실] 반복 직책 표기 통일을 완료하지 못해 기존 번역을 유지합니다.', error);
+        console.warn('[베르바] 반복 직책 표기 통일을 완료하지 못해 기존 번역을 유지합니다.', error);
     }
 }
 
@@ -3797,35 +3690,8 @@ function sourceMapAfterGlobalReplacements(sourceMap, previousTranslation, nextTr
 
 const KOREAN_NAME_PARTICLE_LIKE_ENDINGS = new Set(['은', '는', '이', '가', '을', '를', '의', '에', '도', '만', '와', '과', '로']);
 
-// Common nouns whose topic form can contain a canonical name verbatim.
-// Example: canonical name `담은` is not a person reference in `농담은`.
-const KOREAN_IDENTITY_WORD_COLLISIONS = new Set([
-    '농담', '부담', '상담', '괴담', '미담', '악담', '덕담', '잡담', '험담',
-]);
-
 function escapeRegularExpression(value) {
     return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function repairEmbeddedIdentityWordCollisions(value, speakerIdentity = {}) {
-    let result = String(value || '');
-    const names = canonicalKoreanIdentityNames(speakerIdentity)
-        .filter(name => /^[가-힣]{2,12}$/u.test(name))
-        .sort((left, right) => right.length - left.length);
-    const boundary = '(?=$|[\\s\\p{P}\\p{S}])';
-    const accidentalParticles = '(?:이|가|은|는|을|를)';
-
-    for (const name of names) {
-        for (const noun of KOREAN_IDENTITY_WORD_COLLISIONS) {
-            if (!`${noun}은`.endsWith(name)) continue;
-            const topicForm = `${noun}은`;
-            result = result.replace(
-                new RegExp(`${escapeRegularExpression(topicForm)}${accidentalParticles}${boundary}`, 'gu'),
-                topicForm,
-            );
-        }
-    }
-    return result;
 }
 
 /**
@@ -3844,7 +3710,7 @@ function repairIndivisibleIdentityNames(value, speakerIdentity = {}) {
     names.forEach((name, index) => {
         const shortened = name.slice(0, -1);
         if (!shortened || !result.includes(shortened)) return;
-        const token = `\uE000VERBA_DEEP_IDENTITY_${index}\uE001`;
+        const token = `\uE000VERBA_IDENTITY_${index}\uE001`;
         result = result.split(name).join(token);
         const suffix = '(?:에게서|에게|한테서|한테|께서|께|으로부터|으로|로부터|로|에서|보다|처럼|만큼|까지|부터|하고|이랑|랑|과|와|의|은|는|이|가|을|를|도|만|아|야)?';
         const shortenedPattern = new RegExp(`${escapeRegularExpression(shortened)}(?=${suffix}(?:[^가-힣]|$))`, 'gu');
@@ -3852,57 +3718,6 @@ function repairIndivisibleIdentityNames(value, speakerIdentity = {}) {
         result = result.split(token).join(name);
     });
     return result;
-}
-
-function canonicalKoreanIdentityNames(speakerIdentity = {}) {
-    const identityNames = [
-        String(speakerIdentity.userName || '').trim(),
-        String(speakerIdentity.characterName || '').trim(),
-    ].filter(name => /^[가-힣]{1,12}$/u.test(name));
-    const lockedNames = [
-        ...(Array.isArray(speakerIdentity.nameLocks) ? speakerIdentity.nameLocks : [])
-            .flatMap(row => [row?.target, row?.value])
-            .map(name => String(name || '').trim()),
-    ].filter(name => /^[가-힣]{1,12}$/u.test(name));
-    const identityVariants = identityNames.flatMap(name => (
-        [...name].length === 3 ? [name, [...name].slice(1).join('')] : [name]
-    ));
-    // A generic lock may be a title/place/object rather than a person's full
-    // name, so never invent a shortened alias from lock targets.
-    return [...new Set([...identityVariants, ...lockedNames])];
-}
-
-function repairStrictCanonicalIdentityNames(value, speakerIdentity = {}) {
-    const collisionRepaired = repairEmbeddedIdentityWordCollisions(value, speakerIdentity);
-    return repairCanonicalKoreanNameSuffixes(collisionRepaired, canonicalKoreanIdentityNames(speakerIdentity));
-}
-
-function repairOutputIdentityNames(value, speakerIdentity = {}, sourceSegment = {}, nameTokens = []) {
-    const collisionRepaired = repairEmbeddedIdentityWordCollisions(value, speakerIdentity);
-    const indivisible = repairIndivisibleIdentityNames(collisionRepaired, speakerIdentity);
-    const canonicalNames = canonicalKoreanIdentityNames(speakerIdentity);
-    const particlesRepaired = repairCanonicalKoreanNameSuffixes(indivisible, canonicalNames);
-    return repairCanonicalKoreanVocatives(particlesRepaired, sourceSegment, canonicalNames, nameTokens);
-}
-
-function repairDialogueQuotationEnvelope(value, sourceSegment = {}) {
-    const result = String(value || '');
-    if (sourceSegment?.type !== 'dialogue_candidate' || !result.trim()) return result;
-    const source = String(sourceSegment?.text || '').trim();
-    const pairs = [
-        ['“', '”'], ['"', '"'], ['「', '」'], ['『', '』'], ['‘', '’'],
-    ];
-    const pair = pairs.find(([open, close]) => source.startsWith(open) && source.endsWith(close));
-    if (!pair) return result;
-    const [open, close] = pair;
-    const leading = result.match(/^\s*/u)?.[0] || '';
-    const trailing = result.match(/\s*$/u)?.[0] || '';
-    let body = result.slice(leading.length, result.length - trailing.length || undefined).trim();
-    const anyOpen = /^[“"「『‘]/u.test(body);
-    const anyClose = /[”"」』’]$/u.test(body);
-    if (!anyOpen) body = `${open}${body}`;
-    if (!anyClose) body = `${body}${close}`;
-    return `${leading}${body}${trailing}`;
 }
 
 function hasKoreanFinalConsonant(value) {
@@ -3979,11 +3794,9 @@ function repairKoreanParticleAlternatives(value) {
 function outputScopeForSegment(segment, speakerScopes = {}) {
     if (segment?.type === 'tagged_content') return 'tagged_content';
     if (segment?.type !== 'dialogue_candidate') return 'narration';
-    const resolved = speakerScopes?.[segment.id];
-    if (resolved === 'target_dialogue') return 'target_dialogue';
-    if (resolved === 'user_dialogue') return 'user_dialogue';
-    if (resolved === 'npc_dialogue') return 'npc_dialogue';
-    return 'other_dialogue';
+    return speakerScopes?.[segment.id] === 'target_dialogue'
+        ? 'target_dialogue'
+        : 'other_dialogue';
 }
 
 function segmentsGroupedByOutputScope(segments, speakerScopes = {}) {
@@ -4023,32 +3836,16 @@ function speakerAttributionCacheKey(segmented, speakerIdentity = {}) {
 
 async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, options = {}) {
     const dialogueSegments = (segmented?.segments || []).filter(segment => segment.type === 'dialogue_candidate');
-    const localScopes = settings.developerHongjinFlavorEnabled === true
-        ? inferLocalTargetDialogueScopes(segmented, speakerIdentity)
-        : {};
-    const scopes = Object.fromEntries(dialogueSegments.map(segment => [
-        segment.id,
-        ['target_dialogue', 'user_dialogue', 'npc_dialogue'].includes(localScopes[segment.id])
-            ? localScopes[segment.id]
-            : 'npc_dialogue',
-    ]));
+    const scopes = Object.fromEntries(dialogueSegments.map(segment => [segment.id, 'other_dialogue']));
 
-    // Flavor modes already have a deterministic scene-local resolver. Keep
-    // speaker isolation local so enabling the target voice never adds a
-    // classifier request before the actual translation.
-    if (singlePassFlavorMode()) return scopes;
-
-    // Mad Korean + Hong-jin uses the local scene resolver before its parallel
-    // TARGET/body lanes. Do not add a separate classifier request: it delayed
-    // Flash and detached dialogue from the scene that gives the voice rhythm.
-    const needsSpeakerIsolation = Boolean(
-        !madKoreanExclusiveMode() && (
+    const needsSpeakerIsolation = madKoreanExclusiveMode()
+        ? false
+        : Boolean(
         (settings.dialoguePromptEnabled !== false && String(settings.dialoguePrompt || '').trim())
         || (settings.otherDialoguePromptEnabled !== false && String(settings.otherDialoguePrompt || '').trim())
         || String(settings.dialogueEndingPreferred || '').trim()
         || String(settings.dialogueEndingAvoid || '').trim()
         || settings.dialogueEndingRepetitionReduction !== false
-        )
     );
     if (!dialogueSegments.length || !needsSpeakerIsolation) return scopes;
 
@@ -4076,7 +3873,7 @@ async function classifyOutputDialogueSpeakers(segmented, speakerIdentity, option
         if (isAbort(error, options.signal)) throw error;
         // Conservative fallback is NOT cached. A later retranslation may
         // successfully classify the speakers.
-        console.warn('[긴르바 실험실] 대사 화자 분류 실패 — 캐릭터 전용 프롬프트를 보수적으로 제외합니다.', error);
+        console.warn('[베르바] 대사 화자 분류 실패 — 캐릭터 전용 프롬프트를 보수적으로 제외합니다.', error);
         debugCaptureError?.(error, 'speaker-attribution');
     }
 
@@ -4089,21 +3886,9 @@ async function requestScopedGroupTranslations({
     segments,
     options,
 }) {
-    const requestedNarrationSplit = (
-        madKoreanExclusiveMode()
-        && settings.developerHongjinFlavorEnabled === true
-        && scope === 'narration'
-    ) ? outputSplitCount(settings) : 1;
-    const madFlashChunks = (
-        madKoreanExclusiveMode()
-        && settings.developerHongjinFlavorEnabled === true
-    ) ? splitMadFlashScopeSegments(scope, segments, requestedNarrationSplit) : [segments];
-
     const buildPrompt = targetSegments => buildScopedOutputPrompt({
         segments: targetSegments,
-        sourceContext: madFlashChunks.length > 1
-            ? scopedSourceContext(segmented, targetSegments)
-            : segmented.protectedText,
+        sourceContext: segmented.protectedText,
         settings,
         oneTimeInstruction: options.oneTimeInstruction || '',
         nameTokens: nameTokensForSegments(segmented, targetSegments),
@@ -4112,212 +3897,51 @@ async function requestScopedGroupTranslations({
         speakerIdentity: options.speakerIdentity || {},
     });
 
-    const requestChunk = async (chunk, chunkIndex = 0) => {
-        try {
-            return await requestSegments(buildPrompt(chunk), chunk, {
-                ...options,
-                parallelRequest: true,
-                stage: `${options.stage || 'output-translation'}:${scope}${madFlashChunks.length > 1 ? `:chunk-${chunkIndex + 1}` : ''}`,
-            });
-        } catch (error) {
-            if (isAbort(error, options.signal)) throw error;
-            if (options.noModelFollowups === true) throw error;
+    try {
+        return await requestSegments(buildPrompt(segments), segments, {
+            ...options,
+            parallelRequest: true,
+            stage: `${options.stage || 'output-translation'}:${scope}`,
+        });
+    } catch (error) {
+        if (isAbort(error, options.signal)) throw error;
 
-            const recovered = error.partialTranslations instanceof Map
-                ? new Map(error.partialTranslations)
-                : new Map();
-            const missing = Array.isArray(error.missingSegments) && error.missingSegments.length
-                ? error.missingSegments
-                : chunk.filter(segment => !recovered.has(segment.id));
+        const recovered = error.partialTranslations instanceof Map
+            ? new Map(error.partialTranslations)
+            : new Map();
+        const missing = Array.isArray(error.missingSegments) && error.missingSegments.length
+            ? error.missingSegments
+            : segments.filter(segment => !recovered.has(segment.id));
 
-            if (!missing.length) return recovered;
+        if (!missing.length) return recovered;
 
-            console.warn(
-                `[긴르바 실험실] ${scope} 범위에서 ${recovered.size}개 성공 구간은 유지하고, 실패한 ${missing.length}개 구간만 개별 복구합니다.`,
-                error,
-            );
+        console.warn(
+            `[베르바] ${scope} 범위에서 ${recovered.size}개 성공 구간은 유지하고, 실패한 ${missing.length}개 구간만 개별 복구합니다.`,
+            error,
+        );
 
-            const rows = await runWithConcurrency(
-                missing,
-                scopedParallelRequestLimit(),
-                async segment => {
-                    const single = await requestSegments(buildPrompt([segment]), [segment], {
-                        ...options,
-                        parallelRequest: true,
-                        stage: `${options.stage || 'output-translation'}:${scope}:single`,
-                    });
-                    return [segment.id, single.get(segment.id)];
-                },
-            );
-
-            for (const [id, value] of rows) recovered.set(id, value);
-            return recovered;
-        }
-    };
-
-    if (madFlashChunks.length === 1) return requestChunk(segments);
-    const chunkResults = await runWithConcurrency(
-        madFlashChunks,
-        scopedParallelRequestLimit(),
-        requestChunk,
-    );
-    return new Map(chunkResults.flatMap(result => [...result]));
-}
-
-function splitMadFlashScopeSegments(scope, segments, requestedCount = 1) {
-    const rows = Array.from(segments || []);
-    if (!rows.length) return [];
-    // V2 uses one coherent request per scope for ordinary long outputs. Split
-    // only genuinely oversized scopes; tiny chunks destroyed scene rhythm and
-    // multiplied requests without improving Flash reliability.
-    const limits = scope === 'tagged_content'
-        ? { count: 40, chars: 12000 }
-        : { count: 60, chars: 16000 };
-    const desiredCount = scope === 'narration'
-        ? Math.max(1, Math.min(3, Number.parseInt(requestedCount, 10) || 1))
-        : 1;
-    const totalWeight = rows.reduce((sum, segment) => sum + String(segment?.text || '').length + 40, 0);
-    const balancedTarget = Math.max(1, Math.ceil(totalWeight / desiredCount));
-    const chunks = [];
-    let chunk = [];
-    let chars = 0;
-    for (const segment of rows) {
-        const weight = String(segment?.text || '').length + 40;
-        const balancedBreak = desiredCount > 1
-            && chunks.length < desiredCount - 1
-            && chars > 0
-            && chars + weight > balancedTarget;
-        if (chunk.length && (balancedBreak || chunk.length >= limits.count || chars + weight > limits.chars)) {
-            chunks.push(chunk);
-            chunk = [];
-            chars = 0;
-        }
-        chunk.push(segment);
-        chars += weight;
-    }
-    if (chunk.length) chunks.push(chunk);
-    return chunks;
-}
-
-function splitMadAuditSegments(segments) {
-    const rows = Array.from(segments || []);
-    if (!rows.length) return [];
-    const chunks = [];
-    let chunk = [];
-    let chars = 0;
-    for (const segment of rows) {
-        const weight = String(segment?.text || '').length + 80;
-        if (chunk.length && (chunk.length >= 12 || chars + weight > 3600)) {
-            chunks.push(chunk);
-            chunk = [];
-            chars = 0;
-        }
-        chunk.push(segment);
-        chars += weight;
-    }
-    if (chunk.length) chunks.push(chunk);
-    return chunks;
-}
-
-function scopedSourceContext(segmented, targetSegments) {
-    const all = Array.from(segmented?.segments || []);
-    const indexes = targetSegments
-        .map(segment => all.findIndex(row => row.id === segment.id))
-        .filter(index => index >= 0);
-    if (!indexes.length) return targetSegments.map(segment => segment.text).join('\n');
-    const start = Math.max(0, Math.min(...indexes) - 1);
-    const end = Math.min(all.length, Math.max(...indexes) + 2);
-    return all.slice(start, end).map(segment => segment.text).join('\n');
-}
-
-async function requestMadHongjinTwoLaneTranslations(segmented, speakerScopes, options = {}) {
-    const allSegments = Array.from(segmented?.segments || []);
-    const targetSegments = allSegments.filter(segment => (
-        segment.type === 'dialogue_candidate'
-        && speakerScopes?.[segment.id] === 'target_dialogue'
-    ));
-    const bodySegments = allSegments
-        .filter(segment => !targetSegments.includes(segment))
-        .map(segment => ({
-            ...segment,
-            outputScope: outputScopeForSegment(segment, speakerScopes),
-        }));
-    const bodySplitCount = Math.min(outputSplitCount(settings), Math.max(1, bodySegments.length));
-    const bodyChunks = bodySegments.length
-        ? splitMadFlashScopeSegments('narration', bodySegments, bodySplitCount)
-        : [];
-    const jobs = [];
-
-    if (targetSegments.length) {
-        jobs.push({ scope: 'target_dialogue', segments: targetSegments, chunkIndex: 0, chunkCount: 1 });
-    }
-    bodyChunks.forEach((segments, chunkIndex) => jobs.push({
-        scope: 'non_target_mixed',
-        segments,
-        chunkIndex,
-        chunkCount: bodyChunks.length,
-    }));
-
-    const results = await runWithConcurrency(
-        jobs,
-        scopedParallelRequestLimit(),
-        async job => {
-            if (job.scope === 'target_dialogue') {
-                return requestScopedGroupTranslations({
-                    segmented,
-                    scope: job.scope,
-                    segments: job.segments,
-                    options: {
-                        ...options,
-                        parallelRequest: true,
-                        stage: `${options.stage || 'output-translation'}:target-dialogue`,
-                    },
+        const rows = await runWithConcurrency(
+            missing,
+            SCOPED_PARALLEL_REQUEST_LIMIT,
+            async segment => {
+                // Full message context is deliberately retained. No context
+                // shrinking or prompt compression is used by this optimization.
+                const single = await requestSegments(buildPrompt([segment]), [segment], {
+                    ...options,
+                    parallelRequest: true,
+                    stage: `${options.stage || 'output-translation'}:${scope}:single`,
                 });
-            }
+                return [segment.id, single.get(segment.id)];
+            },
+        );
 
-            const prompt = buildScopedOutputPrompt({
-                segments: job.segments,
-                sourceContext: job.chunkCount > 1
-                    ? scopedSourceContext(segmented, job.segments)
-                    : segmented.protectedText,
-                settings,
-                oneTimeInstruction: options.oneTimeInstruction || '',
-                nameTokens: nameTokensForSegments(segmented, job.segments),
-                tuning: options.tuning || null,
-                scope: 'non_target_mixed',
-                speakerIdentity: options.speakerIdentity || {},
-            });
-            return requestSegments(prompt, job.segments, {
-                ...options,
-                parallelRequest: true,
-                splitRequest: job.chunkCount > 1,
-                splitBatchIndex: job.chunkIndex,
-                splitBatchCount: job.chunkCount,
-                stage: `${options.stage || 'output-translation'}:non-target${job.chunkCount > 1 ? `:chunk-${job.chunkIndex + 1}` : ''}`,
-            });
-        },
-    );
-
-    const translations = new Map();
-    for (const result of results) {
-        for (const [id, value] of result) translations.set(id, value);
+        for (const [id, value] of rows) recovered.set(id, value);
+        return recovered;
     }
-    return translations;
 }
-
 async function requestScopedOutputTranslations(segmented, speakerScopes, options = {}) {
-    // In the combined flavor mode, TARGET dialogue is one focused primary lane
-    // while narration, other speakers and tagged content form the body lane.
-    // Both lanes start together. The user's split setting divides only the body
-    // lane, so 1/2/3 split means 2/3/4 parallel primary calls when TARGET speaks.
-    if (
-        madKoreanExclusiveMode()
-        && settings.developerHongjinFlavorEnabled === true
-        && !options.splitBatchCount
-    ) {
-        return requestMadHongjinTwoLaneTranslations(segmented, speakerScopes, options);
-    }
-
+    // Split only the initial translation request. Existing speaker isolation,
+    // prompts, full-message planning, repair and quality checks remain intact.
     const splitCount = outputSplitCount(settings);
     if (splitCount > 1 && !options.splitBatchCount) {
         return runOutputBatches(segmented, splitCount, options, (segments, batchOptions) =>
@@ -4329,14 +3953,14 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
     }
     const translations = new Map();
     const groups = segmentsGroupedByOutputScope(segmented.segments, speakerScopes);
-    const strictIsolationNeeded = Boolean(
-        !madKoreanExclusiveMode() && (
+    const strictIsolationNeeded = madKoreanExclusiveMode()
+        ? false
+        : Boolean(
         (settings.dialoguePromptEnabled !== false && String(settings.dialoguePrompt || '').trim())
         || (settings.otherDialoguePromptEnabled !== false && String(settings.otherDialoguePrompt || '').trim())
         || String(settings.dialogueEndingPreferred || '').trim()
         || String(settings.dialogueEndingAvoid || '').trim()
         || settings.dialogueEndingRepetitionReduction !== false
-        )
     );
 
     // A shared ALL-DIALOGUE prompt does not require separate API calls by
@@ -4349,7 +3973,6 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
             options.oneTimeInstruction || '',
             options.speakerIdentity || {},
             options.tuning || null,
-            speakerScopes,
         );
         return requestSegments(prompt, segmented.segments, {
             ...options,
@@ -4360,7 +3983,7 @@ async function requestScopedOutputTranslations(segmented, speakerScopes, options
     const scopeJobs = [...groups.entries()].filter(([, segments]) => segments.length);
     const scopeResults = await runWithConcurrency(
         scopeJobs,
-        scopedParallelRequestLimit(),
+        SCOPED_PARALLEL_REQUEST_LIMIT,
         async ([scope, segments]) => {
             const result = await requestScopedGroupTranslations({
                 segmented,
@@ -4404,7 +4027,7 @@ async function repairSegmentsByOutputScope({
 
     const results = await runWithConcurrency(
         groups,
-        scopedParallelRequestLimit(),
+        SCOPED_PARALLEL_REQUEST_LIMIT,
         async ([scope, segments]) => {
             const prompt = buildPrompt(
                 segments,
@@ -4443,29 +4066,9 @@ async function repairProtectedTokenIntegrity(segmented, translations, options = 
     if (!invalid.length) return;
     const started = performance.now();
     const diagnostic = recordProtectedRecovery(invalid, segmented, translations, options);
-    const singlePass = madKoreanExclusiveMode() || options.noModelFollowups === true;
-    const localRepair = repairProtectedTokenIntegrityLocally(segmented, translations, {
-        force: singlePass,
-    });
-    invalid = localRepair.remaining;
-    if (!invalid.length) {
-        finishProtectedRecovery(diagnostic, '내부 복구 완료', started, 0, invalid, segmented, translations);
-        const repairedCount = localRepair.restoredNameTokens
-            + localRepair.normalizedExcessNameTokens
-            + (localRepair.restoredProtectedTokens || 0)
-            + (localRepair.normalizedExcessProtectedTokens || 0);
-        console.info(`[긴르바 실험실] 보호 표식 내부 복구 완료: ${repairedCount}개 · AI 요청 0회`);
-        return;
-    }
-    if (singlePass) {
-        const error = new Error(`보호 표식을 내부에서 복구하지 못했습니다: ${invalid.map(row => row.id).join(', ')}`);
-        finishProtectedRecovery(diagnostic, '내부 복구 실패', started, 0, invalid, segmented, translations, error);
-        throw error;
-    }
     let attempts = 0;
-    const maxAttempts = settings.developerMadKoreanOutputEnabled === true ? 1 : 5;
     try {
-        for (; attempts < maxAttempts;) {
+        for (; attempts < 5;) {
             attempts += 1;
             await repairSegmentsByOutputScope({
                 invalid, segmented, translations, speakerScopes,
@@ -4479,7 +4082,7 @@ async function repairProtectedTokenIntegrity(segmented, translations, options = 
                 return;
             }
         }
-        console.error('[긴르바 실험실] 보호 요소 자동 복구 실패', invalid.map(row => row.id));
+        console.error('[베르바] 보호 요소 자동 복구 실패', invalid.map(row => row.id));
         throw new Error('보호 요소 자동 복구에 실패했습니다. 다시 번역해 주세요.');
     } catch (error) {
         const remaining = findProtectedTokenIntegrityProblems(segmented.segments, translations);
@@ -4624,544 +4227,6 @@ function localQualityAuditCandidates(segmented, translations, speakerScopes) {
     return suspects;
 }
 
-function compactComparableText(value) {
-    return String(value || '')
-        .normalize('NFKC')
-        .toLocaleLowerCase()
-        .replace(/[\s\p{P}\p{S}]+/gu, '');
-}
-
-function hongjinVoiceRewriteFailure(segment, translation, firstPassTranslation = '') {
-    const source = String(segment?.text || '');
-    const target = String(translation || '');
-    const compactSource = compactComparableText(source);
-    const compactTarget = compactComparableText(target);
-    if (!compactTarget) return 'empty';
-    if (compactTarget === compactComparableText(firstPassTranslation)) return 'unchanged-first-pass';
-
-    if (/^['“”"]*time[.!?]?['“”"]*$/iu.test(source.trim())
-        && /^(?:이제)?시간(?:이다|이야|됐어|됐다)?$/u.test(compactTarget)) {
-        return 'literal-time-fragment';
-    }
-    if (/five\s+more\s+minutes/iu.test(source)
-        && /^(?:딱)?(?:5|오)분만더(?:있어|쉬어)?$/u.test(compactTarget)) {
-        return 'literal-duration-fragment';
-    }
-    return '';
-}
-
-function hongjinSceneVoiceFailure(candidates, translations) {
-    const rows = Array.from(candidates || []);
-    if (!rows.length) return '';
-    const rawTexture = /(?:씨발|시발|존나|좆|지랄|개같|개소리|빌어먹|환장|처(?:먹|박|붙|자|일어나|가|들이켜)|뒈|뒤져|냅둬|꼴|잘도|어련|하시지|봐준다|용케|썩|당장|꾸물)/u;
-    const explicitProfanity = /(?:씨발|시발|존나|좆|지랄|개(?:같|소리|새끼|판|빡)|빌어먹|뒈|뒤져)/u;
-    const textured = rows.filter(segment => rawTexture.test(String(translations.get(segment.id) || ''))).length;
-    const explicit = rows.filter(segment => explicitProfanity.test(String(translations.get(segment.id) || ''))).length;
-    if (settings.developerHongjinProfanity === 'high') {
-        const required = Math.max(1, Math.ceil(rows.length * 0.4));
-        if (explicit < required) return `scene-explicit-profanity-density-${explicit}-of-${required}`;
-    } else if (settings.developerHongjinProfanity === 'natural' && rows.length >= 2 && textured < 1) {
-        return 'scene-voice-density-0-of-1';
-    }
-    return '';
-}
-
-async function runHongjinVoiceRewrite({
-    segmented,
-    translations,
-    speakerScopes,
-    speakerIdentity,
-    options,
-}) {
-    if (settings.developerHongjinFlavorEnabled !== true) {
-        return { checked: 0, changed: 0 };
-    }
-
-    const candidates = (segmented.segments || [])
-        .filter(segment => outputScopeForSegment(segment, speakerScopes) === 'target_dialogue')
-        .map(segment => ({ ...segment, outputScope: 'target_dialogue' }));
-    if (!candidates.length) return { checked: 0, changed: 0 };
-
-    const originalTranslations = new Map(translations);
-    const fullSourceContext = (segmented.segments || []).map(segment => segment.text).join('\n');
-
-    try {
-        const chunks = splitMadAuditSegments(candidates);
-        const rewrittenGroups = await runWithConcurrency(
-            chunks,
-            scopedParallelRequestLimit(),
-            async chunk => {
-                const prompt = buildHongjinVoiceRewritePrompt({
-                    segments: chunk,
-                    currentTranslations: translations,
-                    sourceContext: fullSourceContext,
-                    speakerIdentity,
-                    settings,
-                    nameTokens: segmented.nameTokens || [],
-                });
-                const expected = chunk.map(segment => ({
-                    id: segment.id,
-                    type: segment.type,
-                    text: String(translations.get(segment.id) || ''),
-                }));
-                return requestSegments(prompt, expected, {
-                    ...options,
-                    parallelRequest: true,
-                    stage: 'hongjin-voice-rewrite',
-                });
-            },
-        );
-
-        const changed = [];
-        const applyRewrittenGroups = groups => {
-        for (const rewritten of groups) {
-            for (const [id, value] of rewritten) {
-                const segment = candidates.find(row => row.id === id);
-                if (!segment) continue;
-                const before = String(translations.get(id) || '');
-                const after = String(value || '');
-                if (!after.trim() || after === before) continue;
-                translations.set(
-                    id,
-                    repairKoreanParticleAlternatives(
-                        repairStrictCanonicalIdentityNames(
-                            repairCanonicalKoreanVocatives(
-                                repairIndivisibleIdentityNames(after, speakerIdentity),
-                                segment,
-                                canonicalKoreanIdentityNames(speakerIdentity),
-                                segmented.nameTokens || [],
-                            ),
-                            speakerIdentity,
-                        ),
-                    ),
-                );
-                changed.push(segment);
-            }
-        }
-        };
-        applyRewrittenGroups(rewrittenGroups);
-
-        const failed = candidates.filter(segment => hongjinVoiceRewriteFailure(
-            segment,
-            translations.get(segment.id),
-            originalTranslations.get(segment.id),
-        ));
-        const sceneFailure = hongjinSceneVoiceFailure(candidates, translations);
-        const retryCandidates = sceneFailure ? candidates : failed;
-        if (retryCandidates.length) {
-            const prompt = buildHongjinVoiceRewritePrompt({
-                segments: retryCandidates,
-                currentTranslations: translations,
-                sourceContext: scopedSourceContext(segmented, retryCandidates),
-                speakerIdentity,
-                settings,
-                nameTokens: segmented.nameTokens || [],
-            });
-            const reasons = [sceneFailure, ...failed.map(segment => (
-                `${segment.id}:${hongjinVoiceRewriteFailure(segment, translations.get(segment.id), originalTranslations.get(segment.id))}`
-            ))].filter(Boolean).join(', ');
-            const expected = retryCandidates.map(segment => ({
-                id: segment.id,
-                type: segment.type,
-                text: String(translations.get(segment.id) || ''),
-            }));
-            const retried = await requestSegments(
-                `${prompt}\n\nSCENE-LEVEL RETRY: ${reasons}. Rewrite this set together once. Distribute the configured voice across the scene without changing actions, addressees, or speech acts.`,
-                expected,
-                {
-                    ...options,
-                    parallelRequest: true,
-                    stage: 'hongjin-voice-scene-retry',
-                },
-            );
-            applyRewrittenGroups([retried]);
-        }
-        // A voice rewrite is an optional quality pass, never a validity gate.
-        // DeepSeek may deliberately keep terse lines terse or decline to add a
-        // coarse marker to every utterance.  Preserve the best available text
-        // instead of aborting an otherwise complete translation.
-
-        if (changed.length) {
-            const banned = changed.filter(segment =>
-                findBannedWords(translations.get(segment.id), settings).length,
-            );
-            if (banned.length) {
-                await repairSegmentsByOutputScope({
-                    invalid: banned,
-                    segmented,
-                    translations,
-                    speakerScopes,
-                    options: { ...options, speakerIdentity },
-                    buildPrompt: buildBannedRepairPrompt,
-                    stage: 'hongjin-voice-banned-repair',
-                });
-            }
-
-            const untranslated = findUntranslatedSegments(changed, translations, settings, speakerScopes);
-            if (untranslated.length) {
-                await repairSegmentsByOutputScope({
-                    invalid: untranslated,
-                    segmented,
-                    translations,
-                    speakerScopes,
-                    options: { ...options, speakerIdentity },
-                    buildPrompt: buildUntranslatedRepairPrompt,
-                    stage: 'hongjin-voice-untranslated-repair',
-                });
-            }
-
-            await repairProtectedTokenIntegrity(segmented, translations, {
-                ...options,
-                speakerIdentity,
-                speakerScopes,
-            });
-        }
-
-        console.info(`[긴르바 실험실] 김홍진 보이스 전용 패스 완료: ${candidates.length}구간 · ${changed.length}구간 재작성`);
-        return { checked: candidates.length, changed: changed.length };
-    } catch (error) {
-        if (isAbort(error, options.signal)) throw error;
-        translations.clear();
-        for (const [id, translation] of originalTranslations) translations.set(id, translation);
-        console.error('[긴르바 실험실] 김홍진 보이스 전용 패스 실패 — 직역본을 최종 결과로 채택하지 않습니다.', error);
-        throw error;
-    }
-}
-
-function applyMadNarrationDeterministicRepairs(segmented, translations, speakerScopes) {
-    let changed = 0;
-    for (const segment of segmented?.segments || []) {
-        const outputScope = outputScopeForSegment(segment, speakerScopes);
-        if (!['narration', 'tagged_content'].includes(outputScope)) continue;
-        const source = String(segment.text || '');
-        const before = String(translations.get(segment.id) || '');
-        if (!before.trim()) continue;
-
-        if (outputScope === 'tagged_content') {
-            const after = before
-                .replace(/서울\s+용산\s+군(?:사)?\s+초소/gu, '서울 용산 군 검문소')
-                .replace(/용산\s+군(?:사)?\s+초소/gu, '용산 군 검문소')
-                .replace(/(?:야전\s+)?의무\s+천막/gu, '야전 의무 텐트');
-            if (after !== before) {
-                translations.set(segment.id, after);
-                changed += 1;
-            }
-            continue;
-        }
-
-        let after = before
-            .replace(/깊(?:고|은)\s*,?\s*갈리(?:는|던)\s*피로/gu, '무겁고 지독한 피로')
-            .replace(/눈이\s+어둠에\s+적응하기를\s+기다렸(?:다|었다)/gu, '어둠에 눈이 익기를 기다렸다')
-            .replace(/(?:세상|세계)(은|는|이|가)\s+부드럽고\s+잿빛으로/gu, '세상이 흐릿한 잿빛으로')
-            .replace(/접이식\s*(?=[,.!?…。？！]|$)/gu, '접이식 의자')
-            .replace(/무뚝뚝하지\s+않(?:은|게)\s+(?:어조|투|목소리)로/gu, '그리 매몰차지 않은 투로')
-            .replace(/손가락이\s+폈다\s+오므라들었다\s+접혔다/gu, '손가락이 오므라들었다 펴지기를 반복했다')
-            .replace(/검붉은\s+흙(?:먼지|자국)?/gu, match => match.replace('검붉은', '검은'))
-            .replace(/어깨(?:는|가)\s+정복(?:됐|되었)(?:고|다)/gu, match => (
-                /고$/u.test(match) ? '빠진 어깨는 제자리로 맞췄고' : '빠진 어깨는 제자리로 맞춰졌다'
-            ))
-            .replace(/장바구니(?:를|라도)?\s+읽(?:는|듯한|듯이)/gu, match => match.replace(/장바구니(?:를|라도)?/u, '장보기 목록을'))
-            .replace(/혈압\s*커프/gu, '혈압계')
-            .replace(/무표정하고\s+탐색하는\s+눈빛/gu, '무표정하게 재어 보는 눈빛');
-
-        if (/\b(?:car|vehicle)\s+(?:wreck|crash)\b/iu.test(source)) {
-            after = after.replace(/폐차\s*사고/gu, '교통사고');
-        }
-        if (/\b(?:crying|cry|wail(?:ing)?|sob(?:bing)?)\b/iu.test(source)) {
-            after = after.replace(/가늘고\s+앙상한\s+울음/gu, '가늘고 여린 울음');
-        }
-        if (/\bcots?\b/iu.test(source)) {
-            after = after
-                .replace(/들것\s*침대/gu, '간이침대')
-                .replace(/구급\s*침대/gu, '야전침대');
-        }
-        if (/\bknuckles?\b/iu.test(source)) {
-            after = after.replace(/갈라진\s+손등/gu, '갈라진 손마디');
-        }
-        if (/\b(?:boots?|shoes?)\b[^.!?]{0,100}\b(?:sound|sounds|soft)\b/iu.test(source)) {
-            after = after.replace(
-                /((?:그녀의\s+)?(?:부츠|군화))가\s+(.{1,80}?)\s+(?:낮은|나직한|부드러운)\s+소리가\s+(?:났|울렸)다/gu,
-                '$2 $1 소리가 나직이 울렸다',
-            );
-        }
-        if (/\b(?:stitches?|gauze|eyebrow)\b/iu.test(source)) {
-            after = after
-                .replace(/눈썹\s*위(?:쪽)?이\s+둔하게\s+당기는\s+선\s*하나가\s+(?:이어져\s+)?있었다/gu, '눈썹 위의 실밥이 둔하게 당겼다')
-                .replace(/눈썹\s*위를?\s+따라\s+둔하게\s+당기는\s+선(?:이|이었다)?/gu, '눈썹 위에서 둔하게 당기는 실밥');
-        }
-
-        if (after !== before) {
-            translations.set(segment.id, after);
-            changed += 1;
-        }
-    }
-    return changed;
-}
-
-function madNarrationLocalAuditCandidates(segmented, translations, speakerScopes, speakerIdentity = {}) {
-    const candidates = [];
-    const identityNames = canonicalKoreanIdentityNames(speakerIdentity)
-        .filter(name => /^[가-힣]{2,12}$/u.test(name))
-        .sort((left, right) => right.length - left.length);
-    const checks = [
-        [/깊(?:고|은)\s*,?\s*갈리(?:는|던|다)\s*피로/u, '부자연스러운 피로 수식 결합'],
-        [/눈이\s+어둠에\s+적응/u, '시각 적응의 번역투 결합'],
-        [/(?:말|목소리)[^.!?\n]{0,36}공기[^.!?\n]{0,24}(?:매달|떠돌)/u, '말과 공기를 직역한 결합'],
-        [/(?:세상|세계)(?:은|는|이|가)\s+부드럽고/u, '감각 형용사의 부자연스러운 대상 결합'],
-        [/접이식\s*(?=$|[,.!?…。？！])/u, '접이식 뒤 필수 중심 명사 누락'],
-        [/(?:처럼|듯|듯이)\s*[.!?…。？！]["”’)]*\s*$/u, '비교 표현 뒤 본절 누락 가능성'],
-    ];
-
-    for (const segment of segmented?.segments || []) {
-        if (outputScopeForSegment(segment, speakerScopes) !== 'narration') continue;
-        const source = String(segment.text || '');
-        const translation = String(translations.get(segment.id) || '');
-        if (!translation.trim()) continue;
-        const reasons = [];
-        for (const [pattern, reason] of checks) {
-            if (pattern.test(translation)) reasons.push(reason);
-        }
-        if (/\bknuckles?\b/iu.test(source) && !/(?:손마디|손가락\s*관절|주먹\s*관절)/u.test(translation)) {
-            reasons.push('원문의 knuckles 신체 부위 대응 확인');
-        }
-        if (/\bcots?\b/iu.test(source) && /들것\s*침대/u.test(translation)) {
-            reasons.push('cot을 들것 침대로 옮긴 어휘 의미 확인');
-        }
-        if (/\bboots?\b[^.!?]{0,80}\b(?:sound|sounds|soft)\b/iu.test(source)
-            && !/(?:소리|발소리|울림|울리)/u.test(translation)) {
-            reasons.push('군화가 아니라 군화 소리가 주체인지 확인');
-        }
-        for (const name of identityNames) {
-            const bareSentenceName = new RegExp(
-                `(?:^|[.!?…。？！]\\s+|\\n+)${escapeRegularExpression(name)}\\s+[가-힣]`,
-                'u',
-            );
-            if (bareSentenceName.test(translation)) {
-                reasons.push(`문장 경계의 인명 ${name} 뒤 조사 누락 가능성`);
-                break;
-            }
-        }
-        if (reasons.length) candidates.push({
-            ...segment,
-            outputScope: 'narration',
-            localAuditReasons: [...new Set(reasons)],
-        });
-    }
-    return candidates;
-}
-
-async function runMadNarrationMicroAudit({
-    segmented,
-    translations,
-    speakerScopes,
-    speakerIdentity,
-    options,
-}) {
-    if (!madKoreanExclusiveMode()) return { checked: 0, changed: 0, requested: 0 };
-    const localChanged = applyMadNarrationDeterministicRepairs(
-        segmented,
-        translations,
-        speakerScopes,
-    );
-    // The primary request is the author pass. Quality checks after it are
-    // deterministic only: never turn a one/two-split Flash translation into a
-    // slower model-review round.
-    return { checked: 0, changed: localChanged, requested: 0, skipped: 'local-only-single-pass' };
-    /* istanbul ignore next -- retained below only as historical reference for
-       non-shipping test extraction; the early return above is authoritative. */
-    const candidates = madNarrationLocalAuditCandidates(
-        segmented,
-        translations,
-        speakerScopes,
-        speakerIdentity,
-    );
-    if (!candidates.length) {
-        return { checked: 0, changed: localChanged, requested: 0 };
-    }
-    try {
-        const prompt = buildMadNarrationMicroAuditPrompt({
-            segments: candidates,
-            currentTranslations: translations,
-            speakerIdentity,
-        });
-        const reviewed = await requestSparseMadRepairs(prompt, candidates, {
-            ...options,
-            stage: 'mad-narration-micro-audit',
-            maxParseRetries: 0,
-        });
-        let changed = localChanged;
-        for (const segment of candidates) {
-            if (!reviewed.has(segment.id)) continue;
-            const before = String(translations.get(segment.id) || '');
-            const after = String(reviewed.get(segment.id) || '').trim();
-            if (!after || after === before) continue;
-            translations.set(
-                segment.id,
-                repairKoreanParticleAlternatives(
-                    repairStrictCanonicalIdentityNames(after, speakerIdentity),
-                ),
-            );
-            changed += 1;
-        }
-        console.info(`[긴르바 실험실] 서술 고속 검수 완료: 로컬 ${localChanged}구간 · AI 의심 ${candidates.length}구간 · 총 수정 ${changed}구간 · AI 요청 1회`);
-        return { checked: candidates.length, changed, requested: 1 };
-    } catch (error) {
-        if (isAbort(error, options.signal)) throw error;
-        console.warn('[긴르바 실험실] 서술 고속 검수 실패 — 본 번역을 유지합니다.', error);
-        return { checked: candidates.length, changed: localChanged, requested: 1, error };
-    }
-}
-
-async function runMadKoreanTargetedAudit({
-    segmented,
-    translations,
-    speakerScopes,
-    speakerIdentity,
-    options,
-}) {
-    if (!madKoreanExclusiveMode()) {
-        return { checked: 0, changed: 0 };
-    }
-
-    const candidates = (segmented.segments || []).map(segment => ({
-        ...segment,
-        outputScope: outputScopeForSegment(segment, speakerScopes),
-    }));
-    if (!candidates.length) return { checked: 0, changed: 0 };
-    const originalTranslations = new Map(translations);
-
-    try {
-        // One source-aware sparse audit replaces the former scope/chunk
-        // manuscript rewrites. Scope is carried per row, so the reviewer can
-        // check speaker leakage without issuing dozens of requests.
-        const prompt = buildMadFlashV2AuditPrompt({
-            segments: candidates,
-            currentTranslations: translations,
-            sourceContext: segmented.protectedText,
-            speakerIdentity,
-            settings,
-        });
-        const reviewed = await requestSparseMadRepairs(prompt, candidates, {
-            ...options,
-            stage: 'mad-targeted-audit',
-        });
-        if (!reviewed.size) {
-            console.info(`[긴르바 실험실] 미친 한출 부분 검수 완료: ${candidates.length}구간 확인 · 수정 없음`);
-            return { checked: candidates.length, changed: 0 };
-        }
-
-        const changed = [];
-        for (const segment of candidates) {
-            if (!reviewed.has(segment.id)) continue;
-            const before = String(translations.get(segment.id) || '');
-            const after = String(reviewed.get(segment.id) || '');
-            if (!after.trim() || after === before) continue;
-            translations.set(
-                segment.id,
-                repairKoreanParticleAlternatives(
-                    repairStrictCanonicalIdentityNames(
-                        repairCanonicalKoreanVocatives(
-                            repairIndivisibleIdentityNames(after, speakerIdentity),
-                            segment,
-                            canonicalKoreanIdentityNames(speakerIdentity),
-                            segmented.nameTokens || [],
-                        ),
-                        speakerIdentity,
-                    ),
-                ),
-            );
-            changed.push(segment);
-        }
-
-        console.info(`[긴르바 실험실] 미친 한출 부분 검수 완료: ${candidates.length}구간 확인 · ${changed.length}구간 수정`);
-        return { checked: candidates.length, changed: changed.length };
-    } catch (error) {
-        if (isAbort(error, options.signal)) throw error;
-        translations.clear();
-        for (const [id, translation] of originalTranslations) translations.set(id, translation);
-        console.warn('[긴르바 실험실] 미친 한출 부분 검수 실패 — 1차 번역을 유지합니다.', error);
-        return { checked: candidates.length, changed: 0, error };
-    }
-}
-
-async function runMadKoreanIntegratedRewrite({
-    segmented,
-    translations,
-    speakerScopes,
-    speakerIdentity,
-    options,
-}) {
-    if (!madKoreanExclusiveMode()) {
-        return { checked: 0, changed: 0 };
-    }
-
-    // The primary Mad-Korean request is already the final authoring pass.
-    // Never call the model again for rewriting, whether the target-character
-    // flavor preset is on or off.
-    return { checked: 0, changed: 0, skipped: 'primary-authoring-single-pass' };
-    /* istanbul ignore next -- legacy implementation intentionally unreachable. */
-
-    const candidates = (segmented.segments || []).map(segment => ({
-        ...segment,
-        outputScope: outputScopeForSegment(segment, speakerScopes),
-    }));
-    if (!candidates.length) return { checked: 0, changed: 0 };
-
-    const originalTranslations = new Map(translations);
-    try {
-        const prompt = buildMadKoreanIntegratedRewritePrompt({
-            segments: candidates,
-            currentTranslations: translations,
-            speakerIdentity,
-            settings,
-            nameTokens: segmented.nameTokens || [],
-        });
-        const expected = candidates.map(segment => ({
-            id: segment.id,
-            type: segment.type,
-            text: String(translations.get(segment.id) || ''),
-        }));
-        const rewritten = await requestSegments(prompt, expected, {
-            ...options,
-            stage: 'mad-integrated-author-rewrite',
-        });
-
-        let changed = 0;
-        for (const segment of candidates) {
-            const before = String(translations.get(segment.id) || '');
-            const responseValue = String(rewritten.get(segment.id) || '');
-            if (!responseValue.trim()) {
-                throw new Error(`통합 재작성에서 빈 구간이 반환됨: ${segment.id}`);
-            }
-            const after = repairDialogueQuotationEnvelope(
-                repairKoreanParticleAlternatives(
-                    repairStrictCanonicalIdentityNames(
-                        repairCanonicalKoreanVocatives(
-                            repairIndivisibleIdentityNames(responseValue, speakerIdentity),
-                            segment,
-                            canonicalKoreanIdentityNames(speakerIdentity),
-                            segmented.nameTokens || [],
-                        ),
-                        speakerIdentity,
-                    ),
-                ),
-                segment,
-            );
-            translations.set(segment.id, after);
-            if (after !== before) changed += 1;
-        }
-
-        console.info(`[긴르바 실험실] 미친 한출 통합 작가 패스 완료: ${candidates.length}구간 · ${changed}구간 재작성 · AI 요청 1회`);
-        return { checked: candidates.length, changed };
-    } catch (error) {
-        if (isAbort(error, options.signal)) throw error;
-        translations.clear();
-        for (const [id, translation] of originalTranslations) translations.set(id, translation);
-        console.warn('[긴르바 실험실] 미친 한출 통합 작가 패스 실패 — 안전하게 1차 번역을 유지합니다.', error);
-        return { checked: candidates.length, changed: 0, error };
-    }
-}
-
 async function runExperimentalQualityAudit({
     segmented,
     translations,
@@ -5169,7 +4234,7 @@ async function runExperimentalQualityAudit({
     speakerIdentity,
     options,
 }) {
-    if (singlePassFlavorMode() || !settings.developerMode || !settings.qualityAuditEnabled) {
+    if (madKoreanExclusiveMode() || !settings.developerMode || !settings.qualityAuditEnabled) {
         return { checked: 0, changed: 0 };
     }
 
@@ -5266,187 +4331,27 @@ async function runExperimentalQualityAudit({
 
         lastQualityAuditSummary = `AI 통합 검수 ${candidates.length}구간 · 수정 ${changed.length}구간 · ${categories.join('/')}`;
         renderQualityAuditStatus();
-        console.info(`[긴르바 실험실] 품질 검수 완료: ${lastQualityAuditSummary}`);
+        console.info(`[베르바] 품질 검수 완료: ${lastQualityAuditSummary}`);
         return { checked: candidates.length, changed: changed.length };
     } catch (error) {
         if (isAbort(error, options.signal)) throw error;
         lastQualityAuditSummary = '검수 실패 · 원래 번역 유지';
         renderQualityAuditStatus();
-        console.warn('[긴르바 실험실] 개발자 품질 검수 실패 — 기존 번역을 그대로 유지합니다.', error);
+        console.warn('[베르바] 개발자 품질 검수 실패 — 기존 번역을 그대로 유지합니다.', error);
         return { checked: candidates.length, changed: 0, error };
     }
 }
 
-function sourceContainsStandaloneLatinName(source, candidate) {
-    const name = String(candidate || '').trim();
-    if (!name || !/[A-Za-z]/u.test(name)) return false;
-    return sourceContainsExactName(source, name);
-}
-
-function primaryIdentityNameCandidates(source, speakerIdentity = {}, explicitLocks = []) {
-    const text = String(source || '');
-    const candidates = new Set();
-    const add = value => {
-        const name = String(value || '').trim().replace(/[.,!?;:]+$/u, '');
-        if (
-            name.length >= 2
-            && name.length <= 80
-            && /^[A-Za-z][A-Za-z\p{M}'-]*(?:\s+[A-Za-z][A-Za-z\p{M}'-]*)*$/u.test(name)
-            && sourceContainsStandaloneLatinName(text, name)
-        ) candidates.add(name);
-    };
-
-    const identityDisplayNames = [
-        speakerIdentity.sourceCharacterName ?? speakerIdentity.characterName,
-        speakerIdentity.sourceUserName ?? speakerIdentity.userName,
-    ];
-    for (const displayName of identityDisplayNames) {
-        add(displayName);
-        String(displayName || '').trim().split(/\s+/u).forEach(add);
-    }
-
-    // Korean cards often use a Hangul display name while the English source
-    // uses a hyphenated given-name romanization (Hong-jin, Dam-eun). These are
-    // high-confidence name candidates without uploading either card body.
-    for (const match of text.matchAll(/(?<![\p{L}\p{N}_])([A-Z][A-Za-z\p{M}]*(?:[-'][A-Za-z\p{M}]+)+)(?![\p{L}\p{N}_])/gu)) {
-        add(match[1]);
-    }
-
-    // Also accept a single capitalized word only in strong name positions:
-    // a punctuated direct call or immediately before a speech/action tag.
-    for (const match of text.matchAll(/["“]\s*([A-Z][a-z]{1,30})(?=\s*[,!?…])/gu)) add(match[1]);
-    for (const match of text.matchAll(/(?<![\p{L}\p{N}_])([A-Z][a-z]{1,30})(?=\s+(?:said|asked|shouted|yelled|roared|muttered|whispered|replied|answered|turned|looked|grabbed|pulled|pushed|stepped|moved|ran|reached|caught|hit|saw|didn't|was|had)\b)/gu)) add(match[1]);
-
-    const explicitlyLocked = new Set((explicitLocks || []).map(row => String(row?.source || '').trim().toLocaleLowerCase()));
-    return [...candidates]
-        .filter(candidate => !explicitlyLocked.has(candidate.toLocaleLowerCase()))
-        .slice(0, 12);
-}
-
-function mergedNameLocks(explicitLocks = [], inferredLocks = []) {
-    const merged = [];
-    const seen = new Set();
-    for (const row of [...explicitLocks, ...inferredLocks]) {
-        const source = String(row?.source || '').trim();
-        const target = String(row?.target || '').trim();
-        const key = source.toLocaleLowerCase();
-        if (!source || !target || seen.has(key)) continue;
-        seen.add(key);
-        merged.push({ source, target });
-    }
-    return merged;
-}
-
-function localFlavorIdentityNameLocks(source, speakerIdentity = {}) {
-    if (settings.developerHongjinFlavorEnabled !== true) return [];
-    const text = String(source || '');
-    const locks = [];
-    const addIdentity = (sourceName, fixedName) => {
-        const sourceValue = String(sourceName || '').trim();
-        const fixedValue = String(fixedName || '').trim();
-        if (!sourceValue || !fixedValue || sourceValue === fixedValue) return;
-        const matcher = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegularExpression(sourceValue)}(?![\\p{L}\\p{N}])`, 'giu');
-        if (matcher.test(text)) locks.push({ source: sourceValue, target: fixedValue });
-    };
-    addIdentity(speakerIdentity.sourceCharacterName, speakerIdentity.characterName);
-    addIdentity(speakerIdentity.sourceUserName, speakerIdentity.userName);
-    return mergedNameLocks([], locks);
-}
-
-async function inferredPrimaryIdentityNameLocks(source, speakerIdentity = {}, options = {}) {
-    const explicitLocks = Array.isArray(speakerIdentity.nameLocks) ? speakerIdentity.nameLocks : [];
-    const candidates = primaryIdentityNameCandidates(source, speakerIdentity, explicitLocks);
-    if (!candidates.length) return [];
-
-    const characterName = String(speakerIdentity.sourceCharacterName ?? speakerIdentity.characterName ?? '').trim();
-    const userName = String(speakerIdentity.sourceUserName ?? speakerIdentity.userName ?? '').trim();
-    const planned = [];
-    const unresolved = [];
-    for (const candidate of candidates) {
-        const cacheKey = `${characterName}\u0000${userName}\u0000${candidate.toLocaleLowerCase()}`;
-        if (identityNameFallbackCache.has(cacheKey)) {
-            const target = identityNameFallbackCache.get(cacheKey);
-            setBoundedCache(identityNameFallbackCache, cacheKey, target, 120);
-            if (target) planned.push({ source: candidate, target });
-        } else {
-            unresolved.push({ candidate, cacheKey });
-        }
-    }
-    if (!unresolved.length) return planned;
-
-    const prompt = buildIdentityNameFallbackPrompt({
-        characterName,
-        userName,
-        candidates: unresolved.map(row => row.candidate),
-    });
-    const expected = unresolved.map((row, index) => ({
-        id: `identity_name_${String(index).padStart(4, '0')}`,
-        type: 'identity_name',
-        text: row.candidate,
-    }));
-
-    try {
-        const result = await requestSegments(prompt, expected, {
-            ...options,
-            stage: 'identity-name-fallback',
-        });
-        unresolved.forEach((row, index) => {
-            const id = `identity_name_${String(index).padStart(4, '0')}`;
-            const raw = String(result.get(id) || '').trim();
-            const target = /^[가-힣]{1,12}$/u.test(raw) ? raw : '';
-            setBoundedCache(identityNameFallbackCache, row.cacheKey, target, 120);
-            if (target) planned.push({ source: row.candidate, target });
-        });
-    } catch (error) {
-        if (isAbort(error, options.signal)) throw error;
-        console.warn('[긴르바 실험실] 현재 캐릭터·페르소나 이름 확인에 실패하여 기존 이름 규칙으로 계속합니다.', error);
-        unresolved.forEach(row => setBoundedCache(identityNameFallbackCache, row.cacheKey, '', 120));
-    }
-    return planned;
-}
-
 async function translateOutputText(source, options = {}) {
-    const initialSpeakerIdentity = options.speakerIdentity || {};
-    const explicitNameLocks = normalizedCharacterNameLocks();
-    const explicitSegmented = segmentSource(source, explicitNameLocks);
+    const characterNameLocks = normalizedCharacterNameLocks();
+    const initialSegmented = segmentSource(source, characterNameLocks);
     if (minimalOutputEnabled(settings)) {
-        return translateMinimalOutput(explicitSegmented, settings, options, { requestSegments, buildSourceMap });
+        return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap });
     }
-    const roleTermLocks = await planRepeatedRoleTermLocks(explicitSegmented, {
+    const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
         signal: options.signal,
         timing: options.timing,
     });
-    // The typeof guard keeps the isolated entry-path test harness compatible;
-    // in the real extension the resolver is always defined in this module.
-    const inferIdentityNames = typeof inferredPrimaryIdentityNameLocks === 'function'
-        ? inferredPrimaryIdentityNameLocks
-        : async () => [];
-    const localMadNameLocks = localFlavorIdentityNameLocks(source, initialSpeakerIdentity);
-    const inferredNameLocks = localMadNameLocks.length
-        ? localMadNameLocks
-        : singlePassFlavorMode()
-            ? []
-            : await inferIdentityNames(source, initialSpeakerIdentity, options);
-    const characterNameLocks = inferredNameLocks.length
-        ? mergedNameLocks(explicitNameLocks, inferredNameLocks)
-        : explicitNameLocks;
-    const speakerIdentity = inferredNameLocks.length
-        ? resolveOutputSpeakerIdentity({
-            characterName: initialSpeakerIdentity.sourceCharacterName ?? initialSpeakerIdentity.characterName,
-            characterGender: initialSpeakerIdentity.characterGender,
-            userName: initialSpeakerIdentity.sourceUserName ?? initialSpeakerIdentity.userName,
-        }, characterNameLocks)
-        : initialSpeakerIdentity;
-    options = {
-        ...options,
-        speakerIdentity,
-        // One split = one model call. Post-translation checks and protection
-        // recovery stay inside the extension in Mad-Korean mode.
-        noModelFollowups: singlePassFlavorMode() ? true : options.noModelFollowups,
-    };
-    const initialSegmented = inferredNameLocks.length
-        ? segmentSource(source, characterNameLocks)
-        : explicitSegmented;
     const segmented = roleTermLocks.length
         ? segmentSource(source, [...characterNameLocks, ...roleTermLocks])
         : initialSegmented;
@@ -5454,6 +4359,7 @@ async function translateOutputText(source, options = {}) {
         const translation = assembleTranslation(segmented, new Map());
         return { translation, sourceMap: [] };
     }
+    const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = await classifyOutputDialogueSpeakers(segmented, speakerIdentity, {
         ...options,
         speakerIdentity,
@@ -5464,30 +4370,34 @@ async function translateOutputText(source, options = {}) {
         stage: options.stage || 'output-translation',
     }));
 
-    if (!singlePassFlavorMode()) {
-        for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
-            const invalid = segmented.segments.filter(segment =>
-                findBannedWords(translations.get(segment.id), settings).length,
-            );
-            if (!invalid.length) break;
-            await repairSegmentsByOutputScope({
-                invalid, segmented, translations, speakerScopes,
-                options: { ...options, speakerIdentity },
-                buildPrompt: buildBannedRepairPrompt,
-                stage: 'banned-word-repair',
-            });
-        }
+    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
+        const invalid = segmented.segments.filter(segment =>
+            findBannedWords(translations.get(segment.id), settings).length,
+        );
+        if (!invalid.length) break;
+        await repairSegmentsByOutputScope({
+            invalid,
+            segmented,
+            translations,
+            speakerScopes,
+            options: { ...options, speakerIdentity },
+            buildPrompt: buildBannedRepairPrompt,
+            stage: 'banned-word-repair',
+        });
+    }
 
-        for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
-            const invalid = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
-            if (!invalid.length) break;
-            await repairSegmentsByOutputScope({
-                invalid, segmented, translations, speakerScopes,
-                options: { ...options, speakerIdentity },
-                buildPrompt: buildUntranslatedRepairPrompt,
-                stage: 'untranslated-repair',
-            });
-        }
+    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
+        const invalid = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
+        if (!invalid.length) break;
+        await repairSegmentsByOutputScope({
+            invalid,
+            segmented,
+            translations,
+            speakerScopes,
+            options: { ...options, speakerIdentity },
+            buildPrompt: buildUntranslatedRepairPrompt,
+            stage: 'untranslated-repair',
+        });
     }
 
     // Planned terms are protected and no longer appear as plain source words
@@ -5501,75 +4411,14 @@ async function translateOutputText(source, options = {}) {
     // Validate against the original protected source, not merely against the
     // previous repair result. A missing NAME token can otherwise survive every
     // post-processing pass and only fail during final assembly.
-    if (!singlePassFlavorMode()) {
-        await repairProtectedTokenIntegrity(segmented, translations, {
-            ...options,
-            speakerIdentity,
-            speakerScopes,
-        });
-    }
+    await repairProtectedTokenIntegrity(segmented, translations, {
+        ...options,
+        speakerIdentity,
+        speakerScopes,
+    });
 
     for (const [id, translation] of translations) {
-        const sourceSegment = segmented.segments.find(segment => segment.id === id) || {};
-        translations.set(
-            id,
-            repairDialogueQuotationEnvelope(
-                repairKoreanParticleAlternatives(
-                    repairOutputIdentityNames(
-                        repairLeadingLockedNameSubjectParticle(
-                            translation,
-                            sourceSegment,
-                            segmented.nameTokens || [],
-                        ),
-                        speakerIdentity,
-                        sourceSegment,
-                        segmented.nameTokens || [],
-                    ),
-                ),
-                sourceSegment,
-            ),
-        );
-    }
-
-    const runIntegratedAuthorPass = typeof runMadKoreanIntegratedRewrite === 'function'
-        ? runMadKoreanIntegratedRewrite
-        : async () => ({ checked: 0, changed: 0 });
-    await runIntegratedAuthorPass({
-        segmented,
-        translations,
-        speakerScopes,
-        speakerIdentity,
-        options,
-    });
-
-    // Keep the final check cheap: local rules shortlist only suspicious
-    // narration rows, then at most one small sparse-repair request is made.
-    await runMadNarrationMicroAudit({
-        segmented,
-        translations,
-        speakerScopes,
-        speakerIdentity,
-        options,
-    });
-
-    // Flavor modes are single-pass. Detect problems locally; do not ask the
-    // model to review, repair, or regenerate its own translation.
-    if (singlePassFlavorMode()) {
-        const banned = segmented.segments.filter(segment =>
-            findBannedWords(translations.get(segment.id), settings).length,
-        );
-        if (banned.length) {
-            console.warn('[긴르바 실험실] 내부 검수에서 금지어가 감지되었습니다. AI 재요청 없이 현재 결과를 검사합니다.', banned);
-        }
-        const untranslated = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
-        if (untranslated.length) {
-            console.warn('[긴르바 실험실] 내부 검수에서 미번역 의심 구간이 감지되었습니다. AI 재요청 없이 현재 결과를 유지합니다.', untranslated);
-        }
-        await repairProtectedTokenIntegrity(segmented, translations, {
-            ...options,
-            speakerIdentity,
-            speakerScopes,
-        });
+        translations.set(id, repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(translation, speakerIdentity)));
     }
 
     await runExperimentalQualityAudit({
@@ -5580,38 +4429,8 @@ async function translateOutputText(source, options = {}) {
         options,
     });
 
-    // The target-character voice is authored in the primary request. The old
-    // source-less voice rewrite is deliberately not called: it cost extra
-    // requests and could leak the target cadence into another speaker.
-
-    // Re-run the local Mad-name surface repair after all deterministic checks
-    // so final assembly cannot retain doubled particles or a subject-form
-    // vocative.
-    if (madKoreanExclusiveMode()) {
-        for (const [id, translation] of translations) {
-            const sourceSegment = segmented.segments.find(segment => segment.id === id) || {};
-            translations.set(
-                id,
-                repairDialogueQuotationEnvelope(
-                    repairKoreanParticleAlternatives(
-                        repairOutputIdentityNames(
-                            repairLeadingLockedNameSubjectParticle(
-                                translation,
-                                sourceSegment,
-                                segmented.nameTokens || [],
-                            ),
-                            speakerIdentity,
-                            sourceSegment,
-                            segmented.nameTokens || [],
-                        ),
-                    ),
-                    sourceSegment,
-                ),
-            );
-        }
-    }
-
     normalizeTaggedOutputTranslations(segmented, translations);
+
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));
     if (remaining.length) {
@@ -5622,22 +4441,13 @@ async function translateOutputText(source, options = {}) {
         if (untranslated.length === segmented.segments.length) {
             throw new Error('전체 번역 결과가 외국어 원문으로 남아 번역을 적용하지 않았습니다.');
         }
-        console.warn('[긴르바 실험실] 일부 구간의 미번역 의심이 해소되지 않아 나머지 번역 결과를 우선 적용합니다.', untranslated);
+        console.warn('[베르바] 일부 구간의 미번역 의심이 해소되지 않아 나머지 번역 결과를 우선 적용합니다.', untranslated);
     }
-    const assembled = assembleTranslation(segmented, translations);
-    const result = repairDuplicateCanonicalIdentityNames(
-        repairStrictCanonicalIdentityNames(assembled, speakerIdentity),
-        canonicalKoreanIdentityNames(speakerIdentity),
-    );
+    const result = assembleTranslation(segmented, translations);
     if (!result.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
     return {
         translation: result,
-        sourceMap: buildSourceMap(
-            segmented,
-            translations,
-            result,
-            speakerIdentity,
-        ),
+        sourceMap: buildSourceMap(segmented, translations, result),
     };
 }
 
@@ -5654,7 +4464,7 @@ function inputIdentitySpellingContext() {
 
     const userName = String(context.name1 || '').trim().slice(0, 120);
 
-    // Existing Verba Deep name locks are E→K. For input K→E, reuse only
+    // Existing Verba name locks are E→K. For input K→E, reuse only
     // unambiguous Hangul→Latin pairs in reverse.
     const exactNamePairs = normalizedCharacterNameLocks(reference?.character)
         .filter(row => /[\uac00-\ud7a3]/u.test(row.target) && /[A-Za-z]/u.test(row.source))
@@ -5730,24 +4540,6 @@ function outputSpeakerIdentity(message) {
         characterGender: detectCharacterGender(character),
         userName: String(context.name1 || '').trim(),
     }, normalizedCharacterNameLocks(character));
-}
-
-async function outputSpeakerIdentityForSource(source, message, options = {}) {
-    const identity = outputSpeakerIdentity(message);
-    const explicitNameLocks = normalizedCharacterNameLocks();
-    const localFlavorLocks = localFlavorIdentityNameLocks(source, identity);
-    const inferredNameLocks = localFlavorLocks.length
-        ? localFlavorLocks
-        : singlePassFlavorMode()
-            ? []
-            : await inferredPrimaryIdentityNameLocks(source, identity, options);
-    if (!inferredNameLocks.length) return identity;
-    const nameLocks = mergedNameLocks(explicitNameLocks, inferredNameLocks);
-    return resolveOutputSpeakerIdentity({
-        characterName: identity.sourceCharacterName ?? identity.characterName,
-        characterGender: identity.characterGender,
-        userName: identity.sourceUserName ?? identity.userName,
-    }, nameLocks);
 }
 
 function currentTranslationRecoveryScope() {
@@ -5862,7 +4654,7 @@ function currentRecord(message, explicitId = null) {
             && !displayRecord
             && !peerOwnsDisplay
         ) {
-            // Legacy-only fallback. If a Verba Deep record exists but belongs to a
+            // Legacy-only fallback. If a Verba record exists but belongs to a
             // different source hash, display_text is stale state from another
             // swipe/revision and must never be relabelled as this source.
             const record = { swipeId, sourceHash, translation: displayText };
@@ -5883,7 +4675,7 @@ function currentSelectionRecord(message) {
     if (record) return record;
 
     // A model may already return Korean-English bilingual dialogue. Automatic
-    // translation can then skip the message as Korean-dominant, leaving no Verba Deep
+    // translation can then skip the message as Korean-dominant, leaving no Verba
     // cache record even though the mixed-language text still needs selection tools.
     const source = messageSource(message);
     if (!hasKorean(source) || !/[A-Za-z]/.test(source)) return null;
@@ -5969,7 +4761,7 @@ function sameTranslationRecord(left, right) {
 }
 
 /**
- * SillyTavern stores each swipe's `extra` independently. Mirror Verba Deep's owned
+ * SillyTavern stores each swipe's `extra` independently. Mirror Verba's owned
  * display state into the active swipe immediately so returning to that swipe
  * can restore the translation without another API request.
  */
@@ -5992,7 +4784,7 @@ function syncOwnedTranslationToCurrentSwipe(message, record) {
     return changed;
 }
 
-function renderVerbaDeepDisplayFallback(messageId, message, mounted = null) {
+function renderVerbaDisplayFallback(messageId, message, mounted = null) {
     const id = Number(messageId);
     const messageElement = mounted || (
         Number.isInteger(id)
@@ -6002,7 +4794,7 @@ function renderVerbaDeepDisplayFallback(messageId, message, mounted = null) {
     if (!messageElement) return false;
 
     const textElement = messageElement.querySelector(
-        '.mes_text:not(.verba-deep-swipe-hold-content)',
+        '.mes_text:not(.verba-swipe-hold-content)',
     );
     if (!textElement) return false;
 
@@ -6029,14 +4821,14 @@ function renderVerbaDeepDisplayFallback(messageId, message, mounted = null) {
             false,
         );
         textElement.innerHTML = String(html || '');
-        textElement.classList.remove('verba-deep-render-fallback-failed');
-        messageElement.classList.add('verba-deep-render-fallback-used');
-        setTimeout(() => messageElement.classList.remove('verba-deep-render-fallback-used'), 900);
+        textElement.classList.remove('verba-render-fallback-failed');
+        messageElement.classList.add('verba-render-fallback-used');
+        setTimeout(() => messageElement.classList.remove('verba-render-fallback-used'), 900);
         setTimeout(refreshTranslationClasses, 0);
         return true;
     } catch (error) {
-        console.error(`[긴르바 실험실] 메시지 #${id} 직접 표시 fallback 실패`, error);
-        textElement.classList.add('verba-deep-render-fallback-failed');
+        console.error(`[베르바] 메시지 #${id} 직접 표시 fallback 실패`, error);
+        textElement.classList.add('verba-render-fallback-failed');
         return false;
     }
 }
@@ -6047,7 +4839,7 @@ function updateMessageBlock(messageId, message) {
         ? document.querySelector(`.mes[mesid="${id}"]`)
         : null;
 
-    // Off-screen old messages are allowed to stay unmounted. Their Verba Deep cache
+    // Off-screen old messages are allowed to stay unmounted. Their Verba cache
     // and display_text are already saved and they will render when ST loads them.
     if (!mounted) {
         setTimeout(refreshTranslationClasses, 40);
@@ -6060,14 +4852,14 @@ function updateMessageBlock(messageId, message) {
         return { status: 'updated', rendered: true };
     } catch (error) {
         console.warn(
-            `[긴르바 실험실] SillyTavern 메시지 #${id} 전체 재렌더링 실패 — 긴르바 실험실 직접 표시 fallback을 시도합니다.`,
+            `[베르바] SillyTavern 메시지 #${id} 전체 재렌더링 실패 — 베르바 직접 표시 fallback을 시도합니다.`,
             error,
         );
 
-        const fallbackRendered = renderVerbaDeepDisplayFallback(id, message, mounted);
+        const fallbackRendered = renderVerbaDisplayFallback(id, message, mounted);
         if (fallbackRendered) {
             console.warn(
-                `[긴르바 실험실] 메시지 #${id}는 ST 전체 렌더러 대신 긴르바 실험실 직접 표시 fallback으로 적용했습니다.`,
+                `[베르바] 메시지 #${id}는 ST 전체 렌더러 대신 베르바 직접 표시 fallback으로 적용했습니다.`,
             );
             return {
                 status: 'fallback',
@@ -6110,7 +4902,7 @@ function cacheRenderedTranslation(messageId, message, record) {
             || current.extra?.display_text !== record.translation
         ) return;
         const textElement = document.querySelector(`.mes[mesid="${Number(messageId)}"] .mes_text`);
-        if (!textElement || textElement.closest('.mes')?.classList.contains('verba-deep-swipe-hold-active')) return;
+        if (!textElement || textElement.closest('.mes')?.classList.contains('verba-swipe-hold-active')) return;
         const html = textElement.innerHTML;
         if (!html.trim()) return;
         renderedTranslationCache.set(key, html);
@@ -6151,14 +4943,14 @@ function renderSwipeHold(messageId, job) {
     // Keep previous swipe translations cached in data, but never cover the
     // newly generated/current answer with the previous translation.
     const messageElement = document.querySelector(`.mes[mesid="${Number(messageId)}"]`);
-    messageElement?.classList.remove('verba-deep-swipe-hold-active');
-    messageElement?.querySelectorAll('.verba-deep-swipe-hold-content').forEach(element => element.remove());
+    messageElement?.classList.remove('verba-swipe-hold-active');
+    messageElement?.querySelectorAll('.verba-swipe-hold-content').forEach(element => element.remove());
 }
 
 function releaseSwipeHold(messageId) {
     const messageElement = document.querySelector(`.mes[mesid="${Number(messageId)}"]`);
-    messageElement?.classList.remove('verba-deep-swipe-hold-active');
-    messageElement?.querySelectorAll('.verba-deep-swipe-hold-content').forEach(element => element.remove());
+    messageElement?.classList.remove('verba-swipe-hold-active');
+    messageElement?.querySelectorAll('.verba-swipe-hold-content').forEach(element => element.remove());
 }
 
 function finishSwipeTranslationJob(messageId, job) {
@@ -6380,7 +5172,7 @@ function recentDialogueEndingRepeatHints(beforeMessageId) {
     const beforeId = Number(beforeMessageId);
     const collected = [];
 
-    // Use only saved Verba Deep translations from recent assistant outputs.
+    // Use only saved Verba translations from recent assistant outputs.
     // Hidden/ghosted assistant outputs count too; user inputs do not.
     for (let id = Math.min(chat.length - 1, beforeId - 1); id >= 0 && collected.length < 28; id -= 1) {
         const message = chat[id];
@@ -6437,7 +5229,7 @@ async function translateMessage(messageId, options = {}) {
     if (!source.trim()) return;
 
     if (options.automatic && isPredominantlyKorean(source)) {
-        console.log(`[긴르바 실험실] 한국어 중심 출력 자동 제외 #${id}`);
+        console.log(`[베르바] 한국어 중심 출력 자동 제외 #${id}`);
         return;
     }
     if (!hasForeignText(source)) {
@@ -6458,7 +5250,7 @@ async function translateMessage(messageId, options = {}) {
     if (pendingOutputs.has(id)) {
         if (!options.force) return pendingOutputs.get(id).work;
         abortPendingOutput(id, outputAbortReason(
-            'VERBA_DEEP_OUTPUT_REPLACED',
+            'VERBA_OUTPUT_REPLACED',
             '새 전체 재번역 요청으로 이전 작업을 교체했습니다.',
             true,
         ));
@@ -6532,7 +5324,7 @@ async function translateMessage(messageId, options = {}) {
                 }
 
                 throw outputAbortReason(
-                    'VERBA_DEEP_OUTPUT_STALE',
+                    'VERBA_OUTPUT_STALE',
                     willRetryLatest
                         ? '번역 도중 원문 또는 스와이프의 실제 내용이 바뀌어 이전 결과를 조용히 폐기하고 최신 답변 번역을 다시 예약했습니다.'
                         : '번역 도중 원문 또는 스와이프의 실제 내용이 바뀌어 이전 결과를 조용히 폐기했습니다.',
@@ -6545,8 +5337,8 @@ async function translateMessage(messageId, options = {}) {
             );
             if (options.automatic && !isTranslationExtensionActive(EXTENSION_KEY)) {
                 throw outputAbortReason(
-                    'VERBA_DEEP_PAIR_INACTIVE',
-                    '다른 번역 확장이 화면 번역을 맡아 이 자동 번역 결과를 조용히 폐기했습니다.',
+                    'VERBA_PAIR_INACTIVE',
+                    '다른 베르바 계열 확장이 화면 번역을 맡아 이 자동 번역 결과를 조용히 폐기했습니다.',
                     true,
                 );
             }
@@ -6565,7 +5357,7 @@ async function translateMessage(messageId, options = {}) {
             clearTransientTranslationSelections();
 
             if (applied?.renderResult?.status === 'failed') {
-                // The translated text is preserved in Verba Deep storage, but the
+                // The translated text is preserved in Verba storage, but the
                 // user must not see the progress toast simply disappear while
                 // the visible message remains unchanged.
                 outputJobSuccess = false;
@@ -6581,21 +5373,21 @@ async function translateMessage(messageId, options = {}) {
                 const reason = controller.signal.aborted
                     ? (controller.signal.reason || error)
                     : error;
-                const silentCode = String(reason?.verbaDeepCode || '');
+                const silentCode = String(reason?.verbaCode || '');
                 const allowedSilentAbort = reason?.silent === true && [
-                    'VERBA_DEEP_OUTPUT_REPLACED',
-                    'VERBA_DEEP_SWIPE_CHANGED',
-                    'VERBA_DEEP_CHAT_CHANGED',
-                    'VERBA_DEEP_OUTPUT_STALE',
-                    'VERBA_DEEP_OUTPUT_USER_CANCELLED',
-                    'VERBA_DEEP_PAIR_INACTIVE',
+                    'VERBA_OUTPUT_REPLACED',
+                    'VERBA_SWIPE_CHANGED',
+                    'VERBA_CHAT_CHANGED',
+                    'VERBA_OUTPUT_STALE',
+                    'VERBA_OUTPUT_USER_CANCELLED',
+                    'VERBA_PAIR_INACTIVE',
                 ].includes(silentCode);
 
                 if (allowedSilentAbort) {
-                    if (silentCode === 'VERBA_DEEP_OUTPUT_USER_CANCELLED') {
-                        console.info('[긴르바 실험실] 사용자가 출력 번역 요청을 취소했습니다.');
+                    if (silentCode === 'VERBA_OUTPUT_USER_CANCELLED') {
+                        console.info('[베르바] 사용자가 출력 번역 요청을 취소했습니다.');
                     } else {
-                        console.info(`[긴르바 실험실] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
+                        console.info(`[베르바] 의도된 내부 번역 교체/전환으로 작업 종료: ${silentCode}`);
                     }
                     outputJobSuperseded = true;
                     outputJobSuccess = false;
@@ -6604,20 +5396,20 @@ async function translateMessage(messageId, options = {}) {
                     outputJobSuccess = false;
                     failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                     const reasonMessage = String(reason?.message || error?.message || '알 수 없는 이유');
-                    console.warn('[긴르바 실험실] 출력 번역 중단', reason || error);
+                    console.warn('[베르바] 출력 번역 중단', reason || error);
                     reportError('output-aborted', reason || error, `출력 번역 중단: ${reasonMessage}`);
                 }
             } else {
                 outputJobSuccess = false;
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
-                console.error('[긴르바 실험실] 출력 번역 실패', error);
+                console.error('[베르바] 출력 번역 실패', error);
                 reportError(options.force ? 'output-retranslation' : 'output-translation', error, `출력 번역 실패: ${errorText(error)}`);
             }
         } finally {
             if (outputJobSuccess === null && !controller.signal.aborted && !outputJobSuperseded) {
                 outputJobSuccess = false;
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
-                console.error('[긴르바 실험실] 출력 번역이 결과 없이 종료되었습니다.');
+                console.error('[베르바] 출력 번역이 결과 없이 종료되었습니다.');
                 reportError('output-no-result', new Error('출력 번역 작업이 결과 없이 종료되었습니다.'), '출력 번역 실패: 작업이 결과 없이 종료되었습니다. 다시 시도해 주세요.');
             }
             if (outputJobSuccess !== null && !outputJobSuperseded) {
@@ -6668,14 +5460,14 @@ function retranslationInstructionHistoryMarkup() {
     if (!history.length) return '';
 
     return `
-        <div class="verba-deep-request-history">
-            <div class="verba-deep-request-history-header">
+        <div class="verba-request-history">
+            <div class="verba-request-history-header">
                 <span>최근 요구사항</span>
-                <button type="button" class="verba-deep-request-history-clear">기록 지우기</button>
+                <button type="button" class="verba-request-history-clear">기록 지우기</button>
             </div>
-            <div class="verba-deep-request-history-list">
+            <div class="verba-request-history-list">
                 ${history.map((item, index) => `
-                    <button type="button" class="verba-deep-request-history-chip" data-history-index="${index}" title="${escapeHtml(item)}">
+                    <button type="button" class="verba-request-history-chip" data-history-index="${index}" title="${escapeHtml(item)}">
                         ${escapeHtml(item)}
                     </button>`).join('')}
             </div>
@@ -6683,7 +5475,7 @@ function retranslationInstructionHistoryMarkup() {
 }
 
 function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
-    if (document.querySelector('#verba-deep-request-overlay')) return Promise.resolve(null);
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     const isSelection = scope === 'selection';
     const isMultiSelection = scope === 'multi';
     const isPartialSelection = isSelection || isMultiSelection;
@@ -6692,49 +5484,49 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
     const defaultTuning = normalizedTranslationTuning(settings);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
-        overlay.id = 'verba-deep-request-overlay';
-        overlay.className = 'verba-deep-overlay';
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay';
         if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
         overlay.innerHTML = `
-            <section class="verba-deep-modal" role="dialog" aria-modal="true">
-                <header class="verba-deep-modal-header">
+            <section class="verba-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
                     <strong>${escapeHtml(titleOverride || (isMultiSelection ? '여러 구간 묶음 재번역' : isSelection ? '선택 부분 재번역' : '최근 아웃풋 전체 재번역'))}</strong>
-                    <button type="button" class="verba-deep-close" aria-label="닫기">✕</button>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
-                ${preview ? `<div class="verba-deep-target-preview"><b>대상</b><span>${escapeHtml(preview)}</span></div>` : ''}
-                <label for="verba-deep-request-text">이번 번역에만 적용할 요구사항</label>
-                <textarea id="verba-deep-request-text" class="text_pole" rows="5" maxlength="1200" placeholder="예: 더 직설적으로 번역해 줘 / 존댓말로 바꿔 줘"></textarea>
+                ${preview ? `<div class="verba-target-preview"><b>대상</b><span>${escapeHtml(preview)}</span></div>` : ''}
+                <label for="verba-request-text">이번 번역에만 적용할 요구사항</label>
+                <textarea id="verba-request-text" class="text_pole" rows="5" maxlength="1200" placeholder="예: 더 직설적으로 번역해 줘 / 존댓말로 바꿔 줘"></textarea>
                 <small>비워두면 현재 전역 설정대로 다시 번역해요.</small>
                 ${retranslationInstructionHistoryMarkup()}
                 ${showTuning ? `
-                    <fieldset class="verba-deep-tuning-choice">
+                    <fieldset class="verba-tuning-choice">
                         <legend>번역 미세 조정 <small>이번 요청에만 적용</small></legend>
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-request-relation-temperature-enabled" ${defaultTuning.relationTemperatureEnabled ? 'checked' : ''}>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-request-relation-temperature-enabled" ${defaultTuning.relationTemperatureEnabled ? 'checked' : ''}>
                             <span>관계 온도·현지화 적용</span>
                         </label>
-                        <div id="verba-deep-request-fine-tuning-controls" class="verba-deep-tuning-control-group ${defaultTuning.relationTemperatureEnabled ? '' : 'verba-deep-control-disabled'}">
-                            <span class="verba-deep-tuning-label">관계 온도 <small>대사만</small></span>
-                            ${tuningChoiceMarkup('verba-deep-request-relation-temperature', RELATION_TEMPERATURE_OPTIONS, defaultTuning.relationTemperature)}
-                            <span class="verba-deep-tuning-label">서술 현지화</span>
-                            ${tuningChoiceMarkup('verba-deep-request-narration-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.narrationLocalizationLevel)}
-                            <span class="verba-deep-tuning-label">대사 현지화</span>
-                            ${tuningChoiceMarkup('verba-deep-request-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.dialogueLocalizationLevel)}
+                        <div id="verba-request-fine-tuning-controls" class="verba-tuning-control-group ${defaultTuning.relationTemperatureEnabled ? '' : 'verba-control-disabled'}">
+                            <span class="verba-tuning-label">관계 온도 <small>대사만</small></span>
+                            ${tuningChoiceMarkup('verba-request-relation-temperature', RELATION_TEMPERATURE_OPTIONS, defaultTuning.relationTemperature)}
+                            <span class="verba-tuning-label">서술 현지화</span>
+                            ${tuningChoiceMarkup('verba-request-narration-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.narrationLocalizationLevel)}
+                            <span class="verba-tuning-label">대사 현지화</span>
+                            ${tuningChoiceMarkup('verba-request-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, defaultTuning.dialogueLocalizationLevel)}
                         </div>
                     </fieldset>
                     <small>원문 유지부터 네이티브 한국어까지 표현 강도만 조절하며 인명·지명·숫자·사실관계는 바꾸지 않아요.</small>
                 ` : ''}
                 ${showContextChoice ? `
-                    <fieldset class="verba-deep-context-choice">
+                    <fieldset class="verba-context-choice">
                         <legend>AI가 참고할 현재 메시지 문맥</legend>
-                        <label><input type="radio" name="verba-deep-context-mode" value="selection"> 선택 범위만</label>
-                        <label><input type="radio" name="verba-deep-context-mode" value="paragraph" checked> 현재 문단</label>
-                        <label><input type="radio" name="verba-deep-context-mode" value="message"> 메시지 전체</label>
+                        <label><input type="radio" name="verba-context-mode" value="selection"> 선택 범위만</label>
+                        <label><input type="radio" name="verba-context-mode" value="paragraph" checked> 현재 문단</label>
+                        <label><input type="radio" name="verba-context-mode" value="message"> 메시지 전체</label>
                     </fieldset>
                     <small>실제로 교체되는 범위는 선택한 부분뿐이에요.</small>
                 ` : ''}
-                <div class="verba-deep-modal-actions">
-                    <button type="button" class="menu_button verba-deep-submit">${isSelection && settings.selectionCandidates ? '후보 만들기' : '재번역 시작'}</button>
+                <div class="verba-modal-actions">
+                    <button type="button" class="menu_button verba-submit">${isSelection && settings.selectionCandidates ? '후보 만들기' : '재번역 시작'}</button>
                 </div>
             </section>`;
         // SillyTavern themes and mobile drawers sometimes create their own stacking
@@ -6756,7 +5548,7 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
         Object.entries(forcedOverlayStyles).forEach(([property, value]) => {
             overlay.style.setProperty(property.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`), value, 'important');
         });
-        const modal = overlay.querySelector('.verba-deep-modal');
+        const modal = overlay.querySelector('.verba-modal');
         ['position', 'inset', 'margin', 'transform'].forEach((property, index) => {
             modal.style.setProperty(property, ['relative', 'auto', 'auto', 'none'][index], 'important');
         });
@@ -6777,7 +5569,7 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
             overlay.remove();
             resolve(value);
         };
-        const textarea = overlay.querySelector('#verba-deep-request-text');
+        const textarea = overlay.querySelector('#verba-request-text');
         const submit = () => {
             const instruction = String(textarea.value || '').trim();
             if (instruction) rememberRetranslationInstruction(instruction);
@@ -6787,18 +5579,18 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
             }
             finish({
                 instruction,
-                contextMode: overlay.querySelector('input[name="verba-deep-context-mode"]:checked')?.value || 'paragraph',
+                contextMode: overlay.querySelector('input[name="verba-context-mode"]:checked')?.value || 'paragraph',
                 tuning: showTuning ? normalizedTranslationTuning({
-                    relationTemperatureEnabled: overlay.querySelector('#verba-deep-request-relation-temperature-enabled')?.checked,
-                    relationTemperature: overlay.querySelector('input[name="verba-deep-request-relation-temperature"]:checked')?.value,
-                    narrationLocalizationLevel: overlay.querySelector('input[name="verba-deep-request-narration-localization-level"]:checked')?.value,
-                    dialogueLocalizationLevel: overlay.querySelector('input[name="verba-deep-request-dialogue-localization-level"]:checked')?.value,
+                    relationTemperatureEnabled: overlay.querySelector('#verba-request-relation-temperature-enabled')?.checked,
+                    relationTemperature: overlay.querySelector('input[name="verba-request-relation-temperature"]:checked')?.value,
+                    narrationLocalizationLevel: overlay.querySelector('input[name="verba-request-narration-localization-level"]:checked')?.value,
+                    dialogueLocalizationLevel: overlay.querySelector('input[name="verba-request-dialogue-localization-level"]:checked')?.value,
                 }) : null,
             });
         };
-        overlay.querySelector('.verba-deep-close').addEventListener('click', () => finish(null));
-        overlay.querySelector('.verba-deep-submit').addEventListener('click', submit);
-        overlay.querySelectorAll('.verba-deep-request-history-chip').forEach(button => {
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-submit').addEventListener('click', submit);
+        overlay.querySelectorAll('.verba-request-history-chip').forEach(button => {
             button.addEventListener('click', () => {
                 const index = Number(button.dataset.historyIndex);
                 const value = settings.retranslationInstructionHistory[index];
@@ -6809,23 +5601,23 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
                 textarea.setSelectionRange?.(textarea.value.length, textarea.value.length);
             });
         });
-        overlay.querySelector('.verba-deep-request-history-clear')?.addEventListener('click', () => {
+        overlay.querySelector('.verba-request-history-clear')?.addEventListener('click', () => {
             settings.retranslationInstructionHistory = [];
             saveSettings();
-            overlay.querySelector('.verba-deep-request-history')?.remove();
+            overlay.querySelector('.verba-request-history')?.remove();
             textarea.focus();
         });
         if (showTuning) {
-            const relationToggle = overlay.querySelector('#verba-deep-request-relation-temperature-enabled');
-            const relationControls = overlay.querySelector('#verba-deep-request-fine-tuning-controls');
+            const relationToggle = overlay.querySelector('#verba-request-relation-temperature-enabled');
+            const relationControls = overlay.querySelector('#verba-request-fine-tuning-controls');
             const relationInputs = [
-                ...overlay.querySelectorAll('input[name="verba-deep-request-relation-temperature"]'),
-                ...overlay.querySelectorAll('input[name="verba-deep-request-narration-localization-level"]'),
-                ...overlay.querySelectorAll('input[name="verba-deep-request-dialogue-localization-level"]'),
+                ...overlay.querySelectorAll('input[name="verba-request-relation-temperature"]'),
+                ...overlay.querySelectorAll('input[name="verba-request-narration-localization-level"]'),
+                ...overlay.querySelectorAll('input[name="verba-request-dialogue-localization-level"]'),
             ];
             const syncRelationControls = () => {
                 const enabled = Boolean(relationToggle?.checked);
-                relationControls?.classList.toggle('verba-deep-control-disabled', !enabled);
+                relationControls?.classList.toggle('verba-control-disabled', !enabled);
                 relationInputs.forEach(input => { input.disabled = !enabled; });
             };
             relationToggle?.addEventListener('change', syncRelationControls);
@@ -6843,32 +5635,32 @@ function requestOneTimeInstruction(scope, preview = '', titleOverride = '') {
 }
 
 function requestNameLockTarget(sourceName, currentName) {
-    if (document.querySelector('#verba-deep-request-overlay')) return Promise.resolve(null);
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
-        overlay.id = 'verba-deep-request-overlay';
-        overlay.className = 'verba-deep-overlay';
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay';
         if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
         overlay.innerHTML = `
-            <section class="verba-deep-modal" role="dialog" aria-modal="true">
-                <header class="verba-deep-modal-header">
+            <section class="verba-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
                     <strong>캐릭터 이름으로 고정</strong>
-                    <button type="button" class="verba-deep-close" aria-label="닫기">✕</button>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
-                <div class="verba-deep-name-match">
+                <div class="verba-name-match">
                     <span>원문에서 찾은 이름</span><b>${escapeHtml(sourceName)}</b>
                     <span>현재 번역 표기</span><b>${escapeHtml(currentName)}</b>
                 </div>
-                <label for="verba-deep-name-lock-target">앞으로 사용할 표기</label>
-                <input id="verba-deep-name-lock-target" class="text_pole" maxlength="120" value="${escapeHtml(currentName)}">
-                <label class="verba-deep-check-row">
-                    <input type="checkbox" id="verba-deep-name-lock-history" checked>
+                <label for="verba-name-lock-target">앞으로 사용할 표기</label>
+                <input id="verba-name-lock-target" class="text_pole" maxlength="120" value="${escapeHtml(currentName)}">
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-name-lock-history" checked>
                     <span>현재 채팅 전체의 이름 표기 모두 변경</span>
                 </label>
                 <small>현재 이름의 정확한 기존 표기를 한국어 원문·저장 번역·모든 스와이프에서 함께 변경합니다. 비슷한 다른 이름은 합치지 않습니다.</small>
-                <div class="verba-deep-modal-actions">
-                    <button type="button" class="menu_button verba-deep-cancel">취소</button>
-                    <button type="button" class="menu_button verba-deep-submit">이름 고정</button>
+                <div class="verba-modal-actions">
+                    <button type="button" class="menu_button verba-cancel">취소</button>
+                    <button type="button" class="menu_button verba-submit">이름 고정</button>
                 </div>
             </section>`;
         document.documentElement.append(overlay);
@@ -6889,8 +5681,8 @@ function requestNameLockTarget(sourceName, currentName) {
             overlay.remove();
             resolve(value);
         };
-        const input = overlay.querySelector('#verba-deep-name-lock-target');
-        const history = overlay.querySelector('#verba-deep-name-lock-history');
+        const input = overlay.querySelector('#verba-name-lock-target');
+        const history = overlay.querySelector('#verba-name-lock-history');
         const submit = () => {
             const value = String(input.value || '').trim();
             if (!value) {
@@ -6902,9 +5694,9 @@ function requestNameLockTarget(sourceName, currentName) {
                 replaceHistory: Boolean(history.checked),
             });
         };
-        overlay.querySelector('.verba-deep-close').addEventListener('click', () => finish(null));
-        overlay.querySelector('.verba-deep-cancel').addEventListener('click', () => finish(null));
-        overlay.querySelector('.verba-deep-submit').addEventListener('click', submit);
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-submit').addEventListener('click', submit);
         overlay.addEventListener('click', event => {
             if (event.target === overlay) finish(null);
         });
@@ -7118,8 +5910,6 @@ function replaceStoredNameInExtra(extra, source, sourceName, oldNames, targetNam
         .map(oldName => ({ search: oldName, value: targetName }));
     if (!replacements.length) return false;
 
-    // Different source names can have similar or identical Korean surfaces.
-    // Replace only translated rows whose own source contains this exact name.
     let nextTranslation = previousTranslation;
     let nextSourceMap = normalizedSourceMap(stored.record?.sourceMap);
     const rowEdits = nextSourceMap.flatMap(row => {
@@ -7212,9 +6002,6 @@ function replaceNameAcrossChatTranslations(sourceName, oldNames, targetName, opt
             });
         }
 
-        // Korean raw messages/swipes are intentionally user-authored name surfaces.
-        // Keep the original global propagation feature, but only replace the exact
-        // known Korean forms instead of asking AI to guess similar historical forms.
         if (Array.isArray(message.swipes)) {
             message.swipes.forEach((rawSource, swipeId) => {
                 const source = typeof rawSource === 'string'
@@ -7284,32 +6071,32 @@ function replaceNameAcrossChatTranslations(sourceName, oldNames, targetName, opt
 }
 
 function requestSelectionCandidateChoice(candidates, currentText) {
-    if (document.querySelector('#verba-deep-request-overlay')) return Promise.resolve(null);
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
     const choices = Array.isArray(candidates) ? candidates.filter(Boolean).slice(0, 3) : [];
     if (!choices.length) return Promise.resolve(null);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
-        overlay.id = 'verba-deep-request-overlay';
-        overlay.className = 'verba-deep-overlay';
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay';
         if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
         overlay.innerHTML = `
-            <section class="verba-deep-modal verba-deep-candidate-modal" role="dialog" aria-modal="true">
-                <header class="verba-deep-modal-header">
+            <section class="verba-modal verba-candidate-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
                     <strong>선택 재번역 후보</strong>
-                    <button type="button" class="verba-deep-close" aria-label="닫기">✕</button>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
-                <div class="verba-deep-target-preview"><b>현재 번역</b><span>${escapeHtml(currentText)}</span></div>
+                <div class="verba-target-preview"><b>현재 번역</b><span>${escapeHtml(currentText)}</span></div>
                 <small>사용할 후보를 누르면 선택한 부분만 교체됩니다.</small>
-                <div class="verba-deep-candidate-list"></div>
-                <div class="verba-deep-modal-actions">
-                    <button type="button" class="menu_button verba-deep-cancel">기존 번역 유지</button>
+                <div class="verba-candidate-list"></div>
+                <div class="verba-modal-actions">
+                    <button type="button" class="menu_button verba-cancel">기존 번역 유지</button>
                 </div>
             </section>`;
-        const list = overlay.querySelector('.verba-deep-candidate-list');
+        const list = overlay.querySelector('.verba-candidate-list');
         choices.forEach((choice, index) => {
             const button = document.createElement('button');
             button.type = 'button';
-            button.className = 'menu_button verba-deep-candidate-option';
+            button.className = 'menu_button verba-candidate-option';
             const number = document.createElement('b');
             number.textContent = `후보 ${index + 1}`;
             const text = document.createElement('span');
@@ -7335,18 +6122,18 @@ function requestSelectionCandidateChoice(candidates, currentText) {
             overlay.remove();
             resolve(value);
         };
-        overlay.querySelectorAll('.verba-deep-candidate-option').forEach((button, index) => {
+        overlay.querySelectorAll('.verba-candidate-option').forEach((button, index) => {
             button.addEventListener('click', () => finish(choices[index]));
         });
-        overlay.querySelector('.verba-deep-close').addEventListener('click', () => finish(null));
-        overlay.querySelector('.verba-deep-cancel').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-cancel').addEventListener('click', () => finish(null));
         overlay.addEventListener('click', event => {
             if (event.target === overlay) finish(null);
         });
         overlay.addEventListener('keydown', event => {
             if (event.key === 'Escape') finish(null);
         });
-        requestAnimationFrame(() => overlay.querySelector('.verba-deep-candidate-option')?.focus());
+        requestAnimationFrame(() => overlay.querySelector('.verba-candidate-option')?.focus());
     });
 }
 
@@ -7429,8 +6216,7 @@ function resolveSelectionSourceNameLocally(matchContext) {
         cursor = index + Math.max(1, selected.length);
     }
     if (candidates.length === 1 && occurrences.length === 1) return candidates[0].value;
-    if (candidates.length < 2) return '';
-    if (occurrences.length !== candidates.length) return '';
+    if (candidates.length < 2 || occurrences.length !== candidates.length) return '';
     const ordinal = occurrences.findIndex(index => (
         matchContext.start < index + selected.length && matchContext.end > index
     ));
@@ -7450,7 +6236,7 @@ function previousAssistantMessages(beforeId = Number.POSITIVE_INFINITY) {
     return rows;
 }
 
-function positionVerbaDeepChoiceMenu(menu, anchor) {
+function positionVerbaChoiceMenu(menu, anchor) {
     const viewport = globalThis.visualViewport;
     const left = viewport?.offsetLeft || 0;
     const top = viewport?.offsetTop || 0;
@@ -7471,8 +6257,8 @@ function positionVerbaDeepChoiceMenu(menu, anchor) {
     menu.style.setProperty('top', `${Math.max(top + 8, Math.min(desiredY, maxY))}px`, 'important');
 }
 
-function requestRetranslateTargetChoice(target, button = document.querySelector('#verba-deep-retranslate-latest')) {
-    document.querySelector('#verba-deep-retranslate-target-menu')?.remove();
+function requestRetranslateTargetChoice(target, button = document.querySelector('#verba-retranslate-latest')) {
+    document.querySelector('#verba-retranslate-target-menu')?.remove();
     if (!target?.message) return Promise.resolve(null);
 
     const record = currentRecord(target.message);
@@ -7489,8 +6275,8 @@ function requestRetranslateTargetChoice(target, button = document.querySelector(
 
     return new Promise(resolve => {
         const menu = document.createElement('div');
-        menu.id = 'verba-deep-retranslate-target-menu';
-        menu.className = 'verba-deep-retranslate-target-menu';
+        menu.id = 'verba-retranslate-target-menu';
+        menu.className = 'verba-retranslate-target-menu';
         menu.setAttribute('role', 'menu');
         menu.innerHTML = `
             <button type="button" class="menu_button" data-target="recent">최근</button>
@@ -7498,7 +6284,7 @@ function requestRetranslateTargetChoice(target, button = document.querySelector(
             <button type="button" class="menu_button" data-target="toggle-view">${viewLabel}</button>`;
         (document.body || document.documentElement).append(menu);
 
-        positionVerbaDeepChoiceMenu(menu, button || document.querySelector('#send_but'));
+        positionVerbaChoiceMenu(menu, button || document.querySelector('#send_but'));
 
         let settled = false;
         const finish = value => {
@@ -7540,7 +6326,7 @@ function visiblePreviousOutputPreview(target) {
     if (!message || !Number.isInteger(id)) return '';
 
     const liveText = document.querySelector(
-        `.mes[mesid="${id}"] .mes_text:not(.verba-deep-swipe-hold-content)`,
+        `.mes[mesid="${id}"] .mes_text:not(.verba-swipe-hold-content)`,
     )?.innerText?.trim();
     if (liveText) return liveText.replace(/\s+/g, ' ');
 
@@ -7566,7 +6352,7 @@ function visiblePreviousOutputPreview(target) {
             .trim();
         if (rendered) return rendered;
     } catch (error) {
-        console.warn('[긴르바 실험실] 이전 아웃풋 미리보기 렌더링 실패', error);
+        console.warn('[베르바] 이전 아웃풋 미리보기 렌더링 실패', error);
     }
 
     return String(displayText || '')
@@ -7578,15 +6364,15 @@ function visiblePreviousOutputPreview(target) {
 
 function previousOutputOptionMarkup(target, index, previewText = '') {
     const preview = String(previewText || visiblePreviousOutputPreview(target)).slice(0, 180) || '(표시할 내용 없음)';
-    return `<button type="button" class="menu_button verba-deep-previous-output-option" data-target-index="${index}">
-        <span class="verba-deep-previous-output-meta"><b>#${target.id}</b></span>
+    return `<button type="button" class="menu_button verba-previous-output-option" data-target-index="${index}">
+        <span class="verba-previous-output-meta"><b>#${target.id}</b></span>
         <span>${escapeHtml(preview)}</span>
     </button>`;
 }
 
 
 function centerPreviousOutputModal(overlay) {
-    const modal = overlay?.querySelector?.('.verba-deep-previous-output-modal');
+    const modal = overlay?.querySelector?.('.verba-previous-output-modal');
     if (!modal) return;
 
     const viewport = globalThis.visualViewport;
@@ -7613,7 +6399,7 @@ function centerPreviousOutputModal(overlay) {
     modal.style.setProperty('max-height', `${maxHeight}px`, 'important');
     modal.style.setProperty('overflow', 'hidden', 'important');
 
-    const list = modal.querySelector('.verba-deep-previous-output-list');
+    const list = modal.querySelector('.verba-previous-output-list');
     if (list) {
         // Reserve room for header + "더 보기" while making only the list scroll.
         const reserved = 112;
@@ -7624,7 +6410,7 @@ function centerPreviousOutputModal(overlay) {
 }
 
 function requestPreviousOutputTarget(beforeId) {
-    if (document.querySelector('#verba-deep-request-overlay')) return Promise.resolve(null);
+    if (document.querySelector('#verba-request-overlay')) return Promise.resolve(null);
 
     // Includes normal and SillyTavern-hidden/ghosted assistant outputs, while
     // still excluding user inputs and genuine system notices.
@@ -7636,37 +6422,37 @@ function requestPreviousOutputTarget(beforeId) {
 
     return new Promise(resolve => {
         const overlay = document.createElement('div');
-        overlay.id = 'verba-deep-request-overlay';
-        overlay.className = 'verba-deep-overlay verba-deep-previous-output-overlay';
+        overlay.id = 'verba-request-overlay';
+        overlay.className = 'verba-overlay verba-previous-output-overlay';
         if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
         overlay.innerHTML = `
-            <section class="verba-deep-modal verba-deep-previous-output-modal" role="dialog" aria-modal="true">
-                <header class="verba-deep-modal-header">
+            <section class="verba-modal verba-previous-output-modal" role="dialog" aria-modal="true">
+                <header class="verba-modal-header">
                     <strong>이전 아웃풋 선택</strong>
-                    <button type="button" class="verba-deep-close" aria-label="닫기">✕</button>
+                    <button type="button" class="verba-close" aria-label="닫기">✕</button>
                 </header>
-                <input type="search" class="text_pole verba-deep-previous-output-search"
+                <input type="search" class="text_pole verba-previous-output-search"
                     placeholder="내용 또는 #번호 검색" autocomplete="off" enterkeyhint="search">
-                <fieldset class="verba-deep-previous-output-action">
+                <fieldset class="verba-previous-output-action">
                     <legend>번역 완료 후</legend>
                     <label>
-                        <input type="radio" name="verba-deep-previous-output-action" value="jump"
+                        <input type="radio" name="verba-previous-output-action" value="jump"
                             ${settings.previousOutputCompletionAction === 'jump' ? 'checked' : ''}>
                         <span>해당 메시지로 이동</span>
                     </label>
                     <label>
-                        <input type="radio" name="verba-deep-previous-output-action" value="stay"
+                        <input type="radio" name="verba-previous-output-action" value="stay"
                             ${settings.previousOutputCompletionAction === 'stay' ? 'checked' : ''}>
                         <span>현재 위치 유지</span>
                     </label>
                 </fieldset>
-                <div class="verba-deep-previous-output-list"></div>
-                <button type="button" class="menu_button verba-deep-previous-output-more">더 보기</button>
+                <div class="verba-previous-output-list"></div>
+                <button type="button" class="menu_button verba-previous-output-more">더 보기</button>
             </section>`;
 
-        const searchInput = overlay.querySelector('.verba-deep-previous-output-search');
-        const list = overlay.querySelector('.verba-deep-previous-output-list');
-        const moreButton = overlay.querySelector('.verba-deep-previous-output-more');
+        const searchInput = overlay.querySelector('.verba-previous-output-search');
+        const list = overlay.querySelector('.verba-previous-output-list');
+        const moreButton = overlay.querySelector('.verba-previous-output-more');
         const previewCache = new Map();
         let filteredTargets = targets;
         let renderedCount = 0;
@@ -7702,7 +6488,7 @@ function requestPreviousOutputTarget(beforeId) {
         };
 
         const renderEmpty = message => {
-            list.innerHTML = `<div class="verba-deep-previous-output-empty">${escapeHtml(message)}</div>`;
+            list.innerHTML = `<div class="verba-previous-output-empty">${escapeHtml(message)}</div>`;
             moreButton.hidden = true;
         };
 
@@ -7726,7 +6512,7 @@ function requestPreviousOutputTarget(beforeId) {
                 if (!button) continue;
                 button.addEventListener('click', () => {
                     const completionAction = overlay.querySelector(
-                        'input[name="verba-deep-previous-output-action"]:checked',
+                        'input[name="verba-previous-output-action"]:checked',
                     )?.value === 'stay'
                         ? 'stay'
                         : 'jump';
@@ -7780,7 +6566,7 @@ function requestPreviousOutputTarget(beforeId) {
             searchTimer = setTimeout(applySearch, 120);
         });
 
-        overlay.querySelectorAll('input[name="verba-deep-previous-output-action"]').forEach(input => {
+        overlay.querySelectorAll('input[name="verba-previous-output-action"]').forEach(input => {
             input.addEventListener('change', () => {
                 settings.previousOutputCompletionAction = input.value === 'stay' ? 'stay' : 'jump';
                 saveSettings();
@@ -7794,7 +6580,7 @@ function requestPreviousOutputTarget(beforeId) {
             requestAnimationFrame(() => centerPreviousOutputModal(overlay));
         });
 
-        overlay.querySelector('.verba-deep-close').addEventListener('click', () => finish(null));
+        overlay.querySelector('.verba-close').addEventListener('click', () => finish(null));
         overlay.addEventListener('click', event => {
             if (event.target === overlay) finish(null);
         });
@@ -7971,11 +6757,11 @@ function positionPreviousOutputReturnButton(host) {
     host.style.setProperty('transform', 'none', 'important');
 }
 function dismissPreviousOutputReturnButton() {
-    const host = document.querySelector('#verba-deep-return-position');
+    const host = document.querySelector('#verba-return-position');
     if (!host) return;
 
-    host.__verbaDeepCleanup?.();
-    delete host.__verbaDeepCleanup;
+    host.__verbaCleanup?.();
+    delete host.__verbaCleanup;
 
     try {
         host.hidePopover?.();
@@ -8025,13 +6811,13 @@ function showPreviousOutputReturnButton(position) {
     if (!position) return;
 
     const host = document.createElement('div');
-    host.id = 'verba-deep-return-position';
-    host.className = 'verba-deep-return-position';
+    host.id = 'verba-return-position';
+    host.className = 'verba-return-position';
     if ('showPopover' in HTMLElement.prototype) host.setAttribute('popover', 'manual');
 
     host.innerHTML = `
-        <button type="button" class="verba-deep-return-position-main">원래 위치</button>
-        <button type="button" class="verba-deep-return-position-close" aria-label="닫기">✕</button>`;
+        <button type="button" class="verba-return-position-main">원래 위치</button>
+        <button type="button" class="verba-return-position-close" aria-label="닫기">✕</button>`;
 
     (document.body || document.documentElement).append(host);
 
@@ -8062,22 +6848,22 @@ function showPreviousOutputReturnButton(position) {
         : null;
     resizeObserver?.observe(textarea);
 
-    host.__verbaDeepCleanup = () => {
+    host.__verbaCleanup = () => {
         globalThis.visualViewport?.removeEventListener?.('resize', recalc);
         globalThis.visualViewport?.removeEventListener?.('scroll', recalc);
         window.removeEventListener('resize', recalc);
         resizeObserver?.disconnect();
     };
 
-    host.querySelector('.verba-deep-return-position-main')?.addEventListener('click', async () => {
-        const button = host.querySelector('.verba-deep-return-position-main');
+    host.querySelector('.verba-return-position-main')?.addEventListener('click', async () => {
+        const button = host.querySelector('.verba-return-position-main');
         if (button) button.disabled = true;
         const restored = await restorePreviousOutputReturnPosition(position);
         if (restored) dismissPreviousOutputReturnButton();
         else if (button) button.disabled = false;
     });
 
-    host.querySelector('.verba-deep-return-position-close')?.addEventListener('click', dismissPreviousOutputReturnButton);
+    host.querySelector('.verba-return-position-close')?.addEventListener('click', dismissPreviousOutputReturnButton);
 }
 
 
@@ -8100,7 +6886,7 @@ async function jumpToOutputMessage(messageId) {
         try {
             await showMoreMessages(amount);
         } catch (error) {
-            console.warn('[긴르바 실험실] 이전 메시지 자동 불러오기 실패', error);
+            console.warn('[베르바] 이전 메시지 자동 불러오기 실패', error);
             break;
         }
 
@@ -8142,7 +6928,7 @@ async function jumpToOutputMessage(messageId) {
             chatScroller.scrollTo({ top: targetTop, behavior: 'smooth' });
             scrolled = true;
         } catch (error) {
-            console.warn('[긴르바 실험실] 채팅 컨테이너 직접 이동 실패 — 기본 이동으로 전환합니다.', error);
+            console.warn('[베르바] 채팅 컨테이너 직접 이동 실패 — 기본 이동으로 전환합니다.', error);
         }
     }
 
@@ -8154,8 +6940,8 @@ async function jumpToOutputMessage(messageId) {
         });
     }
 
-    element.classList.add('verba-deep-jump-highlight');
-    setTimeout(() => element.classList.remove('verba-deep-jump-highlight'), 1800);
+    element.classList.add('verba-jump-highlight');
+    setTimeout(() => element.classList.remove('verba-jump-highlight'), 1800);
     return true;
 }
 
@@ -8163,7 +6949,7 @@ async function retranslateLatestOutput() {
     const activeControllers = activeTranslationControllers();
     if (activeControllers.some(controller => !controller.signal.aborted)) {
         const cancelled = abortActiveTranslations(outputAbortReason(
-            'VERBA_DEEP_OUTPUT_USER_CANCELLED',
+            'VERBA_OUTPUT_USER_CANCELLED',
             '사용자가 번역 요청을 취소했습니다.',
             true,
         ));
@@ -8244,11 +7030,11 @@ async function retranslateLatestOutput() {
 }
 
 function setTextareaValue(textarea, value) {
-    textarea.dataset.verbaDeepInternalUpdate = 'true';
+    textarea.dataset.verbaInternalUpdate = 'true';
     textarea.value = value;
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
     textarea.dispatchEvent(new Event('change', { bubbles: true }));
-    delete textarea.dataset.verbaDeepInternalUpdate;
+    delete textarea.dataset.verbaInternalUpdate;
 }
 
 async function translateInputAndSend(textarea, sendButton, source) {
@@ -8270,7 +7056,7 @@ async function translateInputAndSend(textarea, sendButton, source) {
         sendButton.click();
     } catch (error) {
         if (!isAbort(error)) {
-            console.error('[긴르바 실험실] 인풋 번역 실패', error);
+            console.error('[베르바] 인풋 번역 실패', error);
             reportError('input-translate-and-send', error, `인풋 번역 실패로 전송하지 않았어요: ${errorText(error)}`);
         }
     } finally {
@@ -8281,7 +7067,7 @@ async function translateInputAndSend(textarea, sendButton, source) {
 }
 
 function blockGenerationAndRestore(textarea, source) {
-    const marker = '/abort quiet=true verba-deep-input-translation-failed';
+    const marker = '/abort quiet=true verba-input-translation-failed';
     setTextareaValue(textarea, marker);
     const restore = () => {
         const current = document.querySelector('#send_textarea');
@@ -8316,7 +7102,7 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         setTextareaValue(textarea, translated);
     } catch (error) {
         if (!isAbort(error)) {
-            console.error('[긴르바 실험실] 생성 전 인풋 번역 실패', error);
+            console.error('[베르바] 생성 전 인풋 번역 실패', error);
             reportError('input-before-generation', error, `인풋 번역 실패로 생성을 중단했어요: ${errorText(error)}`);
         }
         blockGenerationAndRestore(textarea, source);
@@ -8350,11 +7136,11 @@ async function translateSentInputMessage(payload) {
             scheduleChatSave(context.chat);
         } catch (error) {
             if (!isAbort(error)) {
-                console.error('[긴르바 실험실] 전송된 인풋 번역 실패', error);
+                console.error('[베르바] 전송된 인풋 번역 실패', error);
                 reportError('sent-input-translation', error, `인풋 번역 실패로 뒤따르는 생성을 중단했어요: ${errorText(error)}`);
             }
             try {
-                await liveContext().executeSlashCommandsWithOptions?.('/abort quiet=true verba-deep-input-translation-failed');
+                await liveContext().executeSlashCommandsWithOptions?.('/abort quiet=true verba-input-translation-failed');
             } catch {
                 // 중단 명령을 지원하지 않는 환경에서는 원문만 입력창에 복원한다.
             }
@@ -8592,7 +7378,7 @@ function textPositionAtOffset(root, requestedOffset) {
 
 function highlightRangeForStoredOffsets(messageId, translation, start, end) {
     const textElement = document.querySelector(
-        `.mes[mesid="${Number(messageId)}"] .mes_text:not(.verba-deep-swipe-hold-content)`,
+        `.mes[mesid="${Number(messageId)}"] .mes_text:not(.verba-swipe-hold-content)`,
     );
     if (!textElement) return null;
     const visibleRange = visibleRangeForStoredOffsets(
@@ -8622,8 +7408,8 @@ function refreshSelectionHighlights() {
     const HighlightConstructor = globalThis.Highlight;
     if (!highlights || typeof HighlightConstructor !== 'function') return;
 
-    highlights.delete('verba-deep-locked-segments');
-    highlights.delete('verba-deep-bundle-selections');
+    highlights.delete('verba-locked-segments');
+    highlights.delete('verba-bundle-selections');
     const lockedRanges = [];
     document.querySelectorAll('.mes[mesid]').forEach(element => {
         const messageId = Number(element.getAttribute('mesid'));
@@ -8643,7 +7429,7 @@ function refreshSelectionHighlights() {
         }
     });
     if (lockedRanges.length) {
-        highlights.set('verba-deep-locked-segments', new HighlightConstructor(...lockedRanges));
+        highlights.set('verba-locked-segments', new HighlightConstructor(...lockedRanges));
     }
 
     if (bundleStillCurrent()) {
@@ -8657,7 +7443,7 @@ function refreshSelectionHighlights() {
             return range ? [range] : [];
         });
         if (bundleRanges.length) {
-            highlights.set('verba-deep-bundle-selections', new HighlightConstructor(...bundleRanges));
+            highlights.set('verba-bundle-selections', new HighlightConstructor(...bundleRanges));
         }
     }
 }
@@ -8668,7 +7454,7 @@ function scheduleSelectionHighlights(delay = 0) {
 }
 
 function hideSelectionButton() {
-    ['#verba-deep-selection-more-menu', '#verba-deep-selection-actions'].forEach(selector => {
+    ['#verba-selection-more-menu', '#verba-selection-actions'].forEach(selector => {
         const element = document.querySelector(selector);
         try {
             element?.hidePopover?.();
@@ -8688,25 +7474,25 @@ function showSelectionSource(snapshot) {
         hideSelectionButton();
         return;
     }
-    if (document.querySelector('#verba-deep-request-overlay')) return;
+    if (document.querySelector('#verba-request-overlay')) return;
     const source = matches.map(row => row.source).join('\n\n');
     const overlay = document.createElement('div');
-    overlay.id = 'verba-deep-request-overlay';
-    overlay.className = 'verba-deep-overlay';
+    overlay.id = 'verba-request-overlay';
+    overlay.className = 'verba-overlay';
     if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
     overlay.innerHTML = `
-        <section class="verba-deep-modal verba-deep-source-lens-modal" role="dialog" aria-modal="true">
-            <header class="verba-deep-modal-header">
+        <section class="verba-modal verba-source-lens-modal" role="dialog" aria-modal="true">
+            <header class="verba-modal-header">
                 <strong>선택 구간의 원문</strong>
-                <button type="button" class="verba-deep-close" aria-label="닫기">✕</button>
+                <button type="button" class="verba-close" aria-label="닫기">✕</button>
             </header>
-            <div class="verba-deep-target-preview"><b>선택한 번역</b><span>${escapeHtml(snapshot.selected)}</span></div>
-            <pre class="verba-deep-source-lens-text"></pre>
-            <div class="verba-deep-modal-actions">
-                <button type="button" class="menu_button verba-deep-copy-source">원문 복사</button>
+            <div class="verba-target-preview"><b>선택한 번역</b><span>${escapeHtml(snapshot.selected)}</span></div>
+            <pre class="verba-source-lens-text"></pre>
+            <div class="verba-modal-actions">
+                <button type="button" class="menu_button verba-copy-source">원문 복사</button>
             </div>
         </section>`;
-    overlay.querySelector('.verba-deep-source-lens-text').textContent = source;
+    overlay.querySelector('.verba-source-lens-text').textContent = source;
     const close = () => {
         try {
             overlay.hidePopover?.();
@@ -8715,8 +7501,8 @@ function showSelectionSource(snapshot) {
         }
         overlay.remove();
     };
-    overlay.querySelector('.verba-deep-close').addEventListener('click', close);
-    overlay.querySelector('.verba-deep-copy-source').addEventListener('click', async () => {
+    overlay.querySelector('.verba-close').addEventListener('click', close);
+    overlay.querySelector('.verba-copy-source').addEventListener('click', async () => {
         try {
             await copyText(source);
             notify('선택 구간의 원문을 복사했어요.', 'success');
@@ -9002,8 +7788,8 @@ function showSelectionButton(snapshot) {
     if (liveRect) snapshot.rect = liveRect;
     selectionSnapshot = snapshot;
     const actions = document.createElement('div');
-    actions.id = 'verba-deep-selection-actions';
-    actions.className = 'verba-deep-selection-actions';
+    actions.id = 'verba-selection-actions';
+    actions.className = 'verba-selection-actions';
     const desktopMenu = (
         Date.now() - lastDesktopSelectionAt < 2000
         || globalThis.matchMedia?.('(hover: hover) and (pointer: fine)')?.matches
@@ -9013,7 +7799,7 @@ function showSelectionButton(snapshot) {
     const createAction = (label, className, handler) => {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `menu_button verba-deep-selection-action ${className}`.trim();
+        button.className = `menu_button verba-selection-action ${className}`.trim();
         button.textContent = label;
         button.addEventListener('click', event => {
             event.preventDefault();
@@ -9028,26 +7814,26 @@ function showSelectionButton(snapshot) {
     });
     const availableActions = [];
     if (settings.showSelectionName !== false) {
-        availableActions.push(createAction('이름으로 고정', 'verba-deep-name-lock-action', () => {
+        availableActions.push(createAction('이름으로 고정', 'verba-name-lock-action', () => {
             lockSelectionName(selectionSnapshot);
         }));
     }
     if (settings.showSelectionSource !== false) {
-        availableActions.push(createAction('원문 보기', 'verba-deep-source-lens-action', () => {
+        availableActions.push(createAction('원문 보기', 'verba-source-lens-action', () => {
             showSelectionSource(selectionSnapshot);
         }));
     }
     if (settings.showSelectionLock !== false) {
         availableActions.push(createAction(
             selectionIsLocked(snapshot) ? '잠금 해제' : '구간 잠금',
-            'verba-deep-segment-lock-action',
+            'verba-segment-lock-action',
             () => toggleSelectionLock(selectionSnapshot),
         ));
     }
     if (settings.showSelectionBundle !== false) {
         availableActions.push(createAction(
             '묶음 추가',
-            'verba-deep-bundle-add-action',
+            'verba-bundle-add-action',
             () => addSelectionToBundle(selectionSnapshot),
         ));
     }
@@ -9062,18 +7848,18 @@ function showSelectionButton(snapshot) {
     if (overflowActions.length) {
         const moreButton = document.createElement('button');
         moreButton.type = 'button';
-        moreButton.className = 'menu_button verba-deep-selection-action verba-deep-selection-more-toggle';
+        moreButton.className = 'menu_button verba-selection-action verba-selection-more-toggle';
         moreButton.textContent = '⋯';
         moreButton.title = '다른 기능';
         moreButton.setAttribute('aria-label', '다른 기능 열기');
         moreButton.setAttribute('aria-expanded', 'false');
 
         const moreMenu = document.createElement('div');
-        moreMenu.id = 'verba-deep-selection-more-menu';
-        moreMenu.className = 'verba-deep-selection-more-menu';
+        moreMenu.id = 'verba-selection-more-menu';
+        moreMenu.className = 'verba-selection-more-menu';
         if ('showPopover' in HTMLElement.prototype) moreMenu.setAttribute('popover', 'manual');
         overflowActions.forEach(button => {
-            button.classList.add('verba-deep-selection-more-action');
+            button.classList.add('verba-selection-more-action');
             moreMenu.append(button);
         });
         moreMenu.addEventListener('pointerdown', event => event.preventDefault());
@@ -9090,7 +7876,7 @@ function showSelectionButton(snapshot) {
                 moreButton.setAttribute('aria-expanded', 'false');
                 return;
             }
-            document.querySelector('#verba-deep-selection-more-menu')?.remove();
+            document.querySelector('#verba-selection-more-menu')?.remove();
             moreButton.setAttribute('aria-expanded', 'true');
             moreMenu.style.setProperty('visibility', 'hidden', 'important');
             document.documentElement.append(moreMenu);
@@ -9358,40 +8144,6 @@ function selectionSourceContext(snapshot, contextMode) {
     return rows.slice(first, last + 1).map(row => row.source).join('\n\n');
 }
 
-function selectionResolvedSpeakerScope(snapshot, speakerIdentity = {}) {
-    if (!snapshot || !selectionTouchesDialogue(snapshot.translation, snapshot.start, snapshot.end)) {
-        return 'narration';
-    }
-    const locks = Array.isArray(speakerIdentity.nameLocks) && speakerIdentity.nameLocks.length
-        ? speakerIdentity.nameLocks
-        : normalizedCharacterNameLocks();
-    const segmented = segmentSource(snapshot.source, locks);
-    const localScopes = inferLocalTargetDialogueScopes(segmented, speakerIdentity);
-    const sourceRows = selectionSourceRows(snapshot);
-    const touchedById = new Map(sourceRows.map(row => [
-        String(row.id || ''),
-        String(row.source || '').trim(),
-    ]));
-    let matched = (segmented.segments || []).filter(segment => (
-        segment.type === 'dialogue_candidate'
-        && touchedById.has(String(segment.id || ''))
-        // Old translations may reuse the same seg id for a different row after
-        // segmentation rules change. Trust an id only when its source text also
-        // matches; otherwise fall back to source-text matching below.
-        && touchedById.get(String(segment.id || '')) === String(segment.text || '').trim()
-    ));
-    if (!matched.length) {
-        const sourceTexts = new Set(sourceRows.map(row => String(row.source || '').trim()).filter(Boolean));
-        matched = (segmented.segments || []).filter(segment => (
-            segment.type === 'dialogue_candidate' && sourceTexts.has(String(segment.text || '').trim())
-        ));
-    }
-    const matchedScopes = matched.map(segment => localScopes[segment.id]);
-    if (matchedScopes.length && matchedScopes.every(scope => scope === 'target_dialogue')) return 'target_dialogue';
-    if (matchedScopes.length && matchedScopes.every(scope => scope === 'user_dialogue')) return 'user_dialogue';
-    return 'npc_dialogue';
-}
-
 function bundleStillCurrent(state = multiSelectionState) {
     if (!state) return false;
     const message = liveContext().chat?.[state.messageId];
@@ -9407,7 +8159,7 @@ function bundleStillCurrent(state = multiSelectionState) {
 
 function clearMultiSelection() {
     multiSelectionState = null;
-    const tray = document.querySelector('#verba-deep-multi-selection-tray');
+    const tray = document.querySelector('#verba-multi-selection-tray');
     try {
         tray?.hidePopover?.();
     } catch {
@@ -9453,19 +8205,19 @@ function clearTransientTranslationSelections() {
 }
 
 function renderMultiSelectionTray() {
-    document.querySelector('#verba-deep-multi-selection-tray')?.remove();
+    document.querySelector('#verba-multi-selection-tray')?.remove();
     if (!multiSelectionState?.ranges?.length) return;
     const tray = document.createElement('div');
-    tray.id = 'verba-deep-multi-selection-tray';
-    tray.className = 'verba-deep-multi-selection-tray';
+    tray.id = 'verba-multi-selection-tray';
+    tray.className = 'verba-multi-selection-tray';
     tray.setAttribute('role', 'status');
     if ('showPopover' in HTMLElement.prototype) tray.setAttribute('popover', 'manual');
     tray.innerHTML = `
         <b>묶음 선택 ${multiSelectionState.ranges.length}개</b>
-        <button type="button" class="menu_button verba-deep-bundle-run">한꺼번에 재번역</button>
-        <button type="button" class="menu_button verba-deep-bundle-clear">초기화</button>`;
-    tray.querySelector('.verba-deep-bundle-run').addEventListener('click', retranslateSelectionBundle);
-    tray.querySelector('.verba-deep-bundle-clear').addEventListener('click', () => {
+        <button type="button" class="menu_button verba-bundle-run">한꺼번에 재번역</button>
+        <button type="button" class="menu_button verba-bundle-clear">초기화</button>`;
+    tray.querySelector('.verba-bundle-run').addEventListener('click', retranslateSelectionBundle);
+    tray.querySelector('.verba-bundle-clear').addEventListener('click', () => {
         clearMultiSelection();
         notify('묶음 선택을 비웠어요.', 'info');
     });
@@ -9575,13 +8327,12 @@ async function retranslateSelectionBundle() {
         includeDialogue: bundleHasDialogue,
         includeCharacterDialogue: bundleHasDialogue,
     });
-    const speakerIdentity = await outputSpeakerIdentityForSource(state.source, state.message);
+    const speakerIdentity = outputSpeakerIdentity(state.message);
 
     const selections = state.ranges.map((range, index) => ({
         ...range,
         id: `multi_${String(index).padStart(4, '0')}`,
         sourceContext: selectionSourceContext({ ...state, ...range }, contextMode),
-        speakerScope: selectionResolvedSpeakerScope({ ...state, ...range }, speakerIdentity),
     }));
     const expected = selections.map(row => ({ id: row.id, type: 'multi_selection', text: row.selected, ellipsisSource: selectionEllipsisReference({ ...state, ...row }) }));
     const prompt = buildMultiSelectionPrompt({
@@ -9601,41 +8352,34 @@ async function retranslateSelectionBundle() {
         const result = await requestSegments(prompt, expected, {
             signal: controller.signal,
             stage: 'multi-selection-retranslation',
-            noModelFollowups: singlePassFlavorMode(),
         });
         for (const row of selections) {
             result.set(
                 row.id,
-                repairKoreanParticleAlternatives(repairOutputIdentityNames(result.get(row.id), speakerIdentity)),
+                repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get(row.id), speakerIdentity)),
             );
         }
         const unchangedIds = selections
             .filter(row => sameRetranslationWording(result.get(row.id), row.selected))
             .map(row => row.id);
-        if (!singlePassFlavorMode() && unchangedIds.length) {
+        if (unchangedIds.length) {
             const changedPrompt = `${prompt}\n\nMANDATORY BUNDLE RETRANSLATION CORRECTION
 Your previous response echoed the existing Korean wording for these ids: ${JSON.stringify(unchangedIds)}.
-- Return every required id again in the same JSON schema.
-- For each listed id, the translation MUST differ from selected_korean after Unicode and whitespace normalization.
-- Do not merely change spacing or punctuation.
-- Rephrase wording, syntax, or rhythm while preserving the exact source meaning, referents, tense, intensity, explicitness, and grammatical role.
-- Follow the user's one-time request. Do not return an unchanged selection.`;
+Return all required ids in the same schema. For listed ids, rephrase beyond Unicode/spacing/punctuation changes; retain meaning, referents, tense, force, explicitness and grammar role. Apply the one-time instruction.`;
             const retryResult = await requestSegments(changedPrompt, expected, {
                 signal: controller.signal,
                 stage: 'multi-selection-retranslation-unchanged-retry',
             });
             unchangedIds.forEach(id => result.set(
                 id,
-                repairKoreanParticleAlternatives(repairOutputIdentityNames(retryResult.get(id), speakerIdentity)),
+                repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(retryResult.get(id), speakerIdentity)),
             ));
         }
         const replacements = selections.map(row => {
             const replacement = String(result.get(row.id) || '').trim();
             if (!replacement) throw new Error('묶음 재번역 결과 중 비어 있는 구간이 있습니다.');
             if (sameRetranslationWording(replacement, row.selected)) {
-                throw new Error(singlePassFlavorMode()
-                    ? `AI가 기존 번역과 같은 문장을 반환했습니다. 맛 기능의 빠른 단일 패스에서는 자동 재요청하지 않습니다: ${row.selected.slice(0, 40)}`
-                    : `AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
+                throw new Error(`AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
             }
             const banned = findBannedWords(replacement, settings);
             if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
@@ -9667,7 +8411,7 @@ Your previous response echoed the existing Korean wording for these ids: ${JSON.
         notify(`${replacements.length}개 구간을 한꺼번에 교체했어요.`, 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
-            console.error('[긴르바 실험실] 묶음 재번역 실패', error);
+            console.error('[베르바] 묶음 재번역 실패', error);
             reportError('bundle-retranslation', error, `묶음 재번역 실패: ${errorText(error)}`);
         }
     } finally {
@@ -9706,9 +8450,15 @@ async function lockSelectionName(snapshot) {
         const matchContext = selectionNameMatchContext(snapshot);
         let sourceName = resolveSelectionSourceNameLocally(matchContext);
         if (!sourceName) {
-            const prompt = buildNameMatchPrompt({ ...matchContext, settings });
+            const prompt = buildNameMatchPrompt({
+                ...matchContext,
+                settings,
+            });
             const expected = [{ id: 'seg_0000', type: 'name_match', text: currentName }];
-            const result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'name-match' });
+            const result = await requestSegments(prompt, expected, {
+                signal: controller.signal,
+                stage: 'name-match',
+            });
             sourceName = resolveExactSourceName(matchContext.source, result.get('seg_0000'));
         }
         if (!sourceName) throw new Error('선택한 표기에 대응하는 원문 이름을 정확히 찾지 못했습니다.');
@@ -9755,7 +8505,7 @@ async function lockSelectionName(snapshot) {
         notify(`${sourceName}의 표기를 “${targetName}”로 이 캐릭터에 저장했어요.${historyNotice}`, 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
-            console.error('[긴르바 실험실] 이름 고정 실패', error);
+            console.error('[베르바] 이름 고정 실패', error);
             reportError('name-lock', error, `이름 고정 실패: ${errorText(error)}`);
         }
     } finally {
@@ -9806,13 +8556,12 @@ async function retranslateSelection(snapshot) {
         snapshot.start,
         snapshot.end,
     );
-    const speakerIdentity = await outputSpeakerIdentityForSource(snapshot.source, snapshot.message);
-    const selectionSpeakerScope = selectionResolvedSpeakerScope(snapshot, speakerIdentity);
     warnTranslationPromptConflicts({
         oneTimeInstruction: instruction,
         includeDialogue: selectionHasDialogue,
-        includeCharacterDialogue: selectionSpeakerScope === 'target_dialogue',
+        includeCharacterDialogue: selectionHasDialogue,
     });
+    const speakerIdentity = outputSpeakerIdentity(snapshot.message);
 
     const controller = new AbortController();
     trackSelectionTranslation(controller);
@@ -9830,7 +8579,6 @@ async function retranslateSelection(snapshot) {
         contextMode,
         sourceContext: selectionSourceContext(snapshot, contextMode),
         tuning,
-        speakerScope: selectionSpeakerScope,
     });
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected, ellipsisSource: selectionEllipsisReference(snapshot) }];
     let toast = showProgress(candidateMode
@@ -9839,12 +8587,8 @@ async function retranslateSelection(snapshot) {
     try {
         let replacement = '';
         if (candidateMode) {
-            const received = (await requestSelectionCandidates(prompt, {
-                signal: controller.signal,
-                stage: 'selection-candidates',
-                noModelFollowups: singlePassFlavorMode(),
-            }))
-                .map(candidate => repairSourceEllipses(repairUnexpectedProseBreaks(repairKoreanParticleAlternatives(repairOutputIdentityNames(candidate, speakerIdentity)), expected[0]), expected[0]));
+            const received = (await requestSelectionCandidates(prompt, { signal: controller.signal, stage: 'selection-candidates' }))
+                .map(candidate => repairSourceEllipses(repairUnexpectedProseBreaks(repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(candidate, speakerIdentity)), expected[0]), expected[0]));
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
@@ -9861,13 +8605,9 @@ async function retranslateSelection(snapshot) {
             replacement = await requestSelectionCandidateChoice(candidates, snapshot.selected);
             if (replacement === null) return;
         } else {
-            let result = await requestSegments(prompt, expected, {
-                signal: controller.signal,
-                stage: 'selection-retranslation',
-                noModelFollowups: singlePassFlavorMode(),
-            });
-            replacement = repairKoreanParticleAlternatives(repairOutputIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
-            if (!singlePassFlavorMode() && (!replacement || sameRetranslationWording(replacement, snapshot.selected))) {
+            let result = await requestSegments(prompt, expected, { signal: controller.signal, stage: 'selection-retranslation' });
+            replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
+            if (!replacement || sameRetranslationWording(replacement, snapshot.selected)) {
                 const changedPrompt = `${prompt}\n\nMANDATORY RETRANSLATION CORRECTION
 Your previous replacement was empty or unchanged. Return a genuinely different Korean wording for the selected fragment now.
 - Do not repeat the existing selected fragment verbatim or with whitespace-only changes.
@@ -9878,12 +8618,10 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
                     signal: controller.signal,
                     stage: 'selection-retranslation-unchanged-retry',
                 });
-                replacement = repairKoreanParticleAlternatives(repairOutputIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
+                replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
             }
             if (sameRetranslationWording(replacement, snapshot.selected)) {
-                throw new Error(singlePassFlavorMode()
-                    ? 'AI가 기존 번역과 같은 문장을 반환했습니다. 맛 기능의 빠른 단일 패스에서는 자동 재요청하지 않으므로 요구사항을 더 구체적으로 적어 다시 시도해 주세요.'
-                    : 'AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');
+                throw new Error('AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');
             }
         }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
@@ -9913,7 +8651,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
         notify(candidateMode ? '선택한 후보로 번역을 교체했어요.' : '선택한 부분만 다시 번역했어요.', 'success');
     } catch (error) {
         if (!isAbort(error, controller.signal)) {
-            console.error('[긴르바 실험실] 선택 부분 재번역 실패', error);
+            console.error('[베르바] 선택 부분 재번역 실패', error);
             reportError('selection-retranslation', error, `선택 부분 재번역 실패: ${errorText(error)}`);
         }
     } finally {
@@ -9932,7 +8670,7 @@ function setupSelection() {
     document.addEventListener('mouseup', event => {
         if (event.button !== 0) return;
         if (event.sourceCapabilities?.firesTouchEvents) return;
-        if (event.target?.closest?.('#verba-deep-selection-actions, #verba-deep-selection-more-menu')) return;
+        if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
         const pointerRect = desktopSelectionPlacement(event);
         lastDesktopSelectionPlacement = pointerRect;
         lastDesktopSelectionAt = Date.now();
@@ -9953,7 +8691,7 @@ function setupSelection() {
     }, true);
     if (!hasPointerEvents) {
         document.addEventListener('touchend', event => {
-            if (event.target?.closest?.('#verba-deep-selection-actions, #verba-deep-selection-more-menu')) return;
+            if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
             lastTouchSelectionAt = Date.now();
             const preserved = captureSelectionState();
             scheduleSelectionCapture(TOUCH_SELECTION_QUIET_MS, {
@@ -9963,8 +8701,8 @@ function setupSelection() {
         }, { passive: true });
     }
     document.addEventListener('pointerdown', event => {
-        if (event.target?.closest?.('#verba-deep-selection-actions, #verba-deep-selection-more-menu')) return;
-        if (document.querySelector('#verba-deep-selection-actions, #verba-deep-selection-more-menu')) {
+        if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
+        if (document.querySelector('#verba-selection-actions, #verba-selection-more-menu')) {
             clearTimeout(selectionTimer);
             selectionSnapshot = null;
             hideSelectionButton();
@@ -9993,7 +8731,7 @@ function setupSelection() {
         hideSelectionButton();
     }, { passive: true });
     document.addEventListener('pointerup', event => {
-        if (event.target?.closest?.('#verba-deep-selection-actions, #verba-deep-selection-more-menu')) return;
+        if (event.target?.closest?.('#verba-selection-actions, #verba-selection-more-menu')) return;
         const pointerType = event.pointerType || selectionPointerType;
         const shouldCapture = selectionGestureActive
             || selectionNeedsCapture
@@ -10104,21 +8842,21 @@ function showMessageCopyMenu(messageId) {
         notify('복사할 저장 번역본이 없어요.', 'warning');
         return;
     }
-    if (document.querySelector('#verba-deep-request-overlay')) return;
+    if (document.querySelector('#verba-request-overlay')) return;
     const source = messageSource(message);
     const translation = String(record.translation || '');
     const overlay = document.createElement('div');
-    overlay.id = 'verba-deep-request-overlay';
-    overlay.className = 'verba-deep-overlay';
+    overlay.id = 'verba-request-overlay';
+    overlay.className = 'verba-overlay';
     if ('showPopover' in HTMLElement.prototype) overlay.setAttribute('popover', 'manual');
     overlay.innerHTML = `
-        <section class="verba-deep-modal verba-deep-copy-modal" role="dialog" aria-modal="true">
-            <header class="verba-deep-modal-header">
+        <section class="verba-modal verba-copy-modal" role="dialog" aria-modal="true">
+            <header class="verba-modal-header">
                 <strong>메시지 복사</strong>
-                <button type="button" class="verba-deep-close" aria-label="닫기">✕</button>
+                <button type="button" class="verba-close" aria-label="닫기">✕</button>
             </header>
             <small>복사할 형식을 선택하세요.</small>
-            <div class="verba-deep-copy-options">
+            <div class="verba-copy-options">
                 <button type="button" class="menu_button" data-copy="translation">번역문만</button>
                 <button type="button" class="menu_button" data-copy="source">영어 원문만</button>
                 <button type="button" class="menu_button" data-copy="both">원문 + 번역문</button>
@@ -10132,7 +8870,7 @@ function showMessageCopyMenu(messageId) {
         }
         overlay.remove();
     };
-    overlay.querySelector('.verba-deep-close').addEventListener('click', close);
+    overlay.querySelector('.verba-close').addEventListener('click', close);
     overlay.querySelectorAll('[data-copy]').forEach(button => {
         button.addEventListener('click', async () => {
             const format = button.dataset.copy;
@@ -10207,10 +8945,10 @@ function setupMessageCopyHold() {
         const messageElement = event.target?.closest?.('.mes[mesid]');
         const messageText = event.target?.closest?.('.mes_text');
         const interactive = event.target?.closest?.(
-            'button, a, input, textarea, select, [contenteditable="true"], .mes_buttons, .extraMesButtons, #verba-deep-selection-actions, #verba-deep-selection-more-menu',
+            'button, a, input, textarea, select, [contenteditable="true"], .mes_buttons, .extraMesButtons, #verba-selection-actions, #verba-selection-more-menu',
         );
         const startedOnText = messageText && pointHitsRenderedText(messageText, event.clientX, event.clientY);
-        if (!messageElement || interactive || startedOnText || document.querySelector('#verba-deep-request-overlay')) {
+        if (!messageElement || interactive || startedOnText || document.querySelector('#verba-request-overlay')) {
             cancelMessageCopyHold();
             return;
         }
@@ -10278,9 +9016,9 @@ function refreshTranslationClasses() {
         const message = liveContext().chat?.[id];
         const record = message && currentRecord(message);
         const active = Boolean(record && message.extra?.display_text === record.translation);
-        element.classList.toggle('verba-deep-translation-active', active);
-        element.querySelectorAll('.verba-deep-copy-menu-button').forEach(button => button.remove());
-        if (active && !element.classList.contains('verba-deep-swipe-hold-active')) {
+        element.classList.toggle('verba-translation-active', active);
+        element.querySelectorAll('.verba-copy-menu-button').forEach(button => button.remove());
+        if (active && !element.classList.contains('verba-swipe-hold-active')) {
             const html = element.querySelector('.mes_text')?.innerHTML || '';
             const key = renderedTranslationKey(id, record);
             if (key && html.trim()) {
@@ -10310,22 +9048,22 @@ function selectTranslationProfile(slot, expectedId = null) {
 }
 
 function showTranslationProfileChoice() {
-    const existing = document.querySelector('#verba-deep-profile-choice');
+    const existing = document.querySelector('#verba-profile-choice');
     if (existing) {
         existing.querySelector('button:not(:disabled)')?.focus();
         return;
     }
     const configured = configuredProfiles();
     if (!configured.length) {
-        notify('긴르바 실험실 설정에서 연결 프로필을 먼저 선택해 주세요.', 'warning');
+        notify('베르바 설정에서 연결 프로필을 먼저 선택해 주세요.', 'warning');
         return;
     }
     const current = configuredProfileCycle().slot;
     const menu = document.createElement('div');
-    menu.id = 'verba-deep-profile-choice';
-    menu.className = 'verba-deep-retranslate-target-menu';
+    menu.id = 'verba-profile-choice';
+    menu.className = 'verba-retranslate-target-menu';
     menu.setAttribute('role', 'group');
-    menu.setAttribute('aria-label', '긴르바 실험실 번역 프로필 선택');
+    menu.setAttribute('aria-label', '베르바 번역 프로필 선택');
     let closed = false;
     const close = () => {
         if (closed) return;
@@ -10356,7 +9094,7 @@ function showTranslationProfileChoice() {
         menu.append(option);
     }
     (document.body || document.documentElement).append(menu);
-    positionVerbaDeepChoiceMenu(menu, document.querySelector('#verba-deep-profile-toggle') || document.querySelector('#send_but'));
+    positionVerbaChoiceMenu(menu, document.querySelector('#verba-profile-toggle') || document.querySelector('#send_but'));
     requestAnimationFrame(() => {
         if (closed) return;
         document.addEventListener('pointerdown', onOutside, true);
@@ -10367,13 +9105,13 @@ function showTranslationProfileChoice() {
 
 let verbaProfileSlashCommandRegistered = false;
 
-function registerVerbaDeepProfileSlashCommand() {
+function registerVerbaProfileSlashCommand() {
     if (verbaProfileSlashCommandRegistered) return;
     const { SlashCommandParser, SlashCommand } = liveContext();
     if (!SlashCommandParser?.addCommandObject || !SlashCommand?.fromProps) return;
     try {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-            name: 'verba-deep-profile',
+            name: 'verba-profile',
             callback: () => {
                 try {
                     showTranslationProfileChoice();
@@ -10383,25 +9121,25 @@ function registerVerbaDeepProfileSlashCommand() {
                 return '';
             },
             returns: '빈 문자열. 번역 프로필 선택창을 엽니다.',
-            helpString: '<div>긴르바 실험실의 A·B·C 번역 프로필을 고릅니다. 현재 슬롯은 ✓로 표시되며, 미설정·중복 슬롯은 선택할 수 없습니다. 빠른답장에 <code>/verba-deep-profile</code>만 입력하세요.</div>',
+            helpString: '<div>베르바의 A·B·C 번역 프로필을 고릅니다. 현재 슬롯은 ✓로 표시되며, 미설정·중복 슬롯은 선택할 수 없습니다. 빠른답장에 <code>/verba-profile</code>만 입력하세요.</div>',
         }));
         verbaProfileSlashCommandRegistered = true;
     } catch (error) {
-        console.error('[긴르바 실험실] /verba-deep-profile 등록 실패', error);
+        console.error('[베르바] /verba-profile 등록 실패', error);
     }
 }
 
 function createProfileToggleButton() {
     const button = document.createElement('button');
-    button.id = 'verba-deep-profile-toggle';
+    button.id = 'verba-profile-toggle';
     button.type = 'button';
-    button.className = 'verba-deep-input-icon verba-deep-profile-toggle';
+    button.className = 'verba-input-icon verba-profile-toggle';
     const arrows = document.createElement('span');
-    arrows.className = 'verba-deep-profile-arrows';
+    arrows.className = 'verba-profile-arrows';
     arrows.textContent = '⇄';
     arrows.setAttribute('aria-hidden', 'true');
     const badge = document.createElement('small');
-    badge.className = 'verba-deep-profile-slot';
+    badge.className = 'verba-profile-slot';
     badge.textContent = 'A';
     button.append(arrows, badge);
     button.addEventListener('click', () => {
@@ -10417,15 +9155,15 @@ function createProfileToggleButton() {
 }
 
 function refreshProfileToggleButton() {
-    const button = document.querySelector('#verba-deep-profile-toggle');
+    const button = document.querySelector('#verba-profile-toggle');
     if (!button) return;
     const profiles = configuredProfileCycle();
     const configured = configuredProfiles();
     const canSwitch = configured.length >= 2;
     button.hidden = !canSwitch;
-    button.querySelector('.verba-deep-profile-slot').textContent = profiles.slot;
-    button.classList.toggle('verba-deep-profile-b', profiles.slot === 'B');
-    button.classList.toggle('verba-deep-profile-c', profiles.slot === 'C');
+    button.querySelector('.verba-profile-slot').textContent = profiles.slot;
+    button.classList.toggle('verba-profile-b', profiles.slot === 'B');
+    button.classList.toggle('verba-profile-c', profiles.slot === 'C');
     const currentIndex = configured.findIndex(profile => profile.slot === profiles.slot);
     const nextSlot = canSwitch ? configured[(currentIndex + 1) % configured.length].slot : 'B';
     const title = canSwitch
@@ -10436,7 +9174,7 @@ function refreshProfileToggleButton() {
 }
 
 function refreshRetranslateButton() {
-    const button = document.querySelector('#verba-deep-retranslate-latest');
+    const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
     const target = latestAssistantMessage();
     const activeControllers = activeTranslationControllers();
@@ -10448,14 +9186,14 @@ function refreshRetranslateButton() {
     // Any active output, selection, or input translation makes this one global
     // cancel control. Disable it only during the brief abort cleanup.
     button.disabled = (!target && !busy) || cancelling;
-    button.classList.toggle('verba-deep-busy', busy);
-    button.classList.toggle('verba-deep-cancelling', cancelling);
-    button.classList.toggle('verba-deep-retry-needed', failed && !busy);
+    button.classList.toggle('verba-busy', busy);
+    button.classList.toggle('verba-cancelling', cancelling);
+    button.classList.toggle('verba-retry-needed', failed && !busy);
     const translated = target ? Boolean(currentRecord(target.message)) : false;
     button.title = cancelling
-        ? '긴르바 실험실 번역 취소 중'
+        ? '베르바 번역 취소 중'
         : busy
-            ? '긴르바 실험실 번역 중 · 눌러서 모두 취소'
+            ? '베르바 번역 중 · 눌러서 모두 취소'
             : failed || !translated
                 ? '최근 아웃풋 번역 또는 다시 시도'
                 : '아웃풋 재번역 · 최근/이전 선택';
@@ -10474,23 +9212,23 @@ async function runOutputAction() {
     try {
         await retranslateLatestOutput();
     } catch (error) {
-        console.error('[긴르바 실험실] 아웃풋 버튼 실행 실패', error);
+        console.error('[베르바] 아웃풋 버튼 실행 실패', error);
         reportError('output-action', error, `아웃풋 동작 실패: ${errorText(error)}`);
     } finally {
         if (!busy) outputActionPending = false;
     }
 }
 
-function registerVerbaDeepSlashCommand() {
+function registerVerbaSlashCommand() {
     if (verbaSlashCommandRegistered) return;
     const { SlashCommandParser, SlashCommand } = liveContext();
     if (!SlashCommandParser?.addCommandObject || !SlashCommand?.fromProps) {
-        console.warn('[긴르바 실험실] 슬래시 명령어 API가 없어 /verba-deep을 등록하지 못했습니다.');
+        console.warn('[베르바] 슬래시 명령어 API가 없어 /verba를 등록하지 못했습니다.');
         return;
     }
     try {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-            name: 'verba-deep',
+            name: 'verba',
             callback: () => {
                 // Finish immediately so this same Quick Reply remains usable
                 // to cancel; runOutputAction handles asynchronous errors itself.
@@ -10498,21 +9236,21 @@ function registerVerbaDeepSlashCommand() {
                 return '';
             },
             returns: '빈 문자열. 번역 완료를 기다리지 않고 동작을 시작합니다.',
-            helpString: '<div>동그라미 화살표와 동일: 번역 중이면 모두 취소, 최신 AI 메시지에 번역본이 없으면 번역/재시도, 번역본이 있으면 최근·이전·원문/번역본 선택 팝업을 엽니다. 빠른답장 내용에 <code>/verba-deep</code>만 입력하세요.</div>',
+            helpString: '<div>동그라미 화살표와 동일: 번역 중이면 모두 취소, 최신 AI 메시지에 번역본이 없으면 번역/재시도, 번역본이 있으면 최근·이전·원문/번역본 선택 팝업을 엽니다. 빠른답장 내용에 <code>/verba</code>만 입력하세요.</div>',
         }));
         verbaSlashCommandRegistered = true;
     } catch (error) {
-        console.error('[긴르바 실험실] /verba-deep 등록 실패', error);
+        console.error('[베르바] /verba 등록 실패', error);
     }
 }
 
 function createRetranslateButton() {
     const button = document.createElement('button');
-    button.id = 'verba-deep-retranslate-latest';
+    button.id = 'verba-retranslate-latest';
     button.type = 'button';
-    button.className = 'verba-deep-input-icon';
+    button.className = 'verba-input-icon';
     const glyph = document.createElement('span');
-    glyph.className = 'verba-deep-retranslate-glyph';
+    glyph.className = 'verba-retranslate-glyph';
     glyph.textContent = '↻';
     glyph.setAttribute('aria-hidden', 'true');
     button.append(glyph);
@@ -10525,9 +9263,9 @@ function createRetranslateButton() {
 function injectInputAction() {
     const sendButton = document.querySelector('#send_but');
     if (!sendButton) return;
-    const legacyActions = document.querySelector('#verba-deep-input-actions');
-    const profileButton = document.querySelector('#verba-deep-profile-toggle') || createProfileToggleButton();
-    const button = document.querySelector('#verba-deep-retranslate-latest') || createRetranslateButton();
+    const legacyActions = document.querySelector('#verba-input-actions');
+    const profileButton = document.querySelector('#verba-profile-toggle') || createProfileToggleButton();
+    const button = document.querySelector('#verba-retranslate-latest') || createRetranslateButton();
     const targetParent = sendButton.parentElement;
     if (
         legacyActions
@@ -10581,44 +9319,44 @@ async function testConnection(button) {
 }
 
 function renderNameLockManager() {
-    const content = document.querySelector('#verba-deep-name-lock-manager-content');
+    const content = document.querySelector('#verba-name-lock-manager-content');
     if (!content) return;
 
     const groups = allCharacterNameLockGroups();
     content.innerHTML = `
-        <div class="verba-deep-help">모든 캐릭터 카드에 저장된 긴르바 실험실 이름을 불러옵니다. 일반 단어나 문장은 표시하지 않아요.</div>
-        <div class="verba-deep-name-lock-list">
+        <div class="verba-help">모든 캐릭터 카드에 저장된 베르바 이름을 불러옵니다. 일반 단어나 문장은 표시하지 않아요.</div>
+        <div class="verba-name-lock-list">
             ${groups.length ? groups.map((group, groupIndex) => `
-                <section class="verba-deep-name-lock-group" data-group-index="${groupIndex}">
-                    <header class="verba-deep-name-lock-group-header">
+                <section class="verba-name-lock-group" data-group-index="${groupIndex}">
+                    <header class="verba-name-lock-group-header">
                         <b>${escapeHtml(group.characterName)}</b>
                         <small>카드 ${group.reference.characterId + 1} · ${group.rows.length}개</small>
                     </header>
                     ${group.rows.map((row, rowIndex) => `
-                        <div class="verba-deep-name-lock-row" data-row-index="${rowIndex}">
-                            <div class="verba-deep-name-lock-pair">
+                        <div class="verba-name-lock-row" data-row-index="${rowIndex}">
+                            <div class="verba-name-lock-pair">
                                 <b title="${escapeHtml(row.source)}">${escapeHtml(row.source)}</b>
                                 <span aria-hidden="true">→</span>
-                                <input type="text" class="text_pole verba-deep-name-lock-edit" maxlength="120" value="${escapeHtml(row.target)}" aria-label="${escapeHtml(row.source)}의 고정 표기">
+                                <input type="text" class="text_pole verba-name-lock-edit" maxlength="120" value="${escapeHtml(row.target)}" aria-label="${escapeHtml(row.source)}의 고정 표기">
                             </div>
-                            <div class="verba-deep-name-lock-row-actions">
-                                <button type="button" class="menu_button verba-deep-name-lock-save">저장</button>
-                                <button type="button" class="menu_button verba-deep-name-lock-delete">삭제</button>
+                            <div class="verba-name-lock-row-actions">
+                                <button type="button" class="menu_button verba-name-lock-save">저장</button>
+                                <button type="button" class="menu_button verba-name-lock-delete">삭제</button>
                             </div>
                         </div>`).join('')}
-                </section>`).join('') : '<div class="verba-deep-name-lock-empty">아직 어떤 캐릭터에도 고정한 이름이 없어요.</div>'}
+                </section>`).join('') : '<div class="verba-name-lock-empty">아직 어떤 캐릭터에도 고정한 이름이 없어요.</div>'}
         </div>
-        <div class="verba-deep-help">새 이름은 해당 캐릭터의 번역문에서 이름을 선택한 뒤 ‘이름으로 고정’으로 등록하세요. 현재 열린 캐릭터의 표기를 수정하면 현재 채팅의 기존 저장 번역도 함께 변경되며, 다른 캐릭터의 저장값은 카드에서만 수정됩니다.</div>`;
+        <div class="verba-help">새 이름은 해당 캐릭터의 번역문에서 이름을 선택한 뒤 ‘이름으로 고정’으로 등록하세요. 현재 열린 캐릭터의 표기를 수정하면 현재 채팅의 기존 저장 번역도 함께 변경되며, 다른 캐릭터의 저장값은 카드에서만 수정됩니다.</div>`;
 
-    content.querySelectorAll('.verba-deep-name-lock-group').forEach(groupElement => {
+    content.querySelectorAll('.verba-name-lock-group').forEach(groupElement => {
         const group = groups[Number(groupElement.dataset.groupIndex)];
         if (!group) return;
-        groupElement.querySelectorAll('.verba-deep-name-lock-row').forEach(rowElement => {
+        groupElement.querySelectorAll('.verba-name-lock-row').forEach(rowElement => {
             const row = group.rows[Number(rowElement.dataset.rowIndex)];
             if (!row) return;
-            const input = rowElement.querySelector('.verba-deep-name-lock-edit');
-            const saveButton = rowElement.querySelector('.verba-deep-name-lock-save');
-            const deleteButton = rowElement.querySelector('.verba-deep-name-lock-delete');
+            const input = rowElement.querySelector('.verba-name-lock-edit');
+            const saveButton = rowElement.querySelector('.verba-name-lock-save');
+            const deleteButton = rowElement.querySelector('.verba-name-lock-delete');
 
             const save = async () => {
                 const targetName = String(input.value || '').trim();
@@ -10669,30 +9407,30 @@ function renderNameLockManager() {
 }
 
 
-function generalFlavorSettingsMarkup() {
+function developerFlavorSettingsMarkup() {
     return `
-                    <details id="verba-deep-developer-mad-korean-lab" class="verba-deep-tool-details">
+                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🇰🇷 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-developer-mad-korean-enabled" ${settings.developerMadKoreanOutputEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-mad-korean-enabled" ${settings.developerMadKoreanOutputEnabled ? 'checked' : ''}>
                                 <span>미친 한출의 맛 사용</span>
                             </label>
-                            <div id="verba-deep-developer-mad-korean-controls" class="${settings.developerMadKoreanOutputEnabled ? '' : 'verba-deep-control-disabled'}">
-                                <section class="verba-deep-relationship-section">
-                                    <label for="verba-deep-developer-mad-korean-target-user-register">캐릭터 → USER</label>
-                                    <select id="verba-deep-developer-mad-korean-target-user-register" class="text_pole">
+                            <div id="verba-developer-mad-korean-controls" class="${settings.developerMadKoreanOutputEnabled ? '' : 'verba-control-disabled'}">
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-mad-korean-target-user-register">캐릭터 → USER</label>
+                                    <select id="verba-developer-mad-korean-target-user-register" class="text_pole">
                                         ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
                                 </section>
-                                <section class="verba-deep-relationship-section">
-                                    <label for="verba-deep-developer-mad-korean-user-target-register">USER → 캐릭터</label>
-                                    <select id="verba-deep-developer-mad-korean-user-target-register" class="text_pole">
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-mad-korean-user-target-register">USER → 캐릭터</label>
+                                    <select id="verba-developer-mad-korean-user-target-register" class="text_pole">
                                         ${DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerMadKoreanUserToTargetRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
                                 </section>
                             </div>
-                            <div class="verba-deep-help verba-deep-hongjin-help">
+                            <div class="verba-help verba-hongjin-help">
                                 <span>사실·관계·강도는 유지하고 영문 구조를 버린 뒤, 처음부터 자연스러운 한국어로 씁니다.</span>
                                 <span>두 사람의 말투를 방향별로 고정할 수 있으며 NPC 대사에는 적용하지 않습니다.</span>
                                 <span><b>사용 중에는 김홍진의 맛만 함께 적용되고 나머지 프롬프트는 전송하지 않습니다. 기존 설정값은 유지됩니다.</b></span>
@@ -10700,60 +9438,60 @@ function generalFlavorSettingsMarkup() {
                         </div>
                     </details>
 
-                    <details id="verba-deep-developer-hongjin-lab" class="verba-deep-tool-details">
+                    <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🐯 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-developer-hongjin-enabled" ${settings.developerHongjinFlavorEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-hongjin-enabled" ${settings.developerHongjinFlavorEnabled ? 'checked' : ''}>
                                 <span>김홍진의 맛 사용</span>
                             </label>
 
-                            <div id="verba-deep-developer-hongjin-controls" class="${settings.developerHongjinFlavorEnabled ? '' : 'verba-deep-control-disabled'}">
-                                <div class="verba-deep-help verba-deep-hongjin-help">
+                            <div id="verba-developer-hongjin-controls" class="${settings.developerHongjinFlavorEnabled ? '' : 'verba-control-disabled'}">
+                                <div class="verba-help verba-hongjin-help">
                                     <span><b>고정 성격 프롬프트</b></span>
                                     <span>이 캐릭터는 능글맞고 장난기가 많은 성격이며 츤데레식, 능글맞은, 천박한 말투를 사용한다.</span>
                                     <span>원문의 사실·행동·관계는 유지하면서 TARGET CHARACTER 대사를 이 성격과 말투로 과감하게 재창작합니다.</span>
                                 </div>
 
-                                <label for="verba-deep-developer-hongjin-transcreation">초월 의역 강도</label>
-                                <select id="verba-deep-developer-hongjin-transcreation" class="text_pole">
+                                <label for="verba-developer-hongjin-transcreation">초월 의역 강도</label>
+                                <select id="verba-developer-hongjin-transcreation" class="text_pole">
                                     ${DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTranscreation === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
 
-                                <label for="verba-deep-developer-hongjin-profanity">욕설 농도</label>
-                                <select id="verba-deep-developer-hongjin-profanity" class="text_pole">
+                                <label for="verba-developer-hongjin-profanity">욕설 농도</label>
+                                <select id="verba-developer-hongjin-profanity" class="text_pole">
                                     ${DEVELOPER_HONGJIN_PROFANITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinProfanity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
-                                <div class="verba-deep-help">원문에 욕설이 없어도 캐릭터 말맛을 위해 감탄·강조·짜증·장난 자리에 욕설/비속어를 추가할 수 있습니다. 의미나 공격 대상을 새로 만들지는 않습니다.</div>
+                                <div class="verba-help">원문에 욕설이 없어도 캐릭터 말맛을 위해 감탄·강조·짜증·장난 자리에 욕설/비속어를 추가할 수 있습니다. 의미나 공격 대상을 새로 만들지는 않습니다.</div>
 
-                                <label for="verba-deep-developer-hongjin-teasing">능글거림·약올리기</label>
-                                <select id="verba-deep-developer-hongjin-teasing" class="text_pole">
+                                <label for="verba-developer-hongjin-teasing">능글거림·약올리기</label>
+                                <select id="verba-developer-hongjin-teasing" class="text_pole">
                                     ${DEVELOPER_HONGJIN_TEASING_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinTeasing === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
 
-                                <label for="verba-deep-developer-hongjin-vulgarity">천박한 말맛</label>
-                                <select id="verba-deep-developer-hongjin-vulgarity" class="text_pole">
+                                <label for="verba-developer-hongjin-vulgarity">천박한 말맛</label>
+                                <select id="verba-developer-hongjin-vulgarity" class="text_pole">
                                     ${DEVELOPER_HONGJIN_VULGARITY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinVulgarity === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
 
-                                <label for="verba-deep-developer-hongjin-playfulness">장난기</label>
-                                <select id="verba-deep-developer-hongjin-playfulness" class="text_pole">
+                                <label for="verba-developer-hongjin-playfulness">장난기</label>
+                                <select id="verba-developer-hongjin-playfulness" class="text_pole">
                                     ${DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinPlayfulness === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
 
-                                <label for="verba-deep-developer-hongjin-age-band">연령대</label>
-                                <select id="verba-deep-developer-hongjin-age-band" class="text_pole">
+                                <label for="verba-developer-hongjin-age-band">연령대</label>
+                                <select id="verba-developer-hongjin-age-band" class="text_pole">
                                     ${DEVELOPER_HONGJIN_AGE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinAgeBand === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
-                                <div class="verba-deep-help">대사의 어휘·호흡만 연령대에 맞춥니다. 20대 초반·후반은 무조건 현대적이고 캐주얼하게 말하며, 실제 나이·관계·호칭은 새로 만들지 않습니다.</div>
+                                <div class="verba-help">대사의 어휘·호흡만 연령대에 맞춥니다. 20대 초반·후반은 무조건 현대적이고 캐주얼하게 말하며, 실제 나이·관계·호칭은 새로 만들지 않습니다.</div>
 
-                                <label for="verba-deep-developer-hongjin-oppa-frequency">자기 자신을 ‘오빠’라고 부르는 빈도</label>
-                                <select id="verba-deep-developer-hongjin-oppa-frequency" class="text_pole">
+                                <label for="verba-developer-hongjin-oppa-frequency">자기 자신을 ‘오빠’라고 부르는 빈도</label>
+                                <select id="verba-developer-hongjin-oppa-frequency" class="text_pole">
                                     ${DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerHongjinOppaFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                 </select>
-                                <div class="verba-deep-help">현재 캐릭터가 USER에게 직접 말할 때만 ‘내가’ 대신 ‘오빠가’처럼 자신을 지칭합니다. NPC·타인과의 대사에는 사용하지 않습니다.</div>
+                                <div class="verba-help">현재 캐릭터가 USER에게 직접 말할 때만 ‘내가’ 대신 ‘오빠가’처럼 자신을 지칭합니다. NPC·타인과의 대사에는 사용하지 않습니다.</div>
 
-                                <div class="verba-deep-help verba-deep-hongjin-help">
+                                <div class="verba-help verba-hongjin-help">
                                     <span>E→K 아웃풋의 TARGET CHARACTER 직접 대사에만 적용합니다.</span>
                                     <span>서술·USER/NPC 대사·K→E 인풋에는 적용하지 않습니다.</span>
                                     <span>욕설/비속어/비꼼/장난은 추가할 수 있지만 새로운 사건·행동·관계·성적 의미·동의 변화·새로운 협박/비난 대상을 만들지는 않습니다.</span>
@@ -10766,16 +9504,16 @@ function generalFlavorSettingsMarkup() {
 
 function generalSplitSettingsMarkup() {
     return `
-                    <details id="verba-deep-developer-output-split-lab" class="verba-deep-tool-details">
+<details id="verba-developer-output-split-lab" class="verba-tool-details">
                         <summary>분할 번역 <small>출력·전체 재번역</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label for="verba-deep-developer-output-split-count">동시 번역 분할 수</label>
-                            <select id="verba-deep-developer-output-split-count" class="text_pole">
+                        <div class="verba-tool-details-content">
+                            <label for="verba-developer-output-split-count">동시 번역 분할 수</label>
+                            <select id="verba-developer-output-split-count" class="text_pole">
                                 ${[1, 2, 3].map(count => `<option value="${count}" ${Number(settings.developerOutputSplitCount) === count ? 'selected' : ''}>${count === 1 ? '분할 안 함' : `${count}분할`}</option>`).join('')}
                             </select>
-                            <div class="verba-deep-help">최소 프롬프트와 독립 설정입니다. 한출·홍진 등 현재 적용 중인 지침을 유지하며 원문을 나눠 동시에 번역합니다. 최소 프롬프트를 켜면 그 모드의 지침을 사용합니다.</div>
-                            <div class="verba-deep-help">구간 수가 적으면 더 적게 나눕니다. 서버에 따라 3분할이 더 느릴 수 있고, 묶음 사이의 말투·용어가 달라질 수 있습니다. 화자별 분리·복구·검수 요청은 추가될 수 있습니다.</div>
-                            <div class="verba-deep-help">인풋·선택 재번역은 제외합니다. 개발자 모드와 관계없이 선택한 분할 수를 적용합니다.</div>
+                            <div class="verba-help">최소 프롬프트와 독립 설정입니다. 한출·홍진 등 현재 적용 중인 지침을 유지하며 원문을 나눠 동시에 번역합니다. 최소 프롬프트를 켜면 그 모드의 지침을 사용합니다.</div>
+                            <div class="verba-help">구간 수가 적으면 더 적게 나눕니다. 서버에 따라 3분할이 더 느릴 수 있고, 묶음 사이의 말투·용어가 달라질 수 있습니다. 화자별 분리·복구·검수 요청은 추가될 수 있습니다.</div>
+                            <div class="verba-help">인풋·선택 재번역은 제외합니다. 개발자 모드와 관계없이 선택한 분할 수를 적용합니다.</div>
                         </div>
                     </details>
 
@@ -10784,69 +9522,71 @@ function generalSplitSettingsMarkup() {
 
 function generalRelationshipSettingsMarkup() {
     return `
-                    <details id="verba-deep-developer-relationship-lab" class="verba-deep-tool-details">
+<details id="verba-developer-relationship-lab" class="verba-tool-details">
                         <summary>말투·호칭 설정 <small>상대별 말투</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-developer-relationship-enabled" ${settings.developerRelationshipExperimentEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-relationship-enabled" ${settings.developerRelationshipExperimentEnabled ? 'checked' : ''}>
                                 <span>말투·호칭 설정 사용</span>
                             </label>
-                            <div id="verba-deep-developer-relationship-controls" class="${settings.developerRelationshipExperimentEnabled ? '' : 'verba-deep-control-disabled'}">
-                                <section class="verba-deep-relationship-section">
-                                    <label for="verba-deep-developer-speech-distance">캐릭터 → USER 말투 거리감</label>
-                                    <select id="verba-deep-developer-speech-distance" class="text_pole">
+                            <div id="verba-developer-relationship-controls" class="${settings.developerRelationshipExperimentEnabled ? '' : 'verba-control-disabled'}">
+                                <section class="verba-relationship-section">
+                                    <label for="verba-developer-speech-distance">캐릭터 → USER 말투 거리감</label>
+                                    <select id="verba-developer-speech-distance" class="text_pole">
                                         ${DEVELOPER_SPEECH_DISTANCE_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerSpeechDistance === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
-                                    <div class="verba-deep-help verba-deep-relationship-help">
+                                    <div class="verba-help verba-relationship-help">
                                         <span>현재 캐릭터의 직접 대사에만 적용합니다.</span>
                                         <span>한국어의 전반적인 말투 거리감을 원문 우선 / 격식적 / 공손한 편 / 편안한 편 / 매우 편안함 중에서 조절합니다.</span>
                                     </div>
                                 </section>
 
-                                <section class="verba-deep-relationship-section">
-                                    <div class="verba-deep-relationship-section-title">청자별 말투 분리</div>
+                                <section class="verba-relationship-section">
+                                    <div class="verba-relationship-section-title">청자별 말투 분리</div>
 
-                                    <label for="verba-deep-developer-target-user-register">USER에게</label>
-                                    <select id="verba-deep-developer-target-user-register" class="text_pole">
+                                    <label for="verba-developer-target-user-register">USER에게</label>
+                                    <select id="verba-developer-target-user-register" class="text_pole">
                                         ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
 
-                                    <label for="verba-deep-developer-target-other-register">타인에게</label>
-                                    <select id="verba-deep-developer-target-other-register" class="text_pole">
+                                    <label for="verba-developer-target-other-register">타인에게</label>
+                                    <select id="verba-developer-target-other-register" class="text_pole">
                                         ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToOtherRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
 
-                                    <div class="verba-deep-help verba-deep-relationship-help">
+                                    <div class="verba-help verba-relationship-help">
                                         <span>미설정이면 기존 말투 거리감과 프롬프트를 따릅니다.</span>
                                         <span>반말·존댓말은 캐릭터가 그 청자에게 말하는 것이 확실할 때만 적용합니다.</span>
                                         <span>청자가 애매하면 추측하지 않습니다.</span>
                                     </div>
                                 </section>
 
-                                <section class="verba-deep-relationship-section">
-                                    <div class="verba-deep-relationship-section-title">캐릭터 → USER 호칭</div>
 
-                                    <label for="verba-deep-developer-target-user-address">호칭 고정</label>
-                                    <input id="verba-deep-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
 
-                                    <label for="verba-deep-developer-target-user-address-strength">호칭 고정 강도</label>
-                                    <select id="verba-deep-developer-target-user-address-strength" class="text_pole">
+                                <section class="verba-relationship-section">
+                                    <div class="verba-relationship-section-title">캐릭터 → USER 호칭</div>
+
+                                    <label for="verba-developer-target-user-address">호칭 고정</label>
+                                    <input id="verba-developer-target-user-address" class="text_pole" type="text" maxlength="40" value="${escapeHtml(settings.developerTargetToUserAddress)}" placeholder="예: 누나 / 선배님 / 이름">
+
+                                    <label for="verba-developer-target-user-address-strength">호칭 고정 강도</label>
+                                    <select id="verba-developer-target-user-address-strength" class="text_pole">
                                         ${DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressStrength === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
 
-                                    <div class="verba-deep-help verba-deep-relationship-help">
+                                    <div class="verba-help verba-relationship-help">
                                         <span><b>자연스럽게</b> · 장면 분위기와 한국어 자연스러움을 가장 우선합니다.</span>
                                         <span><b>우선 적용</b> · USER를 명확히 부르는 자리에서는 설정 호칭을 우선합니다.</span>
                                         <span><b>강하게 고정</b> · 명시적 호칭이 필요한 자리에서 설정 호칭 외의 당신/그쪽/너/다른 관계 호칭으로 바꾸지 않습니다.</span>
                                         <span>세 단계 모두 자연스러운 생략과 원문의 애칭·명시 호칭은 허용합니다.</span>
                                     </div>
 
-                                    <label for="verba-deep-developer-target-user-address-frequency">호칭 사용 빈도</label>
-                                    <select id="verba-deep-developer-target-user-address-frequency" class="text_pole">
+                                    <label for="verba-developer-target-user-address-frequency">호칭 사용 빈도</label>
+                                    <select id="verba-developer-target-user-address-frequency" class="text_pole">
                                         ${DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserAddressFrequency === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
 
-                                    <div class="verba-deep-help verba-deep-relationship-help">
+                                    <div class="verba-help verba-relationship-help">
                                         <span><b>최소</b> · 정말 필요한 직접 호명 자리 위주로 사용합니다.</span>
                                         <span><b>자연스럽게</b> · 한국어에서 자연스러운 빈도로 사용합니다.</span>
                                         <span><b>자주</b> · 어색하지 않은 직접 호명 자리에서 설정 호칭을 더 적극적으로 사용합니다.</span>
@@ -10854,13 +9594,13 @@ function generalRelationshipSettingsMarkup() {
                                     </div>
                                 </section>
 
-                                <section class="verba-deep-relationship-section verba-deep-relationship-notes">
-                                    <div class="verba-deep-help verba-deep-relationship-help">
+                                <section class="verba-relationship-section verba-relationship-notes">
+                                    <div class="verba-help verba-relationship-help">
                                         <span>호칭을 비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다.</span>
                                         <span>입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고합니다.</span>
                                         <span>원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</span>
-                                        <span>현재 테스트 단계라 E→K 아웃풋의 TARGET CHARACTER 대사에만 적용합니다.</span>
-                                        <span>USER/NPC 대사와 K→E 인풋에는 아직 적용하지 않습니다.</span>
+                                        <span>E→K 아웃풋의 현재 캐릭터 직접 대사에만 적용합니다.</span>
+                                        <span>USER/NPC 대사와 K→E 인풋에는 적용하지 않습니다.</span>
                                     </div>
                                 </section>
                             </div>
@@ -10870,144 +9610,139 @@ function generalRelationshipSettingsMarkup() {
 
 function developerSettingsMarkup() {
     return `
-        <details id="verba-deep-developer-settings" class="verba-deep-tool-details verba-deep-developer-settings" open>
+        <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings" open>
             <summary>개발자 모드 <small>${settings.developerMode ? '품질 검수 실험실' : '번호 입력'}</small></summary>
-            <div class="verba-deep-tool-details-content">
+            <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
-                    <div class="verba-deep-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
-                    <details id="verba-deep-developer-minimal-prompt-lab" class="verba-deep-tool-details verba-deep-developer-lab">
+                    <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+                    ${developerFlavorSettingsMarkup()}
+                    
+                    <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🧪 최소 프롬프트 실험 <small>출력·전체 재번역</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
                                 <span>최소 프롬프트 사용</span>
                             </label>
-                            <label for="verba-deep-developer-minimal-prompt">실험용 번역 지침</label>
-                            <textarea id="verba-deep-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
-                            <div class="verba-deep-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
-                            <div class="verba-deep-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
-                            <div class="verba-deep-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>
+                            <label for="verba-developer-minimal-prompt">실험용 번역 지침</label>
+                            <textarea id="verba-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
+                            <div class="verba-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
+                            <div class="verba-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
+                            <div class="verba-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>
                         </div>
                     </details>
                     ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
 
-                    <details id="verba-deep-developer-compressed-prompt-lab" class="verba-deep-tool-details verba-deep-developer-lab">
+                    <details id="verba-developer-compressed-prompt-lab" class="verba-tool-details verba-developer-lab">
                         <summary>❌️개발자 테스트용 사용 금지❌️ <small>프롬프트 압축 실험</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-developer-compressed-prompt-enabled" ${settings.developerCompressedPromptEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-compressed-prompt-enabled" ${settings.developerCompressedPromptEnabled ? 'checked' : ''}>
                                 <span>압축 프롬프트 사용</span>
                             </label>
-                            <div class="verba-deep-help">긴르바 실험실 내부의 반복 지침만 짧게 합칩니다. 직접 작성한 프롬프트는 줄이지 않으며 번역 품질이 달라질 수 있는 테스트 기능입니다.</div>
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-developer-extreme-compressed-prompt-enabled" ${settings.developerExtremeCompressedPromptEnabled ? 'checked' : ''}>
+                            <div class="verba-help">베르바 내부의 반복 지침만 짧게 합칩니다. 직접 작성한 프롬프트는 줄이지 않으며 번역 품질이 달라질 수 있는 테스트 기능입니다.</div>
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-extreme-compressed-prompt-enabled" ${settings.developerExtremeCompressedPromptEnabled ? 'checked' : ''}>
                                 <span>xxx미친압축xxx</span>
                             </label>
-                            <div class="verba-deep-help">한출·김홍진과 일반 출력·입력·재번역·복구·검수의 긴르바 실험실 내부 지침을 극단적으로 줄입니다. 직접 작성한 지침 내용은 보존하며 결과 품질이 달라질 수 있습니다.</div>
+                            <div class="verba-help">한출·김홍진과 일반 출력·입력·재번역·복구·검수의 베르바 내부 지침을 극단적으로 줄입니다. 직접 작성한 지침 내용은 보존하며 결과 품질이 달라질 수 있습니다.</div>
                         </div>
                     </details>
 
-                    <details id="verba-deep-developer-lab" class="verba-deep-tool-details verba-deep-developer-lab">
+                    <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
                                 <span>품질 검수 사용</span>
                             </label>
-                            <div class="verba-deep-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
+                            <div class="verba-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
 
-                            <div id="verba-deep-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-deep-control-disabled'}">
-                                <label class="verba-deep-check-row"><input type="checkbox" id="verba-deep-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}><span>의미 보존 검사</span></label>
-                                <label class="verba-deep-check-row"><input type="checkbox" id="verba-deep-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}><span>대명사·지칭 대상 검사</span></label>
-                                <label class="verba-deep-check-row"><input type="checkbox" id="verba-deep-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}><span>캐릭터 말투 유지 검사</span></label>
-                                <label class="verba-deep-check-row"><input type="checkbox" id="verba-deep-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}><span>번역투 검사</span></label>
-                                <label class="verba-deep-check-row"><input type="checkbox" id="verba-deep-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}><span>문맥 모순 검사</span></label>
+                            <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}><span>의미 보존 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}><span>대명사·지칭 대상 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}><span>캐릭터 말투 유지 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}><span>번역투 검사</span></label>
+                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}><span>문맥 모순 검사</span></label>
                             </div>
 
-                            <div class="verba-deep-quality-audit-status-row">
+                            <div class="verba-quality-audit-status-row">
                                 <span>최근 검수</span>
-                                <b id="verba-deep-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
+                                <b id="verba-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
                             </div>
-                            <div class="verba-deep-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
+                            <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
                         </div>
                     </details>
 
-
-
-
-
-
-
-
-                    <button type="button" id="verba-deep-developer-mode-off" class="menu_button verba-deep-wide">개발자 모드 끄기</button>
+                    <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
                 ` : `
-                    <label for="verba-deep-developer-code">개발자 번호</label>
-                    <div class="verba-deep-developer-code-row">
-                        <input id="verba-deep-developer-code" class="text_pole" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="번호 입력">
-                        <button type="button" id="verba-deep-developer-mode-on" class="menu_button">활성화</button>
+                    <label for="verba-developer-code">개발자 번호</label>
+                    <div class="verba-developer-code-row">
+                        <input id="verba-developer-code" class="text_pole" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="번호 입력">
+                        <button type="button" id="verba-developer-mode-on" class="menu_button">활성화</button>
                     </div>
-                    <div class="verba-deep-help">개발자 번호를 입력한 뒤 활성화를 눌러 주세요. 배포본의 개발자 번호가 바뀌면 이전 활성화 상태는 자동으로 잠깁니다.</div>
+                    <div class="verba-help">개발자 번호를 입력한 뒤 활성화를 눌러 주세요. 배포본의 개발자 번호가 바뀌면 이전 활성화 상태는 자동으로 잠깁니다.</div>
                 `}
             </div>
         </details>`;
 }
 
-function syncDeveloperQualityControls(root = document.querySelector('#verba-deep-settings')) {
-    const qualityMaster = root?.querySelector('#verba-deep-quality-audit-enabled');
-    const qualityControls = root?.querySelector('#verba-deep-quality-audit-controls');
+function syncDeveloperQualityControls(root = document.querySelector('#verba-settings')) {
+    const qualityMaster = root?.querySelector('#verba-quality-audit-enabled');
+    const qualityControls = root?.querySelector('#verba-quality-audit-controls');
     if (qualityControls) {
         const enabled = Boolean(qualityMaster?.checked);
-        qualityControls.classList.toggle('verba-deep-control-disabled', !enabled);
+        qualityControls.classList.toggle('verba-control-disabled', !enabled);
         qualityControls.querySelectorAll('input').forEach(input => {
             input.disabled = !enabled;
         });
     }
 
-    const madKoreanMaster = root?.querySelector('#verba-deep-developer-mad-korean-enabled');
-    const madKoreanControls = root?.querySelector('#verba-deep-developer-mad-korean-controls');
+    const madKoreanMaster = root?.querySelector('#verba-developer-mad-korean-enabled');
+    const madKoreanControls = root?.querySelector('#verba-developer-mad-korean-controls');
     if (madKoreanControls) {
         const madKoreanEnabled = Boolean(madKoreanMaster?.checked);
-        madKoreanControls.classList.toggle('verba-deep-control-disabled', !madKoreanEnabled);
+        madKoreanControls.classList.toggle('verba-control-disabled', !madKoreanEnabled);
         madKoreanControls.querySelectorAll('select').forEach(control => {
             control.disabled = !madKoreanEnabled;
         });
     }
 
-    const flavorMaster = root?.querySelector('#verba-deep-korean-flavor-enabled');
-    const flavorControls = root?.querySelector('#verba-deep-korean-flavor-controls');
+    const flavorMaster = root?.querySelector('#verba-korean-flavor-enabled');
+    const flavorControls = root?.querySelector('#verba-korean-flavor-controls');
     if (flavorControls) {
         const flavorEnabled = Boolean(flavorMaster?.checked);
-        flavorControls.classList.toggle('verba-deep-control-disabled', !flavorEnabled);
+        flavorControls.classList.toggle('verba-control-disabled', !flavorEnabled);
         flavorControls.querySelectorAll('input, select').forEach(control => {
             control.disabled = !flavorEnabled;
         });
     }
 
-    const relationshipMaster = root?.querySelector('#verba-deep-developer-relationship-enabled');
-    const relationshipControls = root?.querySelector('#verba-deep-developer-relationship-controls');
+    const relationshipMaster = root?.querySelector('#verba-developer-relationship-enabled');
+    const relationshipControls = root?.querySelector('#verba-developer-relationship-controls');
     if (relationshipControls) {
         const relationshipEnabled = Boolean(relationshipMaster?.checked);
-        relationshipControls.classList.toggle('verba-deep-control-disabled', !relationshipEnabled);
+        relationshipControls.classList.toggle('verba-control-disabled', !relationshipEnabled);
         relationshipControls.querySelectorAll('input, select').forEach(control => {
             control.disabled = !relationshipEnabled;
         });
     }
 
-    const hongjinMaster = root?.querySelector('#verba-deep-developer-hongjin-enabled');
-    const hongjinControls = root?.querySelector('#verba-deep-developer-hongjin-controls');
+    const hongjinMaster = root?.querySelector('#verba-developer-hongjin-enabled');
+    const hongjinControls = root?.querySelector('#verba-developer-hongjin-controls');
     if (hongjinControls) {
         const hongjinEnabled = Boolean(hongjinMaster?.checked);
-        hongjinControls.classList.toggle('verba-deep-control-disabled', !hongjinEnabled);
+        hongjinControls.classList.toggle('verba-control-disabled', !hongjinEnabled);
         hongjinControls.querySelectorAll('input, select').forEach(control => {
             control.disabled = !hongjinEnabled;
         });
     }
 
-    const englishFlavorMaster = root?.querySelector('#verba-deep-english-flavor-enabled');
-    const englishFlavorControls = root?.querySelector('#verba-deep-english-flavor-controls');
+    const englishFlavorMaster = root?.querySelector('#verba-english-flavor-enabled');
+    const englishFlavorControls = root?.querySelector('#verba-english-flavor-controls');
     if (englishFlavorControls) {
         const englishFlavorEnabled = Boolean(englishFlavorMaster?.checked);
-        englishFlavorControls.classList.toggle('verba-deep-control-disabled', !englishFlavorEnabled);
+        englishFlavorControls.classList.toggle('verba-control-disabled', !englishFlavorEnabled);
         englishFlavorControls.querySelectorAll('input, select').forEach(control => {
             control.disabled = !englishFlavorEnabled;
         });
@@ -11015,8 +9750,8 @@ function syncDeveloperQualityControls(root = document.querySelector('#verba-deep
 }
 
 function refreshSettingsPanelForDeveloperMode() {
-    const panel = document.querySelector('#verba-deep-settings');
-    const current = panel?.querySelector('#verba-deep-developer-settings');
+    const panel = document.querySelector('#verba-settings');
+    const current = panel?.querySelector('#verba-developer-settings');
     if (!panel || !current) return;
 
     const holder = document.createElement('div');
@@ -11040,13 +9775,13 @@ function enabledQualityAuditChecks() {
 }
 
 function renderQualityAuditStatus() {
-    const target = document.querySelector('#verba-deep-quality-audit-status');
+    const target = document.querySelector('#verba-quality-audit-status');
     if (target) target.textContent = lastQualityAuditSummary;
 }
 
 function bindAutoInputSetting(panel) {
-    const input = panel.querySelector('#verba-deep-auto-input');
-    const status = panel.querySelector('#verba-deep-auto-input-status');
+    const input = panel.querySelector('#verba-auto-input');
+    const status = panel.querySelector('#verba-auto-input-status');
     if (!input) return;
     const sync = () => {
         input.checked = Boolean(settings.autoInput);
@@ -11061,7 +9796,7 @@ function bindAutoInputSetting(panel) {
 }
 
 function injectSettingsPanel() {
-    const existingPanels = [...document.querySelectorAll('#verba-deep-settings, .verba-deep-settings')];
+    const existingPanels = [...document.querySelectorAll('#verba-settings, .verba-settings')];
     if (existingPanels.length) {
         const keep = existingPanels[0];
         existingPanels.slice(1).forEach(panel => panel.remove());
@@ -11071,131 +9806,131 @@ function injectSettingsPanel() {
     const host = document.querySelector('#extensions_settings');
     if (!host) return;
     const panel = document.createElement('div');
-    panel.id = 'verba-deep-settings';
-    panel.className = 'extension_container verba-deep-settings';
+    panel.id = 'verba-settings';
+    panel.className = 'extension_container verba-settings';
     panel.innerHTML = `
         <div class="inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header verba-deep-drawer-header">
-                <div><b>긴르바 실험실</b></div>
+            <div class="inline-drawer-toggle inline-drawer-header verba-drawer-header">
+                <div><b>베르바</b></div>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content" style="display: none;">
-                <div class="verba-deep-note">AI 아웃풋은 항상 한국어로 자동 번역하며, 한국어 중심 출력은 API를 호출하지 않아요.</div>
+                <div class="verba-note">AI 아웃풋은 항상 한국어로 자동 번역하며, 한국어 중심 출력은 API를 호출하지 않아요.</div>
 
-                <label for="verba-deep-profile">연결 프로필 A</label>
-                <div class="verba-deep-profile-row">
-                    <select id="verba-deep-profile" class="text_pole"></select>
-                    <button type="button" id="verba-deep-refresh-profiles" class="menu_button">새로고침</button>
+                <label for="verba-profile">연결 프로필 A</label>
+                <div class="verba-profile-row">
+                    <select id="verba-profile" class="text_pole"></select>
+                    <button type="button" id="verba-refresh-profiles" class="menu_button">새로고침</button>
                 </div>
 
-                <label for="verba-deep-fallback-profile">연결 프로필 B <small>(선택)</small></label>
-                <select id="verba-deep-fallback-profile" class="text_pole"></select>
+                <label for="verba-fallback-profile">연결 프로필 B <small>(선택)</small></label>
+                <select id="verba-fallback-profile" class="text_pole"></select>
 
-                <label for="verba-deep-third-profile">연결 프로필 C <small>(선택)</small></label>
-                <select id="verba-deep-third-profile" class="text_pole"></select>
-                <button type="button" id="verba-deep-test-profile" class="menu_button verba-deep-wide">현재 프로필 연결 테스트</button>
-                <div class="verba-deep-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 직접 바꿀 수 있어요.</div>
+                <label for="verba-third-profile">연결 프로필 C <small>(선택)</small></label>
+                <select id="verba-third-profile" class="text_pole"></select>
+                <button type="button" id="verba-test-profile" class="menu_button verba-wide">현재 프로필 연결 테스트</button>
+                <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 직접 바꿀 수 있어요.</div>
 
-                <label class="verba-deep-check-row">
-                    <input type="checkbox" id="verba-deep-auto-profile-fallback" ${settings.autoProfileFallback !== false ? 'checked' : ''}>
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-auto-profile-fallback" ${settings.autoProfileFallback !== false ? 'checked' : ''}>
                     <span>번역 실패 시 다른 프로필 자동 사용</span>
                 </label>
-                <div class="verba-deep-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
+                <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
 
-                <label class="verba-deep-check-row" for="verba-deep-auto-input">
-                    <input type="checkbox" id="verba-deep-auto-input" ${settings.autoInput ? 'checked' : ''}>
+                <label class="verba-check-row" for="verba-auto-input">
+                    <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
                     <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
-                    <small id="verba-deep-auto-input-status" aria-live="polite">${settings.autoInput ? 'ON' : 'OFF'}</small>
+                    <small id="verba-auto-input-status" aria-live="polite">${settings.autoInput ? 'ON' : 'OFF'}</small>
                 </label>
-                <div class="verba-deep-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
+                <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
 
-                <details id="verba-deep-profile-stats" class="verba-deep-tool-details">
+                <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <div id="verba-deep-profile-stats-content" class="verba-deep-profile-stats-content"></div>
-                        <div class="verba-deep-help">평균은 아웃풋 번역 시작부터 화면 적용 또는 실패 종료까지의 전체 시간이며, 나머지는 프로필 내부 요청 기록이에요. 성능 기록은 브라우저 로컬 저장소에만 저장하며 번역할 때 SillyTavern 전체 설정 저장을 호출하지 않습니다.</div>
-                        <button type="button" id="verba-deep-reset-profile-stats" class="menu_button verba-deep-wide">성능 기록 초기화</button>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-profile-stats-content" class="verba-profile-stats-content"></div>
+                        <div class="verba-help">평균은 아웃풋 번역 시작부터 화면 적용 또는 실패 종료까지의 전체 시간이며, 나머지는 프로필 내부 요청 기록이에요. 성능 기록은 브라우저 로컬 저장소에만 저장하며 번역할 때 SillyTavern 전체 설정 저장을 호출하지 않습니다.</div>
+                        <button type="button" id="verba-reset-profile-stats" class="menu_button verba-wide">성능 기록 초기화</button>
                     </div>
                 </details>
 
-                <details id="verba-deep-name-lock-manager" class="verba-deep-name-lock-manager">
+                <details id="verba-name-lock-manager" class="verba-name-lock-manager">
                     <summary>이름 고정 관리 <small>캐릭터별 저장</small></summary>
-                    <div id="verba-deep-name-lock-manager-content" class="verba-deep-name-lock-manager-content"></div>
+                    <div id="verba-name-lock-manager-content" class="verba-name-lock-manager-content"></div>
                 </details>
 
-                <label class="verba-deep-check-row">
-                    <input type="checkbox" id="verba-deep-selection-candidates" ${settings.selectionCandidates ? 'checked' : ''}>
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-selection-candidates" ${settings.selectionCandidates ? 'checked' : ''}>
                     <span>선택 재번역 후보 3개 미리보기</span>
                 </label>
-                <div class="verba-deep-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
+                <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
 
 
-                <details id="verba-deep-selection-menu-settings" class="verba-deep-tool-details">
+                <details id="verba-selection-menu-settings" class="verba-tool-details">
                     <summary>드래그 메뉴 구성 <small>버튼 수·기능 선택</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <label for="verba-deep-selection-quick-count">바로 표시할 버튼 수</label>
-                        <select id="verba-deep-selection-quick-count" class="text_pole">
+                    <div class="verba-tool-details-content">
+                        <label for="verba-selection-quick-count">바로 표시할 버튼 수</label>
+                        <select id="verba-selection-quick-count" class="text_pole">
                             ${[2, 3, 4, 5].map(count => `
                                 <option value="${count}" ${settings.selectionQuickCount === count ? 'selected' : ''}>${count}개</option>
                             `).join('')}
                         </select>
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-show-selection-name" ${settings.showSelectionName !== false ? 'checked' : ''}>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-name" ${settings.showSelectionName !== false ? 'checked' : ''}>
                             <span>이름으로 고정 메뉴에 포함</span>
                         </label>
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-show-selection-source" ${settings.showSelectionSource !== false ? 'checked' : ''}>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-source" ${settings.showSelectionSource !== false ? 'checked' : ''}>
                             <span>원문 보기 메뉴에 포함</span>
                         </label>
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-show-selection-lock" ${settings.showSelectionLock !== false ? 'checked' : ''}>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-lock" ${settings.showSelectionLock !== false ? 'checked' : ''}>
                             <span>구간 잠금 메뉴에 포함</span>
                         </label>
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-show-selection-bundle" ${settings.showSelectionBundle !== false ? 'checked' : ''}>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-show-selection-bundle" ${settings.showSelectionBundle !== false ? 'checked' : ''}>
                             <span>묶음 추가 메뉴에 포함</span>
                         </label>
-                        <div class="verba-deep-help">선택 부분 재번역을 포함해 지정한 개수까지만 바로 표시하고, 남은 기능은 ⋯을 누르면 세로로 열려요. 5개를 선택하면 모두 한 줄에 표시할 수 있습니다.</div>
+                        <div class="verba-help">선택 부분 재번역을 포함해 지정한 개수까지만 바로 표시하고, 남은 기능은 ⋯을 누르면 세로로 열려요. 5개를 선택하면 모두 한 줄에 표시할 수 있습니다.</div>
                     </div>
                 </details>
 
 
 
-                <details id="verba-deep-current-rules" class="verba-deep-tool-details verba-deep-current-rules">
+                <details id="verba-current-rules" class="verba-tool-details verba-current-rules">
                     <summary>현재 적용 규칙 <small>API 호출 없음</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <div id="verba-deep-current-rules-content"></div>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-current-rules-content"></div>
                     </div>
                 </details>
 
-                <details id="verba-deep-prompt-presets" class="verba-deep-tool-details verba-deep-prompt-presets">
-                    <summary>프롬프트 프리셋 <small id="verba-deep-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <div class="verba-deep-help">프리셋을 선택하면 즉시 적용됩니다. 선택된 프리셋이 있는 상태에서 ‘저장’을 누르면 현재 값으로 덮어쓰고, 선택된 프리셋이 없으면 새 프리셋으로 저장합니다.</div>
+                <details id="verba-prompt-presets" class="verba-tool-details verba-prompt-presets">
+                    <summary>프롬프트 프리셋 <small id="verba-prompt-preset-count">${normalizedPromptPresets().length}개 저장</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div class="verba-help">프리셋을 선택하면 즉시 적용됩니다. 선택된 프리셋이 있는 상태에서 ‘저장’을 누르면 현재 값으로 덮어쓰고, 선택된 프리셋이 없으면 새 프리셋으로 저장합니다.</div>
 
-                        <select id="verba-deep-prompt-preset-select" class="text_pole">
+                        <select id="verba-prompt-preset-select" class="text_pole">
                             ${promptPresetSelectMarkup()}
                         </select>
 
-                        <label for="verba-deep-prompt-preset-name">프리셋 이름</label>
-                        <input id="verba-deep-prompt-preset-name" class="text_pole" type="text" maxlength="60" autocomplete="off" placeholder="예: 한국캐 기본 말투">
+                        <label for="verba-prompt-preset-name">프리셋 이름</label>
+                        <input id="verba-prompt-preset-name" class="text_pole" type="text" maxlength="60" autocomplete="off" placeholder="예: 한국캐 기본 말투">
 
-                        <label for="verba-deep-prompt-preset-save-scope">저장 범위</label>
-                        <select id="verba-deep-prompt-preset-save-scope" class="text_pole">
+                        <label for="verba-prompt-preset-save-scope">저장 범위</label>
+                        <select id="verba-prompt-preset-save-scope" class="text_pole">
                             <option value="prompts">프롬프트만</option>
                             <option value="prompts_translation">프롬프트 + 번역 설정</option>
                         </select>
-                        <div class="verba-deep-help">기존 프리셋은 ‘프롬프트만’으로 유지됩니다. ‘프롬프트 + 번역 설정’을 선택하면 번역 스타일과 개발자 기능 설정도 함께 저장·적용합니다.</div>
+                        <div class="verba-help">기존 프리셋은 ‘프롬프트만’으로 유지됩니다. ‘프롬프트 + 번역 설정’을 선택하면 번역 스타일과 개발자 기능 설정도 함께 저장·적용합니다.</div>
 
-                        <div class="verba-deep-prompt-preset-actions">
-                            <button type="button" id="verba-deep-prompt-preset-save" class="menu_button">저장</button>
-                            <button type="button" id="verba-deep-prompt-preset-new-start" class="menu_button">새로 시작</button>
-                            <button type="button" id="verba-deep-prompt-preset-favorite" class="menu_button" disabled>☆ 즐겨찾기</button>
-                            <button type="button" id="verba-deep-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
-                            <button type="button" id="verba-deep-prompt-preset-delete" class="menu_button" disabled>삭제</button>
+                        <div class="verba-prompt-preset-actions">
+                            <button type="button" id="verba-prompt-preset-save" class="menu_button">저장</button>
+                            <button type="button" id="verba-prompt-preset-new-start" class="menu_button">새로 시작</button>
+                            <button type="button" id="verba-prompt-preset-favorite" class="menu_button" disabled>☆ 즐겨찾기</button>
+                            <button type="button" id="verba-prompt-preset-rename" class="menu_button" disabled>이름 변경</button>
+                            <button type="button" id="verba-prompt-preset-delete" class="menu_button" disabled>삭제</button>
                         </div>
 
-                        <div class="verba-deep-prompt-preset-fields">
+                        <div class="verba-prompt-preset-fields">
                             <small>항상 저장</small>
                             <span>전체 번역 전역 · 모든 대사 공통 · 캐릭터 대사 전용 · NPC·USER 대사 전용 + 각 슬롯 ON/OFF</span>
                             <small>‘프롬프트 + 번역 설정’ 선택 시 추가 저장</small>
@@ -11204,284 +9939,284 @@ function injectSettingsPanel() {
                             <span>연결 프로필 · 성능 통계 · 이름 고정 · 금지어 · 개발자 비밀번호/잠금 해제 · 기본 지침 전용 프리셋 목록 · 백업 · 디버그 · 캐시/임시 상태</span>
                         </div>
 
-                        <details id="verba-deep-prompt-preset-backups" class="verba-deep-prompt-preset-backups">
-                            <summary>최근 프롬프트 백업 <small id="verba-deep-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
-                            <div class="verba-deep-prompt-preset-backup-content">
-                                <div class="verba-deep-help">4개 프롬프트를 수정한 뒤 10분 동안 추가 입력이 없으면 현재 내용과 슬롯 ON/OFF 상태를 자동으로 백업해요. 최근 5개만 보관하며, 복원하면 현재 4개 프롬프트가 해당 상태로 돌아갑니다.</div>
-                                <button type="button" id="verba-deep-prompt-preset-backup-now" class="menu_button verba-deep-wide">지금 백업</button>
-                                <div id="verba-deep-prompt-preset-backup-list" class="verba-deep-prompt-preset-backup-list"></div>
+                        <details id="verba-prompt-preset-backups" class="verba-prompt-preset-backups">
+                            <summary>최근 프롬프트 백업 <small id="verba-prompt-preset-backup-count">${normalizedPromptPresetBackups(settings.promptPresetBackups).length}/5</small></summary>
+                            <div class="verba-prompt-preset-backup-content">
+                                <div class="verba-help">4개 프롬프트를 수정한 뒤 10분 동안 추가 입력이 없으면 현재 내용과 슬롯 ON/OFF 상태를 자동으로 백업해요. 최근 5개만 보관하며, 복원하면 현재 4개 프롬프트가 해당 상태로 돌아갑니다.</div>
+                                <button type="button" id="verba-prompt-preset-backup-now" class="menu_button verba-wide">지금 백업</button>
+                                <div id="verba-prompt-preset-backup-list" class="verba-prompt-preset-backup-list"></div>
                             </div>
                         </details>
                     </div>
                 </details>
 
-                <details id="verba-deep-prompt-slots" class="verba-deep-tool-details verba-deep-prompt-slots" ${settings.promptSlotsCollapsed ? '' : 'open'}>
+                <details id="verba-prompt-slots" class="verba-tool-details verba-prompt-slots" ${settings.promptSlotsCollapsed ? '' : 'open'}>
                     <summary>프롬프트 입력창 <small>4개 한꺼번에 접기·펴기</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                <div class="verba-deep-prompt-slot ${settings.globalPromptEnabled !== false ? '' : 'verba-deep-prompt-slot-off'}" data-verba-deep-prompt-slot="global">
-                    <div class="verba-deep-prompt-slot-head">
-                        <label for="verba-deep-global-prompt">전체 번역 전역 프롬프트</label>
-                        <label class="verba-deep-prompt-slot-toggle">
-                            <input type="checkbox" id="verba-deep-global-prompt-enabled" ${settings.globalPromptEnabled !== false ? 'checked' : ''}>
+                    <div class="verba-tool-details-content">
+                <div class="verba-prompt-slot ${settings.globalPromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="global">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-global-prompt">전체 번역 전역 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-global-prompt-enabled" ${settings.globalPromptEnabled !== false ? 'checked' : ''}>
                             <span>${settings.globalPromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
-                    <textarea id="verba-deep-global-prompt" class="text_pole" rows="5" placeholder="아웃풋 번역의 서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
-                    <div class="verba-deep-help">아웃풋 E→K 번역에만 적용됩니다. 인풋 K→E 자동번역에는 이 프롬프트를 보내지 않습니다.</div>
+                    <textarea id="verba-global-prompt" class="text_pole" rows="5" placeholder="아웃풋 번역의 서술과 대사 모두에 적용할 문체·호칭·표현 규칙">${escapeHtml(settings.globalPrompt)}</textarea>
+                    <div class="verba-help">아웃풋 E→K 번역에만 적용됩니다. 인풋 K→E 자동번역에는 이 프롬프트를 보내지 않습니다.</div>
                 </div>
 
-                <div class="verba-deep-prompt-slot ${settings.allDialoguePromptEnabled !== false ? '' : 'verba-deep-prompt-slot-off'}" data-verba-deep-prompt-slot="all-dialogue">
-                    <div class="verba-deep-prompt-slot-head">
-                        <label for="verba-deep-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
-                        <label class="verba-deep-prompt-slot-toggle">
-                            <input type="checkbox" id="verba-deep-all-dialogue-prompt-enabled" ${settings.allDialoguePromptEnabled !== false ? 'checked' : ''}>
+                <div class="verba-prompt-slot ${settings.allDialoguePromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="all-dialogue">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-all-dialogue-prompt">모든 대사 공통 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-all-dialogue-prompt-enabled" ${settings.allDialoguePromptEnabled !== false ? 'checked' : ''}>
                             <span>${settings.allDialoguePromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
-                    <textarea id="verba-deep-all-dialogue-prompt" class="text_pole" rows="5" placeholder="모든 직접 대사에 공통 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
-                    <div class="verba-deep-help">캐릭터·NPC·USER의 모든 직접 대사에 항상 적용해요. 대사 한영병기, 따옴표 형식처럼 화자와 무관한 공통 출력 형식은 여기에 입력하세요. 대사 병기 여부는 이 프롬프트(또는 전역 프롬프트)에서만 결정합니다.</div>
+                    <textarea id="verba-all-dialogue-prompt" class="text_pole" rows="5" placeholder="모든 직접 대사에 공통 적용할 형식 규칙">${escapeHtml(settings.allDialoguePrompt)}</textarea>
+                    <div class="verba-help">캐릭터·NPC·USER의 모든 직접 대사에 항상 적용해요. 대사 한영병기, 따옴표 형식처럼 화자와 무관한 공통 출력 형식은 여기에 입력하세요. 대사 병기 여부는 이 프롬프트(또는 전역 프롬프트)에서만 결정합니다.</div>
                 </div>
 
-                <div class="verba-deep-prompt-slot ${settings.dialoguePromptEnabled !== false ? '' : 'verba-deep-prompt-slot-off'}" data-verba-deep-prompt-slot="dialogue">
-                    <div class="verba-deep-prompt-slot-head">
-                        <label for="verba-deep-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
-                        <label class="verba-deep-prompt-slot-toggle">
-                            <input type="checkbox" id="verba-deep-dialogue-prompt-enabled" ${settings.dialoguePromptEnabled !== false ? 'checked' : ''}>
+                <div class="verba-prompt-slot ${settings.dialoguePromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="dialogue">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-dialogue-prompt">캐릭터 대사 전용 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-dialogue-prompt-enabled" ${settings.dialoguePromptEnabled !== false ? 'checked' : ''}>
                             <span>${settings.dialoguePromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
-                    <textarea id="verba-deep-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
-                    <div class="verba-deep-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 추가 적용해요. 캐릭터 고유 말투·어휘·표현 제한을 입력하는 칸이며, 한영병기 같은 공통 출력 형식은 모든 대사 공통 프롬프트에 입력하세요.</div>
+                    <textarea id="verba-dialogue-prompt" class="text_pole" rows="5" placeholder="현재 캐릭터가 말한 대사에만 적용할 말투 규칙">${escapeHtml(settings.dialoguePrompt)}</textarea>
+                    <div class="verba-help">아웃풋 전체 문맥에서 화자를 판단해 현재 캐릭터의 직접 대사에만 추가 적용해요. 캐릭터 고유 말투·어휘·표현 제한을 입력하는 칸이며, 한영병기 같은 공통 출력 형식은 모든 대사 공통 프롬프트에 입력하세요.</div>
                 </div>
 
-                <div class="verba-deep-prompt-slot ${settings.otherDialoguePromptEnabled !== false ? '' : 'verba-deep-prompt-slot-off'}" data-verba-deep-prompt-slot="other-dialogue">
-                    <div class="verba-deep-prompt-slot-head">
-                        <label for="verba-deep-other-dialogue-prompt">NPC·USER 대사 전용 프롬프트</label>
-                        <label class="verba-deep-prompt-slot-toggle">
-                            <input type="checkbox" id="verba-deep-other-dialogue-prompt-enabled" ${settings.otherDialoguePromptEnabled !== false ? 'checked' : ''}>
+                <div class="verba-prompt-slot ${settings.otherDialoguePromptEnabled !== false ? '' : 'verba-prompt-slot-off'}" data-verba-prompt-slot="other-dialogue">
+                    <div class="verba-prompt-slot-head">
+                        <label for="verba-other-dialogue-prompt">NPC·USER 대사 전용 프롬프트</label>
+                        <label class="verba-prompt-slot-toggle">
+                            <input type="checkbox" id="verba-other-dialogue-prompt-enabled" ${settings.otherDialoguePromptEnabled !== false ? 'checked' : ''}>
                             <span>${settings.otherDialoguePromptEnabled !== false ? 'ON' : 'OFF'}</span>
                         </label>
                     </div>
-                    <textarea id="verba-deep-other-dialogue-prompt" class="text_pole" rows="5" placeholder="NPC·USER·기타 화자 대사에만 적용할 말투 규칙">${escapeHtml(settings.otherDialoguePrompt)}</textarea>
-                    <div class="verba-deep-help">현재 캐릭터가 아닌 NPC·USER·기타 화자의 직접 대사에만 추가 적용해요. NPC·USER 쪽 말투·어휘·표현 제한을 정하는 칸이며, 한영병기 같은 공통 출력 형식은 모든 대사 공통 프롬프트에 입력하세요.</div>
+                    <textarea id="verba-other-dialogue-prompt" class="text_pole" rows="5" placeholder="NPC·USER·기타 화자 대사에만 적용할 말투 규칙">${escapeHtml(settings.otherDialoguePrompt)}</textarea>
+                    <div class="verba-help">현재 캐릭터가 아닌 NPC·USER·기타 화자의 직접 대사에만 추가 적용해요. NPC·USER 쪽 말투·어휘·표현 제한을 정하는 칸이며, 한영병기 같은 공통 출력 형식은 모든 대사 공통 프롬프트에 입력하세요.</div>
                 </div>
                     </div>
                 </details>
 
-                <label for="verba-deep-banned-words">번역 금지어</label>
-                <textarea id="verba-deep-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
-                <div class="verba-deep-help">금지어가 나오면 해당 문단만 다시 요청하고 정상 문단은 유지해요.</div>
+                <label for="verba-banned-words">번역 금지어</label>
+                <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
+                <div class="verba-help">금지어가 나오면 해당 문단만 다시 요청하고 정상 문단은 유지해요.</div>
 
 
-                <details id="verba-deep-rule-priority-settings" class="verba-deep-tool-details">
+                <details id="verba-rule-priority-settings" class="verba-tool-details">
                     <summary>번역 규칙 우선순위 <small>위·아래로 정렬</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <div id="verba-deep-rule-priority-list" class="verba-deep-rule-priority-list"></div>
-                        <div class="verba-deep-help">위에 있는 규칙이 서로 충돌할 때 먼저 적용됩니다. 원문 정확성·보호 요소·금지어 규칙은 이 순서와 관계없이 항상 최우선이에요.</div>
-                        <button type="button" id="verba-deep-reset-rule-priority" class="menu_button verba-deep-wide">기본 순서로 되돌리기</button>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-rule-priority-list" class="verba-rule-priority-list"></div>
+                        <div class="verba-help">위에 있는 규칙이 서로 충돌할 때 먼저 적용됩니다. 원문 정확성·보호 요소·금지어 규칙은 이 순서와 관계없이 항상 최우선이에요.</div>
+                        <button type="button" id="verba-reset-rule-priority" class="menu_button verba-wide">기본 순서로 되돌리기</button>
                     </div>
                 </details>
 
-                <details id="verba-deep-prompt-conflict-settings" class="verba-deep-tool-details">
-                    <summary>프롬프트 충돌 확인 <small id="verba-deep-prompt-conflict-count">충돌 없음</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <div id="verba-deep-prompt-conflict-content" class="verba-deep-prompt-conflict-content"></div>
-                        <div class="verba-deep-help">전역·모든 대사 공통·캐릭터 전용·NPC·USER 전용 프롬프트에서 긴르바 실험실가 명백한 충돌로 판단한 실제 문구를 보여줘요. 검사는 로컬에서만 하며 API를 호출하지 않습니다.</div>
-                        <button type="button" id="verba-deep-refresh-prompt-conflicts" class="menu_button verba-deep-wide">지금 다시 확인</button>
+                <details id="verba-prompt-conflict-settings" class="verba-tool-details">
+                    <summary>프롬프트 충돌 확인 <small id="verba-prompt-conflict-count">충돌 없음</small></summary>
+                    <div class="verba-tool-details-content">
+                        <div id="verba-prompt-conflict-content" class="verba-prompt-conflict-content"></div>
+                        <div class="verba-help">전역·모든 대사 공통·캐릭터 전용·NPC·USER 전용 프롬프트에서 베르바가 명백한 충돌로 판단한 실제 문구를 보여줘요. 검사는 로컬에서만 하며 API를 호출하지 않습니다.</div>
+                        <button type="button" id="verba-refresh-prompt-conflicts" class="menu_button verba-wide">지금 다시 확인</button>
                     </div>
                 </details>
 
                 ${generalSplitSettingsMarkup()}
 
-                <details id="verba-deep-translation-tuning" class="verba-deep-tool-details">
+                <details id="verba-translation-tuning" class="verba-tool-details">
                     <summary>번역 미세 조정 <small>관계 온도·현지화</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-relation-temperature-enabled" ${settings.relationTemperatureEnabled !== false ? 'checked' : ''}>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-relation-temperature-enabled" ${settings.relationTemperatureEnabled !== false ? 'checked' : ''}>
                             <span>관계 온도·현지화 적용</span>
                         </label>
-                        <div id="verba-deep-fine-tuning-controls" class="verba-deep-tuning-control-group ${settings.relationTemperatureEnabled !== false ? '' : 'verba-deep-control-disabled'}">
-                            <span class="verba-deep-tuning-label">관계 온도</span>
-                            ${tuningChoiceMarkup('verba-deep-relation-temperature', RELATION_TEMPERATURE_OPTIONS, settings.relationTemperature)}
-                            <div class="verba-deep-help">대사의 어미·호칭·언어적 거리만 조절하며 원문에 없는 감정이나 관계는 만들지 않아요.</div>
-                            <span class="verba-deep-tuning-label">서술 현지화</span>
-                            ${tuningChoiceMarkup('verba-deep-narration-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.narrationLocalizationLevel)}
-                            <div class="verba-deep-help">원문 유지 → 약한 현지화 → 균형 → 자연스러운 한국어 → 네이티브 한국어 순으로 번역투를 줄이고 한국어식 문장 호흡과 어순을 강화해요.</div>
-                            <span class="verba-deep-tuning-label">대사 현지화</span>
-                            ${tuningChoiceMarkup('verba-deep-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.dialogueLocalizationLevel)}
-                            <div class="verba-deep-help">단계가 높을수록 직역투를 줄이고 실제 한국어 화자처럼 어미·생략·호흡·구어 표현을 자연스럽게 다듬어요. 인명·지명·수치·사실관계는 두 설정 모두 그대로 보존합니다.</div>
+                        <div id="verba-fine-tuning-controls" class="verba-tuning-control-group ${settings.relationTemperatureEnabled !== false ? '' : 'verba-control-disabled'}">
+                            <span class="verba-tuning-label">관계 온도</span>
+                            ${tuningChoiceMarkup('verba-relation-temperature', RELATION_TEMPERATURE_OPTIONS, settings.relationTemperature)}
+                            <div class="verba-help">대사의 어미·호칭·언어적 거리만 조절하며 원문에 없는 감정이나 관계는 만들지 않아요.</div>
+                            <span class="verba-tuning-label">서술 현지화</span>
+                            ${tuningChoiceMarkup('verba-narration-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.narrationLocalizationLevel)}
+                            <div class="verba-help">원문 유지 → 약한 현지화 → 균형 → 자연스러운 한국어 → 네이티브 한국어 순으로 번역투를 줄이고 한국어식 문장 호흡과 어순을 강화해요.</div>
+                            <span class="verba-tuning-label">대사 현지화</span>
+                            ${tuningChoiceMarkup('verba-dialogue-localization-level', LOCALIZATION_LEVEL_OPTIONS, settings.dialogueLocalizationLevel)}
+                            <div class="verba-help">단계가 높을수록 직역투를 줄이고 실제 한국어 화자처럼 어미·생략·호흡·구어 표현을 자연스럽게 다듬어요. 인명·지명·수치·사실관계는 두 설정 모두 그대로 보존합니다.</div>
                         </div>
                     </div>
                 </details>
 
-                <details id="verba-deep-dialogue-ending-settings" class="verba-deep-tool-details">
+                <details id="verba-dialogue-ending-settings" class="verba-tool-details">
                     <summary>대사 말끝 취향 <small>선호·회피 표현</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <label for="verba-deep-dialogue-ending-preferred">선호하는 말끝·표현</label>
-                        <textarea id="verba-deep-dialogue-ending-preferred" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력&#10;예: ~잖아&#10;~거든&#10;~지">${escapeHtml(settings.dialogueEndingPreferred)}</textarea>
-                        <div class="verba-deep-help">가능한 문맥에서 자연스럽게 우선 사용해요. 적어둔 표현을 모든 문장에 억지로 붙이지 않습니다.</div>
+                    <div class="verba-tool-details-content">
+                        <label for="verba-dialogue-ending-preferred">선호하는 말끝·표현</label>
+                        <textarea id="verba-dialogue-ending-preferred" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력&#10;예: ~잖아&#10;~거든&#10;~지">${escapeHtml(settings.dialogueEndingPreferred)}</textarea>
+                        <div class="verba-help">가능한 문맥에서 자연스럽게 우선 사용해요. 적어둔 표현을 모든 문장에 억지로 붙이지 않습니다.</div>
 
-                        <label for="verba-deep-dialogue-ending-avoid">피하고 싶은 말끝·표현</label>
-                        <textarea id="verba-deep-dialogue-ending-avoid" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력&#10;예: ~구나&#10;~군">${escapeHtml(settings.dialogueEndingAvoid)}</textarea>
-                        <div class="verba-deep-help">금지어처럼 절대 차단하지 않고, 같은 의미를 자연스럽게 표현할 수 있으면 다른 말끝을 우선해요.</div>
+                        <label for="verba-dialogue-ending-avoid">피하고 싶은 말끝·표현</label>
+                        <textarea id="verba-dialogue-ending-avoid" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력&#10;예: ~구나&#10;~군">${escapeHtml(settings.dialogueEndingAvoid)}</textarea>
+                        <div class="verba-help">금지어처럼 절대 차단하지 않고, 같은 의미를 자연스럽게 표현할 수 있으면 다른 말끝을 우선해요.</div>
 
-                        <label for="verba-deep-dialogue-ending-strength">적용 강도</label>
-                        <select id="verba-deep-dialogue-ending-strength" class="text_pole">
+                        <label for="verba-dialogue-ending-strength">적용 강도</label>
+                        <select id="verba-dialogue-ending-strength" class="text_pole">
                             <option value="light" ${settings.dialogueEndingStrength === 'light' ? 'selected' : ''}>약하게</option>
                             <option value="normal" ${settings.dialogueEndingStrength === 'normal' ? 'selected' : ''}>보통</option>
                             <option value="strong" ${settings.dialogueEndingStrength === 'strong' ? 'selected' : ''}>강하게</option>
                         </select>
-                        <div class="verba-deep-help">현재 캐릭터의 직접 대사에만 적용됩니다. NPC·USER 대사와 서술에는 적용하지 않아요. 의미·존댓말/반말·감정 강도·캐릭터성은 유지합니다.</div>
+                        <div class="verba-help">현재 캐릭터의 직접 대사에만 적용됩니다. NPC·USER 대사와 서술에는 적용하지 않아요. 의미·존댓말/반말·감정 강도·캐릭터성은 유지합니다.</div>
 
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-dialogue-ending-repetition-reduction" ${settings.dialogueEndingRepetitionReduction !== false ? 'checked' : ''}>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-dialogue-ending-repetition-reduction" ${settings.dialogueEndingRepetitionReduction !== false ? 'checked' : ''}>
                             <span>말끝 반복 줄이기</span>
                         </label>
-                        <div class="verba-deep-help">현재 캐릭터 대사 안에서 같은 말끝이 몰리지 않도록 지시하고, 최근 캐릭터 대사 번역에서 반복된 말끝이 있으면 다음 번역에서 의존도를 낮춰요. NPC·USER 대사는 분석·적용 대상에서 제외하며 후처리 치환은 하지 않습니다.</div>
+                        <div class="verba-help">현재 캐릭터 대사 안에서 같은 말끝이 몰리지 않도록 지시하고, 최근 캐릭터 대사 번역에서 반복된 말끝이 있으면 다음 번역에서 의존도를 낮춰요. NPC·USER 대사는 분석·적용 대상에서 제외하며 후처리 치환은 하지 않습니다.</div>
                     </div>
                 </details>
 
-                <details id="verba-deep-expression-detail" class="verba-deep-tool-details verba-deep-expression-detail">
+                <details id="verba-expression-detail" class="verba-tool-details verba-expression-detail">
                     <summary>표현 디테일 <small>강조·말끊김·비유</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <div class="verba-deep-help">영어 아웃풋을 한국어로 옮길 때 원문에 이미 있는 강조 방식·말더듬·늘임·끊김·관용구·비유의 결을 어떻게 처리할지 정합니다. 아웃풋 E→K에만 적용되며 기본값은 모두 추가 지시 없음입니다.</div>
+                    <div class="verba-tool-details-content">
+                        <div class="verba-help">영어 아웃풋을 한국어로 옮길 때 원문에 이미 있는 강조 방식·말더듬·늘임·끊김·관용구·비유의 결을 어떻게 처리할지 정합니다. 아웃풋 E→K에만 적용되며 기본값은 모두 추가 지시 없음입니다.</div>
 
-                        <label for="verba-deep-expression-emphasis">강조 표현의 맛</label>
-                        <select id="verba-deep-expression-emphasis" class="text_pole">
+                        <label for="verba-expression-emphasis">강조 표현의 맛</label>
+                        <select id="verba-expression-emphasis" class="text_pole">
                             <option value="default" ${settings.expressionEmphasisTaste === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                             <option value="source" ${settings.expressionEmphasisTaste === 'source' ? 'selected' : ''}>원문대로</option>
                             <option value="natural" ${settings.expressionEmphasisTaste === 'natural' ? 'selected' : ''}>자연스럽게</option>
                             <option value="active" ${settings.expressionEmphasisTaste === 'active' ? 'selected' : ''}>적극적으로</option>
                         </select>
-                        <div class="verba-deep-help">ALL CAPS, italics·bold, !!!, ?!, 반복 글자, 짧게 끊어 강조하는 리듬처럼 원문에 이미 있는 강세를 얼마나 또렷하게 살릴지 조절합니다. 원문에 없는 강조는 새로 만들지 않습니다.</div>
+                        <div class="verba-help">ALL CAPS, italics·bold, !!!, ?!, 반복 글자, 짧게 끊어 강조하는 리듬처럼 원문에 이미 있는 강세를 얼마나 또렷하게 살릴지 조절합니다. 원문에 없는 강조는 새로 만들지 않습니다.</div>
 
-                        <label for="verba-deep-expression-disfluency">말더듬·늘임·끊김 보존</label>
-                        <select id="verba-deep-expression-disfluency" class="text_pole">
+                        <label for="verba-expression-disfluency">말더듬·늘임·끊김 보존</label>
+                        <select id="verba-expression-disfluency" class="text_pole">
                             <option value="default" ${settings.expressionDisfluencyTaste === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                             <option value="clean" ${settings.expressionDisfluencyTaste === 'clean' ? 'selected' : ''}>정리해서 번역</option>
                             <option value="natural" ${settings.expressionDisfluencyTaste === 'natural' ? 'selected' : ''}>자연스럽게 보존</option>
                             <option value="active" ${settings.expressionDisfluencyTaste === 'active' ? 'selected' : ''}>적극 보존</option>
                         </select>
-                        <div class="verba-deep-help">"I-I didn't…", "Nooo…", "Wait—what?" 같은 직접 대사의 말더듬·늘임·중간 끊김을 한국어에서 얼마나 남길지 정합니다. 원문에 없는 말더듬이나 끊김은 추가하지 않습니다.</div>
+                        <div class="verba-help">"I-I didn't…", "Nooo…", "Wait—what?" 같은 직접 대사의 말더듬·늘임·중간 끊김을 한국어에서 얼마나 남길지 정합니다. 원문에 없는 말더듬이나 끊김은 추가하지 않습니다.</div>
 
-                        <label for="verba-deep-expression-idiom">관용구·비유 처리 취향</label>
-                        <select id="verba-deep-expression-idiom" class="text_pole">
+                        <label for="verba-expression-idiom">관용구·비유 처리 취향</label>
+                        <select id="verba-expression-idiom" class="text_pole">
                             <option value="default" ${settings.expressionIdiomMetaphorTaste === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                             <option value="meaning" ${settings.expressionIdiomMetaphorTaste === 'meaning' ? 'selected' : ''}>뜻 중심</option>
                             <option value="balanced" ${settings.expressionIdiomMetaphorTaste === 'balanced' ? 'selected' : ''}>균형</option>
                             <option value="koreanized" ${settings.expressionIdiomMetaphorTaste === 'koreanized' ? 'selected' : ''}>한국식 네이티브화</option>
                             <option value="sourceCulture" ${settings.expressionIdiomMetaphorTaste === 'sourceCulture' ? 'selected' : ''}>원문화·비유 결 보존</option>
                         </select>
-                        <div class="verba-deep-help">영어 관용구·비유의 실제 뜻과 원래 이미지·문화적 결 사이에서 어느 쪽을 더 우선할지 정합니다. 한국식 네이티브화는 상황에 맞는 한국 속담·관용구·익숙한 비유가 있으면 적극적으로 치환하고, 딱 맞는 대응이 없을 때만 뜻 중심으로 자연스럽게 풉니다.</div>
+                        <div class="verba-help">영어 관용구·비유의 실제 뜻과 원래 이미지·문화적 결 사이에서 어느 쪽을 더 우선할지 정합니다. 한국식 네이티브화는 상황에 맞는 한국 속담·관용구·익숙한 비유가 있으면 적극적으로 치환하고, 딱 맞는 대응이 없을 때만 뜻 중심으로 자연스럽게 풉니다.</div>
                     </div>
                 </details>
 
 
                 ${generalRelationshipSettingsMarkup()}
 
-                <details id="verba-deep-korean-flavor" class="verba-deep-tool-details verba-deep-korean-flavor">
+                <details id="verba-korean-flavor" class="verba-tool-details verba-korean-flavor">
                         <summary>🍚 한캐의 맛 <small>한국어 말맛 커스텀</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-korean-flavor-enabled" ${settings.koreanFlavorEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-korean-flavor-enabled" ${settings.koreanFlavorEnabled ? 'checked' : ''}>
                                 <span>한캐의 맛 사용</span>
                             </label>
-                            <div class="verba-deep-help">영어로 생성된 한국인 캐릭터의 아웃풋을 한국어로 번역할 때, 마치 처음부터 자연스러운 한국어로 출력된 것처럼 말맛을 복원합니다. 대사 호흡·주어 생략·욕설·감탄사·인터넷 말투 등을 한국인 캐릭터답게 조절합니다. 아웃풋 E→K에만 적용되며 인풋에는 적용되지 않습니다.</div>
+                            <div class="verba-help">영어로 생성된 한국인 캐릭터의 아웃풋을 한국어로 번역할 때, 마치 처음부터 자연스러운 한국어로 출력된 것처럼 말맛을 복원합니다. 대사 호흡·주어 생략·욕설·감탄사·인터넷 말투 등을 한국인 캐릭터답게 조절합니다. 아웃풋 E→K에만 적용되며 인풋에는 적용되지 않습니다.</div>
 
-                            <div id="verba-deep-korean-flavor-controls" class="${settings.koreanFlavorEnabled ? '' : 'verba-deep-control-disabled'}">
-                                <label for="verba-deep-korean-flavor-rhythm">대사 호흡 취향</label>
-                                <select id="verba-deep-korean-flavor-rhythm" class="text_pole">
+                            <div id="verba-korean-flavor-controls" class="${settings.koreanFlavorEnabled ? '' : 'verba-control-disabled'}">
+                                <label for="verba-korean-flavor-rhythm">대사 호흡 취향</label>
+                                <select id="verba-korean-flavor-rhythm" class="text_pole">
                                     <option value="default" ${settings.koreanFlavorDialogueRhythm === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="short" ${settings.koreanFlavorDialogueRhythm === 'short' ? 'selected' : ''}>짧고 툭툭</option>
                                     <option value="balanced" ${settings.koreanFlavorDialogueRhythm === 'balanced' ? 'selected' : ''}>자연스러운 보통</option>
                                     <option value="smooth" ${settings.koreanFlavorDialogueRhythm === 'smooth' ? 'selected' : ''}>길고 매끄럽게</option>
                                 </select>
-                                <div class="verba-deep-help">직접 대사의 문장 끊기와 이어짐만 조절하며 의미·강조·말투는 바꾸지 않습니다.</div>
+                                <div class="verba-help">직접 대사의 문장 끊기와 이어짐만 조절하며 의미·강조·말투는 바꾸지 않습니다.</div>
 
-                                <label for="verba-deep-korean-flavor-pronoun">주어·대명사 생략 취향</label>
-                                <select id="verba-deep-korean-flavor-pronoun" class="text_pole">
+                                <label for="verba-korean-flavor-pronoun">주어·대명사 생략 취향</label>
+                                <select id="verba-korean-flavor-pronoun" class="text_pole">
                                     <option value="default" ${settings.koreanFlavorPronounOmission === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="preserve" ${settings.koreanFlavorPronounOmission === 'preserve' ? 'selected' : ''}>원문 지칭을 비교적 유지</option>
                                     <option value="natural" ${settings.koreanFlavorPronounOmission === 'natural' ? 'selected' : ''}>자연스러우면 생략</option>
                                     <option value="active" ${settings.koreanFlavorPronounOmission === 'active' ? 'selected' : ''}>한국어답게 적극 생략</option>
                                 </select>
-                                <div class="verba-deep-help">지칭 대상이 헷갈리지 않는 범위에서만 생략하며, 누가 누구를 가리키는지는 절대 바꾸지 않습니다.</div>
+                                <div class="verba-help">지칭 대상이 헷갈리지 않는 범위에서만 생략하며, 누가 누구를 가리키는지는 절대 바꾸지 않습니다.</div>
 
-                                <label for="verba-deep-korean-flavor-profanity">욕설·거친 표현의 번역 결</label>
-                                <select id="verba-deep-korean-flavor-profanity" class="text_pole">
+                                <label for="verba-korean-flavor-profanity">욕설·거친 표현의 번역 결</label>
+                                <select id="verba-korean-flavor-profanity" class="text_pole">
                                     <option value="default" ${settings.koreanFlavorProfanityTone === 'default' ? 'selected' : ''}>기본 · 원문 결 유지</option>
                                     <option value="dry" ${settings.koreanFlavorProfanityTone === 'dry' ? 'selected' : ''}>건조하게</option>
                                     <option value="blunt" ${settings.koreanFlavorProfanityTone === 'blunt' ? 'selected' : ''}>직설적·거칠게</option>
                                     <option value="lowSlang" ${settings.koreanFlavorProfanityTone === 'lowSlang' ? 'selected' : ''}>인터넷식 표현 적게</option>
                                     <option value="restrained" ${settings.koreanFlavorProfanityTone === 'restrained' ? 'selected' : ''}>비속어는 최소화</option>
                                 </select>
-                                <div class="verba-deep-help">원문의 욕설 강도와 공격성은 그대로 보존하고, 같은 강도 안에서 한국어 표현의 결만 조절합니다.</div>
+                                <div class="verba-help">원문의 욕설 강도와 공격성은 그대로 보존하고, 같은 강도 안에서 한국어 표현의 결만 조절합니다.</div>
 
-                                <label for="verba-deep-korean-flavor-interjection">감탄사·추임새 취향</label>
-                                <select id="verba-deep-korean-flavor-interjection" class="text_pole">
+                                <label for="verba-korean-flavor-interjection">감탄사·추임새 취향</label>
+                                <select id="verba-korean-flavor-interjection" class="text_pole">
                                     <option value="default" ${settings.koreanFlavorInterjectionTone === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="natural" ${settings.koreanFlavorInterjectionTone === 'natural' ? 'selected' : ''}>자연스러운 한국식 반응</option>
                                     <option value="restrained" ${settings.koreanFlavorInterjectionTone === 'restrained' ? 'selected' : ''}>담백하게</option>
                                     <option value="lively" ${settings.koreanFlavorInterjectionTone === 'lively' ? 'selected' : ''}>생동감 있게</option>
                                 </select>
-                                <div class="verba-deep-help">원문에 실제 감탄사·추임새가 있을 때만 표현 방식을 조절하며 새 감탄사를 임의로 추가하지 않습니다.</div>
+                                <div class="verba-help">원문에 실제 감탄사·추임새가 있을 때만 표현 방식을 조절하며 새 감탄사를 임의로 추가하지 않습니다.</div>
 
-                                <label for="verba-deep-korean-flavor-meme">인터넷 밈 농도</label>
-                                <select id="verba-deep-korean-flavor-meme" class="text_pole">
+                                <label for="verba-korean-flavor-meme">인터넷 밈 농도</label>
+                                <select id="verba-korean-flavor-meme" class="text_pole">
                                     <option value="default" ${settings.koreanFlavorMemeDensity === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="light" ${settings.koreanFlavorMemeDensity === 'light' ? 'selected' : ''}>살짝</option>
                                     <option value="natural" ${settings.koreanFlavorMemeDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
                                     <option value="active" ${settings.koreanFlavorMemeDensity === 'active' ? 'selected' : ''}>적극적으로</option>
                                 </select>
-                                <div class="verba-deep-help">문맥과 캐릭터 말투에 맞을 때만 한국 인터넷식 밈·짤방체·온라인 구어 감각을 섞습니다. 원문에 없는 사건·감정·관계·농담을 새로 만들지는 않습니다.</div>
+                                <div class="verba-help">문맥과 캐릭터 말투에 맞을 때만 한국 인터넷식 밈·짤방체·온라인 구어 감각을 섞습니다. 원문에 없는 사건·감정·관계·농담을 새로 만들지는 않습니다.</div>
 
-                                <label class="verba-deep-check-row">
-                                    <input type="checkbox" id="verba-deep-korean-flavor-referent-repeat" ${settings.koreanFlavorReduceReferentRepetition ? 'checked' : ''}>
+                                <label class="verba-check-row">
+                                    <input type="checkbox" id="verba-korean-flavor-referent-repeat" ${settings.koreanFlavorReduceReferentRepetition ? 'checked' : ''}>
                                     <span>반복 지칭 줄이기</span>
                                 </label>
-                                <div class="verba-deep-help">같은 문단·대사에서 이름·그는·그녀는 같은 지칭이 과하게 반복되면, 대상이 명확할 때만 생략하거나 문장을 자연스럽게 재구성합니다.</div>
+                                <div class="verba-help">같은 문단·대사에서 이름·그는·그녀는 같은 지칭이 과하게 반복되면, 대상이 명확할 때만 생략하거나 문장을 자연스럽게 재구성합니다.</div>
                             </div>
                         </div>
                     </details>
 
-                <details id="verba-deep-english-flavor" class="verba-deep-tool-details verba-deep-english-flavor">
+                <details id="verba-english-flavor" class="verba-tool-details verba-english-flavor">
                         <summary>🗽 영캐의 맛 <small>영어권 캐릭터 말맛</small></summary>
-                        <div class="verba-deep-tool-details-content">
-                            <label class="verba-deep-check-row">
-                                <input type="checkbox" id="verba-deep-english-flavor-enabled" ${settings.englishFlavorEnabled ? 'checked' : ''}>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-english-flavor-enabled" ${settings.englishFlavorEnabled ? 'checked' : ''}>
                                 <span>영캐의 맛 사용</span>
                             </label>
-                            <div class="verba-deep-help">영어권 캐릭터의 영어 아웃풋을 한국어로 번역할 때, 한국어는 자연스럽게 유지하면서 영어권 특유의 대사 호흡·슬랭·욕설·감탄사·인터넷 문화를 어느 정도까지 살릴지 단계별로 조절합니다. 약한 단계는 한국어 자연화를 더 우선하고, 강한 단계일수록 영어권 캐릭터의 문화적 말맛을 더 선명하게 보존합니다. 아웃풋 E→K에만 적용되며 인풋에는 적용되지 않습니다.</div>
+                            <div class="verba-help">영어권 캐릭터의 영어 아웃풋을 한국어로 번역할 때, 한국어는 자연스럽게 유지하면서 영어권 특유의 대사 호흡·슬랭·욕설·감탄사·인터넷 문화를 어느 정도까지 살릴지 단계별로 조절합니다. 약한 단계는 한국어 자연화를 더 우선하고, 강한 단계일수록 영어권 캐릭터의 문화적 말맛을 더 선명하게 보존합니다. 아웃풋 E→K에만 적용되며 인풋에는 적용되지 않습니다.</div>
 
-                            <div id="verba-deep-english-flavor-controls" class="${settings.englishFlavorEnabled ? '' : 'verba-deep-control-disabled'}">
-                                <label for="verba-deep-english-flavor-rhythm">대사 호흡 취향</label>
-                                <select id="verba-deep-english-flavor-rhythm" class="text_pole">
+                            <div id="verba-english-flavor-controls" class="${settings.englishFlavorEnabled ? '' : 'verba-control-disabled'}">
+                                <label for="verba-english-flavor-rhythm">대사 호흡 취향</label>
+                                <select id="verba-english-flavor-rhythm" class="text_pole">
                                     <option value="default" ${settings.englishFlavorDialogueRhythm === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="short" ${settings.englishFlavorDialogueRhythm === 'short' ? 'selected' : ''}>짧고 툭툭</option>
                                     <option value="balanced" ${settings.englishFlavorDialogueRhythm === 'balanced' ? 'selected' : ''}>자연스러운 보통</option>
                                     <option value="smooth" ${settings.englishFlavorDialogueRhythm === 'smooth' ? 'selected' : ''}>길고 매끄럽게</option>
                                 </select>
-                                <div class="verba-deep-help">영어 원문의 대사 호흡을 한국어에서 얼마나 또렷하게 살릴지 조절합니다. 한국어 문장은 자연스럽게 만들되, 영어권 캐릭터 특유의 끊김·이어짐·강조 리듬을 필요 이상으로 한국식으로 평준화하지 않습니다.</div>
+                                <div class="verba-help">영어 원문의 대사 호흡을 한국어에서 얼마나 또렷하게 살릴지 조절합니다. 한국어 문장은 자연스럽게 만들되, 영어권 캐릭터 특유의 끊김·이어짐·강조 리듬을 필요 이상으로 한국식으로 평준화하지 않습니다.</div>
 
-                                <label for="verba-deep-english-flavor-conversation">영어권 회화 자연화</label>
-                                <select id="verba-deep-english-flavor-conversation" class="text_pole">
+                                <label for="verba-english-flavor-conversation">영어권 회화 자연화</label>
+                                <select id="verba-english-flavor-conversation" class="text_pole">
                                     <option value="default" ${settings.englishFlavorConversationNaturalization === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="natural" ${settings.englishFlavorConversationNaturalization === 'natural' ? 'selected' : ''}>자연스럽게</option>
                                     <option value="active" ${settings.englishFlavorConversationNaturalization === 'active' ? 'selected' : ''}>적극적으로</option>
                                 </select>
-                                <div class="verba-deep-help">영어 원문을 먼저 실제 영어권 회화의 발화 의도와 관용 표현으로 이해한 뒤 한국어로 옮깁니다. 자연스럽게 번역하되 영어권 캐릭터의 직설성·농담 방식·반응 감각을 한국인 캐릭터 말투처럼 바꿔버리지 않습니다.</div>
+                                <div class="verba-help">영어 원문을 먼저 실제 영어권 회화의 발화 의도와 관용 표현으로 이해한 뒤 한국어로 옮깁니다. 자연스럽게 번역하되 영어권 캐릭터의 직설성·농담 방식·반응 감각을 한국인 캐릭터 말투처럼 바꿔버리지 않습니다.</div>
 
-                                <label for="verba-deep-english-flavor-slang">슬랭·구어체 농도</label>
-                                <select id="verba-deep-english-flavor-slang" class="text_pole">
+                                <label for="verba-english-flavor-slang">슬랭·구어체 농도</label>
+                                <select id="verba-english-flavor-slang" class="text_pole">
                                     <option value="default" ${settings.englishFlavorSlangDensity === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="low" ${settings.englishFlavorSlangDensity === 'low' ? 'selected' : ''}>적게</option>
                                     <option value="natural" ${settings.englishFlavorSlangDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
                                     <option value="active" ${settings.englishFlavorSlangDensity === 'active' ? 'selected' : ''}>적극적으로</option>
                                 </select>
-                                <div class="verba-deep-help">영어 원문의 slang·colloquial register를 한국어 번역에서 얼마나 강하게 살릴지 정합니다. 적게는 자연스러운 한국어 표현을 더 우선하고, 자연스럽게는 의미와 영어권 말맛을 균형 있게 유지하며, 적극적으로는 영어권 슬랭의 사회적·문화적 결을 가장 강하게 보존합니다.</div>
+                                <div class="verba-help">영어 원문의 slang·colloquial register를 한국어 번역에서 얼마나 강하게 살릴지 정합니다. 적게는 자연스러운 한국어 표현을 더 우선하고, 자연스럽게는 의미와 영어권 말맛을 균형 있게 유지하며, 적극적으로는 영어권 슬랭의 사회적·문화적 결을 가장 강하게 보존합니다.</div>
 
-                                <label for="verba-deep-english-flavor-profanity">영어권 욕설·거친 표현의 결</label>
-                                <select id="verba-deep-english-flavor-profanity" class="text_pole">
+                                <label for="verba-english-flavor-profanity">영어권 욕설·거친 표현의 결</label>
+                                <select id="verba-english-flavor-profanity" class="text_pole">
                                     <option value="default" ${settings.englishFlavorProfanityTone === 'default' ? 'selected' : ''}>기본 · 원문 결 유지</option>
                                     <option value="dry" ${settings.englishFlavorProfanityTone === 'dry' ? 'selected' : ''}>건조하게</option>
                                     <option value="blunt" ${settings.englishFlavorProfanityTone === 'blunt' ? 'selected' : ''}>직설적·거칠게</option>
@@ -11489,123 +10224,121 @@ function injectSettingsPanel() {
                                     <option value="lowSlang" ${settings.englishFlavorProfanityTone === 'lowSlang' ? 'selected' : ''}>인터넷·밈식 표현 적게</option>
                                     <option value="restrained" ${settings.englishFlavorProfanityTone === 'restrained' ? 'selected' : ''}>비속어는 최소화</option>
                                 </select>
-                                <div class="verba-deep-help">영어 원문의 욕설 강도·공격성·대상은 고정하고, 한국어로 옮겨도 영어권 캐릭터 특유의 건조함·직설성·일상적인 욕설 결이 살아 있도록 조절합니다.</div>
+                                <div class="verba-help">영어 원문의 욕설 강도·공격성·대상은 고정하고, 한국어로 옮겨도 영어권 캐릭터 특유의 건조함·직설성·일상적인 욕설 결이 살아 있도록 조절합니다.</div>
 
-                                <label for="verba-deep-english-flavor-interjection">감탄사·추임새 취향</label>
-                                <select id="verba-deep-english-flavor-interjection" class="text_pole">
+                                <label for="verba-english-flavor-interjection">감탄사·추임새 취향</label>
+                                <select id="verba-english-flavor-interjection" class="text_pole">
                                     <option value="default" ${settings.englishFlavorInterjectionTone === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="natural" ${settings.englishFlavorInterjectionTone === 'natural' ? 'selected' : ''}>자연스러운 영어권 반응</option>
                                     <option value="restrained" ${settings.englishFlavorInterjectionTone === 'restrained' ? 'selected' : ''}>담백하게</option>
                                     <option value="lively" ${settings.englishFlavorInterjectionTone === 'lively' ? 'selected' : ''}>생동감 있게</option>
                                 </select>
-                                <div class="verba-deep-help">원문에 실제 영어권 감탄사·추임새가 있을 때만 그 반응의 문화적·캐릭터적 결을 살려 한국어로 옮깁니다. 새 감탄사나 감정은 임의로 추가하지 않습니다.</div>
+                                <div class="verba-help">원문에 실제 영어권 감탄사·추임새가 있을 때만 그 반응의 문화적·캐릭터적 결을 살려 한국어로 옮깁니다. 새 감탄사나 감정은 임의로 추가하지 않습니다.</div>
 
-                                <label for="verba-deep-english-flavor-meme">인터넷 밈 농도</label>
-                                <select id="verba-deep-english-flavor-meme" class="text_pole">
+                                <label for="verba-english-flavor-meme">인터넷 밈 농도</label>
+                                <select id="verba-english-flavor-meme" class="text_pole">
                                     <option value="default" ${settings.englishFlavorMemeDensity === 'default' ? 'selected' : ''}>기본 · 추가 지시 없음</option>
                                     <option value="light" ${settings.englishFlavorMemeDensity === 'light' ? 'selected' : ''}>살짝</option>
                                     <option value="natural" ${settings.englishFlavorMemeDensity === 'natural' ? 'selected' : ''}>자연스럽게</option>
                                     <option value="active" ${settings.englishFlavorMemeDensity === 'active' ? 'selected' : ''}>적극적으로</option>
                                 </select>
-                                <div class="verba-deep-help">영어 원문에 온라인·밈 감각이 있을 때 어느 정도까지 영어권 인터넷 문화의 레퍼런스와 반응 구조를 남길지 조절합니다. 살짝은 자연스러운 한국어 전달을 더 우선하고, 자연스럽게는 균형, 적극적으로는 영어권 인터넷 문화와 밈의 결을 가장 강하게 살립니다.</div>
+                                <div class="verba-help">영어 원문에 온라인·밈 감각이 있을 때 어느 정도까지 영어권 인터넷 문화의 레퍼런스와 반응 구조를 남길지 조절합니다. 살짝은 자연스러운 한국어 전달을 더 우선하고, 자연스럽게는 균형, 적극적으로는 영어권 인터넷 문화와 밈의 결을 가장 강하게 살립니다.</div>
 
-                                <label class="verba-deep-check-row">
-                                    <input type="checkbox" id="verba-deep-english-flavor-referent-repeat" ${settings.englishFlavorReduceReferentRepetition ? 'checked' : ''}>
+                                <label class="verba-check-row">
+                                    <input type="checkbox" id="verba-english-flavor-referent-repeat" ${settings.englishFlavorReduceReferentRepetition ? 'checked' : ''}>
                                     <span>지칭 반복 줄이기</span>
                                 </label>
-                                <div class="verba-deep-help">영어 원문의 이름·he/she·you 같은 지칭을 한국어에서 읽기 자연스럽게 정리하되, 영어권 캐릭터의 명시적인 주어·대조가 말맛에 필요한 경우에는 함부로 지우지 않습니다.</div>
+                                <div class="verba-help">영어 원문의 이름·he/she·you 같은 지칭을 한국어에서 읽기 자연스럽게 정리하되, 영어권 캐릭터의 명시적인 주어·대조가 말맛에 필요한 경우에는 함부로 지우지 않습니다.</div>
 
                             </div>
                         </div>
                     </details>
 
-                ${generalFlavorSettingsMarkup()}
-
-                <details id="verba-deep-beginner-character-guide" class="verba-deep-tool-details verba-deep-beginner-character-guide">
+                <details id="verba-beginner-character-guide" class="verba-tool-details verba-beginner-character-guide">
                     <summary>신입 챗시 전용 <small>캐릭터 간편 설정 · 기본 OFF</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-beginner-character-enabled" ${settings.beginnerCharacterGuideEnabled ? 'checked' : ''}>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-beginner-character-enabled" ${settings.beginnerCharacterGuideEnabled ? 'checked' : ''}>
                             <span>신입 챗시용 캐릭터 설정 사용</span>
                         </label>
-                        <div class="verba-deep-help">아래에서 고른 성격·말투·대화 태도·연령대를 현재 캐릭터 직접 대사 번역에 보조 프롬프트로 넣습니다. 기본은 꺼져 있어 기존 번역에는 영향이 없습니다.</div>
+                        <div class="verba-help">아래에서 고른 성격·말투·대화 태도·연령대를 현재 캐릭터 직접 대사 번역에 보조 프롬프트로 넣습니다. 기본은 꺼져 있어 기존 번역에는 영향이 없습니다.</div>
 
-                        <div id="verba-deep-beginner-character-controls" class="${settings.beginnerCharacterGuideEnabled ? '' : 'verba-deep-control-disabled'}">
-                            <section class="verba-deep-beginner-group">
+                        <div id="verba-beginner-character-controls" class="${settings.beginnerCharacterGuideEnabled ? '' : 'verba-control-disabled'}">
+                            <section class="verba-beginner-group">
                                 <b>캐릭터 성격 <small>복수 선택</small></b>
-                                <div class="verba-deep-beginner-choice-grid">
+                                <div class="verba-beginner-choice-grid">
                                     ${BEGINNER_PERSONALITY_OPTIONS.map(option => `
-                                        <label class="verba-deep-beginner-choice">
-                                            <input type="checkbox" data-verba-deep-beginner-personality="${option.value}" ${settings.beginnerPersonalityTraits.includes(option.value) ? 'checked' : ''}>
+                                        <label class="verba-beginner-choice">
+                                            <input type="checkbox" data-verba-beginner-personality="${option.value}" ${settings.beginnerPersonalityTraits.includes(option.value) ? 'checked' : ''}>
                                             <span>${option.label}</span>
                                         </label>
                                     `).join('')}
                                 </div>
-                                <div class="verba-deep-help">여러 개를 같이 골라도 됩니다. 서로 다른 면이 함께 선택되면 원문 상황에 맞는 성격 면을 우선해 말투에 반영합니다.</div>
-                                <label for="verba-deep-beginner-personality-custom">성격 직접 입력 <small>선택 보완용</small></label>
-                                <textarea id="verba-deep-beginner-personality-custom" class="text_pole" rows="2" maxlength="240" placeholder="예: 까칠하지만 은근히 정이 많고, 자존심이 세며 감정 표현이 서툼">${escapeHtml(settings.beginnerPersonalityCustom)}</textarea>
-                                <div class="verba-deep-help">프롬프트 문법 없이 평범한 문장으로 적으면 됩니다. 긴르바 실험실가 말투 참고용 설명으로만 감싸서 사용합니다.</div>
+                                <div class="verba-help">여러 개를 같이 골라도 됩니다. 서로 다른 면이 함께 선택되면 원문 상황에 맞는 성격 면을 우선해 말투에 반영합니다.</div>
+                                <label for="verba-beginner-personality-custom">성격 직접 입력 <small>선택 보완용</small></label>
+                                <textarea id="verba-beginner-personality-custom" class="text_pole" rows="2" maxlength="240" placeholder="예: 까칠하지만 은근히 정이 많고, 자존심이 세며 감정 표현이 서툼">${escapeHtml(settings.beginnerPersonalityCustom)}</textarea>
+                                <div class="verba-help">프롬프트 문법 없이 평범한 문장으로 적으면 됩니다. 베르바가 말투 참고용 설명으로만 감싸서 사용합니다.</div>
                             </section>
 
-                            <section class="verba-deep-beginner-group">
+                            <section class="verba-beginner-group">
                                 <b>말투 <small>복수 선택</small></b>
-                                <div class="verba-deep-beginner-choice-grid">
+                                <div class="verba-beginner-choice-grid">
                                     ${BEGINNER_SPEECH_STYLE_OPTIONS.map(option => `
-                                        <label class="verba-deep-beginner-choice">
-                                            <input type="checkbox" data-verba-deep-beginner-speech="${option.value}" ${settings.beginnerSpeechStyles.includes(option.value) ? 'checked' : ''}>
+                                        <label class="verba-beginner-choice">
+                                            <input type="checkbox" data-verba-beginner-speech="${option.value}" ${settings.beginnerSpeechStyles.includes(option.value) ? 'checked' : ''}>
                                             <span>${option.label}</span>
                                         </label>
                                     `).join('')}
                                 </div>
-                                <div class="verba-deep-help">문장 길이·건조함·부드러움·비꼼·구어체 같은 표면 화법을 고릅니다. 원문에 없는 감정이나 관계는 새로 만들지 않습니다.</div>
-                                <label for="verba-deep-beginner-speech-custom">말투 직접 입력 <small>선택 보완용</small></label>
-                                <textarea id="verba-deep-beginner-speech-custom" class="text_pole" rows="2" maxlength="240" placeholder="예: 말끝을 살짝 흘리듯 능글맞고 여유 있게, 너무 애교스럽지는 않게">${escapeHtml(settings.beginnerSpeechCustom)}</textarea>
-                                <div class="verba-deep-help">말투 느낌만 자연어로 적으면 됩니다. 원문 의미를 바꾸는 명령으로 사용하지 않습니다.</div>
+                                <div class="verba-help">문장 길이·건조함·부드러움·비꼼·구어체 같은 표면 화법을 고릅니다. 원문에 없는 감정이나 관계는 새로 만들지 않습니다.</div>
+                                <label for="verba-beginner-speech-custom">말투 직접 입력 <small>선택 보완용</small></label>
+                                <textarea id="verba-beginner-speech-custom" class="text_pole" rows="2" maxlength="240" placeholder="예: 말끝을 살짝 흘리듯 능글맞고 여유 있게, 너무 애교스럽지는 않게">${escapeHtml(settings.beginnerSpeechCustom)}</textarea>
+                                <div class="verba-help">말투 느낌만 자연어로 적으면 됩니다. 원문 의미를 바꾸는 명령으로 사용하지 않습니다.</div>
                             </section>
 
-                            <section class="verba-deep-beginner-group">
+                            <section class="verba-beginner-group">
                                 <b>대화 태도 <small>복수 선택</small></b>
-                                <div class="verba-deep-beginner-choice-grid">
+                                <div class="verba-beginner-choice-grid">
                                     ${BEGINNER_CONVERSATION_ATTITUDE_OPTIONS.map(option => `
-                                        <label class="verba-deep-beginner-choice">
-                                            <input type="checkbox" data-verba-deep-beginner-attitude="${option.value}" ${settings.beginnerConversationAttitudes.includes(option.value) ? 'checked' : ''}>
+                                        <label class="verba-beginner-choice">
+                                            <input type="checkbox" data-verba-beginner-attitude="${option.value}" ${settings.beginnerConversationAttitudes.includes(option.value) ? 'checked' : ''}>
                                             <span>${option.label}</span>
                                         </label>
                                     `).join('')}
                                 </div>
-                                <div class="verba-deep-help">상대에게 말을 거는 방식과 대화의 거리감만 조절합니다. 실제 친밀도·관계·호감·서열을 새로 만들거나 원문의 명령/질문/거절 강도를 바꾸지 않습니다.</div>
+                                <div class="verba-help">상대에게 말을 거는 방식과 대화의 거리감만 조절합니다. 실제 친밀도·관계·호감·서열을 새로 만들거나 원문의 명령/질문/거절 강도를 바꾸지 않습니다.</div>
                             </section>
 
-                            <section class="verba-deep-beginner-group">
-                                <label for="verba-deep-beginner-age-band"><b>연령대</b></label>
-                                <select id="verba-deep-beginner-age-band" class="text_pole">
+                            <section class="verba-beginner-group">
+                                <label for="verba-beginner-age-band"><b>연령대</b></label>
+                                <select id="verba-beginner-age-band" class="text_pole">
                                     ${BEGINNER_AGE_OPTIONS.map(option => `
                                         <option value="${option.value}" ${settings.beginnerAgeBand === option.value ? 'selected' : ''}>${option.label}</option>
                                     `).join('')}
                                 </select>
-                                <div class="verba-deep-help">어휘의 성숙도와 대사 호흡만 참고합니다. 실제 나이·호칭·서열·관계 사실을 새로 만들지 않습니다.</div>
+                                <div class="verba-help">어휘의 성숙도와 대사 호흡만 참고합니다. 실제 나이·호칭·서열·관계 사실을 새로 만들지 않습니다.</div>
                             </section>
 
-                            <div class="verba-deep-help">사용자가 직접 적은 캐릭터 대사 전용 프롬프트가 가장 우선하며, 한캐의 맛·영캐의 맛은 문화권 표현 방식을 담당하고 이 설정은 성격·화법·대화 태도만 담당합니다.</div>
+                            <div class="verba-help">사용자가 직접 적은 캐릭터 대사 전용 프롬프트가 가장 우선하며, 한캐의 맛·영캐의 맛은 문화권 표현 방식을 담당하고 이 설정은 성격·화법·대화 태도만 담당합니다.</div>
                         </div>
                     </div>
                 </details>
 
-                <details id="verba-deep-debug-settings" class="verba-deep-tool-details">
+                <details id="verba-debug-settings" class="verba-tool-details">
                     <summary>디버그 <small>최근 오류·번역 시간</small></summary>
-                    <div class="verba-deep-tool-details-content">
-                        <label class="verba-deep-check-row">
-                            <input type="checkbox" id="verba-deep-debug-mode" ${settings.debugMode ? 'checked' : ''}>
+                    <div class="verba-tool-details-content">
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
                             <span>디버그 모드</span>
                         </label>
-                        <div class="verba-deep-help">마지막 오류·응답 형식·보호 표식 복구 1건을 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
-                        <button type="button" id="verba-deep-copy-last-debug" class="menu_button verba-deep-wide" ${settings.debugMode && lastDebugDiagnostic ? '' : 'disabled'}>로그 복사</button>
-                        <details class="verba-deep-tool-details">
+                        <div class="verba-help">마지막 오류·응답 형식·보호 표식 복구 1건을 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
+                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode && lastDebugDiagnostic ? '' : 'disabled'}>로그 복사</button>
+                        <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>
-                            <div class="verba-deep-tool-details-content">
-                                <div class="verba-deep-help">디버그를 켠 뒤 시작한 출력 번역·전체 재번역 1건만 기록합니다. 인풋·선택 재번역은 제외합니다. 끄거나 새로고침하면 지워집니다.</div>
-                                <pre id="verba-deep-output-timing">${escapeHtml(outputTimingText(outputTiming.latest()))}</pre>
-                                <button type="button" id="verba-deep-copy-output-timing" class="menu_button verba-deep-wide" ${settings.debugMode && outputTiming.latest() ? '' : 'disabled'}>소요 시간 복사</button>
+                            <div class="verba-tool-details-content">
+                                <div class="verba-help">디버그를 켠 뒤 시작한 출력 번역·전체 재번역 1건만 기록합니다. 인풋·선택 재번역은 제외합니다. 끄거나 새로고침하면 지워집니다.</div>
+                                <pre id="verba-output-timing">${escapeHtml(outputTimingText(outputTiming.latest()))}</pre>
+                                <button type="button" id="verba-copy-output-timing" class="menu_button verba-wide" ${settings.debugMode && outputTiming.latest() ? '' : 'disabled'}>소요 시간 복사</button>
                             </div>
                         </details>
                     </div>
@@ -11625,7 +10358,7 @@ function injectSettingsPanel() {
     renderQualityAuditStatus();
 
     const activateDeveloperMode = () => {
-        const input = panel.querySelector('#verba-deep-developer-code');
+        const input = panel.querySelector('#verba-developer-code');
         const code = String(input?.value || '').trim();
 
         if (code !== DEVELOPER_ACCESS_CODE) {
@@ -11649,12 +10382,12 @@ function injectSettingsPanel() {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
 
-        if (target.closest('#verba-deep-developer-mode-on')) {
+        if (target.closest('#verba-developer-mode-on')) {
             activateDeveloperMode();
             return;
         }
 
-        if (target.closest('#verba-deep-developer-mode-off')) {
+        if (target.closest('#verba-developer-mode-off')) {
             settings.developerMode = false;
             settings.developerMinimalPromptEnabled = false;
             settings.developerCompressedPromptEnabled = false;
@@ -11670,7 +10403,7 @@ function injectSettingsPanel() {
     panel.addEventListener('keydown', event => {
         if (event.key !== 'Enter') return;
         const target = event.target instanceof Element ? event.target : null;
-        if (!target?.matches('#verba-deep-developer-code')) return;
+        if (!target?.matches('#verba-developer-code')) return;
         event.preventDefault();
         activateDeveloperMode();
     });
@@ -11679,28 +10412,28 @@ function injectSettingsPanel() {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
 
-        if (target.id === 'verba-deep-developer-output-split-count' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-output-split-count' && target instanceof HTMLSelectElement) {
             settings.developerOutputSplitCount = [2, 3].includes(Number(target.value)) ? Number(target.value) : 1;
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-developer-minimal-prompt-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-developer-minimal-prompt-enabled' && target instanceof HTMLInputElement) {
             settings.developerMinimalPromptEnabled = target.checked;
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-developer-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-developer-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
             settings.developerCompressedPromptEnabled = target.checked;
             if (target.checked) {
                 settings.developerExtremeCompressedPromptEnabled = false;
-                setCheckedValue('#verba-deep-developer-extreme-compressed-prompt-enabled', false);
+                setCheckedValue('#verba-developer-extreme-compressed-prompt-enabled', false);
             }
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             notify(
                 target.checked ? '개발자 테스트용 압축 프롬프트를 켰어요.' : '기존 전체 프롬프트로 돌아왔어요.',
                 'info',
@@ -11708,14 +10441,14 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-extreme-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-developer-extreme-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
             settings.developerExtremeCompressedPromptEnabled = target.checked;
             if (target.checked) {
                 settings.developerCompressedPromptEnabled = false;
-                setCheckedValue('#verba-deep-developer-compressed-prompt-enabled', false);
+                setCheckedValue('#verba-developer-compressed-prompt-enabled', false);
             }
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             notify(
                 target.checked ? 'xxx미친압축xxx을 켰어요.' : '미친압축을 껐어요.',
                 'info',
@@ -11723,98 +10456,98 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-beginner-character-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-beginner-character-enabled' && target instanceof HTMLInputElement) {
             settings.beginnerCharacterGuideEnabled = target.checked;
             syncBeginnerCharacterGuideUi(panel);
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.matches?.('[data-verba-deep-beginner-personality]') && target instanceof HTMLInputElement) {
-            settings.beginnerPersonalityTraits = [...panel.querySelectorAll('[data-verba-deep-beginner-personality]:checked')]
-                .map(input => String(input.dataset.verbaDeepBeginnerPersonality || ''))
+        if (target.matches?.('[data-verba-beginner-personality]') && target instanceof HTMLInputElement) {
+            settings.beginnerPersonalityTraits = [...panel.querySelectorAll('[data-verba-beginner-personality]:checked')]
+                .map(input => String(input.dataset.verbaBeginnerPersonality || ''))
                 .filter(value => BEGINNER_PERSONALITY_OPTIONS.some(option => option.value === value));
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.matches?.('[data-verba-deep-beginner-speech]') && target instanceof HTMLInputElement) {
-            settings.beginnerSpeechStyles = [...panel.querySelectorAll('[data-verba-deep-beginner-speech]:checked')]
-                .map(input => String(input.dataset.verbaDeepBeginnerSpeech || ''))
+        if (target.matches?.('[data-verba-beginner-speech]') && target instanceof HTMLInputElement) {
+            settings.beginnerSpeechStyles = [...panel.querySelectorAll('[data-verba-beginner-speech]:checked')]
+                .map(input => String(input.dataset.verbaBeginnerSpeech || ''))
                 .filter(value => BEGINNER_SPEECH_STYLE_OPTIONS.some(option => option.value === value));
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-beginner-personality-custom' && target instanceof HTMLTextAreaElement) {
+        if (target.id === 'verba-beginner-personality-custom' && target instanceof HTMLTextAreaElement) {
             settings.beginnerPersonalityCustom = String(target.value || '').trim().slice(0, 240);
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-beginner-speech-custom' && target instanceof HTMLTextAreaElement) {
+        if (target.id === 'verba-beginner-speech-custom' && target instanceof HTMLTextAreaElement) {
             settings.beginnerSpeechCustom = String(target.value || '').trim().slice(0, 240);
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.matches?.('[data-verba-deep-beginner-attitude]') && target instanceof HTMLInputElement) {
-            settings.beginnerConversationAttitudes = [...panel.querySelectorAll('[data-verba-deep-beginner-attitude]:checked')]
-                .map(input => String(input.dataset.verbaDeepBeginnerAttitude || ''))
+        if (target.matches?.('[data-verba-beginner-attitude]') && target instanceof HTMLInputElement) {
+            settings.beginnerConversationAttitudes = [...panel.querySelectorAll('[data-verba-beginner-attitude]:checked')]
+                .map(input => String(input.dataset.verbaBeginnerAttitude || ''))
                 .filter(value => BEGINNER_CONVERSATION_ATTITUDE_OPTIONS.some(option => option.value === value));
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-beginner-age-band' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-beginner-age-band' && target instanceof HTMLSelectElement) {
             settings.beginnerAgeBand = BEGINNER_AGE_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'unspecified';
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-developer-hongjin-enabled' && target instanceof HTMLInputElement) {
             settings.developerHongjinFlavorEnabled = target.checked;
             saveSettings();
             syncDeveloperQualityControls(panel);
             return;
         }
 
-        if (target.id === 'verba-deep-developer-mad-korean-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-developer-mad-korean-enabled' && target instanceof HTMLInputElement) {
             settings.developerMadKoreanOutputEnabled = target.checked;
             saveSettings();
             syncDeveloperQualityControls(panel);
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-developer-mad-korean-target-user-register' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-mad-korean-target-user-register' && target instanceof HTMLSelectElement) {
             settings.developerMadKoreanTargetToUserRegister = DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'source';
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-developer-mad-korean-user-target-register' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-mad-korean-user-target-register' && target instanceof HTMLSelectElement) {
             settings.developerMadKoreanUserToTargetRegister = DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'source';
             saveSettings();
-            if (document.querySelector('#verba-deep-current-rules')?.open) renderCurrentAppliedRules();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-transcreation' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-hongjin-transcreation' && target instanceof HTMLSelectElement) {
             settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'strong';
@@ -11822,7 +10555,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-profanity' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-hongjin-profanity' && target instanceof HTMLSelectElement) {
             settings.developerHongjinProfanity = DEVELOPER_HONGJIN_PROFANITY_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'natural';
@@ -11830,7 +10563,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-teasing' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-hongjin-teasing' && target instanceof HTMLSelectElement) {
             settings.developerHongjinTeasing = DEVELOPER_HONGJIN_TEASING_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'natural';
@@ -11838,7 +10571,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-vulgarity' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-hongjin-vulgarity' && target instanceof HTMLSelectElement) {
             settings.developerHongjinVulgarity = DEVELOPER_HONGJIN_VULGARITY_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'natural';
@@ -11846,7 +10579,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-playfulness' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-hongjin-playfulness' && target instanceof HTMLSelectElement) {
             settings.developerHongjinPlayfulness = DEVELOPER_HONGJIN_PLAYFULNESS_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'natural';
@@ -11854,7 +10587,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-age-band' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-hongjin-age-band' && target instanceof HTMLSelectElement) {
             settings.developerHongjinAgeBand = DEVELOPER_HONGJIN_AGE_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'unspecified';
@@ -11862,7 +10595,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-hongjin-oppa-frequency' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-hongjin-oppa-frequency' && target instanceof HTMLSelectElement) {
             settings.developerHongjinOppaFrequency = DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'off';
@@ -11870,14 +10603,14 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-relationship-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-developer-relationship-enabled' && target instanceof HTMLInputElement) {
             settings.developerRelationshipExperimentEnabled = target.checked;
             saveSettings();
             syncDeveloperQualityControls(panel);
             return;
         }
 
-        if (target.id === 'verba-deep-developer-speech-distance' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-speech-distance' && target instanceof HTMLSelectElement) {
             settings.developerSpeechDistance = DEVELOPER_SPEECH_DISTANCE_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'source';
@@ -11885,7 +10618,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-target-user-register' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-target-user-register' && target instanceof HTMLSelectElement) {
             settings.developerTargetToUserRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'unset';
@@ -11893,7 +10626,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-target-other-register' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-target-other-register' && target instanceof HTMLSelectElement) {
             settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'unset';
@@ -11901,14 +10634,14 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-target-user-address' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-developer-target-user-address' && target instanceof HTMLInputElement) {
             settings.developerTargetToUserAddress = String(target.value || '').trim().slice(0, 40);
             target.value = settings.developerTargetToUserAddress;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-developer-target-user-address-strength' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-target-user-address-strength' && target instanceof HTMLSelectElement) {
             settings.developerTargetToUserAddressStrength = DEVELOPER_USER_ADDRESS_STRENGTH_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'natural';
@@ -11916,7 +10649,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-developer-target-user-address-frequency' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-developer-target-user-address-frequency' && target instanceof HTMLSelectElement) {
             settings.developerTargetToUserAddressFrequency = DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'natural';
@@ -11924,7 +10657,7 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-quality-audit-enabled') {
+        if (target.id === 'verba-quality-audit-enabled') {
             settings.qualityAuditEnabled = target.checked;
             saveSettings();
             syncDeveloperQualityControls(panel);
@@ -11936,11 +10669,11 @@ function injectSettingsPanel() {
         }
 
         const map = {
-            'verba-deep-quality-audit-meaning': 'qualityAuditMeaning',
-            'verba-deep-quality-audit-referent': 'qualityAuditReferent',
-            'verba-deep-quality-audit-voice': 'qualityAuditVoice',
-            'verba-deep-quality-audit-translationese': 'qualityAuditTranslationese',
-            'verba-deep-quality-audit-continuity': 'qualityAuditContinuity',
+            'verba-quality-audit-meaning': 'qualityAuditMeaning',
+            'verba-quality-audit-referent': 'qualityAuditReferent',
+            'verba-quality-audit-voice': 'qualityAuditVoice',
+            'verba-quality-audit-translationese': 'qualityAuditTranslationese',
+            'verba-quality-audit-continuity': 'qualityAuditContinuity',
         };
         const key = map[target.id];
         if (key && target instanceof HTMLInputElement) {
@@ -11949,111 +10682,111 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-deep-expression-emphasis' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-expression-emphasis' && target instanceof HTMLSelectElement) {
             settings.expressionEmphasisTaste = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-expression-disfluency' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-expression-disfluency' && target instanceof HTMLSelectElement) {
             settings.expressionDisfluencyTaste = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-expression-idiom' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-expression-idiom' && target instanceof HTMLSelectElement) {
             settings.expressionIdiomMetaphorTaste = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-korean-flavor-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-korean-flavor-enabled' && target instanceof HTMLInputElement) {
             settings.koreanFlavorEnabled = target.checked;
             saveSettings();
             syncDeveloperQualityControls(panel);
             return;
         }
 
-        if (target.id === 'verba-deep-korean-flavor-rhythm' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-korean-flavor-rhythm' && target instanceof HTMLSelectElement) {
             settings.koreanFlavorDialogueRhythm = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-korean-flavor-pronoun' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-korean-flavor-pronoun' && target instanceof HTMLSelectElement) {
             settings.koreanFlavorPronounOmission = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-korean-flavor-profanity' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-korean-flavor-profanity' && target instanceof HTMLSelectElement) {
             settings.koreanFlavorProfanityTone = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-korean-flavor-interjection' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-korean-flavor-interjection' && target instanceof HTMLSelectElement) {
             settings.koreanFlavorInterjectionTone = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-korean-flavor-meme' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-korean-flavor-meme' && target instanceof HTMLSelectElement) {
             settings.koreanFlavorMemeDensity = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-korean-flavor-referent-repeat' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-korean-flavor-referent-repeat' && target instanceof HTMLInputElement) {
             settings.koreanFlavorReduceReferentRepetition = target.checked;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-english-flavor-enabled' && target instanceof HTMLInputElement) {
             settings.englishFlavorEnabled = target.checked;
             saveSettings();
             syncDeveloperQualityControls(panel);
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-rhythm' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-english-flavor-rhythm' && target instanceof HTMLSelectElement) {
             settings.englishFlavorDialogueRhythm = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-slang' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-english-flavor-slang' && target instanceof HTMLSelectElement) {
             settings.englishFlavorSlangDensity = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-profanity' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-english-flavor-profanity' && target instanceof HTMLSelectElement) {
             settings.englishFlavorProfanityTone = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-interjection' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-english-flavor-interjection' && target instanceof HTMLSelectElement) {
             settings.englishFlavorInterjectionTone = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-meme' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-english-flavor-meme' && target instanceof HTMLSelectElement) {
             settings.englishFlavorMemeDensity = target.value;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-referent-repeat' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-english-flavor-referent-repeat' && target instanceof HTMLInputElement) {
             settings.englishFlavorReduceReferentRepetition = target.checked;
             saveSettings();
             return;
         }
 
-        if (target.id === 'verba-deep-english-flavor-conversation' && target instanceof HTMLSelectElement) {
+        if (target.id === 'verba-english-flavor-conversation' && target instanceof HTMLSelectElement) {
             settings.englishFlavorConversationNaturalization = target.value;
             saveSettings();
         }
@@ -12062,11 +10795,11 @@ function injectSettingsPanel() {
     syncDeveloperQualityControls(panel);
     syncBeginnerCharacterGuideUi(panel);
 
-    panel.querySelector('#verba-deep-name-lock-manager').addEventListener('toggle', event => {
+    panel.querySelector('#verba-name-lock-manager').addEventListener('toggle', event => {
         if (event.currentTarget.open) renderNameLockManager();
     });
 
-    panel.querySelector('#verba-deep-profile').addEventListener('change', event => {
+    panel.querySelector('#verba-profile').addEventListener('change', event => {
         settings.profileId = event.target.value;
         if (!settings.profileId) {
             settings.fallbackProfileId = '';
@@ -12085,7 +10818,7 @@ function injectSettingsPanel() {
         refreshProfileSelect();
         saveSettings();
     });
-    panel.querySelector('#verba-deep-fallback-profile').addEventListener('change', event => {
+    panel.querySelector('#verba-fallback-profile').addEventListener('change', event => {
         const value = event.target.value;
         if (value && [settings.profileId, settings.thirdProfileId].map(String).includes(String(value))) {
             settings.fallbackProfileId = '';
@@ -12099,7 +10832,7 @@ function injectSettingsPanel() {
         refreshProfileToggleButton();
         saveSettings();
     });
-    panel.querySelector('#verba-deep-third-profile').addEventListener('change', event => {
+    panel.querySelector('#verba-third-profile').addEventListener('change', event => {
         const value = event.target.value;
         if (value && [settings.profileId, settings.fallbackProfileId].map(String).includes(String(value))) {
             settings.thirdProfileId = '';
@@ -12113,14 +10846,14 @@ function injectSettingsPanel() {
         refreshProfileToggleButton();
         saveSettings();
     });
-    panel.querySelector('#verba-deep-refresh-profiles').addEventListener('click', refreshProfileSelect);
-    panel.querySelector('#verba-deep-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
-    panel.querySelector('#verba-deep-auto-profile-fallback').addEventListener('change', event => {
+    panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
+    panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
+    panel.querySelector('#verba-auto-profile-fallback').addEventListener('change', event => {
         settings.autoProfileFallback = event.target.checked;
         saveSettings();
     });
-    const debugModeInput = panel.querySelector('#verba-deep-debug-mode');
-    const debugCopyButton = panel.querySelector('#verba-deep-copy-last-debug');
+    const debugModeInput = panel.querySelector('#verba-debug-mode');
+    const debugCopyButton = panel.querySelector('#verba-copy-last-debug');
     const syncDebugCopyButton = () => {
         if (!debugCopyButton) return;
         debugCopyButton.disabled = !settings.debugMode || !lastDebugDiagnostic;
@@ -12139,42 +10872,42 @@ function injectSettingsPanel() {
             await copyDebugDiagnostic();
             notify('마지막 오류 로그를 복사했어요.', 'success');
         } catch (error) {
-            console.error('[긴르바 실험실] 최근 오류 진단 복사 실패', error);
+            console.error('[베르바] 최근 오류 진단 복사 실패', error);
             notify(lastDebugDiagnostic ? '로그 복사에 실패했어요. 클립보드 권한을 확인해 주세요.' : '복사할 최근 오류 로그가 없어요.', 'warning');
         }
     });
     syncDebugCopyButton();
-    panel.querySelector('#verba-deep-copy-output-timing')?.addEventListener('click', async () => {
+    panel.querySelector('#verba-copy-output-timing')?.addEventListener('click', async () => {
         const record = outputTiming.latest();
         if (!settings.debugMode || !record) return;
         try {
-            await copyText(`긴르바 실험실 v${EXTENSION_VERSION}\n${outputTimingText(record)}`);
+            await copyText(`베르바 v${EXTENSION_VERSION}\n${outputTimingText(record)}`);
             notify('마지막 번역 소요 시간을 복사했어요.', 'success');
         } catch {
             notify('복사하지 못했어요. 클립보드 권한을 확인해 주세요.', 'warning');
         }
     });
-    panel.querySelector('#verba-deep-reset-profile-stats').addEventListener('click', () => {
+    panel.querySelector('#verba-reset-profile-stats').addEventListener('click', () => {
         if (!globalThis.confirm?.('프로필 A/B/C 성능 기록을 모두 초기화할까요?')) return;
         profileStatsState = normalizeProfileStats(null);
         saveLocalProfileStats();
         renderProfileStats();
         notify('프로필 성능 기록을 초기화했어요.', 'success');
     });
-    panel.querySelector('#verba-deep-selection-candidates').addEventListener('change', event => {
+    panel.querySelector('#verba-selection-candidates').addEventListener('change', event => {
         settings.selectionCandidates = event.target.checked;
         saveSettings();
     });
-    const relationTemperatureInputs = [...panel.querySelectorAll('input[name="verba-deep-relation-temperature"]')];
-    const narrationLocalizationInputs = [...panel.querySelectorAll('input[name="verba-deep-narration-localization-level"]')];
-    const dialogueLocalizationInputs = [...panel.querySelectorAll('input[name="verba-deep-dialogue-localization-level"]')];
+    const relationTemperatureInputs = [...panel.querySelectorAll('input[name="verba-relation-temperature"]')];
+    const narrationLocalizationInputs = [...panel.querySelectorAll('input[name="verba-narration-localization-level"]')];
+    const dialogueLocalizationInputs = [...panel.querySelectorAll('input[name="verba-dialogue-localization-level"]')];
     const fineTuningInputs = [...relationTemperatureInputs, ...narrationLocalizationInputs, ...dialogueLocalizationInputs];
     const syncRelationTemperatureControls = enabled => {
-        panel.querySelector('#verba-deep-fine-tuning-controls')?.classList.toggle('verba-deep-control-disabled', !enabled);
+        panel.querySelector('#verba-fine-tuning-controls')?.classList.toggle('verba-control-disabled', !enabled);
         fineTuningInputs.forEach(input => { input.disabled = !enabled; });
     };
     syncRelationTemperatureControls(settings.relationTemperatureEnabled !== false);
-    panel.querySelector('#verba-deep-relation-temperature-enabled').addEventListener('change', event => {
+    panel.querySelector('#verba-relation-temperature-enabled').addEventListener('change', event => {
         settings.relationTemperatureEnabled = event.target.checked;
         syncRelationTemperatureControls(settings.relationTemperatureEnabled);
         saveSettings();
@@ -12212,32 +10945,32 @@ function injectSettingsPanel() {
             saveSettings();
         });
     });
-    panel.querySelector('#verba-deep-dialogue-ending-preferred').addEventListener('input', event => {
+    panel.querySelector('#verba-dialogue-ending-preferred').addEventListener('input', event => {
         settings.dialogueEndingPreferred = event.target.value;
         saveSettings();
     });
-    panel.querySelector('#verba-deep-dialogue-ending-avoid').addEventListener('input', event => {
+    panel.querySelector('#verba-dialogue-ending-avoid').addEventListener('input', event => {
         settings.dialogueEndingAvoid = event.target.value;
         saveSettings();
     });
-    panel.querySelector('#verba-deep-dialogue-ending-strength').addEventListener('change', event => {
+    panel.querySelector('#verba-dialogue-ending-strength').addEventListener('change', event => {
         settings.dialogueEndingStrength = ['light', 'normal', 'strong'].includes(event.target.value)
             ? event.target.value
             : 'normal';
         saveSettings();
     });
-    panel.querySelector('#verba-deep-dialogue-ending-repetition-reduction').addEventListener('change', event => {
+    panel.querySelector('#verba-dialogue-ending-repetition-reduction').addEventListener('change', event => {
         settings.dialogueEndingRepetitionReduction = event.target.checked;
         saveSettings();
     });
-    panel.querySelector('#verba-deep-rule-priority-list').addEventListener('click', event => {
-        const button = event.target.closest('.verba-deep-rule-move-up, .verba-deep-rule-move-down');
+    panel.querySelector('#verba-rule-priority-list').addEventListener('click', event => {
+        const button = event.target.closest('.verba-rule-move-up, .verba-rule-move-down');
         if (!button || button.disabled) return;
-        const key = button.closest('.verba-deep-rule-priority-row')?.dataset.ruleKey;
+        const key = button.closest('.verba-rule-priority-row')?.dataset.ruleKey;
         const order = normalizeTranslationRuleOrder(settings.translationRuleOrder);
         const index = order.indexOf(String(key || ''));
         if (index < 0) return;
-        const nextIndex = button.classList.contains('verba-deep-rule-move-up') ? index - 1 : index + 1;
+        const nextIndex = button.classList.contains('verba-rule-move-up') ? index - 1 : index + 1;
         if (nextIndex < 0 || nextIndex >= order.length) return;
         [order[index], order[nextIndex]] = [order[nextIndex], order[index]];
         settings.translationRuleOrder = order;
@@ -12245,14 +10978,14 @@ function injectSettingsPanel() {
         renderTranslationRuleOrder();
         renderPromptConflictInspector();
     });
-    panel.querySelector('#verba-deep-reset-rule-priority').addEventListener('click', () => {
+    panel.querySelector('#verba-reset-rule-priority').addEventListener('click', () => {
         settings.translationRuleOrder = [...DEFAULT_TRANSLATION_RULE_ORDER];
         saveSettings();
         renderTranslationRuleOrder();
         renderPromptConflictInspector();
         notify('번역 규칙 우선순위를 기본 순서로 되돌렸어요.', 'success');
     });
-    panel.querySelector('#verba-deep-refresh-prompt-conflicts')?.addEventListener('click', () => {
+    panel.querySelector('#verba-refresh-prompt-conflicts')?.addEventListener('click', () => {
         const conflicts = configuredPromptConflicts();
         renderPromptConflictInspector(conflicts);
         notify(
@@ -12262,16 +10995,16 @@ function injectSettingsPanel() {
             conflicts.length ? 'warning' : 'success',
         );
     });
-    panel.querySelector('#verba-deep-selection-quick-count').addEventListener('change', event => {
+    panel.querySelector('#verba-selection-quick-count').addEventListener('change', event => {
         settings.selectionQuickCount = Math.min(5, Math.max(2, Number(event.target.value) || 2));
         hideSelectionButton();
         saveSettings();
     });
     [
-        ['#verba-deep-show-selection-name', 'showSelectionName'],
-        ['#verba-deep-show-selection-source', 'showSelectionSource'],
-        ['#verba-deep-show-selection-lock', 'showSelectionLock'],
-        ['#verba-deep-show-selection-bundle', 'showSelectionBundle'],
+        ['#verba-show-selection-name', 'showSelectionName'],
+        ['#verba-show-selection-source', 'showSelectionSource'],
+        ['#verba-show-selection-lock', 'showSelectionLock'],
+        ['#verba-show-selection-bundle', 'showSelectionBundle'],
     ].forEach(([selector, key]) => {
         panel.querySelector(selector).addEventListener('change', event => {
             settings[key] = event.target.checked;
@@ -12279,9 +11012,9 @@ function injectSettingsPanel() {
             saveSettings();
         });
     });
-    const promptPresetSelect = panel.querySelector('#verba-deep-prompt-preset-select');
-    const promptPresetName = panel.querySelector('#verba-deep-prompt-preset-name');
-    const promptPresetSaveScope = panel.querySelector('#verba-deep-prompt-preset-save-scope');
+    const promptPresetSelect = panel.querySelector('#verba-prompt-preset-select');
+    const promptPresetName = panel.querySelector('#verba-prompt-preset-name');
+    const promptPresetSaveScope = panel.querySelector('#verba-prompt-preset-save-scope');
 
     promptPresetSelect?.addEventListener('change', event => {
         const preset = promptPresetById(event.target.value);
@@ -12305,13 +11038,13 @@ function injectSettingsPanel() {
         notify(`프롬프트 프리셋 “${preset.name}”을 적용했어요.`, 'success');
     });
 
-    panel.querySelector('#verba-deep-prompt-preset-new-start')?.addEventListener('click', async () => {
+    panel.querySelector('#verba-prompt-preset-new-start')?.addEventListener('click', async () => {
         const scope = await requestPromptPresetNewStartScope();
         if (!scope) return;
         resetPromptPresetWorkspace(scope);
     });
 
-    panel.querySelector('#verba-deep-prompt-preset-save')?.addEventListener('click', () => {
+    panel.querySelector('#verba-prompt-preset-save')?.addEventListener('click', () => {
         const name = normalizedPromptPresetName(promptPresetName?.value);
         if (!name) {
             notify('프롬프트 프리셋 이름을 입력해 주세요.', 'warning');
@@ -12389,7 +11122,7 @@ function injectSettingsPanel() {
         );
     });
 
-    panel.querySelector('#verba-deep-prompt-preset-favorite')?.addEventListener('click', () => {
+    panel.querySelector('#verba-prompt-preset-favorite')?.addEventListener('click', () => {
         const id = String(promptPresetSelect?.value || '');
         const preset = promptPresetById(id);
         if (!preset) {
@@ -12412,7 +11145,7 @@ function injectSettingsPanel() {
         );
     });
 
-    panel.querySelector('#verba-deep-prompt-preset-rename')?.addEventListener('click', () => {
+    panel.querySelector('#verba-prompt-preset-rename')?.addEventListener('click', () => {
         const id = String(promptPresetSelect?.value || '');
         const preset = promptPresetById(id);
         if (!preset) {
@@ -12438,7 +11171,7 @@ function injectSettingsPanel() {
         notify(`프롬프트 프리셋 이름을 “${name}”으로 바꿨어요.`, 'success');
     });
 
-    panel.querySelector('#verba-deep-prompt-preset-delete')?.addEventListener('click', () => {
+    panel.querySelector('#verba-prompt-preset-delete')?.addEventListener('click', () => {
         const id = String(promptPresetSelect?.value || '');
         const preset = promptPresetById(id);
         if (!preset) {
@@ -12454,7 +11187,7 @@ function injectSettingsPanel() {
         notify(`프롬프트 프리셋 “${preset.name}”을 삭제했어요.`, 'success');
     });
 
-    panel.querySelector('#verba-deep-prompt-preset-backup-now')?.addEventListener('click', () => {
+    panel.querySelector('#verba-prompt-preset-backup-now')?.addEventListener('click', () => {
         clearTimeout(promptEditorBackupTimer);
         promptEditorBackupTimer = null;
         if (!createPromptEditorBackup('수동 백업', { force: true })) {
@@ -12470,10 +11203,10 @@ function injectSettingsPanel() {
     renderPromptPresetManager();
 
     [
-        ['#verba-deep-global-prompt-enabled', 'globalPromptEnabled'],
-        ['#verba-deep-all-dialogue-prompt-enabled', 'allDialoguePromptEnabled'],
-        ['#verba-deep-dialogue-prompt-enabled', 'dialoguePromptEnabled'],
-        ['#verba-deep-other-dialogue-prompt-enabled', 'otherDialoguePromptEnabled'],
+        ['#verba-global-prompt-enabled', 'globalPromptEnabled'],
+        ['#verba-all-dialogue-prompt-enabled', 'allDialoguePromptEnabled'],
+        ['#verba-dialogue-prompt-enabled', 'dialoguePromptEnabled'],
+        ['#verba-other-dialogue-prompt-enabled', 'otherDialoguePromptEnabled'],
     ].forEach(([selector, key]) => {
         panel.querySelector(selector)?.addEventListener('change', event => {
             settings[key] = event.target.checked;
@@ -12484,44 +11217,43 @@ function injectSettingsPanel() {
         });
     });
     syncPromptSlotUi();
-
-    const promptSlotsDetails = panel.querySelector('#verba-deep-prompt-slots');
+    const promptSlotsDetails = panel.querySelector('#verba-prompt-slots');
     promptSlotsDetails?.addEventListener('toggle', () => {
         settings.promptSlotsCollapsed = !promptSlotsDetails.open;
         saveSettings();
     });
 
-    panel.querySelector('#verba-deep-global-prompt').addEventListener('input', event => {
+    panel.querySelector('#verba-global-prompt').addEventListener('input', event => {
         settings.globalPrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
         schedulePromptEditorBackup();
     });
-    panel.querySelector('#verba-deep-all-dialogue-prompt').addEventListener('input', event => {
+    panel.querySelector('#verba-all-dialogue-prompt').addEventListener('input', event => {
         settings.allDialoguePrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
         schedulePromptEditorBackup();
     });
-    panel.querySelector('#verba-deep-dialogue-prompt').addEventListener('input', event => {
+    panel.querySelector('#verba-dialogue-prompt').addEventListener('input', event => {
         settings.dialoguePrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
         schedulePromptEditorBackup();
     });
-    panel.querySelector('#verba-deep-other-dialogue-prompt').addEventListener('input', event => {
+    panel.querySelector('#verba-other-dialogue-prompt').addEventListener('input', event => {
         settings.otherDialoguePrompt = event.target.value;
         saveSettings();
         renderPromptConflictInspector();
         schedulePromptEditorBackup();
     });
     bindPromptExpandEditors(panel);
-    panel.querySelector('#verba-deep-banned-words').addEventListener('input', event => {
+    panel.querySelector('#verba-banned-words').addEventListener('input', event => {
         settings.bannedWords = event.target.value;
         saveSettings();
     });
 
-    const currentRulesDetails = panel.querySelector('#verba-deep-current-rules');
+    const currentRulesDetails = panel.querySelector('#verba-current-rules');
     currentRulesDetails?.addEventListener('toggle', () => {
         if (currentRulesDetails.open) renderCurrentAppliedRules();
     });
@@ -12531,7 +11263,7 @@ function injectSettingsPanel() {
     };
     panel.addEventListener('input', event => {
         const target = event.target;
-        if (target instanceof HTMLTextAreaElement && target.id === 'verba-deep-developer-minimal-prompt') {
+        if (target instanceof HTMLTextAreaElement && target.id === 'verba-developer-minimal-prompt') {
             settings.developerMinimalPrompt = target.value;
             saveSettings();
         }
@@ -12567,7 +11299,7 @@ function scheduleAutomaticTranslation(messageId, delay = 100, translationOptions
         if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
 
         // A regenerated/revised message can briefly overlap SillyTavern's swipe
-        // settling job. Older Verba Deep builds simply returned here, which could
+        // settling job. Older Verba builds simply returned here, which could
         // permanently drop the scheduled automatic translation. Defer instead.
         if (swipeTranslationJobs.has(id)) {
             const waitCount = Math.max(0, Number(translationOptions.waitForSwipeCount) || 0);
@@ -12695,7 +11427,7 @@ function handleSwipe(payload) {
     const previousSignature = hold?.signature || storedRecordSignature(message?.extra?.[STATE_KEY]);
     clearTransientTranslationSelections();
     abortPendingOutput(id, outputAbortReason(
-        'VERBA_DEEP_SWIPE_CHANGED',
+        'VERBA_SWIPE_CHANGED',
         '스와이프가 변경되어 이전 답변 번역을 취소했습니다.',
         true,
     ));
@@ -13024,7 +11756,7 @@ function scheduleRecentInsteadRevisionTranslations(delay = 180) {
         if (insteadRevisionTranslationSeen.has(key)) return;
 
         insteadRevisionTranslationSeen.set(key, now);
-        console.info(`[긴르바 실험실] inSTead 새 revision 감지 #${id} swipe ${meta.swipeId ?? '?'} — 자동 번역 예약`);
+        console.info(`[베르바] inSTead 새 revision 감지 #${id} swipe ${meta.swipeId ?? '?'} — 자동 번역 예약`);
         scheduleAutomaticTranslation(id, delay, { insteadRevision: true });
     });
 
@@ -13078,7 +11810,7 @@ function handleGenerationEnded() {
 
 /**
  * SillyTavern's message-edit cancel path intentionally redraws `message.mes`
- * directly, even when `extra.display_text` still contains Verba Deep's translation.
+ * directly, even when `extra.display_text` still contains Verba's translation.
  * MESSAGE_UPDATED fires after that redraw. If the underlying source did not
  * change, force one normal message render so the saved translation is visible
  * again. Use only an exact source-hash match here: a real edit must be handled
@@ -13132,7 +11864,7 @@ function restoreTranslationAfterMessageUpdate(payload) {
 
 /**
  * SillyTavern can rebuild the message DOM from `message.mes` when a chat is
- * opened even though Verba Deep's saved translation record and display_text are
+ * opened even though Verba's saved translation record and display_text are
  * still present. Re-assert the saved display state after chat load without
  * calling the translation API.
  *
@@ -13228,7 +11960,7 @@ function setupEvents() {
             clearTransientTranslationSelections();
             for (const pending of pendingOutputs.values()) {
                 pending.controller.abort(outputAbortReason(
-                    'VERBA_DEEP_CHAT_CHANGED',
+                    'VERBA_CHAT_CHANGED',
                     '채팅이 변경되어 이전 채팅의 번역을 취소했습니다.',
                     true,
                 ));
@@ -13236,7 +11968,7 @@ function setupEvents() {
             pendingOutputs.clear();
             for (const controller of pendingSelectionTranslations) {
                 controller.abort(outputAbortReason(
-                    'VERBA_DEEP_CHAT_CHANGED',
+                    'VERBA_CHAT_CHANGED',
                     '채팅이 변경되어 진행 중인 선택 재번역을 취소했습니다.',
                     true,
                 ));
@@ -13253,13 +11985,13 @@ function setupEvents() {
             lastRenderedTranslationByMessage.clear();
             speakerAttributionCache.clear();
             roleTermPlanCache.clear();
-            document.querySelectorAll('.verba-deep-swipe-hold-active').forEach(element => {
-                element.classList.remove('verba-deep-swipe-hold-active');
-                element.querySelectorAll('.verba-deep-swipe-hold-content').forEach(hold => hold.remove());
+            document.querySelectorAll('.verba-swipe-hold-active').forEach(element => {
+                element.classList.remove('verba-swipe-hold-active');
+                element.querySelectorAll('.verba-swipe-hold-content').forEach(hold => hold.remove());
             });
             dismissPreviousOutputReturnButton();
-            const requestOverlay = document.querySelector('#verba-deep-request-overlay');
-            const closeButton = requestOverlay?.querySelector('.verba-deep-close');
+            const requestOverlay = document.querySelector('#verba-request-overlay');
+            const closeButton = requestOverlay?.querySelector('.verba-close');
             if (closeButton) closeButton.click();
             else requestOverlay?.remove();
             resetAssistantSourceObservation();
@@ -13322,10 +12054,10 @@ function setupObserver() {
 function initialize() {
     registerTranslationExtension(EXTENSION_KEY);
     clearTransientTranslationSelections();
-    registerVerbaDeepSlashCommand();
-    registerVerbaDeepProfileSlashCommand();
+    registerVerbaSlashCommand();
+    registerVerbaProfileSlashCommand();
 
-    const stalePanels = [...document.querySelectorAll('#verba-deep-settings, .verba-deep-settings')];
+    const stalePanels = [...document.querySelectorAll('#verba-settings, .verba-settings')];
     stalePanels.slice(1).forEach(panel => panel.remove());
 
     injectSettingsPanel();
@@ -13343,8 +12075,8 @@ function initialize() {
         scheduleFreshMountedAssistantTranslations(220);
     }, 300);
     setTimeout(() => scheduleFreshMountedAssistantTranslations(220), 900);
-    globalThis.__verbaDeepTranslatorVersion = EXTENSION_VERSION;
-    console.log(`[긴르바 실험실] v${EXTENSION_VERSION} 준비 완료`);
+    globalThis.__verbaTranslatorVersion = EXTENSION_VERSION;
+    console.log(`[베르바] v${EXTENSION_VERSION} 준비 완료`);
 }
 
 if (document.readyState === 'loading') {

@@ -26,9 +26,7 @@ assert.equal(second.currentTranslationExtensionOwner(), 'verba');
 assert.equal(second.isTranslationExtensionActive('verba'), true);
 assert.equal(second.isTranslationExtensionActive('verba-deep'), false);
 
-// The public package name changed, but the runtime coordination key stays
-// legacy-compatible so existing settings and the peer extension still work.
-const ownKey = 'verba-deep';
+const ownKey = manifest.name;
 const peerStateKey = ownKey === 'verba'
     ? 'verba_deep_current_translation'
     : 'verba_current_translation';

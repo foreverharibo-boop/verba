@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
     buildHongjinVoiceRewritePrompt,
-    buildMadFlashV2AuditPrompt,
+    buildMadKoreanTargetedAuditPrompt,
     buildOutputPrompt,
     segmentSource,
 } from '../core.js';
@@ -26,10 +26,10 @@ const settings = {
 const source = 'The overpass ramp rose ahead. "Keep your voice down," he said.';
 const segmented = segmentSource(source);
 const outputPrompt = buildOutputPrompt(segmented, settings, '', identity);
-assert.match(outputPrompt, /TARGET CHARACTER AUTHORING PATH/);
-assert.match(outputPrompt, /SCENE-FIRST RECOMPOSITION/);
-assert.match(outputPrompt, /compose one final Korean realization per supplied id/i);
-assert.match(outputPrompt, /complete dedicated CURRENT TARGET CHARACTER voice pass/i);
+assert.match(outputPrompt, /Road\/overpass “ramp” is 경사로\/진입로/);
+assert.match(outputPrompt, /“공기가 얇다”/);
+assert.match(outputPrompt, /“작은 숨 헐떡임”/);
+assert.match(outputPrompt, /“담은이 몸집”/);
 
 const targetRows = segmented.segments.filter(row => row.type === 'dialogue_candidate');
 const voicePrompt = buildHongjinVoiceRewritePrompt({
@@ -39,17 +39,17 @@ const voicePrompt = buildHongjinVoiceRewritePrompt({
     speakerIdentity: identity,
     settings,
 });
-assert.match(voicePrompt, /KOREAN-ONLY CHARACTER REAUTHORING/i);
-assert.match(voicePrompt, /Never aim a person-directed curse at USER/);
-assert.match(voicePrompt, /Never aim a person-directed curse at USER/);
-assert.match(voicePrompt, /ACROSS THE FULL DIALOGUE SET/i);
+assert.match(voicePrompt, /quiet tactical instructions and restrained concern are not profanity quotas/i);
+assert.match(voicePrompt, /ABSOLUTE USER CHECK/);
+assert.match(voicePrompt, /“새끼야\/병신아\/미친놈아”/);
+assert.match(voicePrompt, /repetition plus a dry comeback/i);
 
 const auditSegments = [
     { id: 'd0', type: 'dialogue_candidate', outputScope: 'target_dialogue', text: '"Keep your voice down."' },
     { id: 'n0', type: 'narration', outputScope: 'narration', text: 'A long gray ramp rose ahead.' },
     { id: 'n1', type: 'narration', outputScope: 'narration', text: 'The strap was too long for Dam-eun\'s frame.' },
 ];
-const auditPrompt = buildMadFlashV2AuditPrompt({
+const auditPrompt = buildMadKoreanTargetedAuditPrompt({
     segments: auditSegments,
     currentTranslations: new Map([
         ['d0', '"말 조용히 해, 새끼야."'],
@@ -60,9 +60,9 @@ const auditPrompt = buildMadFlashV2AuditPrompt({
     speakerIdentity: identity,
     settings,
 });
-assert.match(auditPrompt, /SPEAKER \/ ACTOR/);
-assert.match(auditPrompt, /proposition, speech act, negation/);
-assert.match(auditPrompt, /broken particle, impossible predicate/);
-assert.match(auditPrompt, /never make USER .* the cursed object/i);
+assert.match(auditPrompt, /VERIFY_USER_DIRECTED_PROFANITY/);
+assert.match(auditPrompt, /ROAD_RAMP_MISTRANSLATED_AS_LAMP/);
+assert.match(auditPrompt, /POSSIBLE_NAME_PARTICLE_OR_POSSESSIVE_DAMAGE/);
+assert.match(auditPrompt, /never return an unchanged flagged USER-directed insult/i);
 
 console.log('PASS: live-output regressions cover translationese, ramp polysemy, name possessive damage, serious-line profanity quotas and USER-directed insults.');

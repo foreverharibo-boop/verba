@@ -50,30 +50,30 @@ export function normalizeBaseTranslationCustom(value) {
 
 export function baseTranslationEditorMarkup(state) {
     const changed = state.draft !== state.prompt;
-    return `<details id="verba-deep-base-editor" class="verba-deep-tool-details">
+    return `<details id="verba-base-editor" class="verba-tool-details">
         <summary>🧪 기본 번역 지침 편집 <small>전용 프리셋</small></summary>
-        <div class="verba-deep-tool-details-content">
-            <div class="verba-deep-help">긴르바 실험실가 모든 아웃풋 번역에 기본으로 보내는 번역 지침입니다. 필수 출력 형식·구간 처리와 기존 사용자 프롬프트·미세조정·이름 고정·금지어는 긴르바 실험실가 별도로 붙입니다.</div>
-            <label class="verba-deep-check-row"><input id="verba-deep-base-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span>저장한 기본 지침 사용</span></label>
-            <div class="verba-deep-help">개발자 모드를 끄면 기본값을 사용합니다. 편집 내용과 전용 프리셋은 보관됩니다.</div>
-            <select id="verba-deep-base-preset" class="text_pole" aria-label="기본 지침 전용 프리셋">
+        <div class="verba-tool-details-content">
+            <div class="verba-help">베르바가 모든 아웃풋 번역에 기본으로 보내는 번역 지침입니다. 필수 출력 형식·구간 처리와 기존 사용자 프롬프트·미세조정·이름 고정·금지어는 베르바가 별도로 붙입니다.</div>
+            <label class="verba-check-row"><input id="verba-base-enabled" type="checkbox" ${state.enabled ? 'checked' : ''}><span>저장한 기본 지침 사용</span></label>
+            <div class="verba-help">개발자 모드를 끄면 기본값을 사용합니다. 편집 내용과 전용 프리셋은 보관됩니다.</div>
+            <select id="verba-base-preset" class="text_pole" aria-label="기본 지침 전용 프리셋">
                 <option value="">전용 프리셋 선택</option>
                 ${state.presets.map(row => `<option value="${escape(row.id)}" ${row.id === state.selectedId ? 'selected' : ''}>${escape(row.name)}</option>`).join('')}
             </select>
-            <input id="verba-deep-base-name" class="text_pole" maxlength="60" value="${escape(state.name)}" placeholder="전용 프리셋 이름" aria-label="기본 지침 프리셋 이름">
-            <div class="verba-deep-base-buttons">
-                <button type="button" class="menu_button" data-verba-deep-base-action="new" title="새 프리셋 저장" aria-label="새 프리셋 저장">새로 저장</button>
-                <button type="button" class="menu_button" data-verba-deep-base-action="rename" title="선택 프리셋 이름 변경" aria-label="선택 프리셋 이름 변경" ${state.selectedId ? '' : 'disabled'}>이름 변경</button>
-                <button type="button" class="menu_button" data-verba-deep-base-action="delete" title="선택 프리셋 삭제" aria-label="선택 프리셋 삭제" ${state.selectedId ? '' : 'disabled'}>삭제</button>
+            <input id="verba-base-name" class="text_pole" maxlength="60" value="${escape(state.name)}" placeholder="전용 프리셋 이름" aria-label="기본 지침 프리셋 이름">
+            <div class="verba-base-buttons">
+                <button type="button" class="menu_button" data-verba-base-action="new" title="새 프리셋 저장" aria-label="새 프리셋 저장">새로 저장</button>
+                <button type="button" class="menu_button" data-verba-base-action="rename" title="선택 프리셋 이름 변경" aria-label="선택 프리셋 이름 변경" ${state.selectedId ? '' : 'disabled'}>이름 변경</button>
+                <button type="button" class="menu_button" data-verba-base-action="delete" title="선택 프리셋 삭제" aria-label="선택 프리셋 삭제" ${state.selectedId ? '' : 'disabled'}>삭제</button>
             </div>
-            <label for="verba-deep-base-prompt">기본 번역 지침</label>
-            <textarea id="verba-deep-base-prompt" class="text_pole" rows="14" spellcheck="false">${escape(state.draft)}</textarea>
-            <small id="verba-deep-base-status">${state.enabled ? '저장한 지침 적용 중' : '기본값 사용 중'}${changed ? ' · 미적용 편집 내용 있음' : ''} · ${state.draft.length.toLocaleString()}자</small>
-            <div class="verba-deep-base-buttons">
-                <button type="button" class="menu_button" data-verba-deep-base-action="apply">저장·적용</button>
-                <button type="button" class="menu_button" data-verba-deep-base-action="restore">기본값 복원</button>
+            <label for="verba-base-prompt">기본 번역 지침</label>
+            <textarea id="verba-base-prompt" class="text_pole" rows="14" spellcheck="false">${escape(state.draft)}</textarea>
+            <small id="verba-base-status">${state.enabled ? '저장한 지침 적용 중' : '기본값 사용 중'}${changed ? ' · 미적용 편집 내용 있음' : ''} · ${state.draft.length.toLocaleString()}자</small>
+            <div class="verba-base-buttons">
+                <button type="button" class="menu_button" data-verba-base-action="apply">저장·적용</button>
+                <button type="button" class="menu_button" data-verba-base-action="restore">기본값 복원</button>
             </div>
-            <div class="verba-deep-help">입력 중인 내용은 보관되며 ‘저장·적용’ 또는 프리셋 저장 후 모든 아웃풋 번역 요청에 반영됩니다. 프리셋을 선택하면 즉시 적용됩니다. 이미 시작한 요청과 기존 번역문은 소급 변경하지 않습니다.</div>
+            <div class="verba-help">입력 중인 내용은 보관되며 ‘저장·적용’ 또는 프리셋 저장 후 모든 아웃풋 번역 요청에 반영됩니다. 프리셋을 선택하면 즉시 적용됩니다. 이미 시작한 요청과 기존 번역문은 소급 변경하지 않습니다.</div>
         </div>
     </details>`;
 }
@@ -83,7 +83,7 @@ export function baseTranslationEditorMarkup(state) {
 export function bindBaseTranslationEditor(panel, settings, { save, notify, confirm = message => globalThis.confirm(message) }) {
     const state = () => settings.baseTranslationCustom;
     const render = () => {
-        const old = panel.querySelector('#verba-deep-base-editor');
+        const old = panel.querySelector('#verba-base-editor');
         if (!old) return;
         const open = old.open;
         const holder = document.createElement('div');
@@ -106,23 +106,23 @@ export function bindBaseTranslationEditor(panel, settings, { save, notify, confi
     panel.addEventListener('input', event => {
         if (!settings.developerMode) return;
         const id = event.target?.id;
-        if (id === 'verba-deep-base-prompt') {
+        if (id === 'verba-base-prompt') {
             state().draft = event.target.value;
-            const status = panel.querySelector('#verba-deep-base-status');
+            const status = panel.querySelector('#verba-base-status');
             if (status) status.textContent = `${state().enabled ? '저장한 지침 적용 중' : '기본값 사용 중'} · 미적용 편집 내용 있음 · ${state().draft.length.toLocaleString()}자`;
             save();
-        } else if (id === 'verba-deep-base-name') {
+        } else if (id === 'verba-base-name') {
             state().name = event.target.value.slice(0, 60);
             save();
         }
     });
     panel.addEventListener('change', event => {
         if (!settings.developerMode) return;
-        if (event.target?.id === 'verba-deep-base-enabled') {
+        if (event.target?.id === 'verba-base-enabled') {
             state().enabled = event.target.checked;
             save();
             render();
-        } else if (event.target?.id === 'verba-deep-base-preset') {
+        } else if (event.target?.id === 'verba-base-preset') {
             const preset = state().presets.find(row => row.id === event.target.value);
             state().selectedId = preset?.id || '';
             if (preset) {
@@ -136,9 +136,9 @@ export function bindBaseTranslationEditor(panel, settings, { save, notify, confi
         }
     });
     panel.addEventListener('click', event => {
-        const button = event.target?.closest?.('[data-verba-deep-base-action]');
+        const button = event.target?.closest?.('[data-verba-base-action]');
         if (!button || !settings.developerMode || button.disabled) return;
-        const action = button.dataset.verbaDeepBaseAction;
+        const action = button.dataset.verbaBaseAction;
         event.preventDefault();
         if (action === 'restore') {
             if (!confirm('편집 중인 기본 번역 지침을 기본값으로 복원할까요? 전용 프리셋과 기존 번역 설정은 유지됩니다.')) return;

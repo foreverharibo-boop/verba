@@ -243,6 +243,6 @@ export function collectSegmentResponse(raw, expectedSegments = []) {
         `${[...new Set(issues)].join(' / ')}; 번역 결과 누락: ${missingIds.join(', ')}`,
         syntaxError ? { cause: syntaxError } : undefined,
     ) : null;
-    if (parseError) parseError.code = 'VERBA_DEEP_RESPONSE_FORMAT';
+    if (parseError) parseError.code = 'VERBA_RESPONSE_FORMAT';
     return { partial, parseError, missingIds, repairs: [...new Set(repairs)], issues: [...new Set(issues)] };
 }

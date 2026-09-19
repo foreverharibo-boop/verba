@@ -25,7 +25,7 @@ assert.match(general(settings,String,''),/value="3" selected/);
 const dev = between('function developerSettingsMarkup(', 'function syncDeveloperQualityControls(');
 assert.doesNotMatch(dev,/id="verba-deep-developer-(?:relationship|output-split)-lab"/);
 const panel = between('function injectSettingsPanel(', '    host.append(panel);');
-assert.match(panel,/<div><b>긴르바 실험실<\/b><\/div>/);
+assert.match(panel,/<div><b>베에르으바아<\/b><\/div>/);
 assert.doesNotMatch(panel,/<small>v\$\{EXTENSION_VERSION\}<\/small>/);
 assert.match(style,/#verba-deep-settings > \.inline-drawer > \.inline-drawer-content\s*\{\s*font-size: \.86em;/);
 assert.doesNotMatch(style,/#verba-deep-settings\s*\{\s*font-size:/);

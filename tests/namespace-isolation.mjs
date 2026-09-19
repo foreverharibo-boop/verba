@@ -20,9 +20,9 @@ const sources = [
 ].join('\n');
 const namespaceSources = sources.replace("const PEER_STATE_KEY = 'verba_current_translation';", '');
 
-assert.equal(manifest.name, 'ginrba-lab');
-assert.equal(manifest.display_name, '긴르바 실험실');
-assert.equal(manifest.version, '0.5.126');
+assert.equal(manifest.name, 'verba-deep');
+assert.equal(manifest.display_name, '베에르으바아');
+assert.equal(manifest.version, '0.5.97');
 assert.ok(index.includes("const EXTENSION_KEY = 'verba-deep';"));
 assert.ok(index.includes("const STATE_KEY = 'verba_deep_current_translation';"));
 assert.ok(index.includes("const SOURCE_VIEW_KEY = 'verba_deep_source_view';"));
@@ -38,4 +38,4 @@ assert.doesNotMatch(namespaceSources, new RegExp('\\bverba' + '_(?!deep_)'));
 assert.doesNotMatch(namespaceSources, new RegExp('__verba' + '(?:Cleanup|TranslatorVersion)'));
 assert.doesNotMatch(namespaceSources, new RegExp('베' + '르바'));
 
-console.log('PASS: 긴르바 실험실 keeps its legacy verba-deep technical namespace for saved-setting compatibility.');
+console.log('PASS: 베에르으바아 uses isolated verba-deep extension, DOM, storage, command, token, and global namespaces.');

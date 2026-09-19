@@ -46,22 +46,20 @@ const voicePrompt = buildHongjinVoiceRewritePrompt({
         developerHongjinTeasing: 'active',
     },
 });
-assert.match(voicePrompt, /KOREAN-ONLY CHARACTER REAUTHORING/);
-assert.match(voicePrompt, /No foreign source text is supplied/);
-assert.match(voicePrompt, /write from blank/i);
-assert.match(voicePrompt, /ACROSS THE FULL DIALOGUE SET/);
-assert.match(voicePrompt, /ONLY CONTENT BOUNDARY/);
-assert.match(voicePrompt, /generic serious man/i);
-assert.doesNotMatch(voicePrompt, /You really thought that would work/);
-assert.doesNotMatch(voicePrompt, /SCENE CONTEXT/);
+assert.match(voicePrompt, /DEDICATED SECOND-PASS VOICE REWRITE/);
+assert.match(voicePrompt, /not a generic shouting tough guy/i);
+assert.match(voicePrompt, /Quoted retort/);
+assert.match(voicePrompt, /Tactical refusal/);
+assert.match(voicePrompt, /Reluctant care/);
+assert.match(voicePrompt, /Fake courtesy/);
+assert.match(voicePrompt, /Deflection/);
 assert.match(voicePrompt, /"reauthoring":"maximum"/);
 assert.match(voicePrompt, /"teasing":"active"/);
 
 const translateStart = index.indexOf('async function translateOutputText(');
 const translateEnd = index.indexOf('function inputIdentitySpellingContext(', translateStart);
 const translateBody = index.slice(translateStart, translateEnd);
-assert.doesNotMatch(translateBody, /await runHongjinVoiceRewrite\(/);
-assert.match(translateBody, /source-less voice rewrite is deliberately not called/);
-assert.match(translateBody, /noModelFollowups: singlePassFlavorMode\(\) \? true/);
+assert.ok(translateBody.indexOf('await runHongjinVoiceRewrite(') >= 0);
+assert.ok(translateBody.indexOf('await runHongjinVoiceRewrite(') < translateBody.indexOf('await runMadKoreanTargetedAudit('));
 
-console.log('PASS: ordinary E→K stays neutral; flavor modes use primary authoring lanes and exclude the source-less Hongjin follow-up rewrite.');
+console.log('PASS: ordinary E→K stays neutral and delegates localization; English-character taste remains separate; Hongjin uses a dedicated second-pass rewrite.');

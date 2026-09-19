@@ -23,8 +23,7 @@ function assertGateAfter(prompt, dataMarker, label, expectedForce) {
     assert.match(gate, /generic survival-thriller man/i, `${label}: generic voice rejection`);
     assert.match(gate, /detachable swear word.*does not pass/i, `${label}: sticker profanity rejection`);
     assert.match(gate, /PROFANITY DIVERSITY IS A PASS\/FAIL CONDITION/i, `${label}: diversity is mandatory`);
-    assert.match(gate, /do not impose a numeric one-use cap on “씨발”/i, `${label}: no artificial ssi-bal cap`);
-    assert.match(gate, /never repeat the same curse root in adjacent TARGET utterances/i, `${label}: adjacent repetition guard`);
+    assert.match(gate, /use “씨발” at most once/i, `${label}: hard ssi-bal cap`);
     assert.match(gate, /Never append terminal “, 씨발”/i, `${label}: no repeated command template`);
     assert.match(gate, /USER may hear situation-directed/i, `${label}: listener and target split`);
     assert.match(gate, /Never aim profanity at USER/i, `${label}: user curse target guard`);
@@ -57,16 +56,7 @@ for (const mode of [
             scope: 'target_dialogue',
             speakerIdentity: identity,
         });
-        if (mad) {
-            assert.match(scoped, /MAD FLASH V2 — SINGLE-PASS KOREAN COMPOSITION/);
-            assert.match(scoped, /CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT/);
-            assert.match(scoped, /NATURAL — compatible multi-line dialogue must not stay uniformly clean/);
-            assert.match(scoped, /A neutral sentence plus a detachable curse fails/);
-            assert.match(scoped, /Never turn USER/);
-            checks += 5;
-        } else {
-            assertGateAfter(scoped, 'TRANSLATION TARGETS', `scoped/${JSON.stringify(mode)}/${mad}`, /NATURAL profanity is a positive requirement/);
-        }
+        assertGateAfter(scoped, 'TRANSLATION TARGETS', `scoped/${JSON.stringify(mode)}/${mad}`, /NATURAL profanity is a positive requirement/);
 
         const selection = core.buildSelectionPrompt({
             source,
@@ -80,7 +70,6 @@ for (const mode of [
             speakerIdentity: identity,
             candidateCount: 3,
             contextMode: 'selection',
-            speakerScope: 'target_dialogue',
         });
         assertGateAfter(selection, 'RIGHT', `selection/${JSON.stringify(mode)}/${mad}`, /NATURAL profanity is a positive requirement/);
 
@@ -93,7 +82,6 @@ for (const mode of [
                 sourceContext: '"Move. Now."',
                 start: firstStart,
                 end: firstEnd,
-                speakerScope: 'target_dialogue',
             }],
             settings,
             oneTimeInstruction: '',

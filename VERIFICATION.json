@@ -1,5 +1,5 @@
 {
-  "version": "0.5.79",
+  "version": "0.5.81",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -56,6 +56,11 @@
       "output": "PASS: shortened prompt contracts (1140 route checks, custom text/scopes, no API calls)."
     },
     {
+      "check": "custom-translator.mjs",
+      "status": "PASS",
+      "output": "PASS: custom translator category order, runtime variables, locked contracts, general-mode UI, expand editor binding, and auto-save path."
+    },
+    {
       "check": "diagnostics.mjs",
       "status": "PASS",
       "output": "PASS: diagnostic classification, redaction, bounded raw responses, request ON/OFF, cancellation, last-record UI/copy gates"
@@ -103,7 +108,12 @@
     {
       "check": "output-splitting.mjs",
       "status": "PASS",
-      "output": "PASS: independent 1/2/3 split gate, full coverage, unchanged normal/compact/extreme prompts, scope isolation, whole-output planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI."
+      "output": "PASS: independent 1/2/3 split gate, full coverage, unified speaker-scoped prompts, whole-output local attribution/planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI."
+    },
+    {
+      "check": "local-speaker-attribution.mjs",
+      "status": "PASS",
+      "output": "PASS: local protected-name, speech-tag and continuity attribution marks target-character lines without an API call and keeps USER/NPC dialogue isolated."
     },
     {
       "check": "output-timing.mjs",
@@ -128,7 +138,7 @@
     {
       "check": "prompt-editor.mjs",
       "status": "PASS",
-      "output": "PASS: 76 existing DOM/event assertions plus icon/ancestry and capture/bubble drawer regressions; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested."
+      "output": "PASS: 88 DOM/event assertions including 9 custom-translator expand/close auto-saves; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested."
     },
     {
       "check": "prompt-settings-matrix.mjs",
@@ -185,10 +195,13 @@
     "index.js",
     "manifest.json",
     "README.md",
+    "style.css",
     "VERIFICATION.json",
-    "tests/settings-layout.mjs",
-    "tests/name-lock-collision.mjs"
+    "tests/custom-translator.mjs",
+    "tests/output-timing.mjs",
+    "tests/prompt-editor.mjs",
+    "tests/settings-layout.mjs"
   ],
-  "scope": "Keep global Korean raw/source and all-swipe name propagation while resolving each selected Korean name to its exact source identity and preventing similar source names from being merged",
+  "scope": "Add a general-mode custom translator for every AI request category with locked parser/token contracts and shared expand-editor close autosave",
   "live_mobile_test": false
 }

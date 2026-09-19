@@ -115,8 +115,10 @@ export function createPromptBuilders(h) {
             exclusive ? `SCOPE=${scope}.` : `SCOPE=${scope}. Apply dialogue-only rules solely to the actual speaker's dialogue, never narration or a different speaker.`
         ]);
     }
-    function buildOutputPrompt(segmented,s,oneTimeInstruction='',speakerIdentity={},tuning=null) {
-        return lines([policy(s,{oneTimeInstruction,speakerIdentity,nameTokens:segmented.nameTokens,tuning}),`Return ${schema}`,'SEGMENTS',j(segmented.segments.map(({id,type,text})=>({id,type,text})))]);
+    function buildOutputPrompt(segmented,s,oneTimeInstruction='',speakerIdentity={},tuning=null,speakerScopes={}) {
+        const routing='SPEAKER ROUTING: speaker_scope="target_dialogue" is already confirmed as TARGET CHARACTER speech; apply TARGET-only voice/rules there. Never apply that voice to speaker_scope="other_dialogue". For speaker_scope="unknown_dialogue", identify the actual speaker from the supplied segment sequence, then apply TARGET rules only when clearly TARGET; otherwise use OTHER rules. Narration/tagged content never receives dialogue voice.';
+        const rows=segmented.segments.map(({id,type,text})=>({id,type,...(type==='dialogue_candidate'?{speaker_scope:speakerScopes[id]||'unknown_dialogue'}:{}),text}));
+        return lines([policy(s,{oneTimeInstruction,speakerIdentity,nameTokens:segmented.nameTokens,tuning}),routing,`Return ${schema}`,'SEGMENTS',j(rows)]);
     }
     function buildScopedOutputPrompt({segments,sourceContext,settings,oneTimeInstruction='',nameTokens=[],tuning=null,scope='narration',speakerIdentity={}}) {
         return lines([policy(settings,{scope,oneTimeInstruction,nameTokens,tuning,speakerIdentity}),'Translate only TARGETS; SOURCE CONTEXT is reference only.',`Return ${schema}`,'SOURCE CONTEXT',j(h.boundReference(sourceContext,30000)),'TARGETS',j(segments.map(({id,type,text})=>({id,type,text})))]);

@@ -76,6 +76,7 @@ const env = {
     configuredProfileCycle: () => ({ active: 'a', slot: 'A', fallbacks }),
     fallbackEligibleError: () => true, transientError: () => false, retryAfterMs: () => 0,
     errorText: e => e.message, profileDisplayName: id => id, notifyFallbackUsed: () => {},
+    applyCustomTranslatorPrompt: prompt => prompt,
     serverRetryStates: new Map(), updateServerRetryIndicator: () => {},
     wait: async ms => { time += ms; }, console: { warn() {} },
 };

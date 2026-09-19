@@ -2522,6 +2522,15 @@
     opacity: 1;
 }
 
+.verba-custom-translator-field {
+    padding-top: 2px;
+    border-top: 1px dashed color-mix(in srgb, var(--verba-border) 45%, transparent);
+}
+
+#verba-custom-translator-controls.verba-control-disabled {
+    opacity: .56;
+}
+
 
 /* v0.4.11: recent prompt-preset backups */
 .verba-prompt-preset-backups {

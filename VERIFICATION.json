@@ -1,5 +1,5 @@
 {
-  "version": "0.5.78",
+  "version": "0.5.79",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -89,6 +89,11 @@
       "check": "name-lock-priority.mjs",
       "status": "PASS",
       "output": "Name-lock routing: PASS (841 checks plus identity/restoration assertions; no live AI calls)"
+    },
+    {
+      "check": "name-lock-collision.mjs",
+      "status": "PASS",
+      "output": "PASS: Nyen/Nyon stay source-scoped while Korean raw chat/swipe global updates remain enabled."
     },
     {
       "check": "output-action.mjs",
@@ -182,8 +187,8 @@
     "README.md",
     "VERIFICATION.json",
     "tests/settings-layout.mjs",
-    "tests/prompt-slots-collapse.mjs"
+    "tests/name-lock-collision.mjs"
   ],
-  "scope": "Group the four custom prompt editors in one persisted details control so they collapse and expand together without changing prompt text, per-slot enable state, autosave, or translation behavior",
+  "scope": "Keep global Korean raw/source and all-swipe name propagation while resolving each selected Korean name to its exact source identity and preventing similar source names from being merged",
   "live_mobile_test": false
 }

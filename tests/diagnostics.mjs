@@ -12,12 +12,12 @@ assert.equal(category(httpError(429)), '요청 한도·할당량 오류');
 assert.equal(category(httpError(403)), '인증·권한 오류');
 assert.equal(category(new Error('HTTP 502 Bad Gateway')), '서버 오류');
 assert.equal(category(new TypeError('Failed to fetch')), '네트워크·연결 오류');
-assert.equal(category(Object.assign(new Error('timeout'), { code: 'VERBA_DEEP_TIMEOUT' })), '시간 초과');
-assert.equal(category(Object.assign(new Error('empty'), { code: 'VERBA_DEEP_RESPONSE_EMPTY' })), 'AI 빈 응답');
-assert.equal(category(Object.assign(new SyntaxError('invalid JSON'), { code: 'VERBA_DEEP_RESPONSE_FORMAT' })), 'AI 응답 형식·누락 오류');
-assert.equal(category(new ReferenceError('missingFunction is not defined')), '베에르으바아 실행 오류 의심');
+assert.equal(category(Object.assign(new Error('timeout'), { code: 'VERBA_TIMEOUT' })), '시간 초과');
+assert.equal(category(Object.assign(new Error('empty'), { code: 'VERBA_RESPONSE_EMPTY' })), 'AI 빈 응답');
+assert.equal(category(Object.assign(new SyntaxError('invalid JSON'), { code: 'VERBA_RESPONSE_FORMAT' })), 'AI 응답 형식·누락 오류');
+assert.equal(category(new ReferenceError('missingFunction is not defined')), '베르바 실행 오류 의심');
 assert.equal(category(new Error('unknown')), '원인 미확정');
-const blocked = rememberRequestError(Object.assign(new Error('empty'), { code: 'VERBA_DEEP_RESPONSE_EMPTY' }), {}, { candidates: [{ finishReason: 'SAFETY' }] });
+const blocked = rememberRequestError(Object.assign(new Error('empty'), { code: 'VERBA_RESPONSE_EMPTY' }), {}, { candidates: [{ finishReason: 'SAFETY' }] });
 assert.equal(category(blocked), '안전 필터·정책 차단');
 assert.equal(category(rememberRequestError(new Error('empty'), {}, { error: { code: 503, message: 'busy' } })), '서버 오류');
 const failure = rememberRequestError(httpError(503), { profileSlot: 'B', retryAttempt: 2, stage: 'output' });
@@ -55,7 +55,7 @@ let serviceImpl;
 const dependencies = {
     outputTiming: createOutputTiming(),
     settings, profileSlotForId: () => 'A', profileList: () => [{ id: 'test' }], performance,
-    AbortController, Promise, setTimeout, clearTimeout, VERBA_DEEP_MAX_TOKENS: 1000,
+    AbortController, Promise, setTimeout, clearTimeout, VERBA_MAX_TOKENS: 1000,
     abortError: () => new DOMException('cancelled', 'AbortError'),
     liveContext: () => ({ ConnectionManagerRequestService: { sendRequest: (...args) => serviceImpl(...args) } }),
     enqueueRequest: execute => execute(), enqueueScopedParallelRequest: execute => execute(),

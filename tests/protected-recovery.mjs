@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { protectedRecoverySnapshot, sanitizeDebugValue } from '../diagnostics.js';
 import { findProtectedTokenIntegrityProblems } from '../core.js';
-const a = '@@VERBA_DEEP_NAME_0000@@', b = '@@VERBA_DEEP_0000@@';
+const a = '@@VERBA_NAME_0000@@', b = '@@VERBA_0000@@';
 const segmented = { segments: [{ id: 's1', type: 'narration', text: `${a} opened ${b}` }],
     nameTokens: [{ token: a, source: 'Alex', value: '알렉스' }], tokens: [{ token: b, value: '<tag>' }] };
 let translations = new Map([['s1', `${b}${b} 그녀는 문을 열었다. api_key=private-secret`]]);
@@ -44,10 +44,10 @@ await repair(segmented,translations);assert.equal(logs.latest(),null,'OFF/on can
 translations.set('s1','bad');action=()=>{logs.replace({newer:true});translations.set('s1',`${a}${b}`);};
 await repair(segmented,translations);assert.deepEqual(logs.latest(),{newer:true});
 translations.set('s1','bad');calls=0;action=()=>{now+=100;};
-await assert.rejects(repair(segmented,translations),e=>e.verbaDeepProtectedRecovery.status==='복구 실패');
+await assert.rejects(repair(segmented,translations),e=>e.verbaProtectedRecovery.status==='복구 실패');
 assert.equal(calls,5);assert.equal(logs.latest().protectedRecovery.attempts,5);
 action=()=>{throw Object.assign(new Error('cancel'),{name:'AbortError'});};
-await assert.rejects(repair(segmented,translations),e=>e.verbaDeepProtectedRecovery.status==='취소됨');
+await assert.rejects(repair(segmented,translations),e=>e.verbaProtectedRecovery.status==='취소됨');
 // Diagnostic failures cannot alter the existing recovery path.
 const broken={...deps,recordProtectedRecovery:logs.recordProtectedRecovery,protectedRecoverySnapshot:()=>{throw Error('diagnostic failed');}};
 const badLogs=Function(...Object.keys(broken),'let lastDebugDiagnostic=null;\n'+slice('function recordProtectedRecovery(', 'function createDebugDiagnostic(')+'\nreturn recordProtectedRecovery;')(...Object.values(broken));

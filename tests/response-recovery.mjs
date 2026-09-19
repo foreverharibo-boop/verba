@@ -50,7 +50,7 @@ const paddedTargets = [{ id: 'seg_0000' }, { id: 'seg_0001' }, { id: 'seg_0002' 
 const encode = segments => JSON.stringify({ segments });
 const paddedRows = [
     { id: 'seg_0002', translation: '마지막' },
-    { id: 'seg_001', translation: '내용 @@VERBA_DEEP_NAME_0000@@ ... 그대로' },
+    { id: 'seg_001', translation: '내용 @@VERBA_NAME_0000@@ ... 그대로' },
     { id: 'seg_0000', translation: '처음' },
 ];
 const paddingResponse = encode(paddedRows);

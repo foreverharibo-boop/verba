@@ -3,13 +3,13 @@
 export function bindPromptExpandEditors(panel) {
     const doc = panel.ownerDocument;
     const win = doc.defaultView;
-    for (const source of panel.querySelectorAll('.verba-deep-prompt-slot > textarea')) {
-        const header = source.parentElement.querySelector('.verba-deep-prompt-slot-head');
-        if (!header || header.querySelector('.verba-deep-prompt-expand')) continue;
+    for (const source of panel.querySelectorAll('.verba-prompt-slot > textarea')) {
+        const header = source.parentElement.querySelector('.verba-prompt-slot-head');
+        if (!header || header.querySelector('.verba-prompt-expand')) continue;
         const title = header.querySelector('label')?.textContent.trim() || '프롬프트';
         const button = doc.createElement('button');
         button.type = 'button';
-        button.className = 'menu_button verba-deep-prompt-expand';
+        button.className = 'menu_button verba-prompt-expand';
         // Draw the icon directly: a Unicode arrow inherits the user's theme font
         // and can become a tiny serif glyph on mobile.
         const icon = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -30,14 +30,14 @@ export function bindPromptExpandEditors(panel) {
         button.title = `${title} 크게 편집`;
         button.setAttribute('aria-label', button.title);
         button.setAttribute('aria-haspopup', 'dialog');
-        header.insertBefore(button, header.querySelector('.verba-deep-prompt-slot-toggle'));
+        header.insertBefore(button, header.querySelector('.verba-prompt-slot-toggle'));
 
         button.addEventListener('click', event => {
             event.stopPropagation();
-            if (doc.getElementById('verba-deep-prompt-editor')) return;
+            if (doc.getElementById('verba-prompt-editor')) return;
             const dialog = doc.createElement('dialog');
-            dialog.id = 'verba-deep-prompt-editor';
-            dialog.setAttribute('aria-labelledby', 'verba-deep-prompt-editor-title');
+            dialog.id = 'verba-prompt-editor';
+            dialog.setAttribute('aria-labelledby', 'verba-prompt-editor-title');
             // Keep interactions local: SillyTavern's global outside-click and
             // Escape handlers must not also close the extension drawer.
             for (const type of ['click', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'touchstart', 'touchend']) {
@@ -47,10 +47,10 @@ export function bindPromptExpandEditors(panel) {
                 if (event.key === 'Escape') event.stopPropagation();
             });
             const heading = doc.createElement('strong');
-            heading.id = 'verba-deep-prompt-editor-title';
+            heading.id = 'verba-prompt-editor-title';
             heading.textContent = title;
             const editor = doc.createElement('textarea');
-            editor.id = 'verba-deep-prompt-editor-text';
+            editor.id = 'verba-prompt-editor-text';
             editor.className = 'text_pole';
             editor.setAttribute('aria-labelledby', heading.id);
             editor.value = source.value;
@@ -58,7 +58,7 @@ export function bindPromptExpandEditors(panel) {
             editor.spellcheck = source.spellcheck;
             const close = doc.createElement('button');
             close.type = 'button';
-            close.className = 'menu_button verba-deep-prompt-editor-close';
+            close.className = 'menu_button verba-prompt-editor-close';
             close.textContent = '닫기';
             dialog.append(heading, editor, close);
 
@@ -80,7 +80,7 @@ export function bindPromptExpandEditors(panel) {
                     height: viewport?.height ?? win.innerHeight,
                     left: viewport?.offsetLeft ?? 0,
                     top: viewport?.offsetTop ?? 0,
-                })) dialog.style.setProperty(`--verba-deep-editor-${key}`, `${value}px`);
+                })) dialog.style.setProperty(`--verba-editor-${key}`, `${value}px`);
             };
             let finished = false;
             const finish = () => {

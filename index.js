@@ -28,6 +28,7 @@ import {
     extractResponseText,
     findBannedWords,
     findProtectedTokenIntegrityProblems,
+    normalizeLocallyRecoverableProtectedTokens,
     findTranslationPromptConflicts,
     findUntranslatedSegments,
     hasForeignText,
@@ -46,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.82';
+const EXTENSION_VERSION = '0.5.84';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -211,18 +212,23 @@ const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
 const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
 const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
-    { key: 'output', label: '아웃풋 번역', description: '일반 출력 번역·전체 재번역·분할 번역' },
-    { key: 'input', label: '인풋 번역', description: '전송 전 한국어 → 영어 번역' },
-    { key: 'selection', label: '선택 재번역', description: '선택 영역 재번역·후보 생성·다중 선택' },
-    { key: 'name', label: '이름 판별', description: '이름 후보 매칭·인물명 보조 판별' },
-    { key: 'consistency', label: '호칭·용어 일관성', description: '역할어 계획·일관성 교정' },
-    { key: 'repair', label: '문장 복구', description: '금지어·미번역·출력 형식 복구' },
-    { key: 'quality', label: '품질 검수', description: '품질 검수와 검수 후 교정' },
-    { key: 'flavor', label: '한출·캐릭터 보이스', description: '미친 한출·김홍진의 맛 관련 요청' },
-    { key: 'other', label: '기타 AI 요청', description: '위 분류에 속하지 않는 향후 요청' },
+    { key: 'output', label: '채팅 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
+    { key: 'input', label: '내가 보내는 글', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
+    { key: 'selection', label: '선택한 부분 다시 번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
+    { key: 'name', label: '이름 찾기·연결', description: '원문의 이름과 저장할 한국어 이름이 같은 인물인지 확인할 때 사용해요.' },
+    { key: 'consistency', label: '호칭·용어 통일', description: '같은 인물의 호칭이나 반복 용어를 한 번 더 맞출 때 사용해요.' },
+    { key: 'repair', label: '누락·형식 오류 복구', description: '미번역 문장이나 금지어, 깨진 출력 형식을 고칠 때 사용해요.' },
+    { key: 'quality', label: '번역 품질 확인', description: '뜻·화자·말투·번역투를 검사하거나 교정할 때 사용해요.' },
+    { key: 'flavor', label: '미친 한출·캐릭터 말투', description: '미친 한출의 맛이나 캐릭터 전용 말투 요청에 사용해요.' },
+    { key: 'other', label: '그 밖의 내부 요청', description: '위 항목에 포함되지 않는 보조 AI 요청에 사용해요.' },
 ];
 const DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.fromEntries(
     CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, '{기본_프롬프트}']),
+);
+const CUSTOM_TRANSLATOR_SIMPLE_KEYS = new Set(['output', 'input', 'selection']);
+const CUSTOM_TRANSLATOR_SIMPLE_MARKER = '[사용자 추가 지침]';
+const DEFAULT_CUSTOM_TRANSLATOR_ADVANCED_BACKUPS = Object.fromEntries(
+    CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, '']),
 );
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -317,6 +323,7 @@ const DEFAULT_SETTINGS = {
     timeoutSeconds: 120,
     customTranslatorEnabled: false,
     customTranslatorTemplates: DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES,
+    customTranslatorAdvancedBackups: DEFAULT_CUSTOM_TRANSLATOR_ADVANCED_BACKUPS,
     relationTemperatureEnabled: true,
     relationTemperature: 'default',
     narrationLocalizationLevel: 'balanced',
@@ -354,6 +361,14 @@ settings.customTranslatorTemplates = Object.fromEntries(
         typeof settings.customTranslatorTemplates?.[key] === 'string'
             ? settings.customTranslatorTemplates[key]
             : DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key],
+    ]),
+);
+settings.customTranslatorAdvancedBackups = Object.fromEntries(
+    CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(({ key }) => [
+        key,
+        typeof settings.customTranslatorAdvancedBackups?.[key] === 'string'
+            ? settings.customTranslatorAdvancedBackups[key]
+            : '',
     ]),
 );
 settings.developerMode = settings.developerMode === true;
@@ -3975,9 +3990,11 @@ async function repairSegmentsByOutputScope({
         }
     }
 }
+
 async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = options.speakerScopes || {};
+    normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
     let invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
     if (!invalid.length) return;
     const started = performance.now();
@@ -3992,6 +4009,7 @@ async function repairProtectedTokenIntegrity(segmented, translations, options = 
                 buildPrompt: buildProtectedTokenRepairPrompt,
                 stage: 'protected-token-repair',
             });
+            normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
             invalid = findProtectedTokenIntegrityProblems(segmented.segments, translations);
             if (!invalid.length) {
                 finishProtectedRecovery(diagnostic, '복구 완료', started, attempts, invalid, segmented, translations);
@@ -9724,41 +9742,151 @@ function bindAutoInputSetting(panel) {
     });
 }
 
-function customTranslatorSettingsMarkup() {
-    const fields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => `
-        <section class="verba-prompt-slot verba-custom-translator-field">
+function customTranslatorSimpleTemplate(instruction = '') {
+    return `{기본_프롬프트}\n\n${CUSTOM_TRANSLATOR_SIMPLE_MARKER}\n${String(instruction ?? '')}`;
+}
+
+function customTranslatorSimplePlaceholder(key) {
+    return ({
+        output: '예: 모든 대사는 영어를 먼저 쓰고, 대괄호 안에 한국어 번역을 붙여 주세요.',
+        input: '예: 자연스러운 일상 영어로 바꾸고, 이름은 입력한 표기 그대로 두세요.',
+        selection: '예: 뜻은 유지하되 더 자연스럽고 짧게 다시 써 주세요.',
+    })[key] || '원하는 번역 방식을 평범한 문장으로 적어 주세요.';
+}
+
+function customTranslatorTemplateState(key, sourceTemplate = settings.customTranslatorTemplates?.[key]) {
+    const template = String(sourceTemplate ?? DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key] ?? '{기본_프롬프트}');
+    if (!CUSTOM_TRANSLATOR_SIMPLE_KEYS.has(key)) {
+        return { mode: 'advanced', editorValue: template };
+    }
+    if (template === '{기본_프롬프트}') {
+        return { mode: 'default', editorValue: '' };
+    }
+    const normalized = template.replace(/\r\n/g, '\n');
+    const appendPrefix = `{기본_프롬프트}\n\n${CUSTOM_TRANSLATOR_SIMPLE_MARKER}\n`;
+    if (normalized.startsWith(appendPrefix)) {
+        return { mode: 'append', editorValue: normalized.slice(appendPrefix.length) };
+    }
+    return { mode: 'advanced', editorValue: template };
+}
+
+function changeCustomTranslatorSimpleMode(key, requestedMode, previousMode, editorValue) {
+    if (!CUSTOM_TRANSLATOR_SIMPLE_KEYS.has(key)) {
+        return { mode: 'advanced', editorValue: String(editorValue ?? '') };
+    }
+    const mode = ['default', 'append', 'advanced'].includes(requestedMode) ? requestedMode : 'default';
+    const currentTemplate = String(settings.customTranslatorTemplates?.[key] ?? '{기본_프롬프트}');
+    if (previousMode === 'advanced') {
+        settings.customTranslatorAdvancedBackups[key] = String(editorValue ?? '');
+    }
+
+    if (mode === 'default') {
+        settings.customTranslatorTemplates[key] = '{기본_프롬프트}';
+        return { mode, editorValue: '' };
+    }
+    if (mode === 'append') {
+        const instruction = previousMode === 'append' ? String(editorValue ?? '') : '';
+        settings.customTranslatorTemplates[key] = customTranslatorSimpleTemplate(instruction);
+        return { mode, editorValue: instruction };
+    }
+
+    const savedAdvanced = String(settings.customTranslatorAdvancedBackups?.[key] || '');
+    const advancedTemplate = savedAdvanced || currentTemplate || '{기본_프롬프트}';
+    settings.customTranslatorTemplates[key] = advancedTemplate;
+    return { mode, editorValue: advancedTemplate };
+}
+
+function customTranslatorFieldMarkup(item, simple = false) {
+    const state = customTranslatorTemplateState(item.key);
+    const modePicker = simple ? `
+        <select
+            class="text_pole verba-custom-translator-mode"
+            data-verba-custom-translator-mode="${item.key}"
+            aria-label="${escapeHtml(item.label)} 설정 방식"
+        >
+            <option value="default" ${state.mode === 'default' ? 'selected' : ''}>기본 설정 그대로</option>
+            <option value="append" ${state.mode === 'append' ? 'selected' : ''}>기본 설정에 내 지침 추가 (추천)</option>
+            <option value="advanced" ${state.mode === 'advanced' ? 'selected' : ''}>전체 프롬프트 직접 구성 (고급)</option>
+        </select>` : '';
+    const placeholder = simple && state.mode !== 'advanced'
+        ? customTranslatorSimplePlaceholder(item.key)
+        : '{기본_프롬프트}';
+    return `
+        <section class="verba-prompt-slot verba-custom-translator-field ${simple ? 'verba-custom-translator-simple' : 'verba-custom-translator-advanced-field'} verba-custom-translator-mode-${state.mode}" data-verba-custom-translator-section="${item.key}">
             <div class="verba-prompt-slot-head">
                 <label for="verba-custom-translator-${item.key}">${escapeHtml(item.label)}</label>
             </div>
+            <div class="verba-help verba-custom-translator-description">${escapeHtml(item.description)}</div>
+            ${modePicker}
             <textarea
                 id="verba-custom-translator-${item.key}"
                 class="text_pole"
                 rows="5"
                 spellcheck="false"
                 data-verba-custom-translator-key="${item.key}"
-                placeholder="{기본_프롬프트}"
-            >${escapeHtml(settings.customTranslatorTemplates?.[item.key] ?? DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[item.key])}</textarea>
-            <div class="verba-help">${escapeHtml(item.description)}</div>
-        </section>
-    `).join('');
+                data-verba-custom-translator-editor-mode="${state.mode}"
+                placeholder="${escapeHtml(placeholder)}"
+            >${escapeHtml(state.editorValue)}</textarea>
+            ${simple ? '<div class="verba-help verba-custom-translator-simple-help">평범한 문장으로 원하는 번역 방식만 적으면 기존 설정 뒤에 자동으로 붙어요.</div>' : ''}
+        </section>`;
+}
+
+function customTranslatorSettingsMarkup() {
+    const simpleFields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS
+        .filter(item => CUSTOM_TRANSLATOR_SIMPLE_KEYS.has(item.key))
+        .map(item => customTranslatorFieldMarkup(item, true))
+        .join('');
+    const advancedFields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS
+        .filter(item => !CUSTOM_TRANSLATOR_SIMPLE_KEYS.has(item.key))
+        .map(item => customTranslatorFieldMarkup(item, false))
+        .join('');
     return `
         <details id="verba-custom-translator" class="verba-tool-details verba-custom-translator">
-            <summary>커스텀 번역기 <small>AI 전송 프롬프트 전체 편집</small></summary>
+            <summary>커스텀 번역기 <small>번역 요청별 추가 지침</small></summary>
             <div class="verba-tool-details-content">
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-custom-translator-enabled" ${settings.customTranslatorEnabled ? 'checked' : ''}>
                     <span>커스텀 번역기 사용</span>
                 </label>
-                <div class="verba-help">AI에 전송되는 내부 프롬프트를 요청 종류별로 통째로 감싸거나 교체합니다. 개발자 모드와 무관하게 사용할 수 있어요.</div>
-                <div class="verba-help"><code>{기본_프롬프트}</code> = 기존 전체 프롬프트 · <code>{요청_종류}</code> = 현재 단계명 · <code>{대상_JSON}</code> = 현재 대상 구간 데이터</div>
-                <div class="verba-help">완전히 새로 작성하려면 <code>{기본_프롬프트}</code>를 지우고 직접 지침과 <code>{대상_JSON}</code>을 배치하세요. JSON 응답 형식·보호 표식·태그 보존 계약은 확장 작동에 필수라 항상 마지막에 잠금 적용됩니다.</div>
-                <div class="verba-help">각 항목 오른쪽의 확대 버튼으로 크게 편집할 수 있으며, 닫을 때 마지막 입력까지 자동 저장됩니다.</div>
+                <div class="verba-help verba-custom-translator-intro">프롬프트 구조를 몰라도 괜찮아요. 보통은 <b>채팅 번역</b>만 바꾸면 충분하며, 원하는 점을 평범한 문장으로 적으면 기존 번역 설정은 그대로 유지됩니다.</div>
                 <div id="verba-custom-translator-controls" class="${settings.customTranslatorEnabled ? '' : 'verba-control-disabled'}">
-                    ${fields}
-                    <button type="button" id="verba-custom-translator-reset" class="menu_button verba-wide">모든 항목 기본값으로</button>
+                    <div class="verba-custom-translator-section-title"><b>간편 설정</b><small>자주 쓰는 세 가지</small></div>
+                    ${simpleFields}
+                    <details class="verba-tool-details verba-custom-translator-advanced">
+                        <summary>고급 설정 <small>이름·검수·복구·캐릭터 말투</small></summary>
+                        <div class="verba-tool-details-content">
+                            <div class="verba-help">특별한 문제가 있을 때만 열어 보세요. 잘 모르겠다면 기본값 그대로 두는 것이 가장 안전해요.</div>
+                            ${advancedFields}
+                            <details class="verba-custom-translator-variables">
+                                <summary>직접 구성용 변수 보기</summary>
+                                <div class="verba-help"><code>{기본_프롬프트}</code> 기존 지침 · <code>{요청_종류}</code> 현재 작업명 · <code>{대상_JSON}</code> 번역할 구간 데이터</div>
+                                <div class="verba-help">직접 구성 모드에서도 JSON 응답 형식·보호 표식·태그 보존 규칙은 확장이 자동으로 지킵니다.</div>
+                            </details>
+                        </div>
+                    </details>
+                    <div class="verba-help">각 입력칸은 확대해서 편집할 수 있고, 확대창을 닫으면 자동 저장돼요.</div>
+                    <button type="button" id="verba-custom-translator-reset" class="menu_button verba-wide">커스텀 번역기 전체 초기화</button>
                 </div>
             </div>
         </details>`;
+}
+
+function syncCustomTranslatorFieldPresentation(section, mode) {
+    if (!(section instanceof Element)) return;
+    const normalizedMode = ['default', 'append', 'advanced'].includes(mode) ? mode : 'advanced';
+    section.classList.remove(
+        'verba-custom-translator-mode-default',
+        'verba-custom-translator-mode-append',
+        'verba-custom-translator-mode-advanced',
+    );
+    section.classList.add(`verba-custom-translator-mode-${normalizedMode}`);
+    const textarea = section.querySelector('[data-verba-custom-translator-key]');
+    if (textarea instanceof HTMLTextAreaElement) {
+        textarea.dataset.verbaCustomTranslatorEditorMode = normalizedMode;
+        textarea.placeholder = normalizedMode === 'advanced'
+            ? '{기본_프롬프트}'
+            : customTranslatorSimplePlaceholder(String(textarea.dataset.verbaCustomTranslatorKey || ''));
+    }
 }
 
 function syncCustomTranslatorControls(root = document.querySelector('#verba-settings')) {
@@ -9766,8 +9894,16 @@ function syncCustomTranslatorControls(root = document.querySelector('#verba-sett
     const controls = root?.querySelector('#verba-custom-translator-controls');
     if (!controls) return;
     controls.classList.toggle('verba-control-disabled', !enabled);
-    controls.querySelectorAll('textarea, button').forEach(control => {
+    controls.querySelectorAll('textarea, select, button').forEach(control => {
         control.disabled = !enabled;
+    });
+    controls.querySelectorAll('[data-verba-custom-translator-section]').forEach(section => {
+        const modePicker = section.querySelector('[data-verba-custom-translator-mode]');
+        const textarea = section.querySelector('[data-verba-custom-translator-key]');
+        const mode = modePicker instanceof HTMLSelectElement
+            ? modePicker.value
+            : String(textarea?.dataset?.verbaCustomTranslatorEditorMode || 'advanced');
+        syncCustomTranslatorFieldPresentation(section, mode);
     });
 }
 
@@ -10362,11 +10498,21 @@ function injectSettingsPanel() {
 
         if (target.closest('#verba-custom-translator-reset')) {
             settings.customTranslatorTemplates = { ...DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES };
-            panel.querySelectorAll('[data-verba-custom-translator-key]').forEach(field => {
+            settings.customTranslatorAdvancedBackups = { ...DEFAULT_CUSTOM_TRANSLATOR_ADVANCED_BACKUPS };
+            panel.querySelectorAll('[data-verba-custom-translator-section]').forEach(section => {
+                const field = section.querySelector('[data-verba-custom-translator-key]');
+                const modePicker = section.querySelector('[data-verba-custom-translator-mode]');
+                if (modePicker instanceof HTMLSelectElement) {
+                    modePicker.value = 'default';
+                    if (field instanceof HTMLTextAreaElement) field.value = '';
+                    syncCustomTranslatorFieldPresentation(section, 'default');
+                    return;
+                }
                 if (field instanceof HTMLTextAreaElement) field.value = '{기본_프롬프트}';
+                syncCustomTranslatorFieldPresentation(section, 'advanced');
             });
             saveSettings();
-            notify('커스텀 번역기 프롬프트를 모두 기본값으로 되돌렸어요.', 'success');
+            notify('커스텀 번역기 설정을 모두 기본값으로 되돌렸어요.', 'success');
             return;
         }
 
@@ -10403,6 +10549,22 @@ function injectSettingsPanel() {
         if (target.id === 'verba-custom-translator-enabled' && target instanceof HTMLInputElement) {
             settings.customTranslatorEnabled = target.checked;
             syncCustomTranslatorControls(panel);
+            saveSettings();
+            return;
+        }
+
+        if (target instanceof HTMLSelectElement && target.matches('[data-verba-custom-translator-mode]')) {
+            const key = String(target.dataset.verbaCustomTranslatorMode || '');
+            if (!CUSTOM_TRANSLATOR_SIMPLE_KEYS.has(key)) return;
+            const section = target.closest('[data-verba-custom-translator-section]');
+            const textarea = section?.querySelector('[data-verba-custom-translator-key]');
+            if (!(textarea instanceof HTMLTextAreaElement)) return;
+
+            const previousMode = String(textarea.dataset.verbaCustomTranslatorEditorMode || 'advanced');
+            const next = changeCustomTranslatorSimpleMode(key, target.value, previousMode, textarea.value);
+            target.value = next.mode;
+            textarea.value = next.editorValue;
+            syncCustomTranslatorFieldPresentation(section, next.mode);
             saveSettings();
             return;
         }
@@ -11262,7 +11424,15 @@ function injectSettingsPanel() {
         if (target instanceof HTMLTextAreaElement && target.matches('[data-verba-custom-translator-key]')) {
             const key = String(target.dataset.verbaCustomTranslatorKey || '');
             if (CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.some(item => item.key === key)) {
-                settings.customTranslatorTemplates[key] = target.value;
+                const mode = String(target.dataset.verbaCustomTranslatorEditorMode || 'advanced');
+                if (mode === 'append' && CUSTOM_TRANSLATOR_SIMPLE_KEYS.has(key)) {
+                    settings.customTranslatorTemplates[key] = customTranslatorSimpleTemplate(target.value);
+                } else if (mode === 'default' && CUSTOM_TRANSLATOR_SIMPLE_KEYS.has(key)) {
+                    settings.customTranslatorTemplates[key] = '{기본_프롬프트}';
+                } else {
+                    settings.customTranslatorTemplates[key] = target.value;
+                    settings.customTranslatorAdvancedBackups[key] = target.value;
+                }
                 saveSettings();
             }
             return;

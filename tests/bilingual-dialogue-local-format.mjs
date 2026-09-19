@@ -5,6 +5,8 @@ import {
     bilingualDialogueRequested,
     buildOutputPrompt,
     ensureBilingualDialogueFormat,
+    findProtectedTokenIntegrityProblems,
+    normalizeLocallyRecoverableProtectedTokens,
     segmentSource,
 } from '../core.js';
 
@@ -59,10 +61,28 @@ assert.equal(
 // Already bilingual and common malformed variants must be normalized once,
 // never nested as Source (Source (Korean)).
 const already = `"${token}… (${token}…)"`;
+const canonicalAlready = ensureBilingualDialogueFormat(namedDialogue, already, settings, null, named.nameTokens, named.tokens);
+assert.equal(canonicalAlready, `"Dana... (${token}…)"`);
 assert.equal(
-    ensureBilingualDialogueFormat(namedDialogue, already, settings, null, named.nameTokens, named.tokens),
-    `"Dana... (${token}…)"`,
+    findProtectedTokenIntegrityProblems(named.segments, new Map([[namedDialogue.id, canonicalAlready]])).length,
+    0,
+    'bilingual English copy uses literal source names, leaving one strict NAME marker in Korean',
 );
+const locallyNormalized = new Map([[namedDialogue.id, already]]);
+normalizeLocallyRecoverableProtectedTokens(named, locallyNormalized, settings, {});
+assert.equal(locallyNormalized.get(namedDialogue.id), `"Dana... (${token}…)"`);
+assert.equal(findProtectedTokenIntegrityProblems(named.segments, locallyNormalized).length, 0);
+
+const bilingualNarration = segmentSource('Nyon waited.', [{ source: 'Nyon', target: '니욘' }]);
+const narrationSegment = bilingualNarration.segments[0];
+const narrationToken = bilingualNarration.nameTokens[0].token;
+const narrationTranslations = new Map([[
+    narrationSegment.id,
+    `${narrationSegment.text} (${narrationToken}은 기다렸다.)`,
+]]);
+normalizeLocallyRecoverableProtectedTokens(bilingualNarration, narrationTranslations, settings, {});
+assert.equal(narrationTranslations.get(narrationSegment.id), `Nyon waited. (${narrationToken}은 기다렸다.)`);
+assert.equal(findProtectedTokenIntegrityProblems(bilingualNarration.segments, narrationTranslations).length, 0);
 const misplaced = `"${token}…" (${token}…)"`;
 assert.equal(
     ensureBilingualDialogueFormat(namedDialogue, misplaced, settings, null, named.nameTokens, named.tokens),

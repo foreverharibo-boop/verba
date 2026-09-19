@@ -489,6 +489,30 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
 }
 
 /**
+ * Repairs deterministic NAME-marker duplication before strict integrity checks.
+ * This never changes non-name protected tokens and never sends an AI request.
+ */
+export function normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings = {}, speakerScopes = {}) {
+    const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
+    for (const segment of segmented?.segments || []) {
+        if (segment.type !== 'dialogue_candidate' || !map.has(segment.id)) continue;
+        map.set(segment.id, ensureBilingualDialogueFormat(
+            segment,
+            String(map.get(segment.id) || ''),
+            settings,
+            speakerScopes,
+            segmented?.nameTokens || [],
+            segmented?.tokens || [],
+        ));
+    }
+    return normalizeExcessNameProtectedTokens(
+        segmented?.segments || [],
+        map,
+        segmented?.nameTokens || [],
+    );
+}
+
+/**
  * Finds only strong signs of accidentally untranslated source. Short acronyms
  * and dialogue intentionally made bilingual by a prompt are excluded to avoid
  * destructive false positives. Human-name transliteration is primarily enforced
@@ -1250,6 +1274,42 @@ function replaceExcessNameTokens(value, token, keepCount, replacement) {
         seen += 1;
         return seen <= keepCount ? match : String(replacement || '');
     });
+}
+
+/**
+ * Converts only surplus NAME markers into their visible locked spelling.
+ * The wording is preserved, but strict assembly once again sees exactly the
+ * source marker count. Non-name protected tokens are never changed here.
+ */
+export function normalizeExcessNameProtectedTokens(segments, translations, nameTokens = []) {
+    const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
+    const knownNames = new Map((nameTokens || []).map(entry => [String(entry?.token || ''), entry]));
+    for (const segment of segments || []) {
+        if (!segment?.id || !map.has(segment.id)) continue;
+        const expected = protectedTokenCounts(segment.text);
+        let current = String(map.get(segment.id) || '');
+        const sourceWithMarkers = String(segment.text || '');
+        if (
+            sourceWithMarkers
+            && current !== sourceWithMarkers
+            && current.includes(sourceWithMarkers)
+            && /[가-힣]/u.test(current.split(sourceWithMarkers).join(''))
+        ) {
+            const literalSource = (nameTokens || []).reduce(
+                (value, entry) => value.split(String(entry?.token || '')).join(String(entry?.source || entry?.value || '')),
+                sourceWithMarkers,
+            );
+            current = current.split(sourceWithMarkers).join(literalSource);
+        }
+        for (const [token, entry] of knownNames) {
+            if (!token) continue;
+            const wanted = expected.get(token) || 0;
+            if (protectedTokenOccurrences(current, token) <= wanted) continue;
+            current = replaceExcessNameTokens(current, token, wanted, entry?.value);
+        }
+        map.set(segment.id, current);
+    }
+    return map;
 }
 
 function literalRangesOutsideProtectedTokens(value, literal, { koreanName = false } = {}) {

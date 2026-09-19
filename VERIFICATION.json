@@ -1,5 +1,5 @@
 {
-  "version": "0.5.82",
+  "version": "0.5.84",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -58,7 +58,7 @@
     {
       "check": "custom-translator.mjs",
       "status": "PASS",
-      "output": "PASS: custom translator category order, runtime variables, locked contracts, general-mode UI, expand editor binding, and auto-save path."
+      "output": "PASS: custom translator easy/advanced modes, legacy raw-template preservation, category order, locked contracts, expand editor binding, and auto-save path."
     },
     {
       "check": "diagnostics.mjs",
@@ -199,13 +199,15 @@
   "changed_files": [
     "core.js",
     "index.js",
+    "style.css",
     "manifest.json",
-    "prompt-builders.js",
     "README.md",
     "VERIFICATION.json",
+    "tests/custom-translator.mjs",
+    "tests/protected-recovery.mjs",
     "tests/bilingual-dialogue-local-format.mjs",
     "tests/settings-layout.mjs"
   ],
-  "scope": "Port prompt-aware local bilingual dialogue reconstruction from Ginrba Lab without adding AI repair requests",
+  "scope": "Keep the v0.5.83 easy custom-translator UI and locally normalize duplicated NAME markers before strict protected-token recovery",
   "live_mobile_test": false
 }

@@ -1,5 +1,5 @@
 {
-  "version": "0.5.86",
+  "version": "0.5.88",
   "checks": [
     {
       "check": "bilingual-dialogue-local-format.mjs",
@@ -63,7 +63,7 @@
     {
       "check": "custom-translator.mjs",
       "status": "PASS",
-      "output": "PASS: custom translator easy/advanced modes, legacy raw-template preservation, category order, locked contracts, expand editor binding, and auto-save path."
+      "output": "PASS: custom translator fully replaces default prompts with plain English instructions, automatic source data, category-specific locked response contracts, legacy placeholder migration, expand editor binding, and auto-save path."
     },
     {
       "check": "diagnostics.mjs",

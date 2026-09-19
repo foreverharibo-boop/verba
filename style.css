@@ -2538,58 +2538,6 @@
     margin: 0 0 7px !important;
 }
 
-.verba-custom-translator-mode {
-    box-sizing: border-box;
-    width: 100% !important;
-    margin: 0 0 7px !important;
-}
-
-.verba-custom-translator-section-title {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-    margin: 10px 1px 5px;
-}
-
-.verba-custom-translator-section-title small,
-.verba-custom-translator-advanced > summary small {
-    opacity: .68;
-    font-weight: 400;
-}
-
-.verba-custom-translator-advanced {
-    margin: 10px 0;
-}
-
-.verba-custom-translator-advanced > summary,
-.verba-custom-translator-variables > summary {
-    cursor: pointer;
-}
-
-.verba-custom-translator-variables {
-    margin: 8px 0 2px;
-    padding: 7px 8px;
-    border: 1px dashed color-mix(in srgb, var(--verba-border) 45%, transparent);
-    border-radius: 8px;
-}
-
-.verba-custom-translator-variables > summary {
-    font-size: .88em;
-    font-weight: 650;
-}
-
-.verba-custom-translator-mode-default > textarea,
-.verba-custom-translator-mode-default .verba-prompt-expand,
-.verba-custom-translator-mode-default .verba-custom-translator-simple-help,
-.verba-custom-translator-mode-advanced .verba-custom-translator-simple-help {
-    display: none !important;
-}
-
-.verba-custom-translator-mode-append textarea {
-    min-height: 88px;
-}
-
 #verba-custom-translator-controls.verba-control-disabled {
     opacity: .56;
 }

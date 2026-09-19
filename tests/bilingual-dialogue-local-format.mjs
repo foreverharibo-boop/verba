@@ -110,6 +110,18 @@ const rebound = ensureBilingualDialogueFormat(
 );
 assert.equal(rebound, `"Dana... [${token}…]"`);
 assert.equal(assembleTranslation(named, new Map([[namedDialogue.id, rebound]])), '*그는 망설였다.*\n\n"Dana... [다나…]"');
+assert.equal(
+    ensureBilingualDialogueFormat(
+        namedDialogue,
+        `"${token}... (${token}...)"`,
+        squareSettings,
+        null,
+        named.nameTokens,
+        named.tokens,
+    ),
+    `"Dana... [${token}...]"`,
+    'the configured all-dialogue square-bracket format overrides model parentheses',
+);
 
 const speakerOnly = {
     ...settings,

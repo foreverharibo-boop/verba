@@ -508,11 +508,16 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     let source = sourceEnvelope.body;
     for (const entry of nameTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.source || entry?.value || ''));
     for (const entry of protectedTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.value || ''));
-    // A custom full prompt may choose its own supported bracket pair. Preserve
-    // the pair already returned by the model; otherwise use the configured pair.
-    const [open, close] = existingParts
-        ? [existingParts.open, existingParts.close]
-        : bilingualDialogueBracketPair(settings);
+    // An explicit GLOBAL/ALL-DIALOGUE prompt is authoritative. If it asks for
+    // square brackets but the model returns parentheses, normalize to the
+    // configured pair. Only preserve the model's detected pair when bilingual
+    // output came from a fully custom prompt that the legacy fields cannot see.
+    const configuredBilingual = bilingualDialogueRequested(settings);
+    const [open, close] = configuredBilingual
+        ? bilingualDialogueBracketPair(settings)
+        : existingParts
+            ? [existingParts.open, existingParts.close]
+            : bilingualDialogueBracketPair(settings);
     return `${translatedEnvelope.leading}${sourceEnvelope.open}${source} ${open}${korean}${close}${sourceEnvelope.close}${translatedEnvelope.trailing}`;
 }
 

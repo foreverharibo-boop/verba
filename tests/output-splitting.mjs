@@ -30,7 +30,7 @@ const requestSegments=async(prompt,segments,options)=>{
 };
 const env={settings,outputSplitCount,runOutputBatches,requestSegments,
  buildOutputPrompt:core.buildOutputPrompt,buildScopedOutputPrompt:core.buildScopedOutputPrompt,
- madKoreanExclusiveMode:()=>settings.developerMode===true && settings.developerMadKoreanOutputEnabled===true,
+ madKoreanExclusiveMode:()=>settings.developerMadKoreanOutputEnabled===true,
  isAbort:(error,signal)=>signal?.aborted||error.name==='AbortError',SCOPED_PARALLEL_REQUEST_LIMIT:2,console};
 const routingCode=between('function nameTokensForSegments(', 'function normalizeTaggedOutputTranslations(');
 const route=Function(...Object.keys(env),routingCode+'\nreturn requestScopedOutputTranslations;')(...Object.values(env));
@@ -47,9 +47,9 @@ for(const count of [1,2,3])for(const mode of ['ordinary','compressed','extreme']
   assert.equal(row.options.splitRequest===true,count>1);
  }
 }
-// Developer OFF retains and applies split choice without hidden flavors.
+// Developer OFF retains the split choice and both now-general strong flavors.
 settings.developerMode=false;settings.dialogueEndingRepetitionReduction=false;requests=[];await route(segmented,{},{});assert.equal(requests.length,3);
-for(const row of requests)assert.ok(!row.prompt.includes("KIM HONG-JIN VOICE")&&!row.prompt.includes("MANDATORY REAUTHORING"));
+for(const row of requests)assert.ok(row.prompt.includes("KIM HONG-JIN VOICE")&&row.prompt.includes("MANDATORY REAUTHORING"));
 settings.developerMode=true;
 // Speaker-specific rules share one prompt per split instead of duplicating the
 // same source in narration/TARGET/OTHER requests.

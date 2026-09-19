@@ -5,8 +5,11 @@ export function createPromptBuilders(h) {
     const lines = xs => xs.filter(Boolean).join('\n');
     const str = x => String(x ?? '');
     const mode = s => s.developerMode === true ? (s.developerExtremeCompressedPromptEnabled ? 2 : s.developerCompressedPromptEnabled ? 1 : 0) : 0;
-    const mad = s => s.developerMode === true && s.developerMadKoreanOutputEnabled === true;
-    const hongjinEnabled = s => s.developerMode === true && s.developerHongjinFlavorEnabled === true;
+    // These two tastes are ordinary user-facing output options.  Keep the
+    // historical setting keys for preset/backward compatibility, but never
+    // tie their prompt injection to the developer-mode switch.
+    const mad = s => s.developerMadKoreanOutputEnabled === true;
+    const hongjinEnabled = s => s.developerHongjinFlavorEnabled === true;
     const targetScope = scope => ['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope);
     const dialogueScope = scope => targetScope(scope) || scope === 'other_dialogue';
     const narrationScope = scope => ['mixed', 'narration', 'tagged_content'].includes(scope);

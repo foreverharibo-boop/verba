@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.88';
+const EXTENSION_VERSION = '0.5.89';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -419,7 +419,7 @@ settings.developerMadKoreanUserToTargetRegister = DEVELOPER_MAD_KOREAN_REGISTER_
     : 'source';
 
 function madKoreanExclusiveMode() {
-    return settings.developerMode === true && settings.developerMadKoreanOutputEnabled === true;
+    return settings.developerMadKoreanOutputEnabled === true;
 }
 
 settings.developerHongjinTranscreation = DEVELOPER_HONGJIN_TRANSCREATION_OPTIONS.some(option => option.value === settings.developerHongjinTranscreation)
@@ -2278,18 +2278,18 @@ function renderCurrentAppliedRules() {
                 ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['xxx미친압축xxx', settings.developerMode && settings.developerExtremeCompressedPromptEnabled === true ? 'ON' : 'OFF'],
-                ['미친 한출의 맛', (settings.developerMode && settings.developerMadKoreanOutputEnabled) ? 'ON' : 'OFF'],
+                ['미친 한출의 맛', settings.developerMadKoreanOutputEnabled ? 'ON' : 'OFF'],
                 ['캐릭터 → USER 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanTargetToUserRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
                 ['USER → 캐릭터 말투', madKoreanExclusiveMode()
                     ? (DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS.find(option => option.value === settings.developerMadKoreanUserToTargetRegister)?.label || '원문·문맥')
                     : '적용 안 함'],
-                ['김홍진의 맛', (settings.developerMode && settings.developerHongjinFlavorEnabled) ? 'ON' : 'OFF'],
-                ['김홍진 연령대', (settings.developerMode && settings.developerHongjinFlavorEnabled)
+                ['김홍진의 맛', settings.developerHongjinFlavorEnabled ? 'ON' : 'OFF'],
+                ['김홍진 연령대', settings.developerHongjinFlavorEnabled
                     ? (DEVELOPER_HONGJIN_AGE_OPTIONS.find(option => option.value === settings.developerHongjinAgeBand)?.label || '미지정')
                     : '적용 안 함'],
-                ['김홍진 오빠 자칭', (settings.developerMode && settings.developerHongjinFlavorEnabled)
+                ['김홍진 오빠 자칭', settings.developerHongjinFlavorEnabled
                     ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
@@ -9376,7 +9376,7 @@ function renderNameLockManager() {
 
 function developerFlavorSettingsMarkup() {
     return `
-                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details verba-developer-lab">
+                    <details id="verba-developer-mad-korean-lab" class="verba-tool-details">
                         <summary>🇰🇷 미친 한출의 맛 <small>문장 파괴 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
@@ -9405,7 +9405,7 @@ function developerFlavorSettingsMarkup() {
                         </div>
                     </details>
 
-                    <details id="verba-developer-hongjin-lab" class="verba-tool-details verba-developer-lab">
+                    <details id="verba-developer-hongjin-lab" class="verba-tool-details">
                         <summary>🐯 김홍진의 맛 <small>캐릭터 음성 초월번역</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
@@ -9582,7 +9582,6 @@ function developerSettingsMarkup() {
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
-                    ${developerFlavorSettingsMarkup()}
                     
                     <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
                         <summary>🧪 최소 프롬프트 실험 <small>출력·전체 재번역</small></summary>
@@ -10285,6 +10284,8 @@ function injectSettingsPanel() {
                             </div>
                         </div>
                     </details>
+
+                ${developerFlavorSettingsMarkup()}
 
                 <details id="verba-beginner-character-guide" class="verba-tool-details verba-beginner-character-guide">
                     <summary>신입 챗시 전용 <small>캐릭터 간편 설정 · 기본 OFF</small></summary>

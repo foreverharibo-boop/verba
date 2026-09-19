@@ -1,5 +1,5 @@
 {
-  "version": "0.5.88",
+  "version": "0.5.89",
   "checks": [
     {
       "check": "bilingual-dialogue-local-format.mjs",
@@ -83,7 +83,7 @@
     {
       "check": "general-flavors.mjs",
       "status": "PASS",
-      "output": "PASS: developer flavor gates, general split/relationship UI, retained values and speaker-scoped relationship rules."
+      "output": "PASS: Mad Korean and Hongjin tastes are general-mode controls after English taste, independent of developer mode; values and speaker scope remain intact."
     },
     {
       "check": "mad-recomposition.mjs",
@@ -199,20 +199,24 @@
       "check": "bilingual-dialogue-local-format.mjs",
       "status": "PASS",
       "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally."
+    },
+    {
+      "check": "prompt-token-audit",
+      "status": "PASS",
+      "output": "Generated live prompts from v0.5.89 builders and measured fixed overhead for base/flavor/input/selection/repair/audit categories; documented approximate cl100k counts and split duplication."
     }
   ],
   "changed_files": [
-    "core.js",
+    "prompt-builders.js",
     "index.js",
-    "style.css",
     "manifest.json",
     "README.md",
+    "PROMPT-TOKENS.md",
     "VERIFICATION.json",
-    "tests/custom-translator.mjs",
-    "tests/protected-recovery.mjs",
-    "tests/bilingual-dialogue-local-format.mjs",
+    "tests/general-flavors.mjs",
+    "tests/output-splitting.mjs",
     "tests/settings-layout.mjs"
   ],
-  "scope": "Keep the v0.5.83 easy custom-translator UI and locally normalize duplicated NAME markers before strict protected-token recovery",
+  "scope": "Move Mad Korean and Hongjin tastes into general settings immediately after English taste, preserve stored settings, remove developer-mode activation gates, and document prompt-token overhead.",
   "live_mobile_test": false
 }

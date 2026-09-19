@@ -120,6 +120,64 @@ const speakerOnly = {
 assert.equal(bilingualDialogueRequested(speakerOnly), false);
 assert.equal(ensureBilingualDialogueFormat(dialogue, '"난 그런 말 안 했어."', speakerOnly), '"난 그런 말 안 했어."');
 
+// A full custom translator prompt may request bilingual output without using
+// the legacy prompt fields. Existing bilingual output must still be normalized
+// locally so NAME tokens in the copied English half never restore to Hangul.
+const customOnly = {
+    globalPromptEnabled: false,
+    allDialoguePromptEnabled: false,
+    dialoguePromptEnabled: false,
+    otherDialoguePromptEnabled: false,
+};
+assert.equal(bilingualDialogueRequested(customOnly), false);
+assert.equal(
+    ensureBilingualDialogueFormat(namedDialogue, already, customOnly, null, named.nameTokens, named.tokens),
+    `"Dana... (${token}…)"`,
+);
+assert.equal(
+    assembleTranslation(named, new Map([[
+        namedDialogue.id,
+        ensureBilingualDialogueFormat(namedDialogue, already, customOnly, null, named.nameTokens, named.tokens),
+    ]])),
+    '*그는 망설였다.*\n\n"Dana... (다나…)"',
+);
+assert.equal(
+    ensureBilingualDialogueFormat(namedDialogue, `"${token}… [${token}…]"`, customOnly, null, named.nameTokens, named.tokens),
+    `"Dana... [${token}…]"`,
+    'an existing custom square-bracket format is preserved',
+);
+assert.equal(
+    ensureBilingualDialogueFormat(namedDialogue, `"${token}…"`, customOnly, null, named.nameTokens, named.tokens),
+    `"${token}…"`,
+    'Korean-only dialogue is not made bilingual unless a configured prompt requests it',
+);
+
+// Regression: multiple locked names in a long bilingual line must be literal
+// source spellings only in English and locked Korean spellings only in Korean.
+const multiName = segmentSource(
+    '"Nyon lies down and thinks about Nyen before Dana arrives."',
+    [
+        { source: 'Nyon', target: '니욘' },
+        { source: 'Nyen', target: '니옌' },
+        { source: 'Dana', target: '다나' },
+    ],
+);
+const multiDialogue = multiName.segments.find(segment => segment.type === 'dialogue_candidate');
+assert.ok(multiDialogue);
+const [nyonToken, nyenToken, danaToken] = multiName.nameTokens.map(entry => entry.token);
+const multiRaw = `"${nyonToken} lies down and thinks about ${nyenToken} before ${danaToken} arrives. (${nyonToken}은 ${nyenToken}을 생각하다 ${danaToken}를 만난다.)"`;
+const multiFixed = ensureBilingualDialogueFormat(
+    multiDialogue, multiRaw, customOnly, null, multiName.nameTokens, multiName.tokens,
+);
+assert.equal(
+    multiFixed,
+    `"Nyon lies down and thinks about Nyen before Dana arrives. (${nyonToken}은 ${nyenToken}을 생각하다 ${danaToken}를 만난다.)"`,
+);
+assert.equal(
+    assembleTranslation(multiName, new Map([[multiDialogue.id, multiFixed]])),
+    '"Nyon lies down and thinks about Nyen before Dana arrives. (니욘은 니옌을 생각하다 다나를 만난다.)"',
+);
+
 const prompt = buildOutputPrompt(segmented, settings, '', {}, null, { [dialogue.id]: 'other_dialogue' });
 assert.match(prompt, /BILINGUAL DIALOGUE IS REQUIRED/);
 assert.match(prompt, /Korean-only dialogue is invalid/);

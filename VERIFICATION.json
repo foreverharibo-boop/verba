@@ -1,6 +1,11 @@
 {
-  "version": "0.5.84",
+  "version": "0.5.85",
   "checks": [
+    {
+      "check": "bilingual-dialogue-local-format.mjs",
+      "status": "PASS",
+      "output": "PASS: custom-prompt bilingual detection; English source names remain Latin and only Korean halves receive locked Korean names; no AI repair call."
+    },
     {
       "check": "syntax/base-editor.js",
       "status": "PASS"

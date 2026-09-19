@@ -474,8 +474,22 @@ function bindBilingualKoreanNameTokens(segment, korean, nameTokens = []) {
 /** Locally rebuilds the configured bilingual dialogue display without an AI request. */
 export function ensureBilingualDialogueFormat(segment, translation, settings = {}, speakerScopes = null, nameTokens = [], protectedTokens = []) {
     const result = String(translation || '');
-    if (segment?.type !== 'dialogue_candidate' || !bilingualDialogueRequested(settings)) return result;
+    if (segment?.type !== 'dialogue_candidate') return result;
+
+    // A fully custom prompt can request bilingual dialogue without placing the
+    // instruction in the legacy global/all-dialogue fields inspected by
+    // bilingualDialogueRequested(). In that case the model may already return
+    // Source (Korean), but both halves still contain the same opaque NAME token.
+    // If we skip this local rebuild, assembleTranslation() restores that token
+    // globally and turns the copied English name into its Korean locked spelling.
+    // Detect an already-bilingual result from its actual structure as well as
+    // from settings, so the English half is always rebuilt from the source.
+    const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
+    if (!bilingualDialogueRequested(settings) && !existingBilingual) return result;
     const translatedEnvelope = dialogueEnvelope(result);
+    const existingParts = existingBilingual
+        ? trailingParentheticalParts(translatedEnvelope.body)
+        : null;
     const korean = bindBilingualKoreanNameTokens(segment, extractKoreanDialogueHalf(segment, result, nameTokens, protectedTokens), nameTokens);
     const koreanNameTokenPresent = (nameTokens || []).some(entry => korean.includes(String(entry?.token || '')) && /[가-힣]/u.test(String(entry?.value || '')));
     if (!/[가-힣]/u.test(validationText(korean)) && !koreanNameTokenPresent) return result;
@@ -484,7 +498,11 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     let source = sourceEnvelope.body;
     for (const entry of nameTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.source || entry?.value || ''));
     for (const entry of protectedTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.value || ''));
-    const [open, close] = bilingualDialogueBracketPair(settings);
+    // A custom full prompt may choose its own supported bracket pair. Preserve
+    // the pair already returned by the model; otherwise use the configured pair.
+    const [open, close] = existingParts
+        ? [existingParts.open, existingParts.close]
+        : bilingualDialogueBracketPair(settings);
     return `${translatedEnvelope.leading}${sourceEnvelope.open}${source} ${open}${korean}${close}${sourceEnvelope.close}${translatedEnvelope.trailing}`;
 }
 

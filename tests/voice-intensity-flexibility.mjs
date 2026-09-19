@@ -31,10 +31,9 @@ for (const mode of [
         developerMadKoreanOutputEnabled: true,
         developerHongjinFlavorEnabled: false,
     });
-    assert.match(madOnly, /surface verbal intensity (?:is flexible|is free)|Surface verbal intensity may change|Surface roughness[^\n]+may be freely adjusted/u);
-    assert.match(madOnly, /facts/);
-    assert.match(madOnly, /emotional direction/);
-    assert.match(madOnly, /consent/);
+    assert.match(madOnly, /MAD FLASH V2 — SINGLE-PASS KOREAN COMPOSITION/);
+    assert.match(madOnly, /Surface syntax and wording are disposable/);
+    assert.match(madOnly, /Natural Korean is not literal Korean and not free invention/);
 
     const hongjin = build({
         ...base,
@@ -46,13 +45,12 @@ for (const mode of [
         developerHongjinVulgarity: 'open',
         developerHongjinPlayfulness: 'high',
     });
-    assert.match(hongjin, /MANDATORY AUTHORIZED VOICE OVERRIDE/);
-    assert.match(hongjin, /(?:freely strengthen|stronger than the literal source|may add compatible surface profanity)/i);
-    assert.match(hongjin, /facts/);
-    assert.match(hongjin, /emotional direction/);
-    assert.match(hongjin, /consent/);
+    assert.match(hongjin, /CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT/);
+    assert.match(hongjin, /Reauthoring=maximum/i);
+    assert.match(hongjin, /Vary coarse mechanisms/i);
+    assert.match(hongjin, /most compatible lines/i);
     assert.doesNotMatch(hongjin, /SOLE OPTIONAL STYLE ADD-ON|SOLE VOICE EXCEPTION|Preserve intensity both ways|Naturalization may neither censor nor escalate|source facts\/force\/consent/u);
-    checks += 14;
+    checks += 12;
 }
 
 const narration = core.buildScopedOutputPrompt({
@@ -67,7 +65,7 @@ const narration = core.buildScopedOutputPrompt({
     scope: 'narration',
     speakerIdentity: identity,
 });
-assert.ok(!narration.includes('MANDATORY AUTHORIZED VOICE OVERRIDE'));
+assert.ok(!narration.includes('CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT'));
 checks++;
 
 console.log(`PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (${checks} checks).`);

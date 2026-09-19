@@ -15,7 +15,7 @@ const cases = [
     ['\r\n 처음.\r중간.\u2028다음.\u2029끝.\n', '처음. 중간. 다음. 끝.'],
     ['안녕~\n또 왔네.', '안녕~ 또 왔네.'],
     ['**정말.**\n*그래.*', '**정말.** *그래.*'],
-    ['내용.\n@@VERBA_NAME_0000@@가 왔다.', '내용. @@VERBA_NAME_0000@@가 왔다.'],
+    ['내용.\n@@VERBA_DEEP_NAME_0000@@가 왔다.', '내용. @@VERBA_DEEP_NAME_0000@@가 왔다.'],
     ['오전 7시.\n50미터.', '오전 7시. 50미터.'],
     ['첫 문장.<br>다음 문장.<BR />끝.', '첫 문장. 다음 문장. 끝.'],
     ['첫 문장.\n\n🙂 웃었다.', '첫 문장. 🙂 웃었다.'],
@@ -59,7 +59,7 @@ for (const gap of ['\n', '\n\n', '\r\n\r\n', '\n\n\n']) {
 // browser dependencies; no network request is involved in this step.
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const expression = index.match(/\.map\(candidate => (repairSourceEllipses\([^\n]+)\);/)[1];
-const cleanCandidate = Function('candidate', 'repairUnexpectedProseBreaks', 'repairKoreanParticleAlternatives', 'repairIndivisibleIdentityNames', 'speakerIdentity', 'expected', 'repairSourceEllipses', 'return ' + expression);
+const cleanCandidate = Function('candidate', 'repairUnexpectedProseBreaks', 'repairKoreanParticleAlternatives', 'repairOutputIdentityNames', 'speakerIdentity', 'expected', 'repairSourceEllipses', 'return ' + expression);
 assert.equal(cleanCandidate(candidate, repair, x => x, x => x, {}, [prose], repairSourceEllipses), '첫 문장. 다음 문장.');
 
 const sample = ('그는 기다렸다.\n\n그녀는 웃었다. '.repeat(1500));

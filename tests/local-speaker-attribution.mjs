@@ -45,12 +45,12 @@ for (const id of dialogueIds) assert.equal(scopes[id], 'target_dialogue', `${id}
 const mixed = segmentSource(`Hong-jin looked at Dam-eun. "No," she said. Dam-eun turned away. "Wait here."`, locks);
 const mixedScopes = inferLocalTargetDialogueScopes(mixed, identity);
 for (const id of mixed.segments.filter(row => row.type === 'dialogue_candidate').map(row => row.id)) {
-    assert.equal(mixedScopes[id], 'other_dialogue', `${id} must not leak Hong-jin voice into USER dialogue`);
+    assert.equal(mixedScopes[id], 'user_dialogue', `${id} must be identified as current USER dialogue`);
 }
 
 const npc = segmentSource(`A guard raised his weapon. "Stop right there," he shouted.`, locks);
 const npcId = npc.segments.find(row => row.type === 'dialogue_candidate').id;
-assert.equal(inferLocalTargetDialogueScopes(npc, identity)[npcId], 'other_dialogue');
+assert.equal(inferLocalTargetDialogueScopes(npc, identity)[npcId], 'npc_dialogue');
 
 // Regression: the real failure shape that previously left every Hong-jin line
 // clean. The USER can be mentioned between the target's name and a post-quote
@@ -90,11 +90,68 @@ const prompt = buildOutputPrompt(segmented, {
     developerHongjinProfanity: 'high',
 }, '', identity, null, scopes);
 assert.match(prompt, /"speaker_scope":"target_dialogue"/);
-assert.match(prompt, /already confirmed as TARGET CHARACTER speech/);
-assert.match(prompt, /Never apply that voice to speaker_scope="other_dialogue"/);
+assert.match(prompt, /speaker_scope is an absolute row-level firewall/);
+assert.match(prompt, /prohibit added TARGET profanity/);
 
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 assert.match(index, /inferLocalTargetDialogueScopes\(segmented, speakerIdentity\)/);
 assert.match(index, /options\.tuning \|\| null,\s*speakerScopes,/s);
+assert.match(index, /localFlavorIdentityNameLocks/);
+assert.doesNotMatch(index, /needsHongjinAttribution/);
 
-console.log(`PASS: local protected-name, speech-tag and continuity attribution marks ${dialogueIds.length} Hong-jin lines without an API call and keeps USER/NPC dialogue isolated.`);
+const selectionResolverStart = index.indexOf('function selectionResolvedSpeakerScope(');
+const selectionResolverEnd = index.indexOf('function bundleStillCurrent(', selectionResolverStart);
+assert.ok(selectionResolverStart >= 0 && selectionResolverEnd > selectionResolverStart);
+const resolveSelectionScope = Function(
+    'selectionTouchesDialogue',
+    'normalizedCharacterNameLocks',
+    'segmentSource',
+    'inferLocalTargetDialogueScopes',
+    'selectionSourceRows',
+    `${index.slice(selectionResolverStart, selectionResolverEnd)}\nreturn selectionResolvedSpeakerScope;`,
+)(
+    (translationValue, startValue, endValue) => /["“][^"”]+["”]/u.test(String(translationValue).slice(startValue, endValue)),
+    () => locks,
+    segmentSource,
+    inferLocalTargetDialogueScopes,
+    snapshot => snapshot.sourceMap.filter(row => snapshot.start < row.end && snapshot.end > row.start),
+);
+
+const selectionSource = `Hong-jin entered. Dam-eun stood. "You look awful," she said. A medic approached. "Rest here," she said. Hong-jin frowned. "I'm fine," he said.`;
+const selectionSegments = segmentSource(selectionSource, locks);
+const dialogueSegmentsForSelection = selectionSegments.segments.filter(row => row.type === 'dialogue_candidate');
+assert.equal(dialogueSegmentsForSelection.length, 3);
+const renderedDialogue = ['"꼴이 말이 아니네."', '"여기서 쉬세요."', '"멀쩡해."'];
+let renderedTranslation = '';
+const selectionMap = dialogueSegmentsForSelection.map((row, indexValue) => {
+    const start = renderedTranslation.length;
+    renderedTranslation += renderedDialogue[indexValue];
+    const end = renderedTranslation.length;
+    renderedTranslation += '\n';
+    return { id: row.id, source: row.text, start, end };
+});
+const scopeAt = indexValue => resolveSelectionScope({
+    source: selectionSource,
+    translation: renderedTranslation,
+    start: selectionMap[indexValue].start,
+    end: selectionMap[indexValue].end,
+    sourceMap: selectionMap,
+}, identity);
+assert.equal(scopeAt(0), 'user_dialogue', 'current USER selection must retain USER scope');
+assert.equal(scopeAt(1), 'npc_dialogue', 'third-party selection must retain NPC scope');
+assert.equal(scopeAt(2), 'target_dialogue', 'Hong-jin selection must retain Hong-jin voice');
+const staleMedicMap = selectionMap.map(row => ({ ...row }));
+staleMedicMap[1] = {
+    ...staleMedicMap[1],
+    id: selectionMap[2].id,
+    source: selectionMap[1].source,
+};
+assert.equal(resolveSelectionScope({
+    source: selectionSource,
+    translation: renderedTranslation,
+    start: staleMedicMap[1].start,
+    end: staleMedicMap[1].end,
+    sourceMap: staleMedicMap,
+}, identity), 'npc_dialogue', 'stale id collision must fall back to source text instead of leaking target voice');
+
+console.log(`PASS: local attribution marks ${dialogueIds.length} TARGET lines and selection retranslation separates current USER, NPC and TARGET without an API call.`);

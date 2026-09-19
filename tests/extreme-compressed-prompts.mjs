@@ -21,8 +21,8 @@ const builders = {
     other: s => core.buildScopedOutputPrompt({ segments: segmented.segments, sourceContext: '', settings: s, scope: 'other_dialogue', speakerIdentity: identity }),
     tagged: s => core.buildScopedOutputPrompt({ segments: segmented.segments, sourceContext: '', settings: s, scope: 'tagged_content', speakerIdentity: identity }),
     input: s => core.buildInputPrompt('', s, 'male', identity),
-    selection: s => core.buildSelectionPrompt({ ...selection, settings: s }),
-    multi: s => core.buildMultiSelectionPrompt({ source: '', translation: '""', selections: [{ id: 'm0', selected: '""', start: 0, end: 2 }], settings: s, oneTimeInstruction: '', speakerIdentity: identity }),
+    selection: s => core.buildSelectionPrompt({ ...selection, settings: s, speakerScope: 'target_dialogue' }),
+    multi: s => core.buildMultiSelectionPrompt({ source: '', translation: '""', selections: [{ id: 'm0', selected: '""', start: 0, end: 2, speakerScope: 'target_dialogue' }], settings: s, oneTimeInstruction: '', speakerIdentity: identity }),
     qa: s => core.buildQualityAuditPrompt({ segments: segmented.segments, currentTranslations: translations, sourceContext: '', settings: s, speakerIdentity: identity, enabledChecks: ['meaning', 'referent', 'voice', 'translationese', 'continuity'] }),
     bannedRepair: s => core.buildBannedRepairPrompt(segmented.segments, translations, s, identity),
     tokenRepair: s => core.buildProtectedTokenRepairPrompt(segmented.segments, translations, s, identity),
@@ -42,6 +42,62 @@ const count = (text, value) => text.split(value).length - 1;
 const base = { ...defaults, developerMode: true };
 const measures = [];
 
+for (const [mode, flags] of Object.entries({
+    standard: {},
+    mad: { developerMadKoreanOutputEnabled: true },
+    madHongjin: { developerMadKoreanOutputEnabled: true, developerHongjinFlavorEnabled: true },
+})) {
+    for (const [name, build] of Object.entries(builders)) {
+        const safe = build({ ...base, ...flags, developerCompressedPromptEnabled: true });
+        const extreme = build({ ...base, ...flags, developerExtremeCompressedPromptEnabled: true });
+        ok(mode === 'standard' ? extreme.length < safe.length : extreme.length <= safe.length, `${mode}/${name} must not exceed safe mode`);
+        ok(build({ ...defaults, ...flags, developerExtremeCompressedPromptEnabled: true }) === build({ ...defaults, ...flags }), `${mode}/${name} developer gate`);
+        measures.push({ mode, name, safe: safe.length, extreme: extreme.length, reduction: +(100 * (1 - extreme.length / safe.length)).toFixed(1) });
+    }
+}
+
+const standardSettings = {
+    ...base,
+    developerExtremeCompressedPromptEnabled: true,
+    globalPrompt: 'GLOBAL_SENTINEL',
+    allDialoguePrompt: 'ALL_DIALOGUE_SENTINEL',
+    dialoguePrompt: 'TARGET_DIALOGUE_SENTINEL',
+    otherDialoguePrompt: 'OTHER_DIALOGUE_SENTINEL',
+    bannedWords: 'BAN_SENTINEL',
+};
+const standardFull = builders.full(standardSettings);
+for (const value of ['GLOBAL_SENTINEL', 'ALL_DIALOGUE_SENTINEL', 'TARGET_DIALOGUE_SENTINEL', 'OTHER_DIALOGUE_SENTINEL', 'BAN_SENTINEL']) has(standardFull, value);
+has(builders.target(standardSettings), 'TARGET_DIALOGUE_SENTINEL');
+lacks(builders.target(standardSettings), 'OTHER_DIALOGUE_SENTINEL');
+has(builders.other(standardSettings), 'OTHER_DIALOGUE_SENTINEL');
+lacks(builders.other(standardSettings), 'TARGET_DIALOGUE_SENTINEL');
+lacks(builders.input(standardSettings), 'GLOBAL_SENTINEL');
+
+const madSettings = { ...standardSettings, developerMadKoreanOutputEnabled: true, developerHongjinFlavorEnabled: true };
+const madPrompt = builders.full(madSettings);
+has(madPrompt, 'TARGET CHARACTER AUTHORING PATH');
+has(madPrompt, 'DEEPSEEK V4.1 FLASH — CURRENT TARGET CHARACTER DIALOGUE VOICE PASS');
+has(madPrompt, 'MAD KOREAN EXCLUSIVE ENGINE — FACT-LOCKED KOREAN REAUTHORING');
+has(madPrompt, 'DEEPSEEK V4.1 FLASH EXECUTION ORDER');
+has(madPrompt, 'MUST still sound like the established character');
+has(madPrompt, 'direct no curse at USER');
+has(madPrompt, 'USER-DIRECTED PROFANITY GUARD');
+has(madPrompt, 'NON-NEGOTIABLE ENGINE SAFETY — NOT STYLE PROMPTS');
+has(madPrompt, 'BAN_SENTINEL');
+for (const value of ['GLOBAL_SENTINEL', 'ALL_DIALOGUE_SENTINEL', 'TARGET_DIALOGUE_SENTINEL', 'OTHER_DIALOGUE_SENTINEL']) lacks(madPrompt, value);
+assert.equal(count(madPrompt, 'TOP PRIORITY — NO MISOGYNY'), 1); checks += 1;
+assert.ok(count(madPrompt, 'USER-DIRECTED PROFANITY GUARD') >= 1); checks += 1;
+lacks(madPrompt, 'generate three');
+lacks(builders.narration(madSettings), 'CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT');
+has(builders.narration(madSettings), 'MAD FLASH V2 — SINGLE-PASS KOREAN COMPOSITION');
+has(builders.target(madSettings), 'CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT');
+has(builders.target(madSettings), 'HIGH BOUNDARIES' .replace('HIGH ', 'HARD '));
+
+for (const compressed of [false, true]) {
+    const prompt = builders.target({ ...base, developerCompressedPromptEnabled: compressed, developerHongjinFlavorEnabled: true });
+    has(prompt, 'USER-DIRECTED PROFANITY GUARD');
+}
+
 // Presets retain the extreme choice and normalize conflicting compression flags.
 const state = { ...defaults, baseTranslationCustom: normalizeBaseTranslationCustom({}) };
 const funcs = index.slice(index.indexOf('function normalizedPromptPresetDeveloperSettings('), index.indexOf('function normalizedPromptPresetTranslationSettings('));
@@ -54,9 +110,9 @@ helpers.apply(preset);
 assert.equal(state.developerCompressedPromptEnabled, false); checks += 1;
 assert.equal(state.developerExtremeCompressedPromptEnabled, true); checks += 1;
 
-for (const marker of ['xxx미친압축xxx', 'verba-developer-extreme-compressed-prompt-enabled', "settings.developerExtremeCompressedPromptEnabled = false"]) has(index, marker);
-const safeHandler = index.slice(index.indexOf("if (target.id === 'verba-developer-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-developer-extreme-compressed-prompt-enabled'"));
-const extremeHandler = index.slice(index.indexOf("if (target.id === 'verba-developer-extreme-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-beginner-character-enabled'"));
+for (const marker of ['xxx미친압축xxx', 'verba-deep-developer-extreme-compressed-prompt-enabled', "settings.developerExtremeCompressedPromptEnabled = false"]) has(index, marker);
+const safeHandler = index.slice(index.indexOf("if (target.id === 'verba-deep-developer-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-deep-developer-extreme-compressed-prompt-enabled'"));
+const extremeHandler = index.slice(index.indexOf("if (target.id === 'verba-deep-developer-extreme-compressed-prompt-enabled'"), index.indexOf("if (target.id === 'verba-deep-beginner-character-enabled'"));
 has(safeHandler, 'settings.developerExtremeCompressedPromptEnabled = false', 'safe compression disables extreme');
 has(extremeHandler, 'settings.developerCompressedPromptEnabled = false', 'extreme compression disables safe');
 
@@ -99,14 +155,14 @@ lacks(scoped({ developerMadKoreanOutputEnabled: true }, 'target_dialogue', tunin
 for (const gender of ['male', 'female', 'unknown']) {
     for (const scope of ['mixed', 'narration', 'target_dialogue', 'other_dialogue']) {
         const p = scoped({ developerMadKoreanOutputEnabled: true, developerHongjinFlavorEnabled: true, developerHongjinOppaFrequency: 'often' }, scope, null, { ...identity, characterGender: gender });
-        has(p, `TARGET gender=${JSON.stringify(gender)}`, `Mad identity gender/${scope}`);
-        if (['mixed', 'target_dialogue'].includes(scope)) has(p, '(male only)');
+        has(p, `gender=${JSON.stringify(gender)}`, `Mad identity gender/${scope}`);
+        if (scope === 'target_dialogue') has(p, 'CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT');
     }
 }
 for (const mad of [false, true]) {
     for (const scope of ['mixed', 'narration', 'target_dialogue', 'other_dialogue', 'tagged_content']) {
         const flags = { developerMadKoreanOutputEnabled: mad };
-        has(scoped(flags, scope), 'transliterate only human names to Hangul');
+        has(scoped(flags, scope), mad ? 'MAD FLASH V2 — SINGLE-PASS KOREAN COMPOSITION' : 'Transliterate clear Latin-script human names into Hangul');
         const p = scoped(flags, scope, null, { ...identity, nameLocks: [{ source: 'Alex', target: '알렉스고정' }] });
         has(p, '알렉스고정');
         has(p, 'FIXED-SPELLING PRIORITY');
@@ -114,3 +170,4 @@ for (const mad of [false, true]) {
 }
 
 console.log(`PASS: ${checks} assertions; API calls: 0; live browser testing: not performed.`);
+console.table(measures.filter(row => row.mode === 'standard' || row.name === 'full'));

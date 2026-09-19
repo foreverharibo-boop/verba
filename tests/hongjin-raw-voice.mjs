@@ -20,21 +20,38 @@ const settings = {
 const build = scope => core.buildScopedOutputPrompt({ segments, sourceContext: '', settings, scope, speakerIdentity: identity });
 const prompt = build('target_dialogue');
 
-assert.equal(prompt.split('TARGET DIALOGUE ONLY — KIM HONG-JIN').length - 1, 1);
-assert.equal(prompt.split('MANDATORY AUTHORIZED VOICE OVERRIDE').length - 1, 1);
-assert.match(prompt, /maximum re-authoring/);
-assert.match(prompt, /most eligible TARGET lines/);
-assert.match(prompt, /active cheeky needling/);
-assert.match(prompt, /openly crude, brazen diction/);
-assert.match(prompt, /highly visible playful audacity/);
-assert.match(prompt, /not by attaching one curse to a neutral sentence/);
-assert.match(prompt, /Serious or tactical lines stay short/);
-assert.match(prompt, /USER-DIRECTED PROFANITY GUARD/);
-assert.match(prompt, /Profanity diversity is mandatory/);
-assert.match(prompt, /crude idioms and curse-free rawness/);
+assert.equal(prompt.split('CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT').length - 1, 1);
+assert.equal(prompt.split('MAD FLASH V2 — SINGLE-PASS KOREAN COMPOSITION').length - 1, 1);
+assert.match(prompt, /Discard source-language wording, clause order and sentence rhythm/);
+assert.match(prompt, /original contemporary Korean speech/);
+assert.match(prompt, /Reauthoring=maximum/);
+assert.match(prompt, /most compatible lines/);
+assert.match(prompt, /teasing=active/);
+assert.match(prompt, /vulgarity=openly crude/);
+assert.match(prompt, /playfulness=high/);
+assert.match(prompt, /A neutral sentence plus a detachable curse fails/);
+assert.match(prompt, /Vary coarse mechanisms/);
+assert.match(prompt, /Never turn USER/);
+assert.match(prompt, /situation-directed profanity/);
+assert.match(prompt, /generic macho man/);
+assert.match(prompt, /REFERENCE-CORPUS RHYTHM PROFILE/);
+assert.match(prompt, /ORDINARY CONFLICT/);
+assert.match(prompt, /ACTIVE DANGER/);
+assert.match(prompt, /CONCEALED CARE/);
+assert.ok(prompt.length >= 12000);
+assert.match(prompt, /Do NOT impose an artificial one-use cap/);
+assert.match(prompt, /identical curse roots and identical placement in adjacent TARGET utterances/);
+
+const mixedPrompt = core.buildOutputPrompt(
+    { segments, nameTokens: [] }, settings, '', identity, null,
+    { seg_0000: 'target_dialogue' },
+);
+assert.match(mixedPrompt, /do not impose a numeric one-use cap/i);
+assert.match(mixedPrompt, /never repeat the same curse root in adjacent TARGET utterances/i);
+assert.match(mixedPrompt, /speaker_scope is an absolute row-level firewall/);
 
 for (const scope of ['narration', 'other_dialogue', 'tagged_content']) {
-    assert.doesNotMatch(build(scope), /TARGET DIALOGUE ONLY — KIM HONG-JIN/);
+    assert.doesNotMatch(build(scope), /CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT/);
 }
 
 const off = core.buildScopedOutputPrompt({
@@ -44,7 +61,7 @@ const off = core.buildScopedOutputPrompt({
     scope: 'target_dialogue',
     speakerIdentity: identity,
 });
-assert.doesNotMatch(off, /TARGET DIALOGUE ONLY — KIM HONG-JIN/);
-assert.doesNotMatch(core.buildInputPrompt('안녕', settings, 'male', identity), /TARGET DIALOGUE ONLY — KIM HONG-JIN/);
+assert.doesNotMatch(off, /CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT/);
+assert.doesNotMatch(core.buildInputPrompt('안녕', settings, 'male', identity), /TARGET DIALOGUE ONLY — CURRENT TARGET CHARACTER/);
 
 console.log('PASS: Flash-optimized Kim Hong-jin voice is mandatory, varied, settings-aware, and restricted to confirmed target dialogue.');

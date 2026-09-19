@@ -1,5 +1,5 @@
 // In-memory output-job diagnostics. Never retain prompts, response bodies, or identities.
-const PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
+const PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content)(?::chunk-\d+)?)?$/;
 const LABELS = [
     ['banned', '금지어 복구'], ['untranslated', '미번역 복구'],
     ['protected', '보호 토큰 복구'], ['token', '보호 토큰 복구'],
@@ -120,7 +120,7 @@ export function outputTimingText(record) {
         `마지막 출력 ${record.retranslation ? '재번역' : '번역'} · ${record.status} · 총 ${seconds(record.totalMs)}`,
         `${record.at} · 프로필 ${record.slot} · ${record.mode}${record.splitCount > 1 ? ` · ${record.splitCount}분할` : ''}`,
         `요청 전 준비·기타 처리: ${seconds(d.other)}`,
-        `베르바 요청 대기열: ${seconds(d.queue)}`,
+        `긴르바 실험실 요청 대기열: ${seconds(d.queue)}`,
         `본 번역 응답 대기: ${seconds(d.primary)}`,
         `추가 복구 응답 대기: ${seconds(d.repair)} · ${record.counts.repair}회`,
         `재시도·대체 응답 대기: ${seconds(d.retry)} · ${record.counts.retry}회`,

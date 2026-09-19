@@ -22,29 +22,28 @@ const build = (profanity = 'high', scope = 'target_dialogue') => core.buildScope
 });
 
 const prompt = build();
-assert.match(prompt, /USER-DIRECTED PROFANITY GUARD/);
-assert.match(prompt, /never curse at USER as a person/);
-assert.match(prompt, /USER may hear profanity aimed at the situation, urgency, pain, self, obstacle, enemy, NPC\/third party/);
-assert.match(prompt, /rough non-profane rebuke/);
-assert.match(prompt, /Never use misogynistic or gender-degrading abuse/);
-assert.match(prompt, /most eligible TARGET lines/);
-assert.match(prompt, /Profanity diversity is mandatory/);
-assert.match(prompt, /free expletive/);
-assert.match(prompt, /intensifiers/);
-assert.match(prompt, /개-\/좆-\/지랄\/처-/);
-assert.match(prompt, /curse-free rawness/);
+assert.match(prompt, /CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT/);
+assert.match(prompt, /Never turn USER/);
+assert.match(prompt, /situation, urgency, obstacle, enemy, self or free emotion/);
+assert.match(prompt, /rough teasing and blunt criticism remain allowed/);
+assert.match(prompt, /Never use misogynistic, gender-degrading or identity-based abuse/);
+assert.match(prompt, /most compatible lines/);
+assert.match(prompt, /Vary coarse mechanisms/);
+assert.match(prompt, /situation-directed profanity/);
+assert.match(prompt, /rough verbs/);
+assert.match(prompt, /profanity-shaped rhythm/);
 
 const low = build('low');
 const natural = build('natural');
 const high = build('high');
 assert.notEqual(low, natural);
 assert.notEqual(natural, high);
-assert.match(low, /preserve source swearing/);
-assert.match(natural, /must not remain uniformly clean/);
-assert.match(high, /most eligible TARGET lines/);
+assert.match(low, /preserve source curses/i);
+assert.match(natural, /must not stay uniformly clean/);
+assert.match(high, /most compatible lines/);
 
 for (const scope of ['narration', 'other_dialogue', 'tagged_content']) {
-    assert.doesNotMatch(build('high', scope), /USER-DIRECTED PROFANITY GUARD/);
+    assert.doesNotMatch(build('high', scope), /CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT/);
 }
 assert.doesNotMatch(core.buildInputPrompt('안녕하세요.', {
     ...defaults,

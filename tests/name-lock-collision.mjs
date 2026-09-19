@@ -91,7 +91,14 @@ const extra = {
     },
 };
 assert.equal(
-    replaceStoredNameInExtra(extra, sharedRowSnapshot.source, 'Nyen', ['니옌'], '나이엔', 0),
+    replaceStoredNameInExtra(
+        extra,
+        sharedRowSnapshot.source,
+        'Nyen',
+        ['니옌'],
+        '나이엔',
+        0,
+    ),
     true,
 );
 assert.equal(extra.state.translation, '나이엔은 기다렸다. 니옌은 따라왔다.');
@@ -117,8 +124,8 @@ assert.ok(historyFlow.includes('replaceNameInKoreanRawSource(message.mes, candid
 
 const lockFlowStart = index.indexOf('async function lockSelectionName');
 const lockFlow = index.slice(lockFlowStart, index.indexOf('async function retranslateSelection', lockFlowStart));
-assert.ok(!lockFlow.includes('detectHistoricalNameForms('));
-assert.match(lockFlow, /snapshot\.translation\.slice\(0,\s*snapshot\.start\)/);
-assert.ok(lockFlow.includes('skipMessageId: snapshot.messageId'));
+assert.ok(!lockFlow.includes('detectHistoricalNameForms('), 'name registration must not ask AI to merge similar spellings');
+assert.match(lockFlow, /snapshot\.translation\.slice\(0,\s*snapshot\.start\)/, 'current selection is replaced by exact range');
+assert.ok(lockFlow.includes('skipMessageId: snapshot.messageId'), 'history pass skips the active selected record');
 
 console.log('PASS: Nyen/Nyon stay source-scoped while Korean raw chat/swipe global updates remain enabled.');

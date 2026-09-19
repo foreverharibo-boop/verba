@@ -15,20 +15,25 @@ function assertMadGate(prompt, dataMarker, label, { hongjin = false } = {}) {
     assert.equal(prompt.split(marker).length - 1, 1, `${label}: Mad gate count`);
     assert.ok(prompt.lastIndexOf(marker) > prompt.lastIndexOf(dataMarker), `${label}: Mad gate must follow source data`);
     const gate = prompt.slice(prompt.lastIndexOf(marker), hongjin && prompt.includes(hongjinMarker) ? prompt.lastIndexOf(hongjinMarker) : undefined);
-    assert.match(gate, /FINAL KOREAN CHECK/i, `${label}: mandatory`);
-    assert.match(gate, /source-language clause order/i, `${label}: source structure audit`);
-    assert.match(gate, /sounds translated/i, `${label}: translationese audit`);
-    assert.match(gate, /unnatural collocation/i, `${label}: collocation audit`);
-    assert.match(gate, /particle\/syllable/i, `${label}: corruption audit`);
-    assert.match(gate, /actor\/action\/target/i, `${label}: fact roles`);
-    assert.match(gate, /Add no event or bodily reaction/i, `${label}: factual invention guard`);
-    assert.match(gate, /Return only the requested JSON/i, `${label}: hidden audit`);
+    assert.match(gate, /FINAL BLANK-PAGE TEST/i, `${label}: mandatory`);
+    assert.match(gate, /originally authored in Korean/i, `${label}: Korean-original audit`);
+    assert.match(gate, /Merge, split, reorder, compress, expand/i, `${label}: structural freedom`);
+    assert.match(gate, /only content boundary/i, `${label}: single content boundary`);
+    assert.match(gate, /regenerating the whole affected row/i, `${label}: whole-row regeneration`);
+    assert.match(gate, /required JSON shell/i, `${label}: output shell`);
     if (hongjin) {
         assert.equal(prompt.split(hongjinMarker).length - 1, 1, `${label}: Hongjin gate count`);
         assert.ok(prompt.lastIndexOf(marker) < prompt.lastIndexOf(hongjinMarker), `${label}: Mad gate precedes Hongjin gate`);
     } else {
         assert.doesNotMatch(prompt, /<final_hongjin_voice_gate>/, `${label}: no Hongjin gate`);
     }
+}
+
+function assertRestoredHongjinOutputGate(prompt, dataMarker, label) {
+    assert.equal(prompt.split(marker).length - 1, 0, `${label}: restored primary path avoids a duplicate Mad final gate`);
+    assert.equal(prompt.split(hongjinMarker).length - 1, 1, `${label}: Hongjin gate count`);
+    assert.ok(prompt.lastIndexOf(hongjinMarker) > prompt.lastIndexOf(dataMarker), `${label}: Hongjin gate must follow source data`);
+    assert.match(prompt, /TARGET CHARACTER AUTHORING PATH/);
 }
 
 let routeChecks = 0;
@@ -47,7 +52,12 @@ for (const mode of [
             developerHongjinProfanity: 'natural',
         };
 
-        assertMadGate(core.buildOutputPrompt(segmented, settings, '', identity), 'SEGMENTS', `output/${JSON.stringify(mode)}/${hongjin}`, { hongjin });
+        const outputPrompt = core.buildOutputPrompt(segmented, settings, '', identity);
+        if (hongjin) {
+            assertRestoredHongjinOutputGate(outputPrompt, 'SEGMENTS', `output/${JSON.stringify(mode)}/${hongjin}`);
+        } else {
+            assertMadGate(outputPrompt, 'SEGMENTS', `output/${JSON.stringify(mode)}/${hongjin}`);
+        }
 
         for (const scope of ['narration', 'target_dialogue', 'other_dialogue', 'tagged_content']) {
             const scoped = core.buildScopedOutputPrompt({
@@ -57,14 +67,15 @@ for (const mode of [
                 scope,
                 speakerIdentity: identity,
             });
-            assertMadGate(scoped, 'TRANSLATION TARGETS', `scoped-${scope}/${JSON.stringify(mode)}/${hongjin}`, {
-                hongjin: hongjin && scope === 'target_dialogue',
-            });
-            const gate = scoped.slice(scoped.lastIndexOf(marker), scoped.includes(hongjinMarker) ? scoped.lastIndexOf(hongjinMarker) : undefined);
-            if (scope === 'narration') assert.match(gate, /keep it narration/i);
-            if (scope === 'target_dialogue') assert.match(gate, /confirmed TARGET CHARACTER dialogue/i);
-            if (scope === 'other_dialogue') assert.match(gate, /USER\/NPC\/OTHER dialogue/i);
-            if (scope === 'tagged_content') assert.match(gate, /visible tagged content/i);
+            assert.match(scoped, /MAD FLASH V2 — SINGLE-PASS KOREAN COMPOSITION/);
+            assert.match(scoped, /EXECUTE IN THIS ORDER/);
+            assert.match(scoped, /Discard source-language wording, clause order and sentence rhythm/);
+            assert.match(scoped, /Natural Korean is not literal Korean and not free invention/);
+            if (scope === 'narration') assert.match(scoped, /NARRATION ONLY/);
+            if (scope === 'target_dialogue') assert.match(scoped, /CONFIRMED .* DIALOGUE ONLY/);
+            if (scope === 'other_dialogue') assert.match(scoped, /CONFIRMED USER\/NPC\/OTHER DIALOGUE ONLY/);
+            if (scope === 'tagged_content') assert.match(scoped, /VISIBLE TEXT INSIDE TAGS ONLY/);
+            if (hongjin && scope === 'target_dialogue') assert.match(scoped, /CURRENT TARGET CHARACTER VOICE — PRIMARY WRITING REQUIREMENT/);
         }
 
         const narrationTranslation = '그는 계단참을 건넜다.';
@@ -96,13 +107,14 @@ for (const mode of [
             speakerIdentity: identity,
             candidateCount: 3,
             contextMode: 'selection',
+            speakerScope: 'target_dialogue',
         });
         assertMadGate(dialogueSelection, 'RIGHT', `selection-dialogue/${JSON.stringify(mode)}/${hongjin}`, { hongjin });
 
         const multi = core.buildMultiSelectionPrompt({
             source,
             translation: dialogueTranslation,
-            selections: [{ id: 'sel_0', selected: dialogueTranslation, sourceContext: '"Move. Now."', start: 0, end: dialogueTranslation.length }],
+            selections: [{ id: 'sel_0', selected: dialogueTranslation, sourceContext: '"Move. Now."', start: 0, end: dialogueTranslation.length, speakerScope: 'target_dialogue' }],
             settings,
             oneTimeInstruction: '',
             speakerIdentity: identity,

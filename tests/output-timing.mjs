@@ -44,6 +44,16 @@ assert.equal(r.durations.primary, 90); assert.equal(r.durations.queue, 10);
 assert.equal(r.rows.reduce((n, row) => n + row.responseMs, 0), 130);
 assert.equal(Object.values(r.durations).reduce((x, y) => x + y), 100);
 
+// Mad Korean narration chunks are primary translation work, not auxiliary QA.
+time = 0;
+const chunked = begin();
+const chunk = enqueue(chunked, 'output-retranslation:narration:chunk-1');
+recorder.sent(chunked, chunk);
+time = 25; recorder.received(chunked, chunk); recorder.finish(chunked, '완료');
+r = recorder.latest();
+assert.equal(r.durations.primary, 25);
+assert.equal(r.counts.aux, 0);
+
 // Turning OFF invalidates in-flight traces; turning ON cannot resurrect them.
 const invalidated = begin(); const pending = enqueue(invalidated);
 recorder.sent(invalidated, pending);
@@ -66,7 +76,7 @@ let fallbacks = [];
 const env = {
     outputTiming: recorder, settings: { debugMode: true, profileId: 'a', timeoutSeconds: 20 },
     profileSlotForId: () => 'A', profileList: () => [{ id: 'a' }, { id: 'b' }],
-    performance: { now: () => time }, AbortController, Promise, setTimeout, clearTimeout, VERBA_MAX_TOKENS: 1000,
+    performance: { now: () => time }, AbortController, Promise, setTimeout, clearTimeout, VERBA_DEEP_MAX_TOKENS: 1000,
     liveContext: () => ({ ConnectionManagerRequestService: { sendRequest: (...args) => provider(...args) } }),
     enqueueRequest: execute => queue(execute), enqueueScopedParallelRequest: execute => parallelQueue(execute), enqueueSplitOutputRequest: execute => splitQueue(execute),
     extractResponseText, parseSegmentResponse, rememberRequestError, readErrorResponse,
@@ -150,7 +160,7 @@ for(const i of [1,2,3])assert.ok(tripleLog.includes(`본 번역 (${i}/3)`));
 // Bad JSON in half 1 retries only half 1; half 2's result is reused.
 let halfCalls = [0,0];
 provider=async(_profile,messages)=>{
- const targets=JSON.parse(messages[0].content.split('TARGETS\n')[1].split('\n\nRetry ')[0]);
+ const targets=JSON.parse(messages[0].content.split('TARGETS\n')[1].split('\n\nYour previous response')[0]);
  const half=targets[0].id===splitSource.segments[0].id?0:1;
  halfCalls[half]++;time+=10;
  if(half===0&&halfCalls[half]===1)return {content:'bad JSON'};
@@ -172,7 +182,7 @@ recorder.finish(cancelled, '취소·전환'); r = recorder.latest();
 assert.equal(r.counts.total, 0); assert.equal(r.durations.queue, 100);
 await queued(); assert.equal(recorder.latest().counts.total, 0);
 
-// Provider ignores abort; Verba still records elapsed time and exits immediately.
+// Provider ignores abort; Verba Deep still records elapsed time and exits immediately.
 queue = execute => execute(); time = 0; const active = begin();
 provider = () => new Promise(() => {});
 const activeCtrl = new AbortController();
@@ -193,9 +203,9 @@ let applied = true;
 let seenTrace;
 const lifecycleEnv = {
     minimalOutputEnabled, outputSplitCount,
-    EXTENSION_KEY: 'verba',
+    EXTENSION_KEY: 'verba-deep',
     isTranslationExtensionActive: () => true,
-    activateTranslationExtension: () => 'verba',
+    activateTranslationExtension: () => 'verba-deep',
     settings: env.settings, outputTiming: recorder, performance: env.performance, AbortController,
     liveContext: () => context, isNameReplacementMessage: () => true, messageSource: m => m?.mes || '',
     isPredominantlyKorean: () => false, hasForeignText: () => true, currentRecord: () => null,
@@ -261,17 +271,17 @@ const uiEnv = {
 };
 const uiBody = 'let lastDebugDiagnostic = null;\n'
     + slice('function renderOutputTiming(', 'function storeDebugDiagnostic(')
-    + slice('    const debugModeInput = panel.querySelector', "    panel.querySelector('#verba-reset-profile-stats')")
+    + slice('    const debugModeInput = panel.querySelector', "    panel.querySelector('#verba-deep-reset-profile-stats')")
     + '\nrenderOutputTiming();';
 Function(...Object.keys(uiEnv), uiBody)(...Object.values(uiEnv));
-assert.match(element('#verba-output-timing').textContent, /AI 요청: 1회/);
-assert.equal(element('#verba-copy-output-timing').disabled, false);
-await element('#verba-copy-output-timing').handlers.click();
+assert.match(element('#verba-deep-output-timing').textContent, /AI 요청: 1회/);
+assert.equal(element('#verba-deep-copy-output-timing').disabled, false);
+await element('#verba-deep-copy-output-timing').handlers.click();
 assert.match(copied, /프로필 A · 최소 프롬프트/);
-assert.match(copied, /베르바 vtest/); assert.ok(!copied.includes('private'));
-element('#verba-debug-mode').handlers.change({ target: { checked: false } });
-assert.equal(recorder.latest(), null); assert.equal(element('#verba-copy-output-timing').disabled, true);
-copied = ''; await element('#verba-copy-output-timing').handlers.click(); assert.equal(copied, '');
-element('#verba-debug-mode').handlers.change({ target: { checked: true } });
+assert.match(copied, /긴르바 실험실 vtest/); assert.ok(!copied.includes('private'));
+element('#verba-deep-debug-mode').handlers.change({ target: { checked: false } });
+assert.equal(recorder.latest(), null); assert.equal(element('#verba-deep-copy-output-timing').disabled, true);
+copied = ''; await element('#verba-deep-copy-output-timing').handlers.click(); assert.equal(copied, '');
+element('#verba-deep-debug-mode').handlers.change({ target: { checked: true } });
 assert.equal(recorder.latest(), null);
 console.log('PASS: output timing accounting, parallel overlap, OFF/reset, newest-job isolation, real request/parse/transport retry/fallback paths, queued/active cancellation; simulated provider only.');

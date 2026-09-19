@@ -63,8 +63,8 @@ let saves=0,backups=0,inspections=0,persisted='';
 const index=fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
 const start=index.indexOf("panel.querySelector('#verba-global-prompt').addEventListener('input'");
 const handlers=index.slice(start,index.indexOf("panel.querySelector('#verba-banned-words').addEventListener",start));
-Function('panel','settings','saveSettings','renderPromptConflictInspector','schedulePromptEditorBackup','bindPromptExpandEditors','syncCustomTranslatorControls',handlers)(
-    panel,settings,()=>{saves++;persisted=JSON.stringify(settings);},()=>inspections++,()=>backups++,bindPromptExpandEditors,()=>{});
+Function('panel','settings','saveSettings','renderPromptConflictInspector','schedulePromptEditorBackup','bindPromptExpandEditors',handlers)(
+    panel,settings,()=>{saves++;persisted=JSON.stringify(settings);},()=>inspections++,()=>backups++,bindPromptExpandEditors);
 bindPromptExpandEditors(panel);
 const buttons=panel.querySelectorAll('.verba-prompt-expand');
 assert.equal(buttons.length,4,'idempotent binding');
@@ -188,30 +188,4 @@ assert.equal(drawerCloses,0,'Escape closes only popup');
 const outside=doc.createElement('button');doc.documentElement.append(outside);
 dispatchDomEvent(outside,'click');
 assert.ok(drawerCloses>0&&globalClicks>0,'unrelated host outside-click behavior remains active');
-
-// The nine general-mode custom-translator fields deliberately use the same
-// prompt-slot structure, so exercise each one through the shared modal and
-// commit an undelivered IME-style final value only when Close runs sync().
-const customPanel=doc.createElement('div');doc.documentElement.append(customPanel);
-const customKeys=['output','input','selection','name','consistency','repair','quality','flavor','other'];
-const customSaved={};let customSaveCount=0;
-for(const key of customKeys){
-    const slot=doc.createElement('section');slot.className='verba-prompt-slot verba-custom-translator-field';
-    const header=doc.createElement('div');header.className='verba-prompt-slot-head';
-    const label=doc.createElement('label');label.textContent=key;header.append(label);
-    const source=doc.createElement('textarea');source.value='{기본_프롬프트}';
-    source.addEventListener('input',()=>{customSaved[key]=source.value;customSaveCount++;});
-    slot.append(header,source);customPanel.append(slot);
-}
-bindPromptExpandEditors(customPanel);
-const customButtons=customPanel.querySelectorAll('.verba-prompt-expand');
-assert.equal(customButtons.length,9,'all custom translator fields receive an expand control');
-for(const [i,button] of customButtons.entries()){
-    button.dispatchEvent(new Event('click'));
-    const popup=doc.getElementById('verba-prompt-editor');
-    popup.querySelector('textarea').value=`custom-${customKeys[i]}`;
-    popup.querySelector('button').dispatchEvent(new Event('click'));
-    assert.equal(customSaved[customKeys[i]],`custom-${customKeys[i]}`,'Close commits the final custom prompt value');
-}
-assert.equal(customSaveCount,9,'each custom prompt saves exactly once on close');
-console.log(`PASS: ${checks+23} DOM/event assertions including 9 custom-translator expand/close auto-saves; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested.`);
+console.log(`PASS: ${checks+11} existing DOM/event assertions plus icon/ancestry and capture/bubble drawer regressions; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested.`);

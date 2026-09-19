@@ -29,10 +29,10 @@ for (const oldFingerprint of [saved.developerAccessFingerprint, '', fingerprint]
     lock(state, fingerprint, normalizeBaseTranslationCustom);
     assert.deepEqual(state, { ...before, developerMode: oldFingerprint === fingerprint });
 }
-// Split/relationship and both strong flavors stay visible without developer mode.
+// General split/relationship controls stay visible; flavors require developer mode.
 const state = structuredClone(saved); state.developerMode = false;
 const markupCode=between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(');
-const render=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',definitions+'\n'+markupCode+'\nreturn {general:generalSplitSettingsMarkup()+generalRelationshipSettingsMarkup()+developerFlavorSettingsMarkup(),developer:developerSettingsMarkup()};');
+const render=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',definitions+'\n'+markupCode+'\nreturn {general:generalSplitSettingsMarkup()+generalRelationshipSettingsMarkup(),developer:developerSettingsMarkup()};');
 const {general:markup,developer:locked}=render(state,String,()=>'', '');
 const {general:markupOn,developer:unlocked}=render({...state,developerMode:true},String,()=>'', '');
 assert.equal(markup,markupOn);
@@ -42,17 +42,16 @@ for(const id of ['output-split','relationship']) {
  assert.ok(!unlocked.includes(`id="verba-developer-${id}-lab"`));
 }
 for(const id of ['mad-korean','hongjin']) {
- assert.ok(markup.includes(`id="verba-developer-${id}-lab"`));
+ assert.ok(!markup.includes(`id="verba-developer-${id}-lab"`));
  assert.ok(!locked.includes(`id="verba-developer-${id}-lab"`));
- assert.ok(!unlocked.includes(`id="verba-developer-${id}-lab"`));
- assert.match(markup,new RegExp(`id="verba-developer-${id}-enabled" checked`));
+ assert.match(unlocked,new RegExp(`id="verba-developer-${id}-enabled" checked`));
+ assert.ok(unlocked.includes(`id="verba-developer-${id}-lab" class="verba-tool-details verba-developer-lab"`));
 }
-for(const value of ['maximum','late20s','often','banmal','jondaetmal']) assert.match(markup,new RegExp(`value="${value}" selected`));
+assert.ok(!markup.includes('verba-developer-lab"'));
+for(const value of ['maximum','late20s','often','banmal','jondaetmal']) assert.match(unlocked,new RegExp(`value="${value}" selected`));
 assert.ok(index.includes('${generalSplitSettingsMarkup()}\n\n                <details id="verba-translation-tuning"'));
 assert.ok(index.indexOf('id="verba-expression-detail"') < index.indexOf('${generalRelationshipSettingsMarkup()}'));
 assert.ok(index.indexOf('${generalRelationshipSettingsMarkup()}') < index.indexOf('id="verba-korean-flavor"'));
-assert.ok(index.indexOf('id="verba-english-flavor"') < index.indexOf('${developerFlavorSettingsMarkup()}'));
-assert.ok(index.indexOf('${developerFlavorSettingsMarkup()}') < index.indexOf('id="verba-beginner-character-guide"'));
 // Execute existing change branches with a locked mode: the UI keeps its old IDs
 // and setting keys so presets, saved values and change handlers need no migration.
 class Input {}
@@ -73,18 +72,22 @@ const off = between("        if (target.closest('#verba-developer-mode-off')) {"
 Function('settings', off)(state);
 assert.equal(state.developerHongjinFlavorEnabled, true);
 assert.equal(state.developerMadKoreanOutputEnabled, true);
-// Developer OFF retains and applies these now-general tastes and their guards.
+// Developer OFF retains stored tastes but does not inject them or their guards.
 assert.equal(state.developerRelationshipExperimentEnabled,true);
 const segmented = core.segmentSource('Alex waited. "Come here."');
 const identity = { characterName: 'Alex', userName: 'Sam', characterGender: 'male' };
 for (const dev of [false,true]) for (const mad of [false,true]) for (const hongjin of [false,true]) {
  const settings={...defaults,developerMode:dev,developerMadKoreanOutputEnabled:mad,developerHongjinFlavorEnabled:hongjin};
  const prompt=core.buildOutputPrompt(segmented,settings,'',identity);
- assert.equal(prompt.includes('MAD KOREAN'),mad);
- assert.equal(prompt.includes('KIM HONG-JIN VOICE'),hongjin);
- assert.equal(prompt.includes('TOP PRIORITY — NO MISOGYNY'),mad||hongjin);
+ assert.equal(prompt.includes('MAD KOREAN — MANDATORY REAUTHORING'),dev&&mad);
+ assert.equal(prompt.includes('KIM HONG-JIN VOICE'),dev&&hongjin);
+ assert.equal(prompt.includes('TOP PRIORITY — NO MISOGYNY'),dev&&(mad||hongjin));
  assert.equal(core.buildInputPrompt('안녕',settings,'male',identity),core.buildInputPrompt('안녕',defaults,'male',identity));
- if(mad||hongjin) assert.notDeepEqual(core.findBannedWords('미친년',settings),[]);
+ if(!dev) {
+  assert.equal(prompt,core.buildOutputPrompt(segmented,{...defaults,developerMode:false},'',identity));
+  assert.deepEqual(core.findBannedWords('미친년',settings),[]);
+  assert.ok(!core.buildBannedRepairPrompt(segmented.segments,new Map(),settings,identity).includes('USER-directed profanity guard'));
+ }
 }
 // Relationship style works while locked, applies to TARGET only, preserves values.
 for(const dev of [false,true]) {
@@ -97,7 +100,7 @@ for(const dev of [false,true]) {
  }
  assert.deepEqual(settings,before);
 }
-console.log('PASS: Mad Korean and Hongjin tastes are general-mode controls after English taste, independent of developer mode; values and speaker scope remain intact.');
+console.log('PASS: developer flavor gates, general split/relationship UI, retained values and speaker-scoped relationship rules.');
 
 // The actual activation handler rejects the previous password and accepts the new one.
 let typed = '091813', refreshes = 0, notifications = [];

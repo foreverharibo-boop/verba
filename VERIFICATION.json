@@ -1,10 +1,10 @@
 {
-  "version": "0.5.89",
+  "version": "0.5.80",
   "checks": [
     {
-      "check": "bilingual-dialogue-local-format.mjs",
+      "check": "name-lock-omission.mjs",
       "status": "PASS",
-      "output": "PASS: custom-prompt bilingual detection; English source names remain Latin and only Korean halves receive locked Korean names; no AI repair call."
+      "output": "PASS: omitted repeated NAME tokens stay omitted; present names restore once; excess names and missing structural tokens remain strict."
     },
     {
       "check": "syntax/base-editor.js",
@@ -61,11 +61,6 @@
       "output": "PASS: shortened prompt contracts (1140 route checks, custom text/scopes, no API calls)."
     },
     {
-      "check": "custom-translator.mjs",
-      "status": "PASS",
-      "output": "PASS: custom translator fully replaces default prompts with plain English instructions, automatic source data, category-specific locked response contracts, legacy placeholder migration, expand editor binding, and auto-save path."
-    },
-    {
       "check": "diagnostics.mjs",
       "status": "PASS",
       "output": "PASS: diagnostic classification, redaction, bounded raw responses, request ON/OFF, cancellation, last-record UI/copy gates"
@@ -83,7 +78,7 @@
     {
       "check": "general-flavors.mjs",
       "status": "PASS",
-      "output": "PASS: Mad Korean and Hongjin tastes are general-mode controls after English taste, independent of developer mode; values and speaker scope remain intact."
+      "output": "PASS: developer flavor gates, general split/relationship UI, retained values and speaker-scoped relationship rules."
     },
     {
       "check": "mad-recomposition.mjs",
@@ -113,12 +108,7 @@
     {
       "check": "output-splitting.mjs",
       "status": "PASS",
-      "output": "PASS: independent 1/2/3 split gate, full coverage, unified speaker-scoped prompts, whole-output local attribution/planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI."
-    },
-    {
-      "check": "local-speaker-attribution.mjs",
-      "status": "PASS",
-      "output": "PASS: local protected-name, speech-tag and continuity attribution marks target-character lines without an API call and keeps USER/NPC dialogue isolated."
+      "output": "PASS: independent 1/2/3 split gate, full coverage, unchanged normal/compact/extreme prompts, scope isolation, whole-output planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI."
     },
     {
       "check": "output-timing.mjs",
@@ -143,7 +133,7 @@
     {
       "check": "prompt-editor.mjs",
       "status": "PASS",
-      "output": "PASS: 88 DOM/event assertions including 9 custom-translator expand/close auto-saves; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested."
+      "output": "PASS: 76 existing DOM/event assertions plus icon/ancestry and capture/bubble drawer regressions; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested."
     },
     {
       "check": "prompt-settings-matrix.mjs",
@@ -194,29 +184,18 @@
       "check": "voice-intensity-flexibility.mjs",
       "status": "PASS",
       "output": "PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (43 checks)."
-    },
-    {
-      "check": "bilingual-dialogue-local-format.mjs",
-      "status": "PASS",
-      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally."
-    },
-    {
-      "check": "prompt-token-audit",
-      "status": "PASS",
-      "output": "Generated live prompts from v0.5.89 builders and measured fixed overhead for base/flavor/input/selection/repair/audit categories; documented approximate cl100k counts and split duplication."
     }
   ],
   "changed_files": [
-    "prompt-builders.js",
+    "core.js",
     "index.js",
     "manifest.json",
     "README.md",
-    "PROMPT-TOKENS.md",
     "VERIFICATION.json",
-    "tests/general-flavors.mjs",
-    "tests/output-splitting.mjs",
-    "tests/settings-layout.mjs"
+    "tests/settings-layout.mjs",
+    "tests/protected-recovery.mjs",
+    "tests/name-lock-omission.mjs"
   ],
-  "scope": "Move Mad Korean and Hongjin tastes into general settings immediately after English taste, preserve stored settings, remove developer-mode activation gates, and document prompt-token overhead.",
+  "scope": "Allow natural Korean omission of repeated NAME tokens without AI repair or forced reinsertion, while retaining exact structural-token checks and excess/moved name detection",
   "live_mobile_test": false
 }

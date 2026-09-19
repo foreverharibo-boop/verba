@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { protectedRecoverySnapshot, sanitizeDebugValue } from '../diagnostics.js';
-import { findProtectedTokenIntegrityProblems, normalizeLocallyRecoverableProtectedTokens } from '../core.js';
+import { findProtectedTokenIntegrityProblems } from '../core.js';
 const a = '@@VERBA_NAME_0000@@', b = '@@VERBA_0000@@';
 const segmented = { segments: [{ id: 's1', type: 'narration', text: `${a} opened ${b}` }],
     nameTokens: [{ token: a, source: 'Alex', value: '알렉스' }], tokens: [{ token: b, value: '<tag>' }] };
@@ -17,7 +17,8 @@ const many = protectedRecoverySnapshot(Array(20).fill({...invalid[0], text: 'x'.
 assert.equal(many.omittedSegments, 8);
 assert.match(many.segments[0].sourceWithMarkers, /생략/);
 const moved = {segments: [{id:'a',text:a}, {id:'b',text:'none'}],nameTokens:segmented.nameTokens};
-assert.equal(protectedRecoverySnapshot(findProtectedTokenIntegrityProblems(moved.segments, new Map([['a','none'],['b',a]])),moved,new Map([['a','none'],['b',a]])).problemSegmentCount,2);
+assert.equal(protectedRecoverySnapshot(findProtectedTokenIntegrityProblems(moved.segments, new Map([['a','none'],['b',a]])),moved,new Map([['a','none'],['b',a]])).problemSegmentCount,1,
+    'a missing NAME token is valid Korean omission; the moved excess token is still invalid');
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const slice = (a,b) => index.slice(index.indexOf(a),index.indexOf(b,index.indexOf(a)));
 const settings = {debugMode:true}; const button = {disabled:true}; let now=0;
@@ -28,7 +29,6 @@ const env={settings, document:{querySelector:()=>button}, sanitizeDebugValue, pr
 const logs=Function(...Object.keys(env),'let lastDebugDiagnostic=null;\n'+slice('function storeDebugDiagnostic(', 'function createDebugDiagnostic(')+ '\nreturn {recordProtectedRecovery,finishProtectedRecovery,clear:()=>{lastDebugDiagnostic=null;},latest:()=>lastDebugDiagnostic,replace:storeDebugDiagnostic};')(...Object.values(env));
 let calls=0, action=()=>{translations.set('s1',`${a} opened ${b}`);now+=4900;};
 const deps={...env,...logs,findProtectedTokenIntegrityProblems,buildProtectedTokenRepairPrompt:()=>{},isAbort:e=>e.name==='AbortError',
-    normalizeLocallyRecoverableProtectedTokens:(bundle,map)=>normalizeLocallyRecoverableProtectedTokens(bundle,map,{},{}),
     repairSegmentsByOutputScope:async opts=>{calls++;assert.equal(opts.stage,'protected-token-repair');await action();}};
 const repair=Function(...Object.keys(deps),slice('async function repairProtectedTokenIntegrity(', 'function normalizedNumberTokens(')+'\nreturn repairProtectedTokenIntegrity;')(...Object.values(deps));
 await repair(segmented,translations,{stage:'output-retranslation'});
@@ -39,11 +39,6 @@ assert.equal(logs.latest().protectedRecovery.remaining.problemSegmentCount,0);
 assert.match(logs.latest().protectedRecovery.before.segments[0].translationBeforeRepair,/그녀/);
 assert.equal(JSON.parse(JSON.stringify(logs.latest())).protectedRecovery.before.segments[0].marks[0].missing,1);
 await repair(segmented,translations);assert.equal(calls,1,'valid tokens need no request');
-translations.set('s1',`${a}${a} opened ${b}`);
-await repair(segmented,translations);
-assert.equal(calls,1,'surplus NAME markers are normalized locally without an AI repair');
-assert.equal(translations.get('s1'),`${a}알렉스 opened ${b}`);
-assert.equal(findProtectedTokenIntegrityProblems(segmented.segments,translations).length,0);
 settings.debugMode=false;logs.clear();translations.set('s1','bad');await repair(segmented,translations);assert.equal(logs.latest(),null);
 settings.debugMode=true;translations.set('s1','bad');action=()=>{settings.debugMode=false;logs.clear();settings.debugMode=true;translations.set('s1',`${a}${b}`);};
 await repair(segmented,translations);assert.equal(logs.latest(),null,'OFF/on cannot resurrect log');

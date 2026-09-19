@@ -105,11 +105,15 @@ export function createPromptBuilders(h) {
     function policy(s={}, {scope='mixed',oneTimeInstruction='',speakerIdentity={},nameTokens=[],tuning:over=null}={}) {
         const exclusive=mad(s);
         const custom=s.developerMode===true && s.baseTranslationCustom?.enabled===true && str(s.baseTranslationCustom.prompt).trim();
+        const directDialogue=dialogueScope(scope);
+        const bilingual=directDialogue && h.bilingualDialogueRequested(s);
+        const [bilingualOpen,bilingualClose]=bilingual ? h.bilingualDialogueBracketPair(s) : ['(',')'];
         return lines([
             exclusive ? 'TOP PRIORITY — NO MISOGYNY: ban misogyny/gender degradation over all voice settings; source profanity keeps its force in non-gendered wording.' : hongjinEnabled(s) ? noMisogyny : '',
             exclusive ? lines([madFidelity,names,madRules(s),hongjin(s,scope,true)]) : (custom ? str(s.baseTranslationCustom.prompt) : lines([mode(s) === 2 ? 'E→K: idiomatic Korean; preserve intentional fragments, roughness and ambiguity.' : basic, fidelity, names])),
             exclusive ? madFormat : format,
             exclusive ? 'Korean only.' : userRules(s,oneTimeInstruction,over,scope),
+            !exclusive && bilingual ? `BILINGUAL DIALOGUE IS REQUIRED: every direct-dialogue target must contain the exact source dialogue first, then one space and the Korean translation inside ${bilingualOpen}${bilingualClose}, all inside the same quotation marks. Korean-only dialogue is invalid. Narration remains Korean-only unless GLOBAL explicitly says otherwise.` : '',
             identity(speakerIdentity,exclusive),lockBlock(nameTokens,speakerIdentity),banned(s),
             scope==='tagged_content'?'TAGGED CONTENT: Korean-only visible text, including dates/weather/location; preserve metadata layout. No bilingual output or dialogue voice.':(!exclusive?'Korean only unless active GLOBAL/ALL-DIALOGUE explicitly requests bilingual output for this scope.':''),
             exclusive ? `SCOPE=${scope}.` : `SCOPE=${scope}. Apply dialogue-only rules solely to the actual speaker's dialogue, never narration or a different speaker.`

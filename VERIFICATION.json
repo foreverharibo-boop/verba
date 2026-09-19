@@ -1,5 +1,5 @@
 {
-  "version": "0.5.81",
+  "version": "0.5.82",
   "checks": [
     {
       "check": "syntax/base-editor.js",
@@ -189,19 +189,23 @@
       "check": "voice-intensity-flexibility.mjs",
       "status": "PASS",
       "output": "PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (43 checks)."
+    },
+    {
+      "check": "bilingual-dialogue-local-format.mjs",
+      "status": "PASS",
+      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally."
     }
   ],
   "changed_files": [
+    "core.js",
     "index.js",
     "manifest.json",
+    "prompt-builders.js",
     "README.md",
-    "style.css",
     "VERIFICATION.json",
-    "tests/custom-translator.mjs",
-    "tests/output-timing.mjs",
-    "tests/prompt-editor.mjs",
+    "tests/bilingual-dialogue-local-format.mjs",
     "tests/settings-layout.mjs"
   ],
-  "scope": "Add a general-mode custom translator for every AI request category with locked parser/token contracts and shared expand-editor close autosave",
+  "scope": "Port prompt-aware local bilingual dialogue reconstruction from Ginrba Lab without adding AI repair requests",
   "live_mobile_test": false
 }

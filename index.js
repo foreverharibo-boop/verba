@@ -24,6 +24,7 @@ import {
     buildTermConsistencyRepairPrompt,
     buildUntranslatedRepairPrompt,
     detectCharacterGender,
+    ensureBilingualDialogueFormat,
     extractResponseText,
     findBannedWords,
     findProtectedTokenIntegrityProblems,
@@ -45,7 +46,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.81';
+const EXTENSION_VERSION = '0.5.82';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -4342,6 +4343,22 @@ async function translateOutputText(source, options = {}) {
     });
 
     normalizeTaggedOutputTranslations(segmented, translations);
+
+    // Bilingual dialogue formatting is a deterministic display operation.
+    // Rebuild omitted or malformed source+Korean pairs locally instead of
+    // spending another AI request on formatting repair.
+    for (const segment of segmented.segments) {
+        if (segment.type !== 'dialogue_candidate') continue;
+        const current = String(translations.get(segment.id) || '');
+        translations.set(segment.id, ensureBilingualDialogueFormat(
+            segment,
+            current,
+            settings,
+            speakerScopes,
+            segmented.nameTokens || [],
+            segmented.tokens || [],
+        ));
+    }
 
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));

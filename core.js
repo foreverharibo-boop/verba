@@ -382,7 +382,17 @@ function canonicalizeExactBilingualDialogue(segment, translation, nameTokens = [
     const parts = trailingParentheticalParts(translationEnvelope.body);
     if (!parts) return null;
     const expectedSource = restoreBilingualDetectionTokens(sourceEnvelope.body, nameTokens, protectedTokens, 'source');
-    const actualSource = restoreBilingualDetectionTokens(parts.left, nameTokens, protectedTokens, 'source');
+    // Models sometimes close the dialogue quote before the Korean wrapper:
+    //   "Nyon..." (니욘...)
+    // Treat the quote around the English half as display punctuation, not as
+    // part of the source text, so custom-prompt bilingual output is still
+    // recognized and rebuilt before NAME tokens are globally restored.
+    const actualSource = restoreBilingualDetectionTokens(
+        stripLooseDialogueQuotes(parts.left),
+        nameTokens,
+        protectedTokens,
+        'source',
+    );
     const koreanHalf = restoreBilingualDetectionTokens(parts.right, nameTokens, protectedTokens, 'target');
     if (normalizedDialogueSurface(actualSource) !== normalizedDialogueSurface(expectedSource)
         || !/[가-힣]/u.test(validationText(koreanHalf))) return null;

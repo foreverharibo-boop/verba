@@ -147,6 +147,11 @@ assert.equal(
     'an existing custom square-bracket format is preserved',
 );
 assert.equal(
+    ensureBilingualDialogueFormat(namedDialogue, `"${token}..." (${token}...)`, customOnly, null, named.nameTokens, named.tokens),
+    `"Dana... (${token}...)"`,
+    'a model-closing quote before the Korean wrapper is normalized even for a full custom prompt',
+);
+assert.equal(
     ensureBilingualDialogueFormat(namedDialogue, `"${token}…"`, customOnly, null, named.nameTokens, named.tokens),
     `"${token}…"`,
     'Korean-only dialogue is not made bilingual unless a configured prompt requests it',

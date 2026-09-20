@@ -76,17 +76,6 @@ export function selectionEllipsisReference(snapshot = {}) {
     return selected;
 }
 
-// AI가 보호 토큰을 살짝 변형해서 돌려주는 경우(@@VERBA_NAME_ 0023@@ 처럼 공백이 끼거나,
-// 전각 @, 소문자, 구분자 변형)를 원래 형태(@@VERBA_NAME_0023@@)로 되돌린다.
-// 복원 단계는 정확한 문자열 일치에 의존하므로, 변형된 토큰은 반드시 여기서 먼저 정규화해야 한다.
-const LOOSE_PROTECTED_TOKEN = /[@＠]{2}\s*VERBA\s*[_＿]\s*(NAME\s*[_＿]\s*)?(\d(?:\s?\d){0,3})\s*[@＠]{2}/giu;
-
-export function canonicalizeProtectedTokenVariants(value) {
-    if (typeof value !== 'string' || !/VERBA/iu.test(value)) return value;
-    return value.replace(LOOSE_PROTECTED_TOKEN, (_match, name, digits) =>
-        `@@VERBA_${name ? 'NAME_' : ''}${String(digits).replace(/\s+/g, '').padStart(4, '0')}@@`);
-}
-
 function normalizeSyntax(text) {
     let result = '', quoted = false, escaped = false;
     const fixes = new Set();
@@ -225,9 +214,8 @@ export function collectSegmentResponse(raw, expectedSegments = []) {
             issues.push('비어 있거나 문자열이 아닌 번역');
             continue;
         }
-        const translationText = canonicalizeProtectedTokenVariants(row.translation);
-        if (partial.has(id) && partial.get(id) !== translationText) conflicts.add(id);
-        else partial.set(id, translationText);
+        if (partial.has(id) && partial.get(id) !== row.translation) conflicts.add(id);
+        else partial.set(id, row.translation);
         if (id !== row.id) repairs.push(`구간 ID 앞자리 0 보정: ${row.id} → ${id}`);
     }
     for (const id of conflicts) partial.delete(id);

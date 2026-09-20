@@ -1,5 +1,5 @@
 {
-  "version": "0.5.89",
+  "version": "0.5.90",
   "checks": [
     {
       "check": "bilingual-dialogue-local-format.mjs",
@@ -204,6 +204,16 @@
       "check": "prompt-token-audit",
       "status": "PASS",
       "output": "Generated live prompts from v0.5.89 builders and measured fixed overhead for base/flavor/input/selection/repair/audit categories; documented approximate cl100k counts and split duplication."
+    },
+    {
+      "check": "bilingual-dedupe-and-token-variants.mjs",
+      "status": "PASS",
+      "output": "PASS: bilingual halves emit one English + one Korean copy; loose NAME token variants are canonicalized before restore; name-only dialogue still gets bilingual output."
+    },
+    {
+      "check": "name-lock-omission.mjs",
+      "status": "PASS",
+      "output": "PASS: omitted repeated NAME tokens stay omitted without AI repair or forced reinsertion; excess/moved NAME tokens and structural tokens remain strict."
     }
   ],
   "changed_files": [

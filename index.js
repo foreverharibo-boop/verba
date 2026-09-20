@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.89';
+const EXTENSION_VERSION = '0.5.90';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3350,7 +3350,9 @@ function restoredSegmentText(value, segmented, useSourceNames = false) {
         token: entry.token,
         value: useSourceNames ? entry.source : entry.value,
     }));
-    const namesRestored = restoreProtected(value, nameTokens, { strict: false });
+    const namesRestoredRaw = restoreProtected(value, nameTokens, { strict: false });
+    // 원문 미리보기가 아니라면, 복원되지 않고 남은 이름 보호 토큰이 화면에 노출되지 않게 제거한다.
+    const namesRestored = useSourceNames ? namesRestoredRaw : namesRestoredRaw.replace(/@@VERBA_NAME_\d{4}@@/g, '');
     const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: false });
     return useSourceNames ? fullyRestored : repairKoreanParticleAlternatives(fullyRestored);
 }
@@ -4301,7 +4303,7 @@ async function translateOutputText(source, options = {}) {
         ? segmentSource(source, [...characterNameLocks, ...roleTermLocks])
         : initialSegmented;
     if (!segmented.segments.length) {
-        const translation = assembleTranslation(segmented, new Map());
+        const translation = assembleTranslation(segmented, new Map(), { settings });
         return { translation, sourceMap: [] };
     }
     const speakerIdentity = options.speakerIdentity || {};
@@ -4401,7 +4403,7 @@ async function translateOutputText(source, options = {}) {
         }
         console.warn('[베르바] 일부 구간의 미번역 의심이 해소되지 않아 나머지 번역 결과를 우선 적용합니다.', untranslated);
     }
-    const result = assembleTranslation(segmented, translations);
+    const result = assembleTranslation(segmented, translations, { settings });
     if (!result.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
     return {
         translation: result,

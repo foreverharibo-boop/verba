@@ -50,7 +50,9 @@ calls=[];await run('He waited.');assert.equal(calls.length,1);
 settings.developerMode=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMode=true;
 settings.developerMinimalPromptEnabled=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMinimalPromptEnabled=true;
 // Protect-token repair stays minimal and only retries the affected target.
-let attempts=0;const damaged=segmentSource('Hong-jin waited.\n\nShe nodded.',[{source:'Hong-jin',target:'홍진'}]);
+// 손상 견본은 구조 보호 토큰(<b>)으로 만든다. 이름 보호 토큰 누락은 한국어의 자연스러운
+// 주어 생략이므로 더 이상 손상으로 보지 않고 AI 복구를 요청하지 않는다.
+let attempts=0;const damaged=segmentSource('<b>Hong-jin</b> waited.\n\nShe nodded.',[{source:'Hong-jin',target:'홍진'}]);
 await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(prompt,segments,opts)=>{
  attempts++;assert.ok(!prompt.includes('HONGJIN FLAVOR'));
  if(opts.stage!=='protected-token-repair')return new Map(segments.map(s=>[s.id,'기다렸다.']));

@@ -1,5 +1,5 @@
 import { createPromptBuilders } from './prompt-builders.js';
-import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses } from './response-parser.js';
+import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, canonicalizeProtectedTokenVariants } from './response-parser.js';
 
 const PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
@@ -425,7 +425,91 @@ function stripSingleParentheticalEnvelope(value) {
     return pair ? text.slice(pair[0].length, text.length - pair[1].length).trim() : text;
 }
 
+const BILINGUAL_OPENERS = ['(', '（', '[', '【'];
+const BILINGUAL_CLOSER_RUN = /[\)\]）】]+\s*$/u;
+
+function bracketBalance(value) {
+    let open = 0;
+    let close = 0;
+    for (const ch of String(value || '')) {
+        if (BILINGUAL_OPENERS.includes(ch)) open += 1;
+        else if (')]）】'.includes(ch)) close += 1;
+    }
+    return { open, close };
+}
+
+function dropUnbalancedTrailingClosers(value) {
+    let text = String(value || '').trim();
+    while (BILINGUAL_CLOSER_RUN.test(text)) {
+        const { open, close } = bracketBalance(text);
+        if (close <= open) break;
+        text = text.slice(0, -1).trimEnd();
+    }
+    return text;
+}
+
+/**
+ * 한영병기의 한국어 쪽에 영어 원문이 다시 섞이거나(Nest, (Nest, 둥지,)),
+ * 한국어가 괄호로 두 번 반복되는 경우를 걷어내서 "영어 1번 + 한국어 1번"만 남긴다.
+ */
+function cleanBilingualKoreanHalf(korean, sourceBody, nameTokens = [], protectedTokens = []) {
+    let text = String(korean || '').trim();
+    if (!text) return text;
+    const restoreSource = value => restoreBilingualDetectionTokens(value, nameTokens, protectedTokens, 'source');
+    const sourceWords = normalizedLatinWords(restoreSource(sourceBody));
+    const sourceRun = sourceWords.join(' ');
+    const hasHangul = value => /[가-힣]/u.test(String(value || ''));
+    const wordsOf = value => normalizedLatinWords(restoreSource(stripLooseDialogueQuotes(value))).join(' ');
+
+    for (let pass = 0; pass < 4; pass += 1) {
+        const before = text;
+
+        // (a) 한국어 쪽 안에 "영어 원문 + 여는 괄호 + 한국어"가 또 들어 있는 경우
+        if (sourceRun) {
+            for (let index = 0; index < text.length; index += 1) {
+                if (!BILINGUAL_OPENERS.includes(text[index])) continue;
+                const left = text.slice(0, index);
+                if (hasHangul(left) || wordsOf(left) !== sourceRun) continue;
+                const inner = dropUnbalancedTrailingClosers(text.slice(index + 1));
+                if (hasHangul(inner)) { text = inner; break; }
+            }
+        }
+
+        // (b) 한국어가 "SRC 한국어" 꼴로 영어 원문 전체를 앞에 다시 달고 있는 경우
+        if (sourceRun) {
+            const firstHangul = text.search(/[가-힣]/u);
+            if (firstHangul > 0) {
+                const prefix = text.slice(0, firstHangul);
+                if (wordsOf(prefix) === sourceRun) text = text.slice(firstHangul);
+            }
+        }
+
+        // (c) "한국어) (한국어" 처럼 한국어가 괄호로 여러 번 반복된 경우 첫 한국어 덩어리만 유지
+        const pieces = text.split(/\s*[\)\]）】]\s*[\(\[（【]\s*/u).map(piece => piece.trim()).filter(Boolean);
+        if (pieces.length > 1) {
+            const firstKorean = pieces.find(hasHangul);
+            if (firstKorean) text = firstKorean;
+        }
+
+        // (d) "한국어 (같은 한국어)" 꼴 반복
+        const doubled = text.match(/^(.+?)\s*[\(\[（【]\s*(.+?)\s*[\)\]）】]*$/u);
+        if (doubled && hasHangul(doubled[1]) && hasHangul(doubled[2])) {
+            const key = value => String(value || '').normalize('NFKC').replace(/[\s\p{P}\p{S}]+/gu, '');
+            if (key(doubled[1]) === key(doubled[2])) text = doubled[1].trim();
+        }
+
+        text = dropUnbalancedTrailingClosers(text);
+        if (text === before) break;
+    }
+    return text;
+}
+
 function extractKoreanDialogueHalf(segment, translation, nameTokens = [], protectedTokens = []) {
+    const raw = extractKoreanDialogueHalfRaw(segment, translation, nameTokens, protectedTokens);
+    return cleanBilingualKoreanHalf(raw, dialogueEnvelope(segment?.text || '').body, nameTokens, protectedTokens);
+}
+
+function extractKoreanDialogueHalfRaw(segment, translation, nameTokens = [], protectedTokens = []) {
     const sourceEnvelope = dialogueEnvelope(segment?.text || '');
     const translatedEnvelope = dialogueEnvelope(translation);
     const expectedSource = restoreBilingualDetectionTokens(sourceEnvelope.body, nameTokens, protectedTokens, 'source');
@@ -492,7 +576,7 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
 
     const sourceEnvelope = dialogueEnvelope(segment.text);
     let source = sourceEnvelope.body;
-    for (const entry of nameTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.source || entry?.value || ''));
+    for (const entry of nameTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.original || entry?.source || entry?.value || ''));
     for (const entry of protectedTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.value || ''));
     const configuredBilingual = bilingualDialogueRequested(settings);
     const [open, close] = configuredBilingual
@@ -769,17 +853,27 @@ export function protectSource(value, configuredNameLocks = []) {
 
     const nameTokens = [];
     for (const lock of normalizeNameLocks(configuredNameLocks)) {
-        protectedText = replaceOutsideTokens(protectedText, lock.source, () => {
+        protectedText = replaceOutsideTokens(protectedText, lock.source, match => {
             const token = nameTokenName(nameTokens.length);
-            nameTokens.push({ token, value: lock.target, source: lock.source });
+            nameTokens.push({ token, value: lock.target, source: lock.source, original: match });
             return token;
         });
     }
     return { protectedText, tokens, nameTokens };
 }
 
+/**
+ * 복원 뒤에도 남은 이름 보호 토큰(알 수 없는 번호 등)이 화면에 그대로 노출되지 않게 제거한다.
+ * 알려진 토큰은 restoreProtected 에서 이미 이름으로 바뀐 뒤이므로 여기 남는 것은 전부 쓰레기 토큰이다.
+ */
+export function stripLeakedNameTokens(value) {
+    return String(canonicalizeProtectedTokenVariants(String(value || '')))
+        .replace(/@@VERBA_NAME_\d{4}@@/g, '');
+}
+
 export function restoreProtected(value, tokens, { strict = true, allowMissing = false } = {}) {
-    let result = String(value || '');
+    // 변형된 토큰(@@VERBA_NAME_ 0023@@ 등)을 먼저 원형으로 되돌려야 아래 정확 일치 복원이 동작한다.
+    let result = canonicalizeProtectedTokenVariants(String(value || ''));
     for (const entry of tokens || []) {
         const occurrences = result.split(entry.token).length - 1;
         const damaged = allowMissing ? occurrences > 1 : occurrences !== 1;
@@ -1045,10 +1139,38 @@ export function segmentSource(value, nameLocks = []) {
     };
 }
 
-export function assembleTranslation(segmented, translations) {
+/**
+ * `"Dana,"` 처럼 이름 토큰과 문장부호만 든 따옴표 대사는 번역할 글자가 없어서 segmentSource 에서
+ * 통째로 passthrough 가 된다. 그러면 AI 도, 로컬 한영병기 복구도 거치지 않고 `"다나,"` 로만 나온다.
+ * 한영병기가 켜져 있으면 여기서 `"Dana, (다나,)"` 로 직접 만들어 준다.
+ */
+function bilingualizeNameOnlyDialogue(text, segmented, settings) {
+    if (!settings || !bilingualDialogueRequested(settings)) return text;
+    const nameTokens = segmented?.nameTokens || [];
+    if (!nameTokens.length) return text;
+    const raw = String(text || '');
+    const trimmed = raw.trim();
+    const pair = DIALOGUE_PAIRS.find(([open, close]) => trimmed.length > open.length + close.length
+        && trimmed.startsWith(open) && trimmed.endsWith(close));
+    if (!pair) return text;
+    const body = trimmed.slice(pair[0].length, trimmed.length - pair[1].length);
+    const used = body.match(/@@VERBA_NAME_\d{4}@@/g) || [];
+    if (!used.length) return text;
+    const known = new Map(nameTokens.map(entry => [String(entry?.token || ''), entry]));
+    if (!used.every(token => /[가-힣]/u.test(String(known.get(token)?.value || '')))) return text;
+    const residual = body.replace(/@@VERBA_NAME_\d{4}@@/g, '');
+    if (/[\p{L}\p{N}]/u.test(residual) || /@@VERBA_\d{4}@@/.test(residual)) return text;
+    if (BILINGUAL_BRACKET_PAIRS.some(([open, close]) => body.includes(open) || body.includes(close))) return text;
+    const leading = raw.match(/^\s*/u)?.[0] || '';
+    const trailing = raw.match(/\s*$/u)?.[0] || '';
+    const built = ensureBilingualDialogueFormat({ type: 'dialogue_candidate', text: trimmed }, trimmed, settings, null, nameTokens, segmented?.tokens || []);
+    return `${leading}${built.trim()}${trailing}`;
+}
+
+export function assembleTranslation(segmented, translations, options = {}) {
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
     const joined = segmented.parts.map(part => {
-        if (part.type === 'passthrough') return part.text;
+        if (part.type === 'passthrough') return bilingualizeNameOnlyDialogue(part.text, segmented, options?.settings);
         const translated = map.get(part.id);
         if (typeof translated !== 'string' || !translated.trim()) {
             throw new Error(`번역 결과 누락: ${part.id}`);
@@ -1058,15 +1180,15 @@ export function assembleTranslation(segmented, translations) {
         map.set(part.id, repaired);
         return repaired;
     }).join('');
-    const particlesRepaired = repairLockedTokenParticles(joined, segmented.nameTokens);
+    const particlesRepaired = repairLockedTokenParticles(canonicalizeProtectedTokenVariants(joined), segmented.nameTokens);
     // Korean may naturally omit a repeated subject/name. A missing NAME token
     // therefore must not be synthesized back into the sentence: doing so can
     // place it beside an already rendered name and create `이름이름`. Present
     // and excess NAME tokens remain protected; structural tokens stay exact.
-    const namesRestored = restoreProtected(particlesRepaired, segmented.nameTokens, {
+    const namesRestored = stripLeakedNameTokens(restoreProtected(particlesRepaired, segmented.nameTokens, {
         strict: true,
         allowMissing: true,
-    });
+    }));
     const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: true });
 
     // Critical final surface pass: malformed alternatives can become visible
@@ -1110,7 +1232,7 @@ export function parseSelectionCandidateResponse(raw, expectedCount = 3) {
     const candidates = [];
     const seen = new Set();
     for (const row of rows) {
-        const translation = String(row?.translation || '').trim();
+        const translation = canonicalizeProtectedTokenVariants(String(row?.translation || '').trim());
         const key = translation.replace(/\s+/g, ' ').toLocaleLowerCase();
         if (!translation || seen.has(key)) continue;
         seen.add(key);

@@ -30,11 +30,9 @@ const requestSegments=async(prompt,segments,options)=>{
 };
 const env={settings,outputSplitCount,runOutputBatches,requestSegments,
  buildOutputPrompt:core.buildOutputPrompt,buildScopedOutputPrompt:core.buildScopedOutputPrompt,
- madKoreanExclusiveMode:()=>settings.developerMode===true && settings.developerMadKoreanOutputEnabled===true,
+ madKoreanExclusiveMode:()=>settings.developerMadKoreanOutputEnabled===true,
  isAbort:(error,signal)=>signal?.aborted||error.name==='AbortError',SCOPED_PARALLEL_REQUEST_LIMIT:2,console};
-const routingCode=between('function outputScopeForSegment(', 'function speakerAttributionCacheKey(')
- +between('async function runWithConcurrency(', 'function setBoundedCache(')
- +between('async function requestScopedGroupTranslations(', 'function normalizeTaggedOutputTranslations(');
+const routingCode=between('function nameTokensForSegments(', 'function normalizeTaggedOutputTranslations(');
 const route=Function(...Object.keys(env),routingCode+'\nreturn requestScopedOutputTranslations;')(...Object.values(env));
 for(const count of [1,2,3])for(const mode of ['ordinary','compressed','extreme']){
  Object.assign(settings,{developerOutputSplitCount:count,developerCompressedPromptEnabled:mode==='compressed',developerExtremeCompressedPromptEnabled:mode==='extreme'});
@@ -45,46 +43,46 @@ for(const count of [1,2,3])for(const mode of ['ordinary','compressed','extreme']
   // Compare the actual transmitted prompt with the original builder. No flavor,
   // register, profanity, one-time request or compression policy is rewritten.
   const tokens=segmented.nameTokens.filter(t=>row.segments.some(s=>s.text.includes(t.token)));
-  assert.equal(row.prompt,core.buildOutputPrompt({...segmented,segments:row.segments,nameTokens:tokens},settings,'ONE_TIME',identity,null));
+  assert.equal(row.prompt,core.buildOutputPrompt({...segmented,segments:row.segments,nameTokens:tokens},settings,'ONE_TIME',identity,null,{}));
   assert.equal(row.options.splitRequest===true,count>1);
  }
 }
-// Developer OFF retains and applies split choice without hidden flavors.
+// Developer OFF retains the split choice and both now-general strong flavors.
 settings.developerMode=false;settings.dialogueEndingRepetitionReduction=false;requests=[];await route(segmented,{},{});assert.equal(requests.length,3);
-for(const row of requests)assert.ok(!row.prompt.includes("KIM HONG-JIN VOICE")&&!row.prompt.includes("MANDATORY REAUTHORING"));
+for(const row of requests)assert.ok(row.prompt.includes("KIM HONG-JIN VOICE")&&row.prompt.includes("MANDATORY REAUTHORING"));
 settings.developerMode=true;
-// Strict per-speaker prompts must remain isolated even when splitting is enabled.
+// Speaker-specific rules share one prompt per split instead of duplicating the
+// same source in narration/TARGET/OTHER requests.
 Object.assign(settings,{developerMadKoreanOutputEnabled:false,developerHongjinFlavorEnabled:false,
  developerCompressedPromptEnabled:false,developerExtremeCompressedPromptEnabled:false,
  dialoguePromptEnabled:true,dialoguePrompt:'TARGET_SENTINEL',otherDialoguePromptEnabled:true,otherDialoguePrompt:'OTHER_SENTINEL',developerOutputSplitCount:3});
 const scopes=Object.fromEntries(segmented.segments.filter(s=>s.type==='dialogue_candidate').map((s,i)=>[s.id,i===0?'target_dialogue':'other_dialogue']));
 requests=[];await route(segmented,scopes,{speakerIdentity:identity});
-assert.ok(requests.length>=3);
+assert.equal(requests.length,3);
+assert.deepEqual(requests.flatMap(row=>row.segments),segmented.segments);
 for(const row of requests){
- const scope=row.options.stage.split(':').at(-1);
- assert.equal(row.prompt.includes('TARGET_SENTINEL'),scope==='target_dialogue');
- assert.equal(row.prompt.includes('OTHER_SENTINEL'),scope==='other_dialogue');
+ assert.ok(row.prompt.includes('TARGET_SENTINEL'));
+ assert.ok(row.prompt.includes('OTHER_SENTINEL'));
  assert.equal(row.options.splitRequest,true);
  for(const s of row.segments){
-  const expected=s.type==='tagged_content'?'tagged_content':s.type==='dialogue_candidate'?scopes[s.id]:'narration';
-  assert.equal(scope,expected);
+  if(s.type==='dialogue_candidate')assert.ok(row.prompt.includes(`"speaker_scope":"${scopes[s.id]}"`));
  }
 }
 // Real whole-output pipeline: planning and final verification run once for the
 // whole message, not once per chunk; only the main translation is divided.
 Object.assign(settings,{developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:true,developerMinimalPromptEnabled:false});
-let planned=0,classified=0,audited=0;
+let planned=0,audited=0;
 const fullEnv={...env, ...core, minimalOutputEnabled,translateMinimalOutput,
  normalizedCharacterNameLocks:()=>[{source:'Hong-jin',target:'홍진'}],
  planRepeatedRoleTermLocks:async s=>{planned++;assert.equal(s.segments.length,segmented.segments.length);return [];},
- classifyOutputDialogueSpeakers:async()=>{classified++;return scopes;},requestScopedOutputTranslations:route,
+ inferLocalTargetDialogueScopes:core.inferLocalTargetDialogueScopes,requestScopedOutputTranslations:route,
  repairRepeatedRoleTermConsistency:async()=>{},repairProtectedTokenIntegrity:async()=>{},
  findBannedWords:()=>[],findUntranslatedSegments:()=>[],repairIndivisibleIdentityNames:t=>t,repairKoreanParticleAlternatives:t=>t,
  runExperimentalQualityAudit:async({segmented:s})=>{audited++;assert.equal(s.segments.length,segmented.segments.length);},
  buildSourceMap:(_s,_t,result)=>[{start:0,end:result.length}],console};
 const full=Function(...Object.keys(fullEnv),between('function normalizeTaggedOutputTranslations(', 'async function repairSegmentsByOutputScope(')+between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;')(...Object.values(fullEnv));
 requests=[];const fullResult=await full(source,{speakerIdentity:identity});
-assert.equal(requests.length,3);assert.equal(planned,1);assert.equal(classified,1);assert.equal(audited,1);
+assert.equal(requests.length,3);assert.equal(planned,1);assert.equal(audited,1);
 assert.match(fullResult.translation,/홍진/);assert.match(fullResult.translation,/`CODE_UNCHANGED`/);assert.match(fullResult.translation,/<Info_panel>/);
 // Minimal uses ONLY its own prompt regardless of the independent split setting.
 for(const count of [1,2,3]){
@@ -127,4 +125,4 @@ Function('settings',disable)(settings);assert.equal(outputSplitCount(settings),3
 const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn generalSplitSettingsMarkup()+generalRelationshipSettingsMarkup();');
 assert.ok(markup(settings,String,()=>'', '').includes('verba-developer-output-split-count'));
 settings.developerMode=true;assert.match(markup(settings,String,()=>'', ''),/value="3" selected/);
-console.log('PASS: independent 1/2/3 split gate, full coverage, unchanged normal/compact/extreme prompts, scope isolation, whole-output planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI.');
+console.log('PASS: independent 1/2/3 split gate, full coverage, unified speaker-scoped prompts, whole-output local attribution/planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI.');

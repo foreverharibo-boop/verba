@@ -2522,6 +2522,26 @@
     opacity: 1;
 }
 
+.verba-custom-translator-field {
+    margin: 7px 0;
+    padding: 9px;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 42%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--verba-surface) 92%, var(--verba-accent) 8%);
+}
+
+.verba-custom-translator-field .verba-prompt-slot-head {
+    margin-bottom: 2px;
+}
+
+.verba-custom-translator-description {
+    margin: 0 0 7px !important;
+}
+
+#verba-custom-translator-controls.verba-control-disabled {
+    opacity: .56;
+}
+
 
 /* v0.4.11: recent prompt-preset backups */
 .verba-prompt-preset-backups {

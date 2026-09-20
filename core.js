@@ -166,8 +166,8 @@ export function parseBannedWords(value) {
 }
 
 function developerGenderedInsultGuardEnabled(settings = {}) {
-    return settings?.developerMode === true && (settings?.developerMadKoreanOutputEnabled === true
-        || settings?.developerHongjinFlavorEnabled === true);
+    return settings?.developerMadKoreanOutputEnabled === true
+        || settings?.developerHongjinFlavorEnabled === true;
 }
 
 function findDeveloperGenderedInsults(text) {
@@ -209,9 +209,6 @@ export function findBannedWords(text, configuredWordsOrSettings) {
 const BILINGUAL_PROMPT_PATTERN = /bilingual|dual[-\s]?language|both\s+(?:english|korean)\s+and\s+(?:english|korean)|(?:retain|preserve|include|show|keep)[^\n]{0,50}(?:english|original)|(?:english|original)[^\n]{0,50}(?:retain|preserve|include|show|keep)|(?:english|original)[^\n]{0,80}(?:first|followed|then|alongside|together|parenthes)|(?:first|followed|then|alongside|together|parenthes)[^\n]{0,80}(?:english|original)|한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문|원문)[^\n]{0,30}병기|병기[^\n]{0,30}(?:영어|영문|원문)|영어와\s*한국어|한국어와\s*영어|(?:영어|영문|원문)[^\n]{0,50}(?:먼저|뒤에|괄호|함께)|(?:먼저|뒤에|괄호|함께)[^\n]{0,50}(?:영어|영문|원문)/i;
 const NO_BILINGUAL_PROMPT_PATTERN = /(?:do\s+not|don't|never|without|avoid)[^\n]{0,35}(?:bilingual|english|original)|(?:bilingual|english|original)[^\n]{0,35}(?:forbidden|prohibited)|(?:병기|영어|영문|원문)[^\n]{0,25}(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)|(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)[^\n]{0,25}(?:병기|영어|영문|원문)/i;
 const REQUIRED_BILINGUAL_PROMPT_PATTERN = /(?:always|must|required|without\s+exception|all\s+spoken\s+dialogue)[^\n]{0,180}(?:bilingual|both\s+(?:the\s+)?(?:original\s+)?english[^\n]{0,80}korean|english[^\n]{0,80}(?:translation|korean|parenthes))|(?:반드시|항상|예외\s*없이|모든\s+대사)[^\n]{0,120}(?:한\s*영\s*병기|영\s*한\s*병기|영어[^\n]{0,50}한국어|원문[^\n]{0,50}(?:번역|괄호))/i;
-// A dialogue-only format command often also says that narration must not be
-// bilingual. That scope boundary must not cancel the affirmative dialogue rule.
-const EXPLICIT_DIALOGUE_BILINGUAL_PROMPT_PATTERN = /(?:for\s+(?:direct|spoken)\s+dialogue(?:\s+only)?\s*,?\s*(?:always\s+)?(?:output|show|include|keep|preserve)[^\n]{0,180}(?:both[^\n]{0,120})?(?:english|original)[^\n]{0,120}(?:korean|translation)|(?:직접\s*대사|모든\s*대사)(?:에만|만)?[^\n]{0,80}(?:출력|병기|표기)[^\n]{0,100}(?:영어|영문|원문)[^\n]{0,100}(?:한국어|한글|번역))/i;
 
 function validationText(value) {
     return String(value || '')
@@ -223,10 +220,9 @@ function validationText(value) {
 function promptRequestsBilingual(value) {
     const prompt = String(value || '');
     if (!BILINGUAL_PROMPT_PATTERN.test(prompt)) return false;
-    if (
-        REQUIRED_BILINGUAL_PROMPT_PATTERN.test(prompt)
-        || EXPLICIT_DIALOGUE_BILINGUAL_PROMPT_PATTERN.test(prompt)
-    ) return true;
+    // A dialogue-only instruction often excludes narration explicitly. That
+    // scope boundary must not cancel the positive dialogue requirement.
+    if (REQUIRED_BILINGUAL_PROMPT_PATTERN.test(prompt)) return true;
     return !NO_BILINGUAL_PROMPT_PATTERN.test(prompt);
 }
 
@@ -275,6 +271,7 @@ function bracketPairFromBilingualWording(prompt) {
 }
 
 export function bilingualDialogueBracketPair(settings = {}) {
+    // The more specific all-dialogue rule overrides the global rule.
     const prompts = [
         enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled'),
         enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled'),
@@ -385,6 +382,11 @@ function canonicalizeExactBilingualDialogue(segment, translation, nameTokens = [
     const parts = trailingParentheticalParts(translationEnvelope.body);
     if (!parts) return null;
     const expectedSource = restoreBilingualDetectionTokens(sourceEnvelope.body, nameTokens, protectedTokens, 'source');
+    // Models sometimes close the dialogue quote before the Korean wrapper:
+    //   "Nyon..." (니욘...)
+    // Treat the quote around the English half as display punctuation, not as
+    // part of the source text, so custom-prompt bilingual output is still
+    // recognized and rebuilt before NAME tokens are globally restored.
     const actualSource = restoreBilingualDetectionTokens(
         stripLooseDialogueQuotes(parts.left),
         nameTokens,
@@ -471,6 +473,10 @@ function bindBilingualKoreanNameTokens(segment, korean, nameTokens = []) {
             next = replaceLiteralRanges(next, chosen, Array(chosen.length).fill(token));
             missing -= chosen.length;
         }
+        while (missing > 0) {
+            next = insertMissingProtectedTokenBySourcePosition(segment?.text || '', next, token);
+            missing -= 1;
+        }
     }
     return next;
 }
@@ -480,6 +486,14 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     const result = String(translation || '');
     if (segment?.type !== 'dialogue_candidate') return result;
 
+    // A fully custom prompt can request bilingual dialogue without placing the
+    // instruction in the legacy global/all-dialogue fields inspected by
+    // bilingualDialogueRequested(). In that case the model may already return
+    // Source (Korean), but both halves still contain the same opaque NAME token.
+    // If we skip this local rebuild, assembleTranslation() restores that token
+    // globally and turns the copied English name into its Korean locked spelling.
+    // Detect an already-bilingual result from its actual structure as well as
+    // from settings, so the English half is always rebuilt from the source.
     const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
     if (!bilingualDialogueRequested(settings) && !existingBilingual) return result;
     const translatedEnvelope = dialogueEnvelope(result);
@@ -494,6 +508,10 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     let source = sourceEnvelope.body;
     for (const entry of nameTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.source || entry?.value || ''));
     for (const entry of protectedTokens || []) source = source.split(String(entry?.token || '')).join(String(entry?.value || ''));
+    // An explicit GLOBAL/ALL-DIALOGUE prompt is authoritative. If it asks for
+    // square brackets but the model returns parentheses, normalize to the
+    // configured pair. Only preserve the model's detected pair when bilingual
+    // output came from a fully custom prompt that the legacy fields cannot see.
     const configuredBilingual = bilingualDialogueRequested(settings);
     const [open, close] = configuredBilingual
         ? bilingualDialogueBracketPair(settings)
@@ -503,7 +521,10 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     return `${translatedEnvelope.leading}${sourceEnvelope.open}${source} ${open}${korean}${close}${sourceEnvelope.close}${translatedEnvelope.trailing}`;
 }
 
-/** Repairs deterministic bilingual NAME-marker duplication without an AI request. */
+/**
+ * Repairs deterministic NAME-marker duplication before strict integrity checks.
+ * This never changes non-name protected tokens and never sends an AI request.
+ */
 export function normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings = {}, speakerScopes = {}) {
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
     for (const segment of segmented?.segments || []) {
@@ -728,6 +749,151 @@ export function resolveOutputSpeakerIdentity(identity = {}, nameLocks = []) {
         characterName: resolve(identity.characterName), userName: resolve(identity.userName), nameLocks: locks };
 }
 
+function comparableSpeakerName(value) {
+    return String(value || '').trim().toLocaleLowerCase();
+}
+
+function speakerNamesMatch(left, right) {
+    const a = comparableSpeakerName(left);
+    const b = comparableSpeakerName(right);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    // A saved Korean spelling may omit a Korean family name (김홍진 ↔ 홍진).
+    // Limit this bridge to Hangul-only names so similar romanized NPC names
+    // (Nyen/Nyon, etc.) are never merged by a fuzzy or suffix comparison.
+    if (!/^[가-힣]{2,6}$/u.test(a) || !/^[가-힣]{2,6}$/u.test(b)) return false;
+    return (a.length >= 2 && b.endsWith(a)) || (b.length >= 2 && a.endsWith(b));
+}
+
+function speakerAliasSets(segmented, identity = {}) {
+    const targetNames = [identity.sourceCharacterName, identity.characterName].filter(Boolean);
+    const userNames = [identity.sourceUserName, identity.userName].filter(Boolean);
+    for (const lock of normalizeNameLocks(identity.nameLocks)) {
+        if (targetNames.some(name => speakerNamesMatch(name, lock.target))) targetNames.push(lock.source, lock.target);
+        if (userNames.some(name => speakerNamesMatch(name, lock.target))) userNames.push(lock.source, lock.target);
+    }
+
+    const targetTokens = new Set();
+    const otherTokens = new Set();
+    for (const entry of segmented?.nameTokens || []) {
+        const names = [entry?.source, entry?.value];
+        if (names.some(name => targetNames.some(target => speakerNamesMatch(name, target)))) {
+            targetTokens.add(String(entry.token || ''));
+        } else if (names.some(name => userNames.some(user => speakerNamesMatch(name, user)))) {
+            otherTokens.add(String(entry.token || ''));
+        }
+    }
+    return { targetNames, userNames, targetTokens, otherTokens };
+}
+
+function startsWithSpeakerName(sentence, names) {
+    return [...new Set(names.map(String).filter(Boolean))]
+        .sort((left, right) => right.length - left.length)
+        .find(name => new RegExp(`^${escapeRegExp(name)}(?=$|[^\\p{L}\\p{N}_])`, 'iu').test(sentence)) || '';
+}
+
+function leadingSpeakerActor(text, aliases, targetGender, fallback = 'unknown') {
+    const sentences = String(text || '').split(/(?<=[.!?])\s+/u);
+    let actor = fallback;
+    const gender = String(targetGender || 'unknown').toLocaleLowerCase();
+    for (const rawSentence of sentences) {
+        const sentence = rawSentence.trim();
+        if (!sentence) continue;
+        const firstToken = sentence.match(/^(@@VERBA_NAME_\d{4}@@)/u)?.[1] || '';
+        if (firstToken && aliases.targetTokens.has(firstToken)) {
+            actor = 'target';
+            continue;
+        }
+        const targetName = startsWithSpeakerName(sentence, aliases.targetNames);
+        if (targetName) {
+            actor = 'target';
+            continue;
+        }
+        const userName = startsWithSpeakerName(sentence, aliases.userNames);
+        if (userName) {
+            if (!new RegExp(`^${escapeRegExp(userName)}['’]s\\b`, 'iu').test(sentence)) actor = 'user';
+            continue;
+        }
+        if (firstToken && aliases.otherTokens.has(firstToken)) {
+            // A possessive mention is not the acting subject: "Dam-eun's
+            // footsteps..." must not steal Hong-jin's continuing dialogue.
+            if (!new RegExp(`^${escapeRegExp(firstToken)}['’]s\\b`, 'u').test(sentence)) actor = 'user';
+            continue;
+        }
+        const pronoun = sentence.match(/^(he|she|they)\b/iu)?.[1]?.toLocaleLowerCase();
+        if (pronoun === 'he') actor = gender === 'female' ? 'other' : actor;
+        else if (pronoun === 'she') actor = gender === 'male' ? 'other' : actor;
+        else if (pronoun === 'they' && actor === 'unknown') actor = 'other';
+        else if (/^(?:a|an|the)\s+[\p{L}][\p{L}'’-]*(?:\s+[\p{L}][\p{L}'’-]*)?\s+(?:said|asked|replied|called|shouted|whispered|muttered|looked|raised|turned|walked|stepped|moved|stood|sat|reached|nodded)\b/iu.test(sentence)) {
+            actor = 'other';
+        }
+    }
+    return actor;
+}
+
+function postDialogueSpeaker(text, aliases, targetGender, activeActor) {
+    const lead = String(text || '').trim().slice(0, 240);
+    const speechVerb = '(?:said|asked|replied|answered|called|shouted|whispered|muttered|added|continued|snapped|growled|told)';
+    const token = lead.match(new RegExp(`^(@@VERBA_NAME_\\d{4}@@)(?:\\s+[^.!?]{0,50})?\\s+${speechVerb}\\b`, 'iu'))?.[1]
+        || lead.match(new RegExp(`^${speechVerb}\\s+(@@VERBA_NAME_\\d{4}@@)\\b`, 'iu'))?.[1]
+        || '';
+    if (token && aliases.targetTokens.has(token)) return 'target';
+    if (token && aliases.otherTokens.has(token)) return 'other';
+
+    const namedSpeechRole = (names, role) => names.some(name => {
+        const escaped = escapeRegExp(name);
+        return new RegExp(`^${escaped}(?:\\s+[^.!?]{0,50})?\\s+${speechVerb}\\b`, 'iu').test(lead)
+            || new RegExp(`^${speechVerb}\\s+${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu').test(lead);
+    }) ? role : '';
+    const directRole = namedSpeechRole(aliases.targetNames, 'target')
+        || namedSpeechRole(aliases.userNames, 'other');
+    if (directRole) return directRole;
+
+    const pronoun = lead.match(new RegExp(`^(he|she|they)\\s+${speechVerb}\\b`, 'iu'))?.[1]?.toLocaleLowerCase();
+    const gender = String(targetGender || 'unknown').toLocaleLowerCase();
+    if (pronoun === 'he') {
+        if (gender === 'female') return 'other';
+        if (gender === 'male') return activeActor === 'other' ? 'other' : 'target';
+    }
+    if (pronoun === 'she') {
+        if (gender === 'male') return 'other';
+        if (gender === 'female') return activeActor === 'other' ? 'other' : 'target';
+    }
+    if (pronoun === 'they') return activeActor === 'target' ? 'target' : 'other';
+    return 'unknown';
+}
+
+// Fast, conservative speaker hints for the unified output request. This never
+// calls the model. Only locally certain TARGET/OTHER cases are fixed; uncertain
+// dialogue remains unknown_dialogue and is resolved inside the translation call.
+export function inferLocalTargetDialogueScopes(segmented, identity = {}) {
+    const aliases = speakerAliasSets(segmented, identity);
+    const segments = segmented?.segments || [];
+    const scopes = {};
+    let activeActor = 'unknown';
+
+    for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index];
+        if (segment.type !== 'dialogue_candidate') {
+            activeActor = leadingSpeakerActor(segment.text, aliases, identity.characterGender, activeActor);
+            continue;
+        }
+
+        const next = segments[index + 1];
+        const tagged = next?.type === 'narration'
+            ? postDialogueSpeaker(next.text, aliases, identity.characterGender, activeActor)
+            : 'unknown';
+        const actor = tagged === 'unknown' ? activeActor : tagged;
+        scopes[segment.id] = actor === 'target'
+            ? 'target_dialogue'
+            : actor === 'other' || actor === 'user'
+                ? 'other_dialogue'
+                : 'unknown_dialogue';
+        if (tagged !== 'unknown') activeActor = tagged;
+    }
+    return scopes;
+}
+
 function escapeRegExp(value) {
     return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -778,12 +944,11 @@ export function protectSource(value, configuredNameLocks = []) {
     return { protectedText, tokens, nameTokens };
 }
 
-export function restoreProtected(value, tokens, { strict = true, allowMissing = false } = {}) {
+export function restoreProtected(value, tokens, { strict = true } = {}) {
     let result = String(value || '');
     for (const entry of tokens || []) {
         const occurrences = result.split(entry.token).length - 1;
-        const damaged = allowMissing ? occurrences > 1 : occurrences !== 1;
-        if (strict && damaged) {
+        if (strict && occurrences !== 1) {
             throw new Error(`보호 요소가 손상되었습니다: ${entry.token}`);
         }
         result = result.split(entry.token).join(entry.value);
@@ -996,9 +1161,17 @@ export function segmentSource(value, nameLocks = []) {
         }
 
         const analysis = analyzeLanguage(content);
-        const passthrough = onlyProtectedTokens(content)
+        // A locked name can consume the full visible body of a short direct
+        // line (for example, "Dana..."). Keep it as dialogue so local
+        // bilingual assembly can still use the exact source spelling.
+        const protectedNameOnlyDialogue = !insideTaggedContent
+            && piece.type === 'dialogue_candidate'
+            && /@@VERBA_NAME_\d{4}@@/u.test(content);
+        const passthrough = !protectedNameOnlyDialogue && (
+            onlyProtectedTokens(content)
             || analysis.total === 0
-            || (analysis.korean > 0 && analysis.english + analysis.japanese + analysis.chinese === 0);
+            || (analysis.korean > 0 && analysis.english + analysis.japanese + analysis.chinese === 0)
+        );
 
         if (passthrough) {
             parts.push({ type: 'passthrough', text: content });
@@ -1059,14 +1232,7 @@ export function assembleTranslation(segmented, translations) {
         return repaired;
     }).join('');
     const particlesRepaired = repairLockedTokenParticles(joined, segmented.nameTokens);
-    // Korean may naturally omit a repeated subject/name. A missing NAME token
-    // therefore must not be synthesized back into the sentence: doing so can
-    // place it beside an already rendered name and create `이름이름`. Present
-    // and excess NAME tokens remain protected; structural tokens stay exact.
-    const namesRestored = restoreProtected(particlesRepaired, segmented.nameTokens, {
-        strict: true,
-        allowMissing: true,
-    });
+    const namesRestored = restoreProtected(particlesRepaired, segmented.nameTokens, { strict: true });
     const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: true });
 
     // Critical final surface pass: malformed alternatives can become visible
@@ -1143,7 +1309,11 @@ function replaceExcessNameTokens(value, token, keepCount, replacement) {
     });
 }
 
-/** Converts only surplus NAME markers into their visible locked spelling. */
+/**
+ * Converts only surplus NAME markers into their visible locked spelling.
+ * The wording is preserved, but strict assembly once again sees exactly the
+ * source marker count. Non-name protected tokens are never changed here.
+ */
 export function normalizeExcessNameProtectedTokens(segments, translations, nameTokens = []) {
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
     const knownNames = new Map((nameTokens || []).map(entry => [String(entry?.token || ''), entry]));
@@ -1221,6 +1391,53 @@ function replaceLiteralRanges(value, ranges, replacements) {
     return result + text.slice(cursor);
 }
 
+function nearestProtectedInsertionIndex(value, approximateIndex) {
+    const text = String(value || '');
+    const protectedRanges = [...text.matchAll(/@@VERBA_(?:NAME_)?\d{4}@@/g)]
+        .map(match => ({ start: match.index, end: match.index + match[0].length }));
+    const outsideProtectedToken = index => !protectedRanges.some(range => index > range.start && index < range.end);
+    const rawTarget = Math.max(0, Math.min(text.length, Number(approximateIndex) || 0));
+    const containingRange = protectedRanges.find(range => rawTarget > range.start && rawTarget < range.end);
+    const target = containingRange
+        ? (rawTarget - containingRange.start <= containingRange.end - rawTarget ? containingRange.start : containingRange.end)
+        : rawTarget;
+    if (target === 0 || target === text.length) return target;
+    const boundary = index => outsideProtectedToken(index) && (
+        index <= 0 || index >= text.length
+        || /[\s\p{P}\p{S}]/u.test(text[index - 1] || '')
+        || /[\s\p{P}\p{S}]/u.test(text[index] || '')
+    );
+    if (boundary(target)) return target;
+    for (let distance = 1; distance <= Math.min(120, text.length); distance += 1) {
+        const right = target + distance;
+        const left = target - distance;
+        if (right <= text.length && boundary(right)) return right;
+        if (left >= 0 && boundary(left)) return left;
+    }
+    return target;
+}
+
+function insertMissingProtectedTokenBySourcePosition(source, translation, token) {
+    const sourceText = String(source || '');
+    const output = String(translation || '');
+    const sourceIndex = Math.max(0, sourceText.indexOf(String(token || '')));
+    const stripMarkers = value => String(value || '').replace(/@@VERBA_(?:NAME_)?\d{4}@@/g, '');
+    const visibleSource = stripMarkers(sourceText);
+    const visibleBeforeToken = stripMarkers(sourceText.slice(0, sourceIndex));
+    const ratio = visibleSource.length ? visibleBeforeToken.length / visibleSource.length
+        : (sourceText.length ? sourceIndex / sourceText.length : 1);
+    const insertionIndex = nearestProtectedInsertionIndex(output, Math.round(output.length * ratio));
+    const needsLeadingSpace = insertionIndex > 0
+        && /[\p{L}\p{N}]/u.test(output[insertionIndex - 1] || '')
+        && /[\p{L}\p{N}]/u.test(String(token || '')[0] || '');
+    const needsTrailingSpace = insertionIndex < output.length
+        && /[\p{L}\p{N}]/u.test(output[insertionIndex] || '')
+        && /[\p{L}\p{N}]/u.test(String(token || '').slice(-1) || '');
+    return output.slice(0, insertionIndex)
+        + (needsLeadingSpace ? ' ' : '') + String(token || '')
+        + (needsTrailingSpace ? ' ' : '') + output.slice(insertionIndex);
+}
+
 export function findProtectedTokenIntegrityProblems(segments, translations) {
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
     const invalid = [];
@@ -1228,15 +1445,7 @@ export function findProtectedTokenIntegrityProblems(segments, translations) {
         const expected = protectedTokenCounts(segment?.text);
         const actual = protectedTokenCounts(map.get(segment?.id));
         const tokens = new Set([...expected.keys(), ...actual.keys()]);
-        const damaged = [...tokens].filter(token => {
-            const wanted = expected.get(token) || 0;
-            const received = actual.get(token) || 0;
-            // Each source occurrence gets its own NAME token. Korean frequently
-            // omits repeated subjects, so fewer NAME tokens are valid. Unknown,
-            // moved, or duplicated NAME tokens (received > wanted) are not.
-            if (/^@@VERBA_NAME_\d{4}@@$/.test(token)) return received > wanted;
-            return received !== wanted;
-        });
+        const damaged = [...tokens].filter(token => (expected.get(token) || 0) !== (actual.get(token) || 0));
         if (!damaged.length) continue;
         invalid.push({
             ...segment,
@@ -1554,8 +1763,7 @@ const DEVELOPER_HONGJIN_OPPA_FREQUENCY_RULES = {
 
 function developerHongjinFlavorBlock(settings = {}, scope = 'narration') {
     if (
-        settings?.developerMode !== true
-        || settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerHongjinFlavorEnabled !== true
         || scope !== 'target_dialogue'
     ) {
         return '';
@@ -1713,8 +1921,7 @@ END KOREAN-ORIGINAL COMPOSITION`;
 
 function developerMadKoreanOutputBlock(settings = {}, scope = 'mixed') {
     if (
-        settings?.developerMode !== true
-        || settings?.developerMadKoreanOutputEnabled !== true
+        settings?.developerMadKoreanOutputEnabled !== true
     ) {
         return '';
     }
@@ -1780,7 +1987,7 @@ FINAL REJECTION GATE — REWRITE SILENTLY IF ANY ANSWER IS YES
 }
 
 function madKoreanExclusiveEnabled(settings = {}) {
-    return settings?.developerMode === true && settings?.developerMadKoreanOutputEnabled === true;
+    return settings?.developerMadKoreanOutputEnabled === true;
 }
 
 function madKoreanHongjinVoiceRule(settings = {}) {
@@ -1847,8 +2054,7 @@ ${directionRule(`USER ${JSON.stringify(userName)}`, `TARGET CHARACTER ${JSON.str
 
 function madKoreanHongjinAudienceFirewall(settings = {}, speakerIdentity = {}, scope = 'mixed') {
     if (
-        settings?.developerMode !== true
-        || settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerHongjinFlavorEnabled !== true
         || !['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope)
     ) {
         return '';
@@ -2821,8 +3027,7 @@ const COMPACT_LOCALIZATION_RULES = {
 
 function extremeHongjinFlavorBlock(settings = {}, scope = 'mixed', speakerIdentity = {}) {
     if (
-        settings?.developerMode !== true
-        || settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerHongjinFlavorEnabled !== true
         || !['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope)
     ) return '';
 
@@ -2859,8 +3064,7 @@ function extremeHongjinFlavorBlock(settings = {}, scope = 'mixed', speakerIdenti
 
 function compactHongjinFlavorBlock(settings = {}, scope = 'mixed', speakerIdentity = {}) {
     if (
-        settings?.developerMode !== true
-        || settings?.developerHongjinFlavorEnabled !== true
+        settings?.developerHongjinFlavorEnabled !== true
         || !['mixed', 'dialogue_mixed', 'target_dialogue'].includes(scope)
     ) return '';
 
@@ -4020,4 +4224,5 @@ export function boundReference(value, limit = 16000) {
 const promptBuilders = createPromptBuilders({
     boundReference, parseBannedWords, findBannedWords, normalizeNameLocks,
     normalizedTranslationRuleOrder, parseDialoguePreferenceList, selectionTouchesDialogue,
+    bilingualDialogueRequested, bilingualDialogueBracketPair,
 });

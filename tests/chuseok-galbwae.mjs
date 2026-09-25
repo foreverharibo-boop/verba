@@ -41,6 +41,8 @@ for (const scope of ['all', 'dialogueInner']) {
         assert.match(prompt, /"tag_context":\["inner_info","small"\]/);
         assert.match(prompt, /"tag_context":\["info_panel"\]/);
         assert.match(prompt, /"나 알아\?" → "나를 아늕랴!!"/);
+        assert.match(prompt, /chaotic 죠캎-style Korean internet-post language/);
+        assert.match(prompt, /must NOT sound like a historical drama, an elderly speaker/);
     }
 }
 
@@ -114,4 +116,4 @@ assert.match(index, /chuseokGalbwaeScope:\s*normalizedChuseokGalbwaeScope/);
 const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 assert.match(style, /\.verba-visibility-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
 
-console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+Inner_Info modes, uses the old-man meme rewrite pattern, preserves protected structure, and keeps visibility actions horizontal.');
+console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+Inner_Info modes, uses the Jyokap-style chaotic rewrite pattern without old-man speech, preserves protected structure, and keeps visibility actions horizontal.');

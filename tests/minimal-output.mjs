@@ -22,6 +22,7 @@ assert.ok(buildMinimalOutputPrompt([], {...settings,developerMinimalPrompt:'</te
 const galbwaePrompt=buildMinimalOutputPrompt(segmented.segments,{...settings,chuseokGalbwaeScope:'all'},segmented.nameTokens,'ONE_TIME_MUST_NOT_APPEAR');
 assert.match(galbwaePrompt,/EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE/);
 assert.match(galbwaePrompt,/나 알아\?→나를 아늕랴!!/);
+assert.match(galbwaePrompt,/chaotic 죠캎-style Korean internet-post language/);
 assert.doesNotMatch(galbwaePrompt,/ONE_TIME_MUST_NOT_APPEAR|자연스럽게 한국어로 번역하라/);
 let calls=[];
 function translated(segment){

@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.94';
+const EXTENSION_VERSION = '0.5.95';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -229,10 +229,10 @@ const CUSTOM_TRANSLATOR_SIMPLE_MARKER = '[사용자 추가 지침]';
 
 const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'profiles', label: '연결 프로필', selector: '#verba-profile-settings-group' },
-    { key: 'input', label: '인풋·태그 번역', selector: '#verba-input-settings-group' },
+    { key: 'input', label: '인풋 번역', selector: '#verba-input-settings-group' },
     { key: 'profileStats', label: '프로필 성능 기록', selector: '#verba-profile-stats' },
     { key: 'nameLocks', label: '이름 고정 관리', selector: '#verba-name-lock-manager' },
-    { key: 'selection', label: '선택 재번역·드래그 메뉴', selector: '#verba-selection-settings-group' },
+    { key: 'selection', label: '선택 재번역·태그·드래그 메뉴', selector: '#verba-selection-settings-group' },
     { key: 'currentRules', label: '현재 적용 규칙', selector: '#verba-current-rules' },
     { key: 'promptPresets', label: '프롬프트 프리셋', selector: '#verba-prompt-presets' },
     { key: 'promptSlots', label: '프롬프트 입력창', selector: '#verba-prompt-slots' },
@@ -3204,9 +3204,10 @@ function applyCustomTranslatorPrompt(prompt, options = {}) {
 
 [VERBA EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE — REQUIRED]
 - ACTIVE MODE=${galbwaeScope}. In mode=all, apply readable 갈봬체 to Korean narration, direct dialogue and targets whose tag_context contains "inner_info". In mode=dialogueInner, apply it only to direct dialogue and targets whose tag_context contains "inner_info"; keep narration normally spelled.
-- Rewrite every eligible sentence in an exaggerated old-man/boomer meme voice, replacing ordinary modern wording and endings with conspicuously archaic, bossy or melodramatic cadence such as ~느냐/~게냐/~거라/~구나/~로다/~말이다/~하여라 when fitting.
-- Then visibly wreck consonants, vowels, syllable boundaries, particles and endings with absurd 받침, fused syllables and meme-like misspellings. A nearly normal sentence with one typo is invalid.
-- Exact pattern example: 나 알아? → 나를 아늕랴!! Other patterns: 뭐 하고 있는 거야? → 뭣을 핫고 잇는 게냟!!; 어서 이리 와. → 얼릉 이리 오너랗!!; 내가 몇 번을 말해? → 내가 몃 번을 말햇느냟!!
+- Rewrite every eligible sentence as chaotic 죠캎-style Korean internet-post language: strangely earnest, overexcited, clumsily typed, and sometimes awkwardly polite. Do NOT use old-man, historical-drama or generic ~느냐/~거라/~로다 parody.
+- Visibly wreck spelling and spacing with varied phonetic misspellings, swapped vowels/consonants, wrong-but-readable particles/endings, fused words, odd spaces and community-post punctuation. A nearly normal sentence with one typo is invalid; repeating one ending mechanically is also invalid.
+- Exact pattern example: 나 알아? → 나를 아늕랴!! Other patterns: 어떻게 해야 해요? → 어덕헤 해야대요??; 계속 보고 있었어요. → 개속 보고잇엇내요; 도와주세요. → 도아주새요 ㅠㅠ; 정말 무서웠어요. → 진자 너무무서웟어요;;
+- The absurdity is wording only. Never invent actions, body parts, sexual content, incidents, objects or claims that are absent from the source.
 - Never alter ordinary tagged metadata, Info_panel, dates/weather/locations, proper names or their particles, numbers, protected tokens, code, tags or facts. Preserve ellipses exactly; ? and ! may be exaggerated when the speech act remains clear.
 [END VERBA EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE]` : '';
     return `[USER TRANSLATION INSTRUCTION]
@@ -10031,12 +10032,6 @@ function injectSettingsPanel() {
                 </label>
                 <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
 
-                <label class="verba-check-row" for="verba-translate-tagged-content">
-                    <input type="checkbox" id="verba-translate-tagged-content" ${settings.translateTaggedContent !== false ? 'checked' : ''}>
-                    <span>&lt;태그&gt; 안 자연어 번역</span>
-                    <small id="verba-translate-tagged-content-status" aria-live="polite">${settings.translateTaggedContent !== false ? 'ON' : 'OFF'}</small>
-                </label>
-                <div class="verba-help">기본 ON입니다. 끄면 HTML·커스텀 짝태그의 구조와 내부 자연어를 모두 원문 그대로 두고, 태그 밖의 본문만 번역해요. 코드·style·script·숨김 사고 태그는 이 설정과 관계없이 기존처럼 보호됩니다.</div>
                 </section>
 
                 <details id="verba-profile-stats" class="verba-tool-details">
@@ -10059,6 +10054,13 @@ function injectSettingsPanel() {
                     <span>선택 재번역 후보 3개 미리보기</span>
                 </label>
                 <div class="verba-help">선택 재번역 결과를 바로 적용하지 않고, 의미는 같지만 표현이 조금씩 다른 후보 중 하나를 고를 수 있어요.</div>
+
+                <label class="verba-check-row" for="verba-translate-tagged-content">
+                    <input type="checkbox" id="verba-translate-tagged-content" ${settings.translateTaggedContent !== false ? 'checked' : ''}>
+                    <span>&lt;태그&gt; 안 자연어 번역</span>
+                    <small id="verba-translate-tagged-content-status" aria-live="polite">${settings.translateTaggedContent !== false ? 'ON' : 'OFF'}</small>
+                </label>
+                <div class="verba-help">기본 ON입니다. 끄면 HTML·커스텀 짝태그의 구조와 내부 자연어를 모두 원문 그대로 두고, 태그 밖의 본문만 번역해요. 코드·style·script·숨김 사고 태그는 이 설정과 관계없이 기존처럼 보호됩니다.</div>
 
 
                 <details id="verba-selection-menu-settings" class="verba-tool-details">
@@ -10467,7 +10469,7 @@ function injectSettingsPanel() {
                             <span>대사·속마음만 갈봬체 <small>서술 정상</small></span>
                         </label>
                         <div class="verba-help">둘 중 하나만 선택할 수 있으며, 켠 항목을 다시 끄면 갈봬체가 완전히 꺼져요. 켜져 있는 동안 미친 한출의 맛·김홍진의 맛·입력 프롬프트·표현 디테일 등 다른 스타일 지시는 전송하지 않는 배타 모드로 작동합니다. Info_panel·날짜·날씨·장소·이름·숫자·코드·태그 구조에는 어느 옵션에서도 적용하지 않습니다. 프롬프트 프리셋에서 ‘프롬프트 + 번역 설정’을 저장하면 선택한 범위도 함께 저장됩니다.</div>
-                        <div class="verba-help">대표 기준: “나 알아?” → “나를 아늕랴!!”처럼 단순 받침 장난이 아니라 문장과 어미부터 할배 밈투로 뜯어고친 뒤 맞춤법을 망가뜨립니다.</div>
+                        <div class="verba-help">대표 기준: “나 알아?” → “나를 아늕랴!!”처럼 죠캎식으로 발음·맞춤법·띄어쓰기·조사를 기괴하지만 읽히게 무너뜨립니다. 사극체나 할배 말투로 바꾸는 기능은 아닙니다.</div>
                     </div>
                 </details>
 

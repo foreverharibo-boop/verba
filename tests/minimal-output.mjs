@@ -57,6 +57,24 @@ for(const count of [1,2,3]){
  assert.equal(merged.translation,result.translation);assert.deepEqual(merged.sourceMap,result.sourceMap);
 }
 
+// Galbwae minimal mode conditionally repairs only strong unchanged Latin
+// character-name leftovers instead of paying for another call on clean output.
+const nameSegmented=segmentSource('Aila called Calix. Atlas answered Aila.');
+let nameCalls=[];
+const nameRequest=async(prompt,segments,opts)=>{
+ nameCalls.push({prompt,segments,opts});
+ const translation=opts.stage==='untranslated-name-repair'
+  ? '아일라가 칼릭스를 불렀고 아틀라스가 아일라에게 대답했다.'
+  : 'Aila가 Calix를 불렀고 Atlas는 Aila! 하고 대답했다.';
+ return new Map(segments.map(segment=>[segment.id,translation]));
+};
+const nameResult=await translateMinimalOutput(nameSegmented,{...settings,developerOutputSplitCount:1,chuseokGalbwaeScope:'all'},{},{requestSegments:nameRequest,buildSourceMap});
+assert.equal(nameCalls.length,2);
+assert.equal(nameCalls[1].opts.stage,'untranslated-name-repair');
+assert.match(nameCalls[1].prompt,/Every clear human or fictional character name must use natural Hangul/);
+assert.match(nameResult.translation,/아일라가 칼릭스를 불렀고 아틀라스가/);
+assert.doesNotMatch(nameResult.translation,/\b(?:Aila|Calix|Atlas)\b/);
+
 // Actual entry point must branch before any optional planning, classification,
 // banned-word repair or quality audit, even when all those options are enabled.
 const route=Function('settings','normalizedCharacterNameLocks','segmentSource','minimalOutputEnabled','translateMinimalOutput','requestSegments','buildSourceMap','planRepeatedRoleTermLocks',between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;');

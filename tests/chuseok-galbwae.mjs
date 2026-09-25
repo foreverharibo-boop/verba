@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import {
     buildOutputPrompt,
     buildSelectionPrompt,
+    findUntranslatedSegments,
     segmentSource,
 } from '../core.js';
 
@@ -19,6 +20,25 @@ assert.equal(segmented.tokens.some(row => row.value.includes('**')), false);
 const tagsDisabled = segmentSource(source, [], { translateTaggedContent: false });
 assert.equal(tagsDisabled.segments.some(row => row.text.includes('How do I do this?')), false);
 assert.equal(tagsDisabled.segments.some(row => row.text.includes('This is insane')), false);
+
+const nameLeftoverSegment = { id: 'seg_name', type: 'narration', text: 'Aila called Calix. Atlas answered Aila.' };
+const nameLeftovers = findUntranslatedSegments(
+    [nameLeftoverSegment],
+    new Map([['seg_name', 'Aila가 Calix를 불렀다. Atlas는 Aila! 하고 대답했다.']]),
+    { chuseokGalbwaeScope: 'all' },
+);
+assert.equal(nameLeftovers.length, 1);
+assert.match(nameLeftovers[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Aila, Calix, Atlas/);
+assert.equal(findUntranslatedSegments(
+    [nameLeftoverSegment],
+    new Map([['seg_name', '아일라가 칼릭스를 불렀다. 아틀라스가 대답했다.']]),
+    { chuseokGalbwaeScope: 'all' },
+).length, 0);
+assert.equal(findUntranslatedSegments(
+    [nameLeftoverSegment],
+    new Map([['seg_name', 'Aila가 Calix를 불렀고 Atlas는 대답했다.']]),
+    { chuseokGalbwaeScope: 'off' },
+).length, 0);
 
 const baseSettings = {
     translationRuleOrder: ['fineTuning'],
@@ -141,4 +161,4 @@ assert.match(index, /chuseokGalbwaeScope:\s*normalizedChuseokGalbwaeScope/);
 const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 assert.match(style, /\.verba-visibility-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
 
-console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+bold-Markdown modes, forces fixed-name-first natural Hangul character names before protecting them from style corruption, rewrites eligible visible text inside ** delimiters while absolutely exempting every paired-tag interior, mixes sparse internet-grandpa/profanity/ending/punctuation mutations without mechanical repetition, respects the tagged-content toggle, and keeps visibility actions horizontal.');
+console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+bold-Markdown modes, detects and repairs strong unchanged Latin character-name leftovers only while Galbwae is active, forces fixed-name-first natural Hangul names before protecting them from style corruption, rewrites eligible visible text inside ** delimiters while absolutely exempting every paired-tag interior, mixes sparse internet-grandpa/profanity/ending/punctuation mutations without mechanical repetition, respects the tagged-content toggle, and keeps visibility actions horizontal.');

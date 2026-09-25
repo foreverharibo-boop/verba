@@ -347,6 +347,53 @@ function unchangedLatinPhrase(source, translation) {
     return '';
 }
 
+const LATIN_NAME_FALSE_POSITIVES = new Set([
+    'a', 'an', 'the', 'i', 'he', 'she', 'it', 'we', 'you', 'they',
+    'his', 'her', 'its', 'our', 'your', 'their', 'this', 'that', 'these', 'those',
+    'and', 'but', 'or', 'if', 'as', 'at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'to', 'with',
+    'after', 'before', 'inside', 'outside', 'then', 'when', 'while', 'where', 'somewhere',
+    'something', 'nothing', 'no', 'not', 'yes', 'maybe', 'now', 'here', 'there',
+    'oh', 'hey', 'hi', 'hello', 'okay', 'ok', 'fuck', 'damn', 'god',
+    'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+    'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+    'september', 'october', 'november', 'december',
+]);
+
+function galbwaeTranslationActive(settings = {}) {
+    return ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+        || settings.chuseokGalbwaeEnabled === true;
+}
+
+function countExactLatinToken(value, token) {
+    const matches = String(value || '').match(new RegExp(`(?<![A-Za-z])${escapeRegExp(token)}(?![A-Za-z])`, 'gu'));
+    return matches?.length || 0;
+}
+
+/**
+ * Detects short Latin-script character names that the model copied into an
+ * otherwise Korean Galbwae translation.  General foreign-text detection
+ * intentionally ignores short proper-looking tokens, so use only strong
+ * name-shaped contexts: Korean particles, vocative punctuation, or repetition.
+ */
+export function unchangedLatinCharacterNames(source, translation, settings = {}) {
+    if (!galbwaeTranslationActive(settings)) return [];
+    const sourceText = validationText(source);
+    const targetText = validationText(translation);
+    const candidates = [...sourceText.matchAll(/\b[A-Z][A-Za-z'’\-]{1,79}\b/g)]
+        .map(match => match[0])
+        .filter(token => !LATIN_NAME_FALSE_POSITIVES.has(token.toLocaleLowerCase()))
+        .filter(token => !/^[A-Z]{2,}$/u.test(token));
+    const unique = [...new Set(candidates)];
+    return unique.filter(token => {
+        if (!new RegExp(`(?<![A-Za-z])${escapeRegExp(token)}(?![A-Za-z])`, 'u').test(targetText)) return false;
+        const escaped = escapeRegExp(token);
+        const koreanParticle = new RegExp(`${escaped}(?=(?:은|는|이|가|을|를|의|에|에게|한테|께서|도|만|와|과|로|으로|랑|이랑|부터|까지))`, 'u').test(targetText);
+        const vocative = new RegExp(`(?:["“”'‘’]\s*)?${escaped}\s*[!?,:;](?:["“”'‘’]|\s|$)`, 'u').test(targetText);
+        const repeated = countExactLatinToken(sourceText, token) >= 2 || countExactLatinToken(targetText, token) >= 2;
+        return koreanParticle || vocative || repeated;
+    });
+}
+
 function restoreBilingualDetectionTokens(value, nameTokens = [], protectedTokens = [], nameMode = 'source') {
     let restored = String(value || '');
     for (const entry of nameTokens || []) {
@@ -658,6 +705,15 @@ export function findUntranslatedSegments(segments, translations, settings = {}, 
             || allowsIntentionalForeignText(segment, settings, speakerScopes)
             || looksLikeBilingualDialogue(segment, translation)
         ) continue;
+
+        const leftoverCharacterNames = unchangedLatinCharacterNames(segment.text, translation, settings);
+        if (leftoverCharacterNames.length) {
+            invalid.push({
+                ...segment,
+                untranslatedReason: `UNTRANSLATED_CHARACTER_NAME: ${leftoverCharacterNames.join(', ')} — verify person/fictional-character context, then render those names in natural Hangul; fixed name mappings win`,
+            });
+            continue;
+        }
 
         const sourceStats = analyzeLanguage(validationText(segment.text));
         const targetStats = analyzeLanguage(validationText(translation));

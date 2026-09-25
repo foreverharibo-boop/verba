@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.98';
+const EXTENSION_VERSION = '0.5.99';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -4445,6 +4445,7 @@ async function translateOutputText(source, options = {}) {
     for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
         const invalid = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
         if (!invalid.length) break;
+        if (repairAttempt >= 1 && invalid.every(segment => String(segment.untranslatedReason || '').startsWith('UNTRANSLATED_CHARACTER_NAME:'))) break;
         await repairSegmentsByOutputScope({
             invalid,
             segmented,

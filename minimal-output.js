@@ -1,5 +1,5 @@
 import { outputSplitCount, runOutputBatches } from './output-splitting.js';
-import { assembleTranslation, findProtectedTokenIntegrityProblems, normalizeStructuredMetadataTranslation } from './core.js';
+import { assembleTranslation, findProtectedTokenIntegrityProblems, findUntranslatedSegments, normalizeStructuredMetadataTranslation } from './core.js';
 
 export function minimalOutputEnabled(settings = {}) {
     return settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
@@ -46,24 +46,38 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     };
     const oneTime = String(options.oneTimeInstruction || '');
     const translations = await runOutputBatches(segmented, outputSplitCount(settings), options, async (segments, batchOptions) => {
-        const request = (targets, repair = false) => {
+        const request = (targets, repair = '') => {
             batchOptions.signal.throwIfAborted();
             let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime);
-            if (repair) prompt += '\nPrevious result damaged protected tokens. Retranslate these targets and preserve each original token exactly once.';
+            if (repair === 'tokens') prompt += '\nPrevious result damaged protected tokens. Retranslate these targets and preserve each original token exactly once.';
+            if (repair === 'names') prompt += '\nPrevious result left one or more source-language character names in Latin script. Retranslate these targets. Every clear human or fictional character name must use natural Hangul (fixed mapping first); never keep a character name in Latin script merely because it is a proper name. Keep genuine brands, acronyms, products, codes, URLs and handles unchanged.';
             return requestSegments(prompt, targets, {
                 ...batchOptions,
-                stage: repair ? 'protected-token-repair' : options.stage || 'output-translation',
+                stage: repair === 'tokens'
+                    ? 'protected-token-repair'
+                    : repair === 'names'
+                        ? 'untranslated-name-repair'
+                        : options.stage || 'output-translation',
             });
         };
         const translated = await request(segments);
         for (let attempt = 0; attempt < 5; attempt++) {
             const invalid = findProtectedTokenIntegrityProblems(segments, translated);
             if (!invalid.length) break;
-            const repaired = await request(invalid, true);
+            const repaired = await request(invalid, 'tokens');
             for (const segment of invalid) translated.set(segment.id, repaired.get(segment.id));
         }
         if (findProtectedTokenIntegrityProblems(segments, translated).length) {
             throw new Error('보호 요소 자동 복구에 실패했습니다. 다시 번역해 주세요.');
+        }
+        const untranslatedNames = findUntranslatedSegments(segments, translated, config)
+            .filter(segment => String(segment.untranslatedReason || '').startsWith('UNTRANSLATED_CHARACTER_NAME:'));
+        if (untranslatedNames.length) {
+            const repaired = await request(untranslatedNames, 'names');
+            for (const segment of untranslatedNames) {
+                const replacement = String(repaired.get(segment.id) || '');
+                if (replacement.trim()) translated.set(segment.id, replacement);
+            }
         }
         return translated;
     });

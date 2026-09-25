@@ -1,5 +1,5 @@
 {
-  "version": "0.5.93",
+  "version": "0.5.94",
   "checks": [
     {
       "check": "syntax",
@@ -9,7 +9,7 @@
     {
       "check": "chuseok-galbwae.mjs",
       "status": "PASS",
-      "output": "The OFF-by-default Chuseok Galbwae style offers mutually exclusive all-text and dialogue-plus-Inner_Info scopes, survives Mad Korean mode, and preserves Info_panel, proper names, numbers and protected structure."
+      "output": "The OFF-by-default Chuseok Galbwae style offers mutually exclusive all-text and dialogue-plus-Inner_Info scopes, suppresses every other optional style prompt while active, enforces the old-man meme rewrite pattern, and preserves Info_panel, proper names, numbers and protected structure."
     },
     {
       "check": "tagged-content-toggle.mjs",
@@ -19,7 +19,7 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, 25 visibility controls, compact inner UI and v0.5.93 metadata pass."
+      "output": "Complete settings markup, unique IDs, 25 visibility controls, horizontal visibility actions, compact inner UI and v0.5.94 metadata pass."
     },
     {
       "check": "original-baseline-regression",
@@ -45,6 +45,6 @@
     "tests/tagged-content-toggle.mjs",
     "tests/chuseok-galbwae.mjs"
   ],
-  "scope": "Offer two mutually exclusive Chuseok Galbwae scopes: all narration/dialogue/Inner_Info or dialogue/Inner_Info only, while preserving structured metadata and prior v0.5.91 changes.",
+  "scope": "Make Chuseok Galbwae an exclusive old-man meme rewrite mode with the canonical 나 알아? → 나를 아늕랴!! pattern, retain two scopes, and keep visibility action buttons horizontal.",
   "live_mobile_test": false
 }

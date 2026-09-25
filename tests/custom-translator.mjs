@@ -93,6 +93,16 @@ assert.equal(
 );
 settings.customTranslatorEnabled = false;
 assert.equal(api.applyCustomTranslatorPrompt('UNCHANGED', { stage: 'output-translation' }), 'UNCHANGED');
+settings.customTranslatorEnabled = true;
+settings.chuseokGalbwaeScope = 'all';
+settings.customTranslatorTemplates.output = 'CUSTOM TRANSLATOR MUST NOT APPEAR';
+const exclusiveGalbwae = api.applyCustomTranslatorPrompt('OLD DEFAULT MUST NOT APPEAR', {
+    stage: 'output-translation',
+    customTargetSegments: targets,
+});
+assert.match(exclusiveGalbwae, /EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE/);
+assert.match(exclusiveGalbwae, /나 알아\? → 나를 아늕랴!!/);
+assert.doesNotMatch(exclusiveGalbwae, /CUSTOM TRANSLATOR MUST NOT APPEAR|OLD DEFAULT MUST NOT APPEAR/);
 
 const expectedOrder = definitions.map(key => `{ key: '${key}'`);
 let previous = -1;

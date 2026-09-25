@@ -40,9 +40,25 @@ for (const scope of ['all', 'dialogueInner']) {
         assert.match(prompt, /proper names and particles attached directly to those names normally spelled/);
         assert.match(prompt, /"tag_context":\["inner_info","small"\]/);
         assert.match(prompt, /"tag_context":\["info_panel"\]/);
-        assert.match(prompt, /짅짜 밋치괫네/);
+        assert.match(prompt, /"나 알아\?" → "나를 아늕랴!!"/);
     }
 }
+
+const exclusivePrompt = buildOutputPrompt(segmented, {
+    ...baseSettings,
+    chuseokGalbwaeScope: 'all',
+    developerMadKoreanOutputEnabled: true,
+    developerHongjinFlavorEnabled: true,
+    developerMode: true,
+    baseTranslationCustom: { enabled: true, prompt: 'CUSTOM BASE MUST NOT APPEAR' },
+    globalPrompt: 'GLOBAL MUST NOT APPEAR',
+    allDialoguePrompt: 'ALL DIALOGUE MUST NOT APPEAR',
+    dialoguePrompt: 'TARGET DIALOGUE MUST NOT APPEAR',
+    otherDialoguePrompt: 'OTHER DIALOGUE MUST NOT APPEAR',
+}, 'ONE TIME MUST NOT APPEAR', { characterName: '홍진', userName: '담은' });
+assert.match(exclusivePrompt, /EXCLUSIVE GALBWAE MODE/);
+assert.doesNotMatch(exclusivePrompt, /MAD KOREAN|KIM HONG-JIN VOICE/);
+assert.doesNotMatch(exclusivePrompt, /CUSTOM BASE MUST NOT APPEAR|GLOBAL MUST NOT APPEAR|ALL DIALOGUE MUST NOT APPEAR|TARGET DIALOGUE MUST NOT APPEAR|OTHER DIALOGUE MUST NOT APPEAR|ONE TIME MUST NOT APPEAR/);
 
 const translation = '<Inner_Info><small>🧠 홍진: 이건 미쳤어.</small></Inner_Info>';
 const start = translation.indexOf('이건');
@@ -95,4 +111,7 @@ assert.match(index, /target\.id === 'verba-chuseok-galbwae-all'/);
 assert.match(index, /target\.id === 'verba-chuseok-galbwae-dialogue-inner'/);
 assert.match(index, /chuseokGalbwaeScope:\s*normalizedChuseokGalbwaeScope/);
 
-console.log('PASS: Chuseok Galbwae defaults OFF, persists one mutually exclusive scope, supports all-text or dialogue+Inner_Info modes, and preserves Info_panel, names, numbers and protected structure.');
+const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+assert.match(style, /\.verba-visibility-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
+
+console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+Inner_Info modes, uses the old-man meme rewrite pattern, preserves protected structure, and keeps visibility actions horizontal.');

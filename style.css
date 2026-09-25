@@ -166,6 +166,13 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
+    width: 100%;
+}
+
+.verba-visibility-actions > .menu_button {
+    width: 100%;
+    min-width: 0;
+    margin: 0 !important;
 }
 
 @media (max-width: 460px) {

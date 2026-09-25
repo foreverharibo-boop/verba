@@ -19,6 +19,10 @@ assert.ok(!p.includes('KEEP_CODE'));
 for(const forbidden of ['GLOBAL_SENTINEL','VOICE_SENTINEL','MAD KOREAN','HONGJIN FLAVOR','BANNED','FINE TUNING','SPEAKER ATTRIBUTION','TAGGED-CONTENT']) assert.ok(!p.includes(forbidden),forbidden);
 assert.ok(buildMinimalOutputPrompt([], {...settings,developerMinimalPrompt:'  '}).startsWith('자연스럽게 한국어로 번역하라.'));
 assert.ok(buildMinimalOutputPrompt([], {...settings,developerMinimalPrompt:'</textarea> TEST'}).startsWith('</textarea> TEST'));
+const galbwaePrompt=buildMinimalOutputPrompt(segmented.segments,{...settings,chuseokGalbwaeScope:'all'},segmented.nameTokens,'ONE_TIME_MUST_NOT_APPEAR');
+assert.match(galbwaePrompt,/EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE/);
+assert.match(galbwaePrompt,/나 알아\?→나를 아늕랴!!/);
+assert.doesNotMatch(galbwaePrompt,/ONE_TIME_MUST_NOT_APPEAR|자연스럽게 한국어로 번역하라/);
 let calls=[];
 function translated(segment){
  const tokens=segment.text.match(/@@VERBA[A-Z0-9_]*@@/g)||[];

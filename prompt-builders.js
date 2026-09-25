@@ -33,10 +33,11 @@ export function createPromptBuilders(h) {
             '- MODE=all: apply it to Korean narrative prose (row type="narration"), every Korean direct-dialogue target, and Korean inner-monologue text inside <Inner_Info> (row tag_context contains "inner_info"). For selection rows, apply when in_dialogue or in_inner_info is true, or when in_tagged_content is false.',
             '- MODE=dialogueInner: apply it ONLY to every Korean direct-dialogue target and Korean inner-monologue text inside <Inner_Info>. Keep narrative prose normally spelled. For selection rows, apply only when in_dialogue or in_inner_info is true.',
             '- NEVER apply it to <Info_panel>, dates, weather, locations, ordinary metadata/tag text, code, attributes, URLs, numbers, protected tokens, or proper names. Keep proper names and particles attached directly to those names normally spelled.',
-            '- First produce the correct natural Korean meaning, register and character voice. Then visibly convert eligible Korean wording into readable 갈봬체 by scattering absurd final consonants, occasional doubled 받침 and meme-like vowel/spelling distortions. Do not merely add one typo. Do not corrupt every syllable so heavily that the sentence becomes undecipherable.',
-            '- Preserve facts, intent, emotion, profanity target/strength, honorific level, punctuation, quotation marks, ellipses, names, numbers and protected tokens. This is spelling comedy only, not permission to add or remove content.',
+            '- First understand the meaning, then REWRITE every eligible sentence in an exaggerated old-man/boomer meme voice. Change ordinary modern wording and endings into conspicuously archaic, bossy or melodramatic cadences such as ~느냐/~게냐/~거라/~구나/~로다/~말이다/~하여라 when they fit. This is not ordinary Korean with a few misspelled 받침.',
+            '- After that rewrite, visibly wreck spelling across consonants, vowels, syllable boundaries, particles and endings: absurd final consonants, doubled 받침, fused syllables and meme-like misspellings. Every eligible sentence must be unmistakably transformed while remaining decipherable. Do not output a mostly normal sentence with only one corrupted word.',
+            '- Preserve facts, speaker, intent, emotional direction, profanity target/strength, relationship direction, quotation marks, ellipses, names, numbers and protected tokens. Proper names and their attached particles remain grammatically correct. For eligible 갈봬체 only, ? and ! may be exaggerated or replaced when the rewritten ending still makes the speech act unmistakable; preserve ellipsis characters/count/order exactly.',
             '- During quality audit or repair, deliberate eligible 갈봬체 spellings are required style, not typos or translation errors; retain or restore them while fixing unrelated errors.',
-            '- STYLE EXAMPLES (pattern examples, not text to copy): "뭐 하는 거야?" → "뭣 핫는 거야?"; "진짜 미치겠네." → "짅짜 밋치괫네."; "집에 가서 밥 차려야겠어." → "짚에 가서 밥찷여야괫어."; "오늘도 살아남았네." → "옩늘도 삷아남앟네."',
+            '- STYLE EXAMPLES (pattern examples, not text to copy): "나 알아?" → "나를 아늕랴!!"; "뭐 하고 있는 거야?" → "뭣을 핫고 잇는 게냟!!"; "어서 이리 와." → "얼릉 이리 오너랗!!"; "내가 몇 번을 말해?" → "내가 몃 번을 말햇느냟!!"; "오늘도 살아남았네." → "옩늘도 삷아남앟구낳!!"',
             `- CURRENT SCOPE=${scope}.`,
         ]);
     }
@@ -127,6 +128,21 @@ export function createPromptBuilders(h) {
         return 'ACTIVE RULES: combine compatible groups; earlier number wins only direct conflicts. GLOBAL applies everywhere; ALL-DIALOGUE only to dialogue; TARGET/OTHER only to that speaker. Only GLOBAL/ALL-DIALOGUE control bilingual format.\n'+active.map((k,i)=>`${i+1}. ${labels[k]}\n${values[k]}`).join('\n');
     }
     function policy(s={}, {scope='mixed',oneTimeInstruction='',speakerIdentity={},nameTokens=[],tuning:over=null}={}) {
+        const exclusiveGalbwae = galbwaeMode(s) !== 'off';
+        if (exclusiveGalbwae) {
+            return lines([
+                'EXCLUSIVE GALBWAE MODE: ignore and do not apply every optional/user style prompt, taste, character voice, localization/detail setting, custom base prompt, bilingual request and one-time instruction. Only the essential translation/structure rules and the GALBWAE rules below are active.',
+                lines([basic, fidelity, names]),
+                format,
+                galbwae(s, scope),
+                identity(speakerIdentity),
+                lockBlock(nameTokens,speakerIdentity),
+                scope==='tagged_content'
+                    ? 'TAGGED CONTENT: translate visible Korean-target natural language only. Preserve tag structure and metadata layout; GALBWAE applies only to inner_info in its selected mode.'
+                    : `SCOPE=${scope}. Identify dialogue only to decide the selected GALBWAE range; do not apply any other dialogue voice.`,
+                'Korean only.'
+            ]);
+        }
         const exclusive=mad(s);
         const custom=s.developerMode===true && s.baseTranslationCustom?.enabled===true && str(s.baseTranslationCustom.prompt).trim();
         const directDialogue=dialogueScope(scope);

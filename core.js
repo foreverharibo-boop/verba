@@ -82,6 +82,7 @@ function taggedInnerRangesInProtectedText(protectedText, tokens = []) {
             stack.push({
                 tag: descriptor.tag,
                 contentStart: matcher.lastIndex,
+                ancestors: stack.map(entry => entry.tag),
             });
             continue;
         }
@@ -100,7 +101,11 @@ function taggedInnerRangesInProtectedText(protectedText, tokens = []) {
         const opening = stack[matchIndex];
         stack.splice(matchIndex);
         if (match.index >= opening.contentStart) {
-            ranges.push({ start: opening.contentStart, end: match.index });
+            ranges.push({
+                start: opening.contentStart,
+                end: match.index,
+                tags: [...new Set([...opening.ancestors, opening.tag])],
+            });
         }
     }
 
@@ -114,8 +119,9 @@ function taggedInnerRangesInProtectedText(protectedText, tokens = []) {
         const previous = merged.at(-1);
         if (previous && range.start <= previous.end) {
             previous.end = Math.max(previous.end, range.end);
+            previous.tags = [...new Set([...(previous.tags || []), ...(range.tags || [])])];
         } else {
-            merged.push({ ...range });
+            merged.push({ ...range, tags: [...(range.tags || [])] });
         }
     }
     return merged;
@@ -132,7 +138,11 @@ function splitByTaggedRanges(value, ranges = []) {
         const start = Math.max(cursor, Math.min(text.length, Number(range.start) || 0));
         const end = Math.max(start, Math.min(text.length, Number(range.end) || start));
         if (start > cursor) chunks.push({ text: text.slice(cursor, start), insideTaggedContent: false });
-        if (end > start) chunks.push({ text: text.slice(start, end), insideTaggedContent: true });
+        if (end > start) chunks.push({
+            text: text.slice(start, end),
+            insideTaggedContent: true,
+            tagContext: [...(range.tags || [])],
+        });
         cursor = end;
     }
     if (cursor < text.length) chunks.push({ text: text.slice(cursor), insideTaggedContent: false });
@@ -1238,7 +1248,9 @@ function splitDialogueAndNarration(value) {
     return pieces.filter(piece => piece.text);
 }
 
-export function segmentSource(value, nameLocks = []) {
+export function segmentSource(value, nameLocks = [], {
+    translateTaggedContent = true,
+} = {}) {
     const source = String(value || '');
     const { protectedText, tokens, nameTokens } = protectSource(source, nameLocks);
     const taggedRanges = taggedInnerRangesInProtectedText(protectedText, tokens);
@@ -1246,7 +1258,7 @@ export function segmentSource(value, nameLocks = []) {
     const parts = [];
     let translatableIndex = 0;
 
-    const appendPiece = (piece, insideTaggedContent = false) => {
+    const appendPiece = (piece, insideTaggedContent = false, tagContext = []) => {
         const leading = piece.text.match(/^\s+/u)?.[0] || '';
         const afterLeading = piece.text.slice(leading.length);
         const trailing = afterLeading.match(/\s+$/u)?.[0] || '';
@@ -1277,6 +1289,9 @@ export function segmentSource(value, nameLocks = []) {
                 id: `seg_${String(translatableIndex).padStart(4, '0')}`,
                 type: insideTaggedContent ? 'tagged_content' : piece.type,
                 text: content,
+                ...(insideTaggedContent && tagContext.length
+                    ? { tagContext: [...new Set(tagContext.map(tag => String(tag).toLocaleLowerCase()))] }
+                    : {}),
             });
             translatableIndex += 1;
         }
@@ -1293,9 +1308,13 @@ export function segmentSource(value, nameLocks = []) {
             }
 
             if (region.insideTaggedContent) {
+                if (!translateTaggedContent) {
+                    parts.push({ type: 'passthrough', text: block });
+                    continue;
+                }
                 // Any paired-tag interior is structured visible text. Even if it
                 // contains quotation marks, do not route it through dialogue prompts.
-                appendPiece({ type: 'tagged_content', text: block }, true);
+                appendPiece({ type: 'tagged_content', text: block }, true, region.tagContext);
                 continue;
             }
 

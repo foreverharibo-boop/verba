@@ -1,232 +1,50 @@
 {
-  "version": "0.5.90",
+  "version": "0.5.93",
   "checks": [
     {
-      "check": "bilingual-dialogue-local-format.mjs",
+      "check": "syntax",
       "status": "PASS",
-      "output": "PASS: custom-prompt bilingual detection; English source names remain Latin and only Korean halves receive locked Korean names; no AI repair call."
+      "output": "All extension JavaScript files pass node --check."
     },
     {
-      "check": "syntax/base-editor.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/core.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/diagnostics.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/index.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/minimal-output.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/output-splitting.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/pair-coordinator.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/prompt-builders.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/prompt-editor.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/response-parser.js",
-      "status": "PASS"
-    },
-    {
-      "check": "syntax/timing.js",
-      "status": "PASS"
-    },
-    {
-      "check": "auto-input-setting.mjs",
+      "check": "chuseok-galbwae.mjs",
       "status": "PASS",
-      "output": "PASS: auto-input initial state, ON/OFF, change/save handling and early binding; DOM adapter, not native browser clicks."
+      "output": "The OFF-by-default Chuseok Galbwae style offers mutually exclusive all-text and dialogue-plus-Inner_Info scopes, survives Mad Korean mode, and preserves Info_panel, proper names, numbers and protected structure."
     },
     {
-      "check": "compressed-prompts.mjs",
+      "check": "tagged-content-toggle.mjs",
       "status": "PASS",
-      "output": "PASS: shortened prompt contracts (1140 route checks, custom text/scopes, no API calls)."
-    },
-    {
-      "check": "custom-translator.mjs",
-      "status": "PASS",
-      "output": "PASS: custom translator fully replaces default prompts with plain English instructions, automatic source data, category-specific locked response contracts, legacy placeholder migration, expand editor binding, and auto-save path."
-    },
-    {
-      "check": "diagnostics.mjs",
-      "status": "PASS",
-      "output": "PASS: diagnostic classification, redaction, bounded raw responses, request ON/OFF, cancellation, last-record UI/copy gates"
-    },
-    {
-      "check": "extreme-compressed-prompts.mjs",
-      "status": "PASS",
-      "output": "PASS: 116 assertions; API calls: 0; live browser testing: not performed."
-    },
-    {
-      "check": "flavor-preset-restore.mjs",
-      "status": "PASS",
-      "output": "PASS: preset JSON roundtrip, ON/OFF, all 9 choices, visible controls and disabled states, re-save, legacy and prompt-only, developer locked/unlocked.\nPASS: minimal experiment flag/text persist in translation presets without unlocking developer mode.\nPASS: independent split count in translation presets, prompt-only preservation, legacy defaults, invalid values, no developer auto-unlock.\nPASS: removed register monitor does not return through legacy presets."
-    },
-    {
-      "check": "general-flavors.mjs",
-      "status": "PASS",
-      "output": "PASS: Mad Korean and Hongjin tastes are general-mode controls after English taste, independent of developer mode; values and speaker scope remain intact."
-    },
-    {
-      "check": "mad-recomposition.mjs",
-      "status": "PASS",
-      "output": "PASS: User-approved MAD recomposition/punctuation/time/units/register/abuse guards across modes and scopes."
-    },
-    {
-      "check": "minimal-output.mjs",
-      "status": "PASS",
-      "output": "PASS: minimal-only prompt and actual entry path, lock/enable gates, optional call exclusion, name/code/tag preservation, source mapping, local cleanup, repair bounds and cancellation.\nPASS: developer-only escaped UI, toggle restores saved settings, developer shutdown disables experiment but retains text/flavors."
-    },
-    {
-      "check": "name-lock-priority.mjs",
-      "status": "PASS",
-      "output": "Name-lock routing: PASS (841 checks plus identity/restoration assertions; no live AI calls)"
-    },
-    {
-      "check": "name-lock-collision.mjs",
-      "status": "PASS",
-      "output": "PASS: Nyen/Nyon stay source-scoped while Korean raw chat/swipe global updates remain enabled."
-    },
-    {
-      "check": "output-action.mjs",
-      "status": "PASS",
-      "output": "PASS: /verba routing/cancellation/retry, duplicate guards, errors, popup creation/options/dismissal/placement (DOM adapter). API calls: 0; live SillyTavern browser: not tested."
-    },
-    {
-      "check": "output-splitting.mjs",
-      "status": "PASS",
-      "output": "PASS: independent 1/2/3 split gate, full coverage, unified speaker-scoped prompts, whole-output local attribution/planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI."
-    },
-    {
-      "check": "local-speaker-attribution.mjs",
-      "status": "PASS",
-      "output": "PASS: local protected-name, speech-tag and continuity attribution marks target-character lines without an API call and keeps USER/NPC dialogue isolated."
-    },
-    {
-      "check": "output-timing.mjs",
-      "status": "PASS",
-      "output": "PASS: output timing accounting, parallel overlap, OFF/reset, newest-job isolation, real request/parse/transport retry/fallback paths, queued/active cancellation; simulated provider only."
-    },
-    {
-      "check": "pair-coordination.mjs",
-      "status": "PASS",
-      "output": "PASS: verba shares one display owner, defaults to Verba, switches manually, rejects peer display adoption, and gates automatic input/output work."
-    },
-    {
-      "check": "profile-action.mjs",
-      "status": "PASS",
-      "output": "PASS: profile command registration, A/B/C popup, current marker, disabled/stale slots, persistence, dismissal, hidden-anchor placement and existing icon cycle. DOM adapter; no API calls."
-    },
-    {
-      "check": "prompt-slots-collapse.mjs",
-      "status": "PASS",
-      "output": "PASS: four prompt slots collapse together, preserve their controls, default open, and persist UI state."
-    },
-    {
-      "check": "prompt-editor.mjs",
-      "status": "PASS",
-      "output": "PASS: 88 DOM/event assertions including 9 custom-translator expand/close auto-saves; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested."
-    },
-    {
-      "check": "prompt-settings-matrix.mjs",
-      "status": "PASS",
-      "output": "PASS: 192 option/mode sensitivity checks; settings, identity, source and custom notes preserved.\nPASS: implicit defaults and explicit Hongjin/pair-register overrides in all three modes.\nPASS: shared accuracy policy across built-in styles and compression modes."
-    },
-    {
-      "check": "protected-recovery.mjs",
-      "status": "PASS",
-      "output": "PASS protected recovery: exact missing/excess counts, moved marks, mappings, redaction/limits, successful log/copy data, no-op, OFF/reset, newer-log guard, 5-attempt failure, cancellation, diagnostic isolation (mock requests)."
-    },
-    {
-      "check": "response-recovery.mjs",
-      "status": "PASS",
-      "output": "PASS: safe syntax recovery, exact text preservation, truncated-row salvage, malformed/ambiguous rejection, missing-only retry, intermediate recovered logs and debug OFF/reset (mock AI).\nPASS: unexpected prose blank lines, protected layout, source-map offsets and one-call cleanup with debug ON/OFF."
-    },
-    {
-      "check": "selection-range-only.mjs",
-      "status": "PASS",
-      "output": "PASS: selection-only retranslation sends no surrounding Korean or full-source fallback."
+      "output": "Paired-tag natural-language translation defaults ON; OFF preserves tag structure and inner text while translating outside text. Nested and tag-only cases pass."
     },
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "PASS: complete settings markup, default outer drawer sizing, hidden visible version, compact inner UI, exact adjacent placement, unique IDs and version; developer ON/OFF."
+      "output": "Complete settings markup, unique IDs, 25 visibility controls, compact inner UI and v0.5.93 metadata pass."
     },
     {
-      "check": "source-ellipsis.mjs",
+      "check": "original-baseline-regression",
       "status": "PASS",
-      "output": "PASS: 1260 ellipsis assertions plus parser/assembly/candidate/selection/protected-content integration; local mean 0.433 ms for 24800 characters. No API calls."
+      "output": "34 tests pass. The same 14 stale long-Verba/prompt tests already fail unchanged in the supplied baseline; no new regression was introduced."
     },
     {
-      "check": "source-layout.mjs",
+      "check": "archive",
       "status": "PASS",
-      "output": "PASS: 420 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.350 ms/local pass (container, not phone)."
-    },
-    {
-      "check": "source-map-selection.mjs",
-      "status": "PASS",
-      "output": "PASS: selection retranslation preserves source mapping across single, crossed, and repeated ranges."
-    },
-    {
-      "check": "subject-pronoun-omission.mjs",
-      "status": "PASS",
-      "output": "PASS: general and Mad Korean prompts no longer encourage subject/pronoun omission; explicit 한캐 option remains available."
-    },
-    {
-      "check": "voice-intensity-flexibility.mjs",
-      "status": "PASS",
-      "output": "PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (43 checks)."
-    },
-    {
-      "check": "bilingual-dialogue-local-format.mjs",
-      "status": "PASS",
-      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally."
-    },
-    {
-      "check": "prompt-token-audit",
-      "status": "PASS",
-      "output": "Generated live prompts from v0.5.89 builders and measured fixed overhead for base/flavor/input/selection/repair/audit categories; documented approximate cl100k counts and split duplication."
-    },
-    {
-      "check": "bilingual-dedupe-and-token-variants.mjs",
-      "status": "PASS",
-      "output": "PASS: bilingual halves emit one English + one Korean copy; loose NAME token variants are canonicalized before restore; name-only dialogue still gets bilingual output."
-    },
-    {
-      "check": "name-lock-omission.mjs",
-      "status": "PASS",
-      "output": "PASS: omitted repeated NAME tokens stay omitted without AI repair or forced reinsertion; excess/moved NAME tokens and structural tokens remain strict."
+      "output": "Archive integrity, manifest version and root layout verified."
     }
   ],
   "changed_files": [
-    "prompt-builders.js",
+    "core.js",
     "index.js",
+    "minimal-output.js",
+    "prompt-builders.js",
+    "style.css",
     "manifest.json",
     "README.md",
-    "PROMPT-TOKENS.md",
     "VERIFICATION.json",
-    "tests/general-flavors.mjs",
-    "tests/output-splitting.mjs",
-    "tests/settings-layout.mjs"
+    "tests/settings-layout.mjs",
+    "tests/tagged-content-toggle.mjs",
+    "tests/chuseok-galbwae.mjs"
   ],
-  "scope": "Move Mad Korean and Hongjin tastes into general settings immediately after English taste, preserve stored settings, remove developer-mode activation gates, and document prompt-token overhead.",
+  "scope": "Offer two mutually exclusive Chuseok Galbwae scopes: all narration/dialogue/Inner_Info or dialogue/Inner_Info only, while preserving structured metadata and prior v0.5.91 changes.",
   "live_mobile_test": false
 }

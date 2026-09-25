@@ -10,7 +10,7 @@ const between=(a,b)=>{
 const defs=between('const RELATION_TEMPERATURE_OPTIONS','const baseContext =');
 const render=Function('dev','escapeHtml',defs+`
     const settings=structuredClone(DEFAULT_SETTINGS);settings.developerMode=dev;
-    const EXTENSION_VERSION='0.5.90',lastQualityAuditSummary='',lastDebugDiagnostic=null;
+    const EXTENSION_VERSION='0.5.93',lastQualityAuditSummary='',lastDebugDiagnostic=null;
     const outputTiming={latest:()=>null},outputTimingText=()=>'',normalizedPromptPresets=()=>[],normalizedPromptPresetBackups=()=>[],promptPresetSelectMarkup=()=>'',baseTranslationEditorMarkup=()=>'';
 `+between('function tuningChoiceMarkup(', 'function normalizeTranslationRuleOrder(')
  +between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')
@@ -21,6 +21,11 @@ const escapeHtml=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;')
 const panels=[false,true].map(dev=>render(dev,escapeHtml));
 for(const html of panels){
     assert.match(html,/<div><b>베르바<\/b><\/div>/);
+    assert.match(html,/id="verba-settings-visibility"[\s\S]*?표시할 기능 선택/);
+    assert.match(html,/id="verba-translate-tagged-content" checked/);
+    assert.match(html,/id="verba-chuseok-galbwae-all"/);
+    assert.match(html,/id="verba-chuseok-galbwae-dialogue-inner"/);
+    assert.doesNotMatch(html,/id="verba-chuseok-galbwae-(?:all|dialogue-inner)" checked/);
     assert.doesNotMatch(html,/<small>v\$?\{?EXTENSION_VERSION|<small>v0\.5\./);
     assert.match(html,/id="verba-prompt-conflict-settings"[\s\S]*?<\/details>\s*<details id="verba-developer-output-split-lab"/);
     assert.match(html,/id="verba-expression-detail"[\s\S]*?<\/details>\s*<details id="verba-developer-relationship-lab"/);
@@ -31,7 +36,7 @@ for(const html of panels){
 }
 const manifest=JSON.parse(fs.readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
 assert.equal(manifest.name,'verba');assert.equal(manifest.display_name,'베르바');
-assert.equal(manifest.version,'0.5.90');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
+assert.equal(manifest.version,'0.5.93');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
 assert.match(style,/#verba-settings > \.inline-drawer > \.inline-drawer-content\s*\{\s*font-size: \.86em;/);
 assert.doesNotMatch(style,/#verba-settings\s*\{\s*font-size:/);
 assert.doesNotMatch(style,/#verba-settings \.verba-drawer-header\s*\{[^}]*min-height:/s);

@@ -131,6 +131,49 @@
     padding-bottom: 12px;
 }
 
+.verba-settings-section-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.verba-settings [data-verba-ui-hidden="true"],
+.verba-settings [hidden][data-verba-ui-hidden] {
+    display: none !important;
+}
+
+.verba-visibility-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px 8px;
+}
+
+.verba-visibility-choice {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin: 0 !important;
+    font-weight: 500 !important;
+}
+
+.verba-visibility-choice span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.verba-visibility-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+@media (max-width: 460px) {
+    .verba-visibility-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .verba-settings label {
     font-weight: 650;
     margin-top: 3px;

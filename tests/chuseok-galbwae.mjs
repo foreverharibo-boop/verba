@@ -6,12 +6,19 @@ import {
     segmentSource,
 } from '../core.js';
 
-const source = `He waited.\n\n"Run now!"\n\n<Info_panel>[Weather: Sunny]</Info_panel>\n\n<Inner_Info><small>🧠 Hong-jin: This is insane.</small></Inner_Info>`;
+const source = `He waited **right there**.\n\n"**Do you know me?**"\n\n<div class="notice">How do I do this?</div>\n\n<Info_panel>[Weather: Sunny]</Info_panel>\n\n<Inner_Info><small>🧠 Hong-jin: This is insane.</small></Inner_Info>`;
 const segmented = segmentSource(source);
+const ordinaryTag = segmented.segments.find(row => row.text.includes('How do I do this?'));
 const info = segmented.segments.find(row => row.text.includes('Weather'));
 const inner = segmented.segments.find(row => row.text.includes('This is insane'));
+assert.deepEqual(ordinaryTag.tagContext, ['div']);
 assert.deepEqual(info.tagContext, ['info_panel']);
 assert.deepEqual(inner.tagContext, ['inner_info', 'small']);
+assert.ok(segmented.segments.some(row => row.text.includes('**Do you know me?**')));
+assert.equal(segmented.tokens.some(row => row.value.includes('**')), false);
+const tagsDisabled = segmentSource(source, [], { translateTaggedContent: false });
+assert.equal(tagsDisabled.segments.some(row => row.text.includes('How do I do this?')), false);
+assert.equal(tagsDisabled.segments.some(row => row.text.includes('This is insane')), false);
 
 const baseSettings = {
     translationRuleOrder: ['fineTuning'],
@@ -40,9 +47,23 @@ for (const scope of ['all', 'dialogueInner']) {
         assert.match(prompt, /proper names and particles attached directly to those names normally spelled/);
         assert.match(prompt, /"tag_context":\["inner_info","small"\]/);
         assert.match(prompt, /"tag_context":\["info_panel"\]/);
+        assert.match(prompt, /"tag_context":\["div"\]/);
         assert.match(prompt, /"나 알아\?" → "나를 아늕랴!!"/);
         assert.match(prompt, /chaotic 죠캎-style Korean internet-post language/);
-        assert.match(prompt, /must NOT sound like a historical drama, an elderly speaker/);
+        assert.match(prompt, /LIGHT, intermittent internet-grandpa flavor/);
+        assert.match(prompt, /Do not turn the whole response into historical-drama speech/);
+        assert.match(prompt, /씨핤, 씨핧, 샤갈, 쌱앐, 쌰갈, 시핣/);
+        assert.match(prompt, /알겠어요→알갰어료/);
+        assert.match(prompt, /네 or 응 to 례/);
+        assert.match(prompt, /roughly one out of three/);
+        assert.match(prompt, /Sprinkle ㄷㄷ, ;; and ㅠㅠ/);
+        assert.match(prompt, /MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION/);
+        assert.match(prompt, /\*\*Do you know me\?\*\* → \*\*나를 아늕랴!!\*\*/);
+        assert.match(prompt, /PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION/);
+        assert.match(prompt, /Do NOT apply GALBWAE to visible text between ANY <tag>\.\.\.<\/tag> pair/);
+        assert.match(prompt, /including <Inner_Info>/);
+        assert.match(prompt, /There are no tag-name exceptions/);
+        assert.doesNotMatch(prompt, /<div>Do you know me\?<\/div> → <div>나를 아늕랴!!<\/div>/);
     }
 }
 
@@ -116,4 +137,4 @@ assert.match(index, /chuseokGalbwaeScope:\s*normalizedChuseokGalbwaeScope/);
 const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 assert.match(style, /\.verba-visibility-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
 
-console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+Inner_Info modes, uses the Jyokap-style chaotic rewrite pattern without old-man speech, preserves protected structure, and keeps visibility actions horizontal.');
+console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+bold-Markdown modes, rewrites eligible visible text inside ** delimiters while absolutely exempting every paired-tag interior, mixes sparse internet-grandpa/profanity/ending/punctuation mutations without mechanical repetition, respects the tagged-content toggle, and keeps visibility actions horizontal.');

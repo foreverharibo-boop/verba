@@ -102,6 +102,13 @@ const exclusiveGalbwae = api.applyCustomTranslatorPrompt('OLD DEFAULT MUST NOT A
 });
 assert.match(exclusiveGalbwae, /EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE/);
 assert.match(exclusiveGalbwae, /나 알아\? → 나를 아늕랴!!/);
+assert.match(exclusiveGalbwae, /씨핤, 씨핧, 샤갈, 쌱앐, 쌰갈, 시핣/);
+assert.match(exclusiveGalbwae, /요→료/);
+assert.match(exclusiveGalbwae, /네\/응→례/);
+assert.match(exclusiveGalbwae, /MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION/);
+assert.match(exclusiveGalbwae, /PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION/);
+assert.match(exclusiveGalbwae, /including Inner_Info, Info_panel, small, div and custom tags/);
+assert.doesNotMatch(exclusiveGalbwae, /<div>Do you know me\?<\/div> → <div>나를 아늕랴!!<\/div>/);
 assert.doesNotMatch(exclusiveGalbwae, /CUSTOM TRANSLATOR MUST NOT APPEAR|OLD DEFAULT MUST NOT APPEAR/);
 
 const expectedOrder = definitions.map(key => `{ key: '${key}'`);

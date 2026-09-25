@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.95';
+const EXTENSION_VERSION = '0.5.97';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3203,12 +3203,16 @@ function applyCustomTranslatorPrompt(prompt, options = {}) {
     const galbwaeContract = galbwaeScope !== 'off' ? `
 
 [VERBA EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE — REQUIRED]
-- ACTIVE MODE=${galbwaeScope}. In mode=all, apply readable 갈봬체 to Korean narration, direct dialogue and targets whose tag_context contains "inner_info". In mode=dialogueInner, apply it only to direct dialogue and targets whose tag_context contains "inner_info"; keep narration normally spelled.
-- Rewrite every eligible sentence as chaotic 죠캎-style Korean internet-post language: strangely earnest, overexcited, clumsily typed, and sometimes awkwardly polite. Do NOT use old-man, historical-drama or generic ~느냐/~거라/~로다 parody.
-- Visibly wreck spelling and spacing with varied phonetic misspellings, swapped vowels/consonants, wrong-but-readable particles/endings, fused words, odd spaces and community-post punctuation. A nearly normal sentence with one typo is invalid; repeating one ending mechanically is also invalid.
-- Exact pattern example: 나 알아? → 나를 아늕랴!! Other patterns: 어떻게 해야 해요? → 어덕헤 해야대요??; 계속 보고 있었어요. → 개속 보고잇엇내요; 도와주세요. → 도아주새요 ㅠㅠ; 정말 무서웠어요. → 진자 너무무서웟어요;;
+- ACTIVE MODE=${galbwaeScope}. In mode=all, apply readable 갈봬체 to Korean narration, direct dialogue and eligible visible text enclosed by Markdown **...**, but never to paired-tag interiors. In mode=dialogueInner, apply it only to direct dialogue and eligible visible text enclosed by **...**; keep other narration normally spelled and every paired-tag interior exempt.
+- Rewrite every eligible sentence as chaotic 죠캎-style Korean internet-post language: strangely earnest, overexcited, clumsily typed, and sometimes awkwardly polite. Mix in a LIGHT, intermittent internet-grandpa flavor, as if a slightly confused old man is typing online. Do not turn the whole response into historical-drama speech or repeat generic ~느냐/~거라/~로다 endings.
+- Visibly wreck spelling and spacing with varied phonetic misspellings, swapped vowels/consonants, wrong-but-readable particles/endings, fused words, odd spaces and community-post punctuation. Sprinkle ㄷㄷ, ;; and ㅠㅠ where emotion permits, but not on every sentence. A nearly normal sentence with one typo is invalid; repeating one ending mechanically is also invalid.
+- REQUIRED PROFANITY MUTATION: whenever an eligible Korean rendering would naturally use 씨발, never output clean 씨발. Choose and vary among 씨핤, 씨핧, 샤갈, 쌱앐, 쌰갈, 시핣. Preserve its target/function/intensity and do not add it where profanity is not licensed.
+- OCCASIONAL ENDING/REPLY MUTATION: irregularly change some sentence-final 요→료 (알겠어요→알갰어료; 한다네요→한다내료) and occasionally standalone 네/응→례. Use only a minority of eligible opportunities, roughly one out of three with uneven spacing; never every occurrence and never inside paired tags.
+- Exact pattern example: 나 알아? → 나를 아늕랴!! Other patterns: 네, 그렇게 할게요. → 례.. 그러캐할개료; 응, 알겠어. → 례 알갯다내료;;; 씨발, 뭐야? → 쌰갈 머냐고요 ㄷㄷ; 도와주세요. → 도아주새요 ㅠㅠ
 - The absurdity is wording only. Never invent actions, body parts, sexual content, incidents, objects or claims that are absent from the source.
-- Never alter ordinary tagged metadata, Info_panel, dates/weather/locations, proper names or their particles, numbers, protected tokens, code, tags or facts. Preserve ellipses exactly; ? and ! may be exaggerated when the speech act remains clear.
+- MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION: preserve Markdown delimiters, nesting and placement, but eligible visible natural-language text between **...** must receive GALBWAE. This overrides generic Markdown preservation. Keep inline/fenced backtick code unchanged. Example: **Do you know me?** → **나를 아늕랴!!**.
+- PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION: preserve opening/closing tags, attributes and order exactly, and keep translated visible text inside ANY paired tag normally spelled. Do not apply GALBWAE there, including Inner_Info, Info_panel, small, div and custom tags. There are no tag-name exceptions.
+- Never alter structured tagged metadata, Info_panel, dates/weather/locations, proper names or their particles, numbers, protected tokens, code, tags or facts. Preserve ellipses exactly; ? and ! may be exaggerated when the speech act remains clear.
 [END VERBA EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE]` : '';
     return `[USER TRANSLATION INSTRUCTION]
 ${activeInstruction}
@@ -10458,18 +10462,18 @@ function injectSettingsPanel() {
                     </details>
 
                 <details id="verba-chuseok-galbwae" class="verba-tool-details verba-chuseok-galbwae">
-                    <summary>🌕 추석 갈봬체 <small>서술·대사·속마음 · 기본 OFF</small></summary>
+                    <summary>🌕 추석 갈봬체 <small>서술·대사·**강조문** · 기본 OFF</small></summary>
                     <div class="verba-tool-details-content">
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-chuseok-galbwae-all" ${settings.chuseokGalbwaeScope === 'all' ? 'checked' : ''}>
-                            <span>전체 갈봬체 <small>서술 + 대사 + 속마음</small></span>
+                            <span>전체 갈봬체 <small>서술 + 대사 + **강조문**</small></span>
                         </label>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-chuseok-galbwae-dialogue-inner" ${settings.chuseokGalbwaeScope === 'dialogueInner' ? 'checked' : ''}>
-                            <span>대사·속마음만 갈봬체 <small>서술 정상</small></span>
+                            <span>대사·**강조문**만 갈봬체 <small>그 외 서술 정상</small></span>
                         </label>
-                        <div class="verba-help">둘 중 하나만 선택할 수 있으며, 켠 항목을 다시 끄면 갈봬체가 완전히 꺼져요. 켜져 있는 동안 미친 한출의 맛·김홍진의 맛·입력 프롬프트·표현 디테일 등 다른 스타일 지시는 전송하지 않는 배타 모드로 작동합니다. Info_panel·날짜·날씨·장소·이름·숫자·코드·태그 구조에는 어느 옵션에서도 적용하지 않습니다. 프롬프트 프리셋에서 ‘프롬프트 + 번역 설정’을 저장하면 선택한 범위도 함께 저장됩니다.</div>
-                        <div class="verba-help">대표 기준: “나 알아?” → “나를 아늕랴!!”처럼 죠캎식으로 발음·맞춤법·띄어쓰기·조사를 기괴하지만 읽히게 무너뜨립니다. 사극체나 할배 말투로 바꾸는 기능은 아닙니다.</div>
+                        <div class="verba-help">둘 중 하나만 선택할 수 있으며, 켠 항목을 다시 끄면 갈봬체가 완전히 꺼져요. 켜져 있는 동안 미친 한출의 맛·김홍진의 맛·입력 프롬프트·표현 디테일 등 다른 스타일 지시는 전송하지 않는 배타 모드로 작동합니다. 모든 &lt;짝태그&gt; 안의 글씨에는 갈봬체를 적용하지 않으며 Inner_Info도 예외가 아닙니다. Info_panel·날짜·날씨·장소·이름·숫자·코드·태그 구조와 속성은 어느 옵션에서도 바꾸지 않습니다. 프롬프트 프리셋에서 ‘프롬프트 + 번역 설정’을 저장하면 선택한 범위도 함께 저장됩니다.</div>
+                        <div class="verba-help">대표 기준: “나 알아?” → “나를 아늕랴!!”처럼 죠캎식으로 발음·맞춤법·띄어쓰기·조사를 기괴하지만 읽히게 무너뜨립니다. 여기에 인터넷 처음 배운 할배 같은 결을 살짝 섞고, 씨발은 씨핤·씨핧·샤갈·쌱앐·쌰갈·시핣 계열로 바꿔요. 일부 요→료, 네·응→례와 ㄷㄷ·;;·ㅠㅠ도 랜덤하게 섞되 매번 도배하지 않습니다. **굵은 글씨**는 기호를 유지하고 안쪽 문장에 적용합니다.</div>
                     </div>
                 </details>
 

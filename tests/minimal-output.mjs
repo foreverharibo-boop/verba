@@ -22,7 +22,14 @@ assert.ok(buildMinimalOutputPrompt([], {...settings,developerMinimalPrompt:'</te
 const galbwaePrompt=buildMinimalOutputPrompt(segmented.segments,{...settings,chuseokGalbwaeScope:'all'},segmented.nameTokens,'ONE_TIME_MUST_NOT_APPEAR');
 assert.match(galbwaePrompt,/EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE/);
 assert.match(galbwaePrompt,/나 알아\?→나를 아늕랴!!/);
+assert.match(galbwaePrompt,/씨핤, 씨핧, 샤갈, 쌱앐, 쌰갈, 시핣/);
+assert.match(galbwaePrompt,/요→료/);
+assert.match(galbwaePrompt,/네\/응→례/);
 assert.match(galbwaePrompt,/chaotic 죠캎-style Korean internet-post language/);
+assert.match(galbwaePrompt,/MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION/);
+assert.match(galbwaePrompt,/PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION/);
+assert.match(galbwaePrompt,/including Inner_Info\/Info_panel\/small\/div\/custom tags/);
+assert.doesNotMatch(galbwaePrompt,/<div>Do you know me\?<\/div>→<div>나를 아늕랴!!<\/div>/);
 assert.doesNotMatch(galbwaePrompt,/ONE_TIME_MUST_NOT_APPEAR|자연스럽게 한국어로 번역하라/);
 let calls=[];
 function translated(segment){

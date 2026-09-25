@@ -1,5 +1,5 @@
 {
-  "version": "0.5.95",
+  "version": "0.5.97",
   "checks": [
     {
       "check": "syntax",
@@ -9,7 +9,7 @@
     {
       "check": "chuseok-galbwae.mjs",
       "status": "PASS",
-      "output": "The OFF-by-default Chuseok Galbwae style offers mutually exclusive all-text and dialogue-plus-Inner_Info scopes, suppresses every other optional style prompt while active, enforces the chaotic Jyokap-style rewrite without old-man cadence, and preserves Info_panel, proper names, numbers and protected structure."
+      "output": "The OFF-by-default Chuseok Galbwae style offers mutually exclusive all-text and dialogue-plus-bold-Markdown scopes, suppresses every other optional style prompt while active, applies the selected style to eligible visible text inside ** delimiters while absolutely exempting every paired-tag interior, mixes a light intermittent internet-grandpa cadence, mutates clean 씨발 into the approved variants, sparsely varies 요→료 and 네/응→례 with ㄷㄷ/;;/ㅠㅠ, and preserves Info_panel, proper names, numbers and protected structure."
     },
     {
       "check": "tagged-content-toggle.mjs",
@@ -19,7 +19,7 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, 25 visibility controls, tagged-content toggle directly below selection candidates, horizontal visibility actions, compact inner UI and v0.5.95 metadata pass."
+      "output": "Complete settings markup, unique IDs, 25 visibility controls, tagged-content toggle directly below selection candidates, horizontal visibility actions, compact inner UI and v0.5.97 metadata pass."
     },
     {
       "check": "original-baseline-regression",
@@ -45,6 +45,6 @@
     "tests/tagged-content-toggle.mjs",
     "tests/chuseok-galbwae.mjs"
   ],
-  "scope": "Correct Chuseok Galbwae into an exclusive Jyokap-style chaotic spelling mode with the canonical 나 알아? → 나를 아늕랴!! pattern, and move tagged-content translation under selection candidate preview.",
+  "scope": "Keep Chuseok Galbwae as an exclusive Jyokap-style chaotic spelling mode with the canonical 나 알아? → 나를 아늕랴!! pattern, add sparse internet-grandpa/profanity/ending mutations, and preserve the bold-Markdown-only versus paired-tag-exempt boundary.",
   "live_mobile_test": false
 }

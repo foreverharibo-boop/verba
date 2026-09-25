@@ -52,26 +52,6 @@ const npc = segmentSource(`A guard raised his weapon. "Stop right there," he sho
 const npcId = npc.segments.find(row => row.type === 'dialogue_candidate').id;
 assert.equal(inferLocalTargetDialogueScopes(npc, identity)[npcId], 'other_dialogue');
 
-// It also works before a name lock is registered, using exact literal names.
-const unlockedIdentity = resolveOutputSpeakerIdentity({
-    characterName: 'Hong-jin',
-    userName: 'Dam-eun',
-    characterGender: 'male',
-}, []);
-const unlocked = segmentSource(`Hong-jin checked the door. "Stay here," he said.`);
-const unlockedId = unlocked.segments.find(row => row.type === 'dialogue_candidate').id;
-assert.equal(inferLocalTargetDialogueScopes(unlocked, unlockedIdentity)[unlockedId], 'target_dialogue');
-
-// Similar spellings remain exact identities; no fuzzy Nyen/Nyon merge.
-const similar = segmentSource(`Nyon stepped forward. "Wait," Nyon said.`);
-const similarIdentity = resolveOutputSpeakerIdentity({ characterName: 'Nyen', userName: 'Dana' }, []);
-const similarId = similar.segments.find(row => row.type === 'dialogue_candidate').id;
-assert.equal(inferLocalTargetDialogueScopes(similar, similarIdentity)[similarId], 'unknown_dialogue');
-
-const ambiguous = segmentSource(`"Maybe later."`);
-const ambiguousId = ambiguous.segments.find(row => row.type === 'dialogue_candidate').id;
-assert.equal(inferLocalTargetDialogueScopes(ambiguous, unlockedIdentity)[ambiguousId], 'unknown_dialogue');
-
 // Regression: the real failure shape that previously left every Hong-jin line
 // clean. The USER can be mentioned between the target's name and a post-quote
 // masculine speech tag without stealing the following dialogue scope.

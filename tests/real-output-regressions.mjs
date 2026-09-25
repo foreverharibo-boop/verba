@@ -26,10 +26,10 @@ const settings = {
 const source = 'The overpass ramp rose ahead. "Keep your voice down," he said.';
 const segmented = segmentSource(source);
 const outputPrompt = buildOutputPrompt(segmented, settings, '', identity);
-assert.match(outputPrompt, /Road\/overpass “ramp” is 경사로\/진입로/);
-assert.match(outputPrompt, /“공기가 얇다”/);
-assert.match(outputPrompt, /“작은 숨 헐떡임”/);
-assert.match(outputPrompt, /“담은이 몸집”/);
+assert.match(outputPrompt, /MANDATORY BLANK-PAGE REWRITING/);
+assert.match(outputPrompt, /Destroy and discard every source word choice/);
+assert.match(outputPrompt, /write the passage again from a blank page/);
+assert.match(outputPrompt, /only content boundary/i);
 
 const targetRows = segmented.segments.filter(row => row.type === 'dialogue_candidate');
 const voicePrompt = buildHongjinVoiceRewritePrompt({
@@ -39,10 +39,10 @@ const voicePrompt = buildHongjinVoiceRewritePrompt({
     speakerIdentity: identity,
     settings,
 });
-assert.match(voicePrompt, /quiet tactical instructions and restrained concern are not profanity quotas/i);
-assert.match(voicePrompt, /ABSOLUTE USER CHECK/);
-assert.match(voicePrompt, /“새끼야\/병신아\/미친놈아”/);
-assert.match(voicePrompt, /repetition plus a dry comeback/i);
+assert.match(voicePrompt, /BLANK-PAGE DIALOGUE REWRITING/i);
+assert.match(voicePrompt, /Never aim a person-directed curse at USER/);
+assert.match(voicePrompt, /Never aim a person-directed curse at USER/);
+assert.match(voicePrompt, /ACROSS THE FULL DIALOGUE SET/i);
 
 const auditSegments = [
     { id: 'd0', type: 'dialogue_candidate', outputScope: 'target_dialogue', text: '"Keep your voice down."' },

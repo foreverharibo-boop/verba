@@ -109,7 +109,6 @@ assert.deepEqual(
     replaceNameInKoreanRawSource('니옌과 니욘이 만났다.', ['니옌'], '나이엔'),
     { changed: true, value: '나이엔과 니욘이 만났다.' },
 );
-
 const historyFlowStart = index.indexOf('function replaceNameAcrossChatTranslations');
 const historyFlow = index.slice(historyFlowStart, index.indexOf('function requestSelectionCandidateChoice', historyFlowStart));
 assert.ok(historyFlow.includes('replaceNameInKoreanRawSource(rawSource, candidates, targetName)'));

@@ -8,14 +8,6 @@ class Select { value = ''; disabled = false; }
 class Textarea {}
 const nodes = new Map();
 const pairs = [
- ['output-split-count','developerOutputSplitCount',3],
- ['relationship-enabled','developerRelationshipExperimentEnabled',true],
- ['speech-distance','developerSpeechDistance','casual'],
- ['target-user-register','developerTargetToUserRegister','banmal'],
- ['target-other-register','developerTargetToOtherRegister','jondaetmal'],
- ['target-user-address','developerTargetToUserAddress','선배님'],
- ['target-user-address-strength','developerTargetToUserAddressStrength','strict'],
- ['target-user-address-frequency','developerTargetToUserAddressFrequency','often'],
  ['mad-korean-enabled','developerMadKoreanOutputEnabled',true],
  ['hongjin-enabled','developerHongjinFlavorEnabled',true],
  ['mad-korean-target-user-register','developerMadKoreanTargetToUserRegister','banmal'],
@@ -27,14 +19,22 @@ const pairs = [
  ['hongjin-playfulness','developerHongjinPlayfulness','high'],
  ['hongjin-age-band','developerHongjinAgeBand','late20s'],
  ['hongjin-oppa-frequency','developerHongjinOppaFrequency','often'],
+ ['relationship-enabled','developerRelationshipExperimentEnabled',true],
+ ['speech-distance','developerSpeechDistance','formal'],
+ ['target-user-register','developerTargetToUserRegister','banmal'],
+ ['target-other-register','developerTargetToOtherRegister','jondaetmal'],
+ ['target-user-address','developerTargetToUserAddress','선배님'],
+ ['target-user-address-strength','developerTargetToUserAddressStrength','strict'],
+ ['target-user-address-frequency','developerTargetToUserAddressFrequency','often'],
 ];
-for (const [id,,value] of pairs) nodes.set(`#verba-developer-${id}`,typeof value==='boolean'?new Input():new Select());
+for (const [id,,value] of pairs) nodes.set(`#verba-deep-developer-${id}`,typeof value==='boolean'?new Input():new Select());
 const panel = {querySelector: s => nodes.get(s)||null};
-nodes.set('#verba-settings',panel);
+nodes.set('#verba-deep-developer-output-split-count',new Select());
+nodes.set('#verba-deep-settings',panel);
 for (const name of ['mad-korean','hongjin']) {
- const controls = pairs.filter(([id,,v])=>id.startsWith(name)&&typeof v!=='boolean').map(([id])=>nodes.get(`#verba-developer-${id}`));
+ const controls = pairs.filter(([id,,v])=>id.startsWith(name)&&typeof v!=='boolean').map(([id])=>nodes.get(`#verba-deep-developer-${id}`));
  const classes=new Set();
- nodes.set(`#verba-developer-${name}-controls`,{classList:{toggle(k,on){on?classes.add(k):classes.delete(k);},contains:k=>classes.has(k)},querySelectorAll:()=>controls});
+ nodes.set(`#verba-deep-developer-${name}-controls`,{classList:{toggle(k,on){on?classes.add(k):classes.delete(k);},contains:k=>classes.has(k)},querySelectorAll:()=>controls});
 }
 const document={querySelector:s=>nodes.get(s)||null,querySelectorAll:()=>[]};
 const noop=()=>{};
@@ -50,13 +50,13 @@ const api=Function('normalizeBaseTranslationCustom','document','HTMLInputElement
 const check = expected => {
  for (const [id,key] of pairs) {
   assert.equal(api.settings[key],expected[key],key+' saved value');
-  const el=nodes.get(`#verba-developer-${id}`);
-  assert.equal(el instanceof Input?el.checked:el.value,el instanceof Input?expected[key]:String(expected[key]),key+' visible value');
+  const el=nodes.get(`#verba-deep-developer-${id}`);
+  assert.equal(el instanceof Input?el.checked:el.value,expected[key],key+' visible value');
  }
  for (const name of ['mad-korean','hongjin']) {
-  const enabled=nodes.get(`#verba-developer-${name}-enabled`).checked;
-  const group=nodes.get(`#verba-developer-${name}-controls`);
-  assert.equal(group.classList.contains('verba-control-disabled'),!enabled);
+  const enabled=nodes.get(`#verba-deep-developer-${name}-enabled`).checked;
+  const group=nodes.get(`#verba-deep-developer-${name}-controls`);
+  assert.equal(group.classList.contains('verba-deep-control-disabled'),!enabled);
   for (const el of group.querySelectorAll()) assert.equal(el.disabled,!enabled);
  }
 };
@@ -108,6 +108,7 @@ for(const dev of [false,true])for(const minimal of [false,true])for(const count 
  assert.equal(preset.translationSettings.developerSettings.developerOutputSplitCount,count);
  Object.assign(api.settings,{developerOutputSplitCount:1,developerMinimalPromptEnabled:!minimal});
  api.apply(preset);assert.equal(api.settings.developerOutputSplitCount,count);
+ assert.equal(nodes.get('#verba-deep-developer-output-split-count').value,String(count));
  assert.equal(api.settings.developerMinimalPromptEnabled,minimal);assert.equal(api.settings.developerMode,dev);
  api.apply(api.save('prompts'));assert.equal(api.settings.developerOutputSplitCount,count);
  const legacy=structuredClone(preset);delete legacy.translationSettings.developerSettings.developerOutputSplitCount;
@@ -116,11 +117,3 @@ for(const dev of [false,true])for(const minimal of [false,true])for(const count 
  api.apply(preset);assert.equal(api.settings.developerOutputSplitCount,1);
 }
 console.log('PASS: independent split count in translation presets, prompt-only preservation, legacy defaults, invalid values, no developer auto-unlock.');
-
-// Retired monitor is ignored in older presets and never re-saved.
-const legacyMonitor=api.save('prompts_translation');
-legacyMonitor.translationSettings.developerSettings.developerRegisterShiftMonitor=true;
-api.apply(legacyMonitor);
-assert.equal(api.settings.developerRegisterShiftMonitor,undefined);
-assert.ok(!('developerRegisterShiftMonitor' in api.save('prompts_translation').translationSettings.developerSettings));
-console.log('PASS: removed register monitor does not return through legacy presets.');

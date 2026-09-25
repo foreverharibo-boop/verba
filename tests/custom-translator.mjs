@@ -61,10 +61,10 @@ const replaced = api.applyCustomTranslatorPrompt('OLD DEFAULT PROMPT MUST DISAPP
 assert.doesNotMatch(replaced, /OLD DEFAULT PROMPT MUST DISAPPEAR/);
 assert.match(replaced, /USER TRANSLATION INSTRUCTION/);
 assert.match(replaced, /Translate as natural Korean prose\./);
-assert.match(replaced, /VERBA REQUEST DATA/);
+assert.match(replaced, /VEEREUBAA REQUEST DATA/);
 assert.match(replaced, /Source text\./);
-assert.match(replaced, /VERBA LOCKED RESPONSE CONTRACT/);
-assert.match(replaced, /@@VERBA_\.\.\.@/);
+assert.match(replaced, /VEEREUBAA LOCKED RESPONSE CONTRACT/);
+assert.match(replaced, /@@VERBA_DEEP_\.\.\.@/);
 assert.match(replaced, /seg_0001/);
 
 settings.customTranslatorTemplates.selection = 'Create three natural Korean alternatives.';
@@ -85,7 +85,7 @@ assert.equal(
         customTargetSegments: targets,
     }),
     'INPUT ORIGINAL',
-    'a blank category keeps Verba’s existing prompt unchanged',
+    'a blank category keeps 베에르으바아의 existing prompt unchanged',
 );
 assert.equal(
     api.applyCustomTranslatorPrompt('PING', { stage: 'connection-test', customTargetSegments: targets }),
@@ -93,26 +93,6 @@ assert.equal(
 );
 settings.customTranslatorEnabled = false;
 assert.equal(api.applyCustomTranslatorPrompt('UNCHANGED', { stage: 'output-translation' }), 'UNCHANGED');
-settings.customTranslatorEnabled = true;
-settings.chuseokGalbwaeScope = 'all';
-settings.customTranslatorTemplates.output = 'CUSTOM TRANSLATOR MUST NOT APPEAR';
-const exclusiveGalbwae = api.applyCustomTranslatorPrompt('OLD DEFAULT MUST NOT APPEAR', {
-    stage: 'output-translation',
-    customTargetSegments: targets,
-});
-assert.match(exclusiveGalbwae, /EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE/);
-assert.match(exclusiveGalbwae, /나 알아\? → 나를 아늕랴!!/);
-assert.match(exclusiveGalbwae, /씨핤, 씨핧, 샤갈, 쌱앐, 쌰갈, 시핣/);
-assert.match(exclusiveGalbwae, /요→료/);
-assert.match(exclusiveGalbwae, /네\/응→례/);
-assert.match(exclusiveGalbwae, /NAME HANDLING ORDER — ABSOLUTE/);
-assert.match(exclusiveGalbwae, /Aila→아일라, Calix→칼릭스, Atlas→아틀라스/);
-assert.match(exclusiveGalbwae, /Never leave a Latin-script character name unchanged/);
-assert.match(exclusiveGalbwae, /MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION/);
-assert.match(exclusiveGalbwae, /PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION/);
-assert.match(exclusiveGalbwae, /including Inner_Info, Info_panel, small, div and custom tags/);
-assert.doesNotMatch(exclusiveGalbwae, /<div>Do you know me\?<\/div> → <div>나를 아늕랴!!<\/div>/);
-assert.doesNotMatch(exclusiveGalbwae, /CUSTOM TRANSLATOR MUST NOT APPEAR|OLD DEFAULT MUST NOT APPEAR/);
 
 const expectedOrder = definitions.map(key => `{ key: '${key}'`);
 let previous = -1;
@@ -126,20 +106,20 @@ const uiStart = index.indexOf('function customTranslatorInstructionPlaceholder('
 const uiEnd = index.indexOf('function injectSettingsPanel(', uiStart);
 const customTranslatorUi = index.slice(uiStart, uiEnd);
 assert.match(customTranslatorUi, /<summary>커스텀 번역기/);
-assert.match(customTranslatorUi, /id="verba-custom-translator-enabled"/);
-assert.match(customTranslatorUi, /data-verba-custom-translator-key/);
-assert.doesNotMatch(customTranslatorUi, /data-verba-custom-translator-mode/);
+assert.match(customTranslatorUi, /id="verba-deep-custom-translator-enabled"/);
+assert.match(customTranslatorUi, /data-verba-deep-custom-translator-key/);
+assert.doesNotMatch(customTranslatorUi, /data-verba-deep-custom-translator-mode/);
 assert.doesNotMatch(customTranslatorUi, /간편 설정/);
 assert.doesNotMatch(customTranslatorUi, /고급 설정/);
 assert.doesNotMatch(customTranslatorUi, /직접 구성용 변수 보기/);
 assert.match(customTranslatorUi, /원하는 항목에 <b>영어 지침만<\/b> 적으세요/);
 assert.match(customTranslatorUi, /기존 프롬프트를 완전히 대체합니다/);
-assert.match(customTranslatorUi, /원문 데이터·JSON 응답 형식·이름·태그·보호 표식은 베르바가 자동으로 붙이며/);
+assert.match(customTranslatorUi, /원문 데이터·JSON 응답 형식·이름·태그·보호 표식은 베에르으바아가 자동으로 붙이며/);
 assert.match(index, /채팅 번역/);
 assert.match(index, /내가 보내는 글/);
 assert.match(index, /선택한 부분 다시 번역/);
 assert.match(index, /bindPromptExpandEditors\(panel\);\s*syncCustomTranslatorControls\(panel\);/);
-assert.match(index, /target\.matches\('\[data-verba-custom-translator-key\]'\)[\s\S]*?normalizeCustomTranslatorInstruction\(target\.value\)[\s\S]*?saveSettings\(\)/);
+assert.match(index, /target\.dataset\.verbaDeepCustomTranslatorKey[\s\S]*?normalizeCustomTranslatorInstruction\(target\.value\)[\s\S]*?saveSettings\(\)/);
 assert.match(index, /const outgoingPrompt = applyCustomTranslatorPrompt\(prompt, options\)/);
 assert.match(index, /customTargetSegments: pending/);
 

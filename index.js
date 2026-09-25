@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.97';
+const EXTENSION_VERSION = '0.5.98';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3208,11 +3208,12 @@ function applyCustomTranslatorPrompt(prompt, options = {}) {
 - Visibly wreck spelling and spacing with varied phonetic misspellings, swapped vowels/consonants, wrong-but-readable particles/endings, fused words, odd spaces and community-post punctuation. Sprinkle ㄷㄷ, ;; and ㅠㅠ where emotion permits, but not on every sentence. A nearly normal sentence with one typo is invalid; repeating one ending mechanically is also invalid.
 - REQUIRED PROFANITY MUTATION: whenever an eligible Korean rendering would naturally use 씨발, never output clean 씨발. Choose and vary among 씨핤, 씨핧, 샤갈, 쌱앐, 쌰갈, 시핣. Preserve its target/function/intensity and do not add it where profanity is not licensed.
 - OCCASIONAL ENDING/REPLY MUTATION: irregularly change some sentence-final 요→료 (알겠어요→알갰어료; 한다네요→한다내료) and occasionally standalone 네/응→례. Use only a minority of eligible opportunities, roughly one out of three with uneven spacing; never every occurrence and never inside paired tags.
+- NAME HANDLING ORDER — ABSOLUTE: first render every source-language human or fictional character name in natural Hangul, then exempt only that Korean rendering from GALBWAE corruption. A supplied fixed name mapping wins; otherwise transliterate by established Korean pronunciation. Never leave a Latin-script character name unchanged merely because proper names are style-exempt. Examples: Aila→아일라, Calix→칼릭스, Atlas→아틀라스. Brand names, codes, URLs, account handles and product identifiers keep their ordinary rules.
 - Exact pattern example: 나 알아? → 나를 아늕랴!! Other patterns: 네, 그렇게 할게요. → 례.. 그러캐할개료; 응, 알겠어. → 례 알갯다내료;;; 씨발, 뭐야? → 쌰갈 머냐고요 ㄷㄷ; 도와주세요. → 도아주새요 ㅠㅠ
 - The absurdity is wording only. Never invent actions, body parts, sexual content, incidents, objects or claims that are absent from the source.
 - MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION: preserve Markdown delimiters, nesting and placement, but eligible visible natural-language text between **...** must receive GALBWAE. This overrides generic Markdown preservation. Keep inline/fenced backtick code unchanged. Example: **Do you know me?** → **나를 아늕랴!!**.
 - PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION: preserve opening/closing tags, attributes and order exactly, and keep translated visible text inside ANY paired tag normally spelled. Do not apply GALBWAE there, including Inner_Info, Info_panel, small, div and custom tags. There are no tag-name exceptions.
-- Never alter structured tagged metadata, Info_panel, dates/weather/locations, proper names or their particles, numbers, protected tokens, code, tags or facts. Preserve ellipses exactly; ? and ! may be exaggerated when the speech act remains clear.
+- Never apply GALBWAE misspelling to Korean-rendered proper names or their particles, structured tagged metadata, Info_panel, dates/weather/locations, numbers, protected tokens, code, tags or facts. Preserve ellipses exactly; ? and ! may be exaggerated when the speech act remains clear.
 [END VERBA EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE]` : '';
     return `[USER TRANSLATION INSTRUCTION]
 ${activeInstruction}

@@ -6,7 +6,7 @@ import {
     segmentSource,
 } from '../core.js';
 
-const source = `He waited **right there**.\n\n"**Do you know me?**"\n\n<div class="notice">How do I do this?</div>\n\n<Info_panel>[Weather: Sunny]</Info_panel>\n\n<Inner_Info><small>🧠 Hong-jin: This is insane.</small></Inner_Info>`;
+const source = `Aila waited **right there** while Calix called Atlas.\n\n"**Do you know me?**"\n\n<div class="notice">How do I do this?</div>\n\n<Info_panel>[Weather: Sunny]</Info_panel>\n\n<Inner_Info><small>🧠 Hong-jin: This is insane.</small></Inner_Info>`;
 const segmented = segmentSource(source);
 const ordinaryTag = segmented.segments.find(row => row.text.includes('How do I do this?'));
 const info = segmented.segments.find(row => row.text.includes('Weather'));
@@ -57,6 +57,10 @@ for (const scope of ['all', 'dialogueInner']) {
         assert.match(prompt, /네 or 응 to 례/);
         assert.match(prompt, /roughly one out of three/);
         assert.match(prompt, /Sprinkle ㄷㄷ, ;; and ㅠㅠ/);
+        assert.match(prompt, /NAME HANDLING ORDER — ABSOLUTE/);
+        assert.match(prompt, /A supplied fixed name mapping wins/);
+        assert.match(prompt, /Aila→아일라, Calix→칼릭스, Atlas→아틀라스/);
+        assert.match(prompt, /Never leave a Latin-script character name unchanged/);
         assert.match(prompt, /MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION/);
         assert.match(prompt, /\*\*Do you know me\?\*\* → \*\*나를 아늕랴!!\*\*/);
         assert.match(prompt, /PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION/);
@@ -137,4 +141,4 @@ assert.match(index, /chuseokGalbwaeScope:\s*normalizedChuseokGalbwaeScope/);
 const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 assert.match(style, /\.verba-visibility-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);
 
-console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+bold-Markdown modes, rewrites eligible visible text inside ** delimiters while absolutely exempting every paired-tag interior, mixes sparse internet-grandpa/profanity/ending/punctuation mutations without mechanical repetition, respects the tagged-content toggle, and keeps visibility actions horizontal.');
+console.log('PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+bold-Markdown modes, forces fixed-name-first natural Hangul character names before protecting them from style corruption, rewrites eligible visible text inside ** delimiters while absolutely exempting every paired-tag interior, mixes sparse internet-grandpa/profanity/ending/punctuation mutations without mechanical repetition, respects the tagged-content toggle, and keeps visibility actions horizontal.');

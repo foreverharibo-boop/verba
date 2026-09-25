@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.99';
+const EXTENSION_VERSION = '0.5.100';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -3175,6 +3175,20 @@ function lockedSegmentRequestContract(segments = [], stage = '') {
 function applyCustomTranslatorPrompt(prompt, options = {}) {
     if (settings.customTranslatorEnabled !== true || options.stage === 'connection-test') return String(prompt || '');
     const key = customTranslatorPromptKey(options.stage);
+    const galbwaeScope = ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+        ? settings.chuseokGalbwaeScope
+        : settings.chuseokGalbwaeEnabled === true
+            ? 'dialogueInner'
+            : 'off';
+    // The generic custom-translator envelope intentionally rebuilds normal
+    // translation requests from source targets.  Doing that to an internal
+    // repair request discards its current_translation and detected_problem,
+    // which made Galbwae name repair silently repeat the original bad output.
+    // Galbwae already suppresses the user's custom instruction, so preserve the
+    // purpose-built internal repair prompt verbatim instead.
+    if (galbwaeScope !== 'off' && String(options.stage || '').toLocaleLowerCase().includes('repair')) {
+        return String(prompt || '');
+    }
     const instruction = typeof settings.customTranslatorTemplates?.[key] === 'string'
         ? settings.customTranslatorTemplates[key]
         : DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key];
@@ -3191,11 +3205,6 @@ function applyCustomTranslatorPrompt(prompt, options = {}) {
         ? options.customRequestData
         : { segments: targets };
     if (!targets.length && !Object.keys(requestData).length) return String(prompt || '');
-    const galbwaeScope = ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
-        ? settings.chuseokGalbwaeScope
-        : settings.chuseokGalbwaeEnabled === true
-            ? 'dialogueInner'
-            : 'off';
     if (!normalizedInstruction && galbwaeScope === 'off') return String(prompt || '');
     const activeInstruction = galbwaeScope !== 'off'
         ? 'Translate the supplied source material into Korean. Preserve facts, speakers, intent, relationships and protected structure. Ignore every optional/user style prompt, taste, voice, custom translator instruction and one-time instruction; only the exclusive GALBWAE contract below controls output style.'

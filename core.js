@@ -304,6 +304,12 @@ export function bilingualDialogueBracketPair(settings = {}) {
 }
 
 function allowsIntentionalForeignText(segment, settings = {}, speakerScopes = null) {
+    // Galbwae is an exclusive Korean-only mode.  Prompts saved in the four
+    // ordinary slots are deliberately not sent while it is active, so a
+    // dormant bilingual-output instruction must not disable leftover-name
+    // validation here either.
+    if (galbwaeTranslationActive(settings)) return false;
+
     // Visible text inside any existing paired tag is always Korean-only.
     // A global bilingual-format prompt must not relax validation for this scope.
     if (segment?.type === 'tagged_content') return false;
@@ -388,9 +394,20 @@ export function unchangedLatinCharacterNames(source, translation, settings = {})
         if (!new RegExp(`(?<![A-Za-z])${escapeRegExp(token)}(?![A-Za-z])`, 'u').test(targetText)) return false;
         const escaped = escapeRegExp(token);
         const koreanParticle = new RegExp(`${escaped}(?=(?:은|는|이|가|을|를|의|에|에게|한테|께서|도|만|와|과|로|으로|랑|이랑|부터|까지))`, 'u').test(targetText);
-        const vocative = new RegExp(`(?:["“”'‘’]\s*)?${escaped}\s*[!?,:;](?:["“”'‘’]|\s|$)`, 'u').test(targetText);
+        // Markdown delimiters can sit immediately around a name (`**Aila!**`).
+        // They are formatting, not part of the name, and must not hide a
+        // leftover Latin spelling from the validator.
+        const vocative = new RegExp(`(?:["“”'‘’]\\s*|(?:\\*\\*|__|~~)\\s*)?${escaped}\\s*[!?,:;](?:\\s*(?:\\*\\*|__|~~))?(?:["“”'‘’]|\\s|$)`, 'u').test(targetText);
+        const markdownWrapped = new RegExp(`(?:\\*\\*|__|~~)\\s*${escaped}\\s*(?:\\*\\*|__|~~)`, 'u').test(targetText);
+        const bareNameOnly = new RegExp(`^[\\s*_~"“”'‘’]*${escaped}[\\s*_~!?,:;"“”'‘’]*$`, 'u').test(sourceText)
+            && new RegExp(`^[\\s*_~"“”'‘’]*${escaped}[\\s*_~!?,:;"“”'‘’]*$`, 'u').test(targetText);
+        // Galbwae may deliberately damage the particle itself, so also catch a
+        // surviving title-case token immediately beside otherwise Korean text.
+        // The AI repair pass still verifies whether it is a person/character or
+        // an intentional brand/product before changing it.
+        const koreanNeighbour = new RegExp(`(?:${escaped}[^A-Za-z]{0,6}[가-힣]|[가-힣][^A-Za-z]{0,6}${escaped})`, 'u').test(targetText);
         const repeated = countExactLatinToken(sourceText, token) >= 2 || countExactLatinToken(targetText, token) >= 2;
-        return koreanParticle || vocative || repeated;
+        return koreanParticle || vocative || markdownWrapped || bareNameOnly || koreanNeighbour || repeated;
     });
 }
 

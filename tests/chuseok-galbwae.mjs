@@ -34,6 +34,25 @@ assert.equal(findUntranslatedSegments(
     new Map([['seg_name', '아일라가 칼릭스를 불렀다. 아틀라스가 대답했다.']]),
     { chuseokGalbwaeScope: 'all' },
 ).length, 0);
+assert.match(findUntranslatedSegments(
+    [{ id: 'seg_bold_name', type: 'dialogue_candidate', text: '**Aila!**' }],
+    new Map([['seg_bold_name', '**Aila!**']]),
+    { chuseokGalbwaeScope: 'all' },
+)[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Aila/);
+assert.match(findUntranslatedSegments(
+    [{ id: 'seg_tag_name', type: 'tagged_content', text: 'Calix' }],
+    new Map([['seg_tag_name', 'Calix']]),
+    { chuseokGalbwaeScope: 'all' },
+)[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Calix/);
+assert.match(findUntranslatedSegments(
+    [{ id: 'seg_bilingual_setting', type: 'dialogue_candidate', text: 'Atlas called her.' }],
+    new Map([['seg_bilingual_setting', 'Atlas가 그녀를 불렀다.']]),
+    {
+        chuseokGalbwaeScope: 'all',
+        globalPromptEnabled: true,
+        globalPrompt: '영어 원문과 한국어 번역을 함께 출력한다.',
+    },
+)[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Atlas/);
 assert.equal(findUntranslatedSegments(
     [nameLeftoverSegment],
     new Map([['seg_name', 'Aila가 Calix를 불렀고 Atlas는 대답했다.']]),
@@ -157,6 +176,7 @@ assert.match(index, /id="verba-chuseok-galbwae-dialogue-inner"/);
 assert.match(index, /target\.id === 'verba-chuseok-galbwae-all'/);
 assert.match(index, /target\.id === 'verba-chuseok-galbwae-dialogue-inner'/);
 assert.match(index, /chuseokGalbwaeScope:\s*normalizedChuseokGalbwaeScope/);
+assert.match(index, /galbwaeScope !== 'off' && String\(options\.stage \|\| ''\)\.toLocaleLowerCase\(\)\.includes\('repair'\)/);
 
 const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 assert.match(style, /\.verba-visibility-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);

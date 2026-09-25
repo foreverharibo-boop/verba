@@ -1,8 +1,8 @@
 {
-  "name": "verba-deep",
-  "display_name": "베에르으바아",
-  "version": "0.5.90",
-  "description": "장문 프롬프트로 정밀한 한국어 번역을 제공하는 독립 확장",
+  "name": "verba",
+  "display_name": "베르바",
+    "version": "0.5.101",
+  "description": "선택 재번역과 캐릭터별 이름 고정을 지원하는 가벼운 자동번역기",
   "author": "담은",
   "js": "index.js",
   "css": "style.css",

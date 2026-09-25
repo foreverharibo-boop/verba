@@ -76,15 +76,15 @@ export function selectionEllipsisReference(snapshot = {}) {
     return selected;
 }
 
-// AI가 보호 토큰을 살짝 변형해서 돌려주는 경우(@@VERBA_DEEP_NAME_ 0023@@ 처럼 공백이 끼거나,
-// 전각 @, 소문자, 구분자 변형)를 원래 형태(@@VERBA_DEEP_NAME_0023@@)로 되돌린다.
+// AI가 보호 토큰을 살짝 변형해서 돌려주는 경우(@@VERBA_NAME_ 0023@@ 처럼 공백이 끼거나,
+// 전각 @, 소문자, 구분자 변형)를 원래 형태(@@VERBA_NAME_0023@@)로 되돌린다.
 // 복원 단계는 정확한 문자열 일치에 의존하므로, 변형된 토큰은 반드시 여기서 먼저 정규화해야 한다.
-const LOOSE_PROTECTED_TOKEN = /[@＠]{2}\s*VERBA\s*[_＿]\s*(?:DEEP\s*[_＿]\s*)?(NAME\s*[_＿]\s*)?(\d(?:\s?\d){0,3})\s*[@＠]{2}/giu;
+const LOOSE_PROTECTED_TOKEN = /[@＠]{2}\s*VERBA\s*[_＿]\s*(NAME\s*[_＿]\s*)?(\d(?:\s?\d){0,3})\s*[@＠]{2}/giu;
 
 export function canonicalizeProtectedTokenVariants(value) {
     if (typeof value !== 'string' || !/VERBA/iu.test(value)) return value;
     return value.replace(LOOSE_PROTECTED_TOKEN, (_match, name, digits) =>
-        `@@VERBA_DEEP_${name ? 'NAME_' : ''}${String(digits).replace(/\s+/g, '').padStart(4, '0')}@@`);
+        `@@VERBA_${name ? 'NAME_' : ''}${String(digits).replace(/\s+/g, '').padStart(4, '0')}@@`);
 }
 
 function normalizeSyntax(text) {
@@ -255,6 +255,6 @@ export function collectSegmentResponse(raw, expectedSegments = []) {
         `${[...new Set(issues)].join(' / ')}; 번역 결과 누락: ${missingIds.join(', ')}`,
         syntaxError ? { cause: syntaxError } : undefined,
     ) : null;
-    if (parseError) parseError.code = 'VERBA_DEEP_RESPONSE_FORMAT';
+    if (parseError) parseError.code = 'VERBA_RESPONSE_FORMAT';
     return { partial, parseError, missingIds, repairs: [...new Set(repairs)], issues: [...new Set(issues)] };
 }

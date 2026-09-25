@@ -53,6 +53,15 @@ assert.match(findUntranslatedSegments(
         globalPrompt: '영어 원문과 한국어 번역을 함께 출력한다.',
     },
 )[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Atlas/);
+assert.match(findUntranslatedSegments(
+    [{
+        id: 'seg_possessive_name',
+        type: 'narration',
+        text: "Atlas's ears perk up abruptly and then flatten just as fast.",
+    }],
+    new Map([['seg_possessive_name', 'Atlas의 귀가 팍 솟구컬다가 순식간애 축 쳐젼내요.']]),
+    { chuseokGalbwaeScope: 'all' },
+)[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Atlas/);
 assert.equal(findUntranslatedSegments(
     [nameLeftoverSegment],
     new Map([['seg_name', 'Aila가 Calix를 불렀고 Atlas는 대답했다.']]),

@@ -386,7 +386,12 @@ export function unchangedLatinCharacterNames(source, translation, settings = {})
     const sourceText = validationText(source);
     const targetText = validationText(translation);
     const candidates = [...sourceText.matchAll(/\b[A-Z][A-Za-z'’\-]{1,79}\b/g)]
-        .map(match => match[0])
+        // English possessives belong to the surrounding grammar, not to the
+        // character name.  `Atlas's ears` must be checked against `Atlas의`,
+        // otherwise the exact-token comparison looks for the nonexistent
+        // literal name `Atlas's` and silently misses the leftover `Atlas`.
+        .map(match => match[0].replace(/(?:['’]s|['’])$/iu, ''))
+        .filter(Boolean)
         .filter(token => !LATIN_NAME_FALSE_POSITIVES.has(token.toLocaleLowerCase()))
         .filter(token => !/^[A-Z]{2,}$/u.test(token));
     const unique = [...new Set(candidates)];

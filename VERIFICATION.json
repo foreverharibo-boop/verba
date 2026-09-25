@@ -1,5 +1,5 @@
 {
-  "version": "0.5.100",
+  "version": "0.5.101",
   "checks": [
     {
       "check": "syntax",
@@ -9,7 +9,7 @@
     {
       "check": "chuseok-galbwae.mjs",
       "status": "PASS",
-      "output": "The OFF-by-default Chuseok Galbwae style offers mutually exclusive all-text and dialogue-plus-bold-Markdown scopes, suppresses every other optional style prompt while active, preserves internal repair data through the custom-translator path, detects Latin character names in Korean-particle, Markdown, tag-only, vocative, repeated and nearby-Korean contexts even when dormant bilingual settings exist, and preserves Info_panel, numbers and protected structure."
+      "output": "The OFF-by-default Chuseok Galbwae style offers mutually exclusive all-text and dialogue-plus-bold-Markdown scopes, suppresses every other optional style prompt while active, preserves internal repair data through the custom-translator path, detects Latin character names in Korean-particle, Markdown, tag-only, vocative, repeated, possessive and nearby-Korean contexts even when dormant bilingual settings exist, and preserves Info_panel, numbers and protected structure."
     },
     {
       "check": "tagged-content-toggle.mjs",
@@ -19,7 +19,7 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, 25 visibility controls, tagged-content toggle directly below selection candidates, horizontal visibility actions, compact inner UI and v0.5.100 metadata pass."
+      "output": "Complete settings markup, unique IDs, 25 visibility controls, tagged-content toggle directly below selection candidates, horizontal visibility actions, compact inner UI and v0.5.101 metadata pass."
     },
     {
       "check": "original-baseline-regression",
@@ -41,6 +41,6 @@
     "tests/settings-layout.mjs",
     "tests/chuseok-galbwae.mjs"
   ],
-  "scope": "Keep Chuseok Galbwae exclusive while ensuring unchanged Latin character names are detected and the targeted repair request survives custom-translator wrapping.",
+  "scope": "Keep Chuseok Galbwae exclusive while ensuring unchanged Latin character names, including English possessive forms such as Atlas's, are detected and repaired.",
   "live_mobile_test": false
 }

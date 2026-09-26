@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.5.101';
+const EXTENSION_VERSION = '0.6.2';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -289,6 +289,8 @@ const DEFAULT_SETTINGS = {
     thirdProfileId: '',
     activeProfileSlot: 'A',
     autoProfileFallback: true,
+    profileRaceEnabled: false,
+    profileRaceTimeoutMinutes: 5,
     debugMode: false,
     developerMode: false,
     developerAccessFingerprint: '',
@@ -409,6 +411,8 @@ const legacyProfileStats = settings.profileStats;
 let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
+settings.profileRaceEnabled = settings.profileRaceEnabled === true;
+settings.profileRaceTimeoutMinutes = Math.min(1440, Math.max(1, Number(settings.profileRaceTimeoutMinutes) || 5));
 settings.translateTaggedContent = settings.translateTaggedContent !== false;
 settings.settingsVisibility = normalizedSettingsVisibility(settings.settingsVisibility);
 settings.customTranslatorEnabled = settings.customTranslatorEnabled === true;
@@ -698,6 +702,13 @@ const transientLockedMessages = new Set();
 const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
 const scopedParallelRequestQueue = [];
 let scopedParallelRequestActive = 0;
+// Three split-output jobs may each race A/B/C.  Nine slots let every profile
+// in that bounded 3 x 3 case actually start instead of leaving B/C queued
+// behind the stalled A requests they are supposed to outrun.
+const PROFILE_RACE_REQUEST_LIMIT = 9;
+const PROFILE_RACE_STAGGER_MS = 35000;
+const profileRaceRequestQueue = [];
+let profileRaceRequestActive = 0;
 const enqueueSplitOutputRequest = createSplitRequestQueue(3);
 let requestTail = Promise.resolve();
 let lastQualityAuditSummary = '아직 실행되지 않음';
@@ -2794,6 +2805,31 @@ function enqueueScopedParallelRequest(task) {
     });
 }
 
+function drainProfileRaceRequestQueue() {
+    while (
+        profileRaceRequestActive < PROFILE_RACE_REQUEST_LIMIT
+        && profileRaceRequestQueue.length
+    ) {
+        const item = profileRaceRequestQueue.shift();
+        profileRaceRequestActive += 1;
+
+        Promise.resolve()
+            .then(item.task)
+            .then(item.resolve, item.reject)
+            .finally(() => {
+                profileRaceRequestActive = Math.max(0, profileRaceRequestActive - 1);
+                drainProfileRaceRequestQueue();
+            });
+    }
+}
+
+function enqueueProfileRaceRequest(task) {
+    return new Promise((resolve, reject) => {
+        profileRaceRequestQueue.push({ task, resolve, reject });
+        drainProfileRaceRequestQueue();
+    });
+}
+
 async function runWithConcurrency(items, limit, worker) {
     const rows = Array.from(items || []);
     if (!rows.length) return [];
@@ -2967,7 +3003,10 @@ async function sendProfileRequest(prompt, options = {}) {
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
     outerSignal?.addEventListener?.('abort', forwardAbort, { once: true });
-    const timeoutSeconds = Math.min(300, Math.max(20, Number(settings.timeoutSeconds) || 120));
+    const timeoutOverride = Number(options.timeoutSecondsOverride);
+    const timeoutSeconds = Number.isFinite(timeoutOverride) && timeoutOverride > 0
+        ? Math.min(3600, Math.max(20, timeoutOverride))
+        : Math.min(300, Math.max(20, Number(settings.timeoutSeconds) || 120));
     let timedOut = false;
     let timer = null;
     let removeHardStopAbort = null;
@@ -3025,7 +3064,9 @@ async function sendProfileRequest(prompt, options = {}) {
         };
 
         const queuedRequest = (
-            options.splitRequest === true
+            options.profileRaceRequest === true
+                ? enqueueProfileRaceRequest(executeRequest)
+                : options.splitRequest === true
                 ? enqueueSplitOutputRequest(executeRequest)
                 : options.parallelRequest === true
                 ? enqueueScopedParallelRequest(executeRequest)
@@ -3122,6 +3163,22 @@ function configuredProfileCycle() {
     };
 }
 
+function normalizedProfileRaceTimeoutMinutes(value = settings.profileRaceTimeoutMinutes) {
+    return Math.min(1440, Math.max(1, Number(value) || 5));
+}
+
+function profileRaceActive() {
+    return settings.profileRaceEnabled === true
+        && settings.autoProfileFallback !== false
+        && configuredProfiles().length > 1;
+}
+
+function profileRaceTimeoutError(minutes = normalizedProfileRaceTimeoutMinutes()) {
+    const error = new Error(`지연 경주 전체 제한 시간 ${minutes}분을 초과했습니다.`);
+    error.code = 'VERBA_PROFILE_RACE_TIMEOUT';
+    return error;
+}
+
 function profileDisplayName(profileId) {
     return profileList().find(profile => profile.id === String(profileId))?.name || '보조 프로필';
 }
@@ -3133,6 +3190,14 @@ function notifyFallbackUsed(profileId) {
     if (now - lastFallbackNoticeAt < 8000) return;
     lastFallbackNoticeAt = now;
     notify(`현재 프로필 연결 실패로 다른 프로필 “${profileDisplayName(profileId)}”을 사용했어요.`, 'warning');
+}
+
+function notifyProfileRaceWinner(profile) {
+    if (!profile || profile.slot === activeProfileSlot()) return;
+    const now = Date.now();
+    if (now - lastFallbackNoticeAt < 8000) return;
+    lastFallbackNoticeAt = now;
+    notify(`지연 경주에서 프로필 ${profile.slot} “${profileDisplayName(profile.id)}”의 응답을 먼저 사용했어요.`, 'info');
 }
 
 function customTranslatorPromptKey(stage = '') {
@@ -3233,6 +3298,142 @@ ${JSON.stringify(requestData)}
 [END VERBA REQUEST DATA]${galbwaeContract}${lockedSegmentRequestContract(targets, options.stage)}`.trim();
 }
 
+function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfileCycle(), retryAttempt = 0, deadlineAt = Date.now() + 300000) {
+    const candidates = [
+        { slot: profiles.slot, id: profiles.active },
+        ...(profiles.fallbacks || []),
+    ].filter(profile => profile?.id);
+    if (candidates.length < 2) {
+        const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1000));
+        return sendProfileRequest(prompt, {
+            ...options,
+            profileId: candidates[0]?.id || profiles.active,
+            profileSlot: candidates[0]?.slot || profiles.slot,
+            retryAttempt,
+            fallback: false,
+            timeoutSecondsOverride: remainingSeconds,
+        });
+    }
+
+    const outerSignal = options.signal || null;
+    if (outerSignal?.aborted) return Promise.reject(abortError());
+
+    return new Promise((resolve, reject) => {
+        const childControllers = new Map();
+        const errors = [];
+        let nextIndex = 0;
+        let activeCount = 0;
+        let finished = false;
+        let staggerTimer = null;
+
+        const clearStagger = () => {
+            if (!staggerTimer) return;
+            clearTimeout(staggerTimer);
+            staggerTimer = null;
+        };
+        const abortChildren = exceptIndex => {
+            for (const [index, child] of childControllers.entries()) {
+                if (index === exceptIndex || child.signal.aborted) continue;
+                child.abort();
+            }
+        };
+        const cleanup = () => {
+            clearStagger();
+            outerSignal?.removeEventListener?.('abort', onOuterAbort);
+        };
+        const finishFailure = error => {
+            if (finished) return;
+            finished = true;
+            cleanup();
+            abortChildren(-1);
+            reject(error);
+        };
+        const onOuterAbort = () => finishFailure(abortError());
+
+        const scheduleNext = () => {
+            clearStagger();
+            if (finished || nextIndex >= candidates.length) return;
+            const remaining = deadlineAt - Date.now();
+            if (remaining <= 0) {
+                finishFailure(profileRaceTimeoutError());
+                return;
+            }
+            staggerTimer = setTimeout(() => {
+                staggerTimer = null;
+                launchNext();
+            }, Math.min(PROFILE_RACE_STAGGER_MS, remaining));
+        };
+
+        const launchNext = () => {
+            if (finished || nextIndex >= candidates.length) return;
+            const index = nextIndex;
+            const profile = candidates[index];
+            nextIndex += 1;
+            activeCount += 1;
+
+            const child = new AbortController();
+            childControllers.set(index, child);
+            const abortChild = () => child.abort();
+            outerSignal?.addEventListener?.('abort', abortChild, { once: true });
+            const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1000) + 1);
+
+            sendProfileRequest(prompt, {
+                ...options,
+                signal: child.signal,
+                profileId: profile.id,
+                profileSlot: profile.slot,
+                retryAttempt,
+                fallback: index > 0,
+                profileRaceRequest: true,
+                timeoutSecondsOverride: remainingSeconds,
+            }).then(response => {
+                if (finished) return;
+                finished = true;
+                cleanup();
+                abortChildren(index);
+                if (index > 0) notifyProfileRaceWinner(profile);
+                resolve(response);
+            }).catch(error => {
+                if (finished) return;
+                activeCount = Math.max(0, activeCount - 1);
+                errors.push({ index, error });
+
+                if (outerSignal?.aborted) {
+                    finishFailure(abortError());
+                    return;
+                }
+
+                const transient = fallbackEligibleError(error);
+                if (transient && nextIndex < candidates.length) {
+                    clearStagger();
+                    launchNext();
+                    return;
+                }
+
+                if (activeCount === 0) {
+                    if (nextIndex < candidates.length && transient) {
+                        clearStagger();
+                        launchNext();
+                        return;
+                    }
+                    const selected = [...errors].reverse().find(item => fallbackEligibleError(item.error))?.error
+                        || errors.at(-1)?.error
+                        || error;
+                    finishFailure(selected);
+                }
+            }).finally(() => {
+                outerSignal?.removeEventListener?.('abort', abortChild);
+                childControllers.delete(index);
+            });
+
+            scheduleNext();
+        };
+
+        outerSignal?.addEventListener?.('abort', onOuterAbort, { once: true });
+        launchNext();
+    });
+}
+
 async function sendWithRetry(prompt, options = {}) {
     const transientDelays = [3000, 5000, 8000, 12000, 18000];
     const generalDelays = [800, 1200, 1800, 2600, 4000];
@@ -3240,10 +3441,21 @@ async function sendWithRetry(prompt, options = {}) {
     const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
     const controller = new AbortController();
+    const raceEnabled = profileRaceActive();
+    const raceTimeoutMinutes = normalizedProfileRaceTimeoutMinutes();
+    const raceDeadlineAt = raceEnabled ? Date.now() + raceTimeoutMinutes * 60 * 1000 : 0;
+    let raceTimedOut = false;
+    let raceDeadlineTimer = null;
     const forwardAbort = () => controller.abort();
     if (outerSignal) {
         if (outerSignal.aborted) forwardAbort();
         else outerSignal.addEventListener('abort', forwardAbort, { once: true });
+    }
+    if (raceEnabled) {
+        raceDeadlineTimer = setTimeout(() => {
+            raceTimedOut = true;
+            controller.abort();
+        }, Math.max(1, raceDeadlineAt - Date.now()));
     }
 
     const requestOptions = { ...options, signal: controller.signal };
@@ -3258,15 +3470,26 @@ async function sendWithRetry(prompt, options = {}) {
             const primaryProfileId = profiles.active;
 
             try {
-                return await sendProfileRequest(outgoingPrompt, {
-                    ...requestOptions,
-                    profileId: primaryProfileId,
-                    profileSlot: profiles.slot,
-                    retryAttempt: attempt,
-                    fallback: false,
-                });
+                return raceEnabled
+                    ? await sendProfileRaceAttempt(
+                        outgoingPrompt,
+                        requestOptions,
+                        profiles,
+                        attempt,
+                        raceDeadlineAt,
+                    )
+                    : await sendProfileRequest(outgoingPrompt, {
+                        ...requestOptions,
+                        profileId: primaryProfileId,
+                        profileSlot: profiles.slot,
+                        retryAttempt: attempt,
+                        fallback: false,
+                    });
             } catch (primaryError) {
-                if (isAbort(primaryError, controller.signal)) throw primaryError;
+                if (isAbort(primaryError, controller.signal)) {
+                    if (raceTimedOut) throw profileRaceTimeoutError(raceTimeoutMinutes);
+                    throw primaryError;
+                }
 
                 let cycleError = primaryError;
                 const errors = [primaryError];
@@ -3275,7 +3498,7 @@ async function sendWithRetry(prompt, options = {}) {
                 // only temporary server/network/quota errors use B/C profiles.
                 // But the active profile itself is retried for EVERY non-abort
                 // failure, as requested.
-                if (profiles.fallbacks.length && fallbackEligibleError(primaryError)) {
+                if (!raceEnabled && profiles.fallbacks.length && fallbackEligibleError(primaryError)) {
                     for (const fallback of profiles.fallbacks) {
                         console.warn(
                             `[베르바] 현재 선택 프로필 실패 — 프로필 ${fallback.slot} ${profileDisplayName(fallback.id)}(으)로 임시 전환`,
@@ -3302,6 +3525,9 @@ async function sendWithRetry(prompt, options = {}) {
 
                 lastError = cycleError;
                 if (attempt === maxRetries) break;
+                if (raceEnabled && Date.now() >= raceDeadlineAt) {
+                    throw profileRaceTimeoutError(raceTimeoutMinutes);
+                }
 
                 const transient = transientError(cycleError);
                 const fallbackDelay = transient
@@ -3327,7 +3553,13 @@ async function sendWithRetry(prompt, options = {}) {
                     cycleError,
                 );
 
-                await outputTiming.wait(options.timing, () => wait(delay, controller.signal));
+                const boundedDelay = raceEnabled
+                    ? Math.min(delay, Math.max(1, raceDeadlineAt - Date.now()))
+                    : delay;
+                await outputTiming.wait(options.timing, () => wait(boundedDelay, controller.signal));
+                if (raceTimedOut || (raceEnabled && Date.now() >= raceDeadlineAt)) {
+                    throw profileRaceTimeoutError(raceTimeoutMinutes);
+                }
                 state.delayMs = 0;
                 state.updatedAt = Date.now();
                 updateServerRetryIndicator();
@@ -3339,6 +3571,7 @@ async function sendWithRetry(prompt, options = {}) {
             { cause: lastError || undefined },
         );
     } finally {
+        if (raceDeadlineTimer) clearTimeout(raceDeadlineTimer);
         serverRetryStates.delete(token);
         updateServerRetryIndicator();
         outerSignal?.removeEventListener?.('abort', forwardAbort);
@@ -10037,6 +10270,20 @@ function injectSettingsPanel() {
                     <span>번역 실패 시 다른 프로필 자동 사용</span>
                 </label>
                 <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
+
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-profile-race-enabled" ${settings.profileRaceEnabled === true ? 'checked' : ''}>
+                    <span>지연 경주 방식</span>
+                </label>
+                <div class="verba-help">응답이 35초 동안 끝나지 않으면 다음 프로필도 겹쳐 호출하고, 먼저 정상 완료된 번역만 사용해요. 프로필 자동 사용과 서로 다른 프로필 두 개 이상이 필요합니다.</div>
+                <div id="verba-profile-race-options" class="verba-profile-race-options" ${settings.profileRaceEnabled === true && settings.autoProfileFallback !== false ? '' : 'hidden'}>
+                    <label for="verba-profile-race-timeout-minutes">전체 강제 종료 시간</label>
+                    <div class="verba-profile-race-time-row">
+                        <input type="number" inputmode="decimal" min="1" max="1440" step="1" id="verba-profile-race-timeout-minutes" class="text_pole" value="${normalizedProfileRaceTimeoutMinutes()}">
+                        <span>분</span>
+                    </div>
+                    <div class="verba-help">최초 프로필 호출부터 계산해 입력한 시간이 지나면 경주 중인 A·B·C 요청을 모두 종료해요. 마지막 입력값은 저장됩니다.</div>
+                </div>
                 </section>
 
                 <section id="verba-input-settings-group" class="verba-settings-section-group">
@@ -11146,10 +11393,31 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
-    panel.querySelector('#verba-auto-profile-fallback').addEventListener('change', event => {
+    const profileFallbackInput = panel.querySelector('#verba-auto-profile-fallback');
+    const profileRaceInput = panel.querySelector('#verba-profile-race-enabled');
+    const profileRaceOptions = panel.querySelector('#verba-profile-race-options');
+    const profileRaceMinutesInput = panel.querySelector('#verba-profile-race-timeout-minutes');
+    const syncProfileRaceUi = () => {
+        const fallbackEnabled = settings.autoProfileFallback !== false;
+        if (profileRaceInput) profileRaceInput.disabled = !fallbackEnabled;
+        if (profileRaceOptions) profileRaceOptions.hidden = !(fallbackEnabled && settings.profileRaceEnabled === true);
+    };
+    profileFallbackInput.addEventListener('change', event => {
         settings.autoProfileFallback = event.target.checked;
+        syncProfileRaceUi();
         saveSettings();
     });
+    profileRaceInput.addEventListener('change', event => {
+        settings.profileRaceEnabled = event.target.checked;
+        syncProfileRaceUi();
+        saveSettings();
+    });
+    profileRaceMinutesInput.addEventListener('change', event => {
+        settings.profileRaceTimeoutMinutes = normalizedProfileRaceTimeoutMinutes(event.target.value);
+        event.target.value = String(settings.profileRaceTimeoutMinutes);
+        saveSettings();
+    });
+    syncProfileRaceUi();
     const debugModeInput = panel.querySelector('#verba-debug-mode');
     const debugCopyButton = panel.querySelector('#verba-copy-last-debug');
     const syncDebugCopyButton = () => {

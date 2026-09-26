@@ -221,6 +221,34 @@
     writing-mode: horizontal-tb !important;
 }
 
+.verba-profile-race-options {
+    display: grid;
+    gap: 6px;
+    padding: 7px 8px;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 42%, transparent);
+    border-radius: 9px;
+}
+
+.verba-profile-race-options[hidden] {
+    display: none !important;
+}
+
+.verba-profile-race-time-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.verba-profile-race-time-row input {
+    flex: 0 1 110px;
+    width: 110px;
+    min-width: 72px;
+}
+
+.verba-profile-race-time-row > span {
+    white-space: nowrap;
+}
+
 .verba-wide {
     width: 100%;
 }
@@ -3102,6 +3130,16 @@
     flex-basis: 72px;
     width: 72px !important;
     min-width: 72px;
+}
+
+#verba-settings .verba-profile-race-options {
+    gap: 4px;
+    padding: 5px 6px;
+    border-radius: 7px;
+}
+
+#verba-settings .verba-profile-race-time-row {
+    gap: 5px;
 }
 
 #verba-settings .verba-check-row {

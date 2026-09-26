@@ -1,5 +1,5 @@
 {
-  "version": "0.5.101",
+  "version": "0.6.2",
   "checks": [
     {
       "check": "syntax",
@@ -19,12 +19,17 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, 25 visibility controls, tagged-content toggle directly below selection candidates, horizontal visibility actions, compact inner UI and v0.5.101 metadata pass."
+      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.2 metadata pass."
+    },
+    {
+      "check": "profile-race.mjs",
+      "status": "PASS",
+      "output": "The opt-in delayed profile race starts later profiles after 35 seconds or immediately on transient failures, uses the first valid response, aborts losing requests, enforces the saved overall timeout, preserves user cancellation, and exposes a five-minute default."
     },
     {
       "check": "original-baseline-regression",
       "status": "PASS",
-      "output": "34 tests pass. The same 14 stale long-Verba/prompt tests already fail unchanged in the supplied baseline; no new regression was introduced."
+      "output": "35 current tests pass versus 34 in the supplied baseline. The same 14 stale long-Verba/prompt tests fail in both trees; no new regression was introduced."
     },
     {
       "check": "archive",
@@ -33,14 +38,15 @@
     }
   ],
   "changed_files": [
-    "core.js",
     "index.js",
+    "style.css",
     "manifest.json",
     "README.md",
     "VERIFICATION.json",
-    "tests/settings-layout.mjs",
-    "tests/chuseok-galbwae.mjs"
+    "tests/output-timing.mjs",
+    "tests/profile-race.mjs",
+    "tests/settings-layout.mjs"
   ],
-  "scope": "Keep Chuseok Galbwae exclusive while ensuring unchanged Latin character names, including English possessive forms such as Atlas's, are detected and repaired.",
+  "scope": "Add an opt-in delayed profile race with a saved user-selected overall timeout while preserving the existing sequential failover path when disabled.",
   "live_mobile_test": false
 }

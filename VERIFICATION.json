@@ -1,10 +1,15 @@
 {
-  "version": "0.6.9",
+  "version": "0.6.10",
   "checks": [
     {
       "check": "syntax",
       "status": "PASS",
       "output": "All extension JavaScript files pass node --check."
+    },
+    {
+      "check": "google-free.mjs",
+      "status": "PASS",
+      "output": "The optional free Google engine supports E-to-K output and K-to-E input translation without a profile, splits long requests at safe boundaries, preserves protected tokens and whitespace locally, limits concurrency, and blocks AI-only selection/name features."
     },
     {
       "check": "chuseok-galbwae.mjs",
@@ -24,7 +29,7 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.9 metadata pass."
+      "output": "Complete settings markup, unique IDs, visibility controls, engine selector, tagged-content toggle placement, compact inner UI and v0.6.10 metadata pass."
     },
     {
       "check": "profile-race.mjs",
@@ -49,7 +54,7 @@
     {
       "check": "original-baseline-regression",
       "status": "PASS",
-      "output": "40 current tests pass. The remaining 11 failures are the same stale long-Verba or retired prompt-pipeline tests already documented before v0.6.9; no new regression was introduced."
+      "output": "41 current tests pass. The remaining 11 failures are the same stale long-Verba or retired prompt-pipeline tests already documented before v0.6.10; no new regression was introduced."
     },
     {
       "check": "archive",
@@ -58,17 +63,16 @@
     }
   ],
   "changed_files": [
+    "google-free.js",
     "index.js",
     "minimal-output.js",
     "manifest.json",
     "README.md",
     "VERIFICATION.json",
-    "tests/bounded-retries-and-soft-fallback.mjs",
-    "tests/minimal-output.mjs",
+    "tests/google-free.mjs",
     "tests/namespace-isolation.mjs",
-    "tests/response-recovery.mjs",
     "tests/settings-layout.mjs"
   ],
-  "scope": "Disable post-translation AI repair calls without deleting their implementation, keep deterministic local cleanup, and limit malformed or incomplete JSON recovery to one additional request.",
+  "scope": "Add an optional no-key free Google translation engine with safe automatic chunking while preserving the existing AI engine and its settings.",
   "live_mobile_test": false
 }

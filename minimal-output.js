@@ -52,7 +52,8 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     };
     const oneTime = String(options.oneTimeInstruction || '');
     let usedInitialFallback = false;
-    const translations = await runOutputBatches(segmented, outputSplitCount(settings), options, async (segments, batchOptions) => {
+    const effectiveSplitCount = settings.translationEngine === 'google-free' ? 1 : outputSplitCount(settings);
+    const translations = await runOutputBatches(segmented, effectiveSplitCount, options, async (segments, batchOptions) => {
         const request = (targets, repair = '') => {
             batchOptions.signal.throwIfAborted();
             let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime);

@@ -10,9 +10,9 @@ const between=(a,b)=>{
 const defs=between('const RELATION_TEMPERATURE_OPTIONS','const baseContext =');
 const render=Function('dev','escapeHtml',defs+`
     const settings=structuredClone(DEFAULT_SETTINGS);settings.developerMode=dev;
-    const EXTENSION_VERSION='0.6.2',lastQualityAuditSummary='',lastDebugDiagnostic=null;
+    const EXTENSION_VERSION='0.6.4',lastQualityAuditSummary='',lastDebugDiagnostic=null;
     const outputTiming={latest:()=>null},outputTimingText=()=>'',normalizedPromptPresets=()=>[],normalizedPromptPresetBackups=()=>[],promptPresetSelectMarkup=()=>'',baseTranslationEditorMarkup=()=>'';
-    const normalizedProfileRaceTimeoutMinutes=()=>5;
+    const normalizedProfileRaceTimeoutMinutes=()=>5,normalizedProfileFailureTimeoutSeconds=()=>120,normalizedProfileFailureTimeoutMinutes=()=>2;
 `+between('function tuningChoiceMarkup(', 'function normalizeTranslationRuleOrder(')
  +between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')
  +between('function customTranslatorInstructionPlaceholder(', 'function injectSettingsPanel(')
@@ -38,7 +38,7 @@ for(const html of panels){
 }
 const manifest=JSON.parse(fs.readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
 assert.equal(manifest.name,'verba');assert.equal(manifest.display_name,'베르바');
-assert.equal(manifest.version,'0.6.2');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
+assert.equal(manifest.version,'0.6.4');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
 assert.match(style,/#verba-settings > \.inline-drawer > \.inline-drawer-content\s*\{\s*font-size: \.86em;/);
 assert.doesNotMatch(style,/#verba-settings\s*\{\s*font-size:/);
 assert.doesNotMatch(style,/#verba-settings \.verba-drawer-header\s*\{[^}]*min-height:/s);

@@ -8,8 +8,13 @@ assert.match(index, /profileRaceEnabled:\s*false/);
 assert.match(index, /profileRaceTimeoutMinutes:\s*5/);
 assert.match(index, /id="verba-profile-race-enabled"/);
 assert.match(index, /id="verba-profile-race-timeout-minutes"/);
+assert.match(index, /id="verba-profile-failure-timeout-minutes"/);
+assert.doesNotMatch(index, /id="verba-profile-failure-timeout-seconds"/);
+assert.match(index, /settings\.timeoutSeconds\s*=\s*minutes \* 60/);
+assert.match(index, /profileFallbackOptions\.hidden\s*=\s*!fallbackEnabled/);
 assert.match(index, /profileRaceOptions\.hidden\s*=\s*!\(fallbackEnabled && settings\.profileRaceEnabled === true\)/);
 assert.match(style, /\.verba-profile-race-options\[hidden\][\s\S]*display:\s*none\s*!important/);
+assert.match(style, /\.verba-profile-race-time-row input\s*\{[\s\S]*?width:\s*62px\s*!important/);
 
 const start = index.indexOf('function sendProfileRaceAttempt(');
 const end = index.indexOf('\nasync function sendWithRetry(', start);
@@ -43,6 +48,7 @@ const env = {
     abortError,
     fallbackEligibleError: error => error?.code === 'TRANSIENT',
     profileRaceTimeoutError: () => Object.assign(new Error('race timeout'), { code: 'VERBA_PROFILE_RACE_TIMEOUT' }),
+    normalizedProfileFailureTimeoutSeconds: () => 120,
     notifyProfileRaceWinner: profile => notices.push(profile.slot),
     PROFILE_RACE_STAGGER_MS: 12,
     Date, Promise, AbortController, setTimeout, clearTimeout,
@@ -57,11 +63,12 @@ const winner = await sendProfileRaceAttempt(
     {},
     { active: 'a', slot: 'A', fallbacks: [{ id: 'b', slot: 'B' }] },
     0,
-    Date.now() + 1000,
+    Date.now() + 1000000,
 );
 assert.equal(winner.content, 'B');
 assert.deepEqual(calls.map(call => call.options.profileSlot), ['A', 'B']);
 assert.ok(calls.every(call => call.options.profileRaceRequest === true));
+assert.ok(calls.every(call => call.options.timeoutSecondsOverride === 120));
 assert.deepEqual(notices, ['B']);
 assert.ok(aborted.includes('A'));
 

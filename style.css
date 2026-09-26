@@ -221,6 +221,7 @@
     writing-mode: horizontal-tb !important;
 }
 
+.verba-profile-fallback-options,
 .verba-profile-race-options {
     display: grid;
     gap: 6px;
@@ -229,22 +230,27 @@
     border-radius: 9px;
 }
 
+.verba-profile-fallback-options[hidden],
 .verba-profile-race-options[hidden] {
     display: none !important;
 }
 
+.verba-profile-fallback-time-row,
 .verba-profile-race-time-row {
     display: flex;
     align-items: center;
     gap: 7px;
 }
 
+.verba-profile-fallback-time-row input,
 .verba-profile-race-time-row input {
-    flex: 0 1 110px;
-    width: 110px;
-    min-width: 72px;
+    flex: 0 0 62px;
+    width: 62px !important;
+    min-width: 62px;
+    max-width: 62px;
 }
 
+.verba-profile-fallback-time-row > span,
 .verba-profile-race-time-row > span {
     white-space: nowrap;
 }
@@ -3132,12 +3138,14 @@
     min-width: 72px;
 }
 
+#verba-settings .verba-profile-fallback-options,
 #verba-settings .verba-profile-race-options {
     gap: 4px;
     padding: 5px 6px;
     border-radius: 7px;
 }
 
+#verba-settings .verba-profile-fallback-time-row,
 #verba-settings .verba-profile-race-time-row {
     gap: 5px;
 }

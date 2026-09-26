@@ -76,6 +76,7 @@ const env = {
     configuredProfileCycle: () => ({ active: 'a', slot: 'A', fallbacks }),
     profileRaceActive: () => false,
     normalizedProfileRaceTimeoutMinutes: () => 5,
+    normalizedProfileFailureTimeoutSeconds: () => 20,
     profileRaceTimeoutError: () => Object.assign(new Error('race timeout'), { code: 'VERBA_PROFILE_RACE_TIMEOUT' }),
     sendProfileRaceAttempt: () => { throw new Error('profile race must stay disabled in this legacy timing fixture'); },
     fallbackEligibleError: () => true, transientError: () => false, retryAfterMs: () => 0,

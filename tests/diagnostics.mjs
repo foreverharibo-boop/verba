@@ -55,6 +55,7 @@ let serviceImpl;
 const dependencies = {
     outputTiming: createOutputTiming(),
     settings, profileSlotForId: () => 'A', profileList: () => [{ id: 'test' }], performance,
+    normalizedProfileFailureTimeoutSeconds: () => 20,
     AbortController, Promise, setTimeout, clearTimeout, VERBA_MAX_TOKENS: 1000,
     abortError: () => new DOMException('cancelled', 'AbortError'),
     liveContext: () => ({ ConnectionManagerRequestService: { sendRequest: (...args) => serviceImpl(...args) } }),

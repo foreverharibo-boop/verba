@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.2';
+const EXTENSION_VERSION = '0.6.4';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -411,6 +411,7 @@ const legacyProfileStats = settings.profileStats;
 let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
+settings.timeoutSeconds = Math.min(3600, Math.max(60, Number(settings.timeoutSeconds) || 120));
 settings.profileRaceEnabled = settings.profileRaceEnabled === true;
 settings.profileRaceTimeoutMinutes = Math.min(1440, Math.max(1, Number(settings.profileRaceTimeoutMinutes) || 5));
 settings.translateTaggedContent = settings.translateTaggedContent !== false;
@@ -3006,7 +3007,7 @@ async function sendProfileRequest(prompt, options = {}) {
     const timeoutOverride = Number(options.timeoutSecondsOverride);
     const timeoutSeconds = Number.isFinite(timeoutOverride) && timeoutOverride > 0
         ? Math.min(3600, Math.max(20, timeoutOverride))
-        : Math.min(300, Math.max(20, Number(settings.timeoutSeconds) || 120));
+        : normalizedProfileFailureTimeoutSeconds();
     let timedOut = false;
     let timer = null;
     let removeHardStopAbort = null;
@@ -3167,6 +3168,14 @@ function normalizedProfileRaceTimeoutMinutes(value = settings.profileRaceTimeout
     return Math.min(1440, Math.max(1, Number(value) || 5));
 }
 
+function normalizedProfileFailureTimeoutSeconds(value = settings.timeoutSeconds) {
+    return Math.min(3600, Math.max(60, Number(value) || 120));
+}
+
+function normalizedProfileFailureTimeoutMinutes(value = Number(settings.timeoutSeconds) / 60) {
+    return Math.min(60, Math.max(1, Math.round(Number(value) || 2)));
+}
+
 function profileRaceActive() {
     return settings.profileRaceEnabled === true
         && settings.autoProfileFallback !== false
@@ -3305,13 +3314,14 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
     ].filter(profile => profile?.id);
     if (candidates.length < 2) {
         const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1000));
+        const attemptTimeoutSeconds = Math.min(normalizedProfileFailureTimeoutSeconds(), remainingSeconds);
         return sendProfileRequest(prompt, {
             ...options,
             profileId: candidates[0]?.id || profiles.active,
             profileSlot: candidates[0]?.slot || profiles.slot,
             retryAttempt,
             fallback: false,
-            timeoutSecondsOverride: remainingSeconds,
+            timeoutSecondsOverride: attemptTimeoutSeconds,
         });
     }
 
@@ -3376,6 +3386,7 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
             const abortChild = () => child.abort();
             outerSignal?.addEventListener?.('abort', abortChild, { once: true });
             const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1000) + 1);
+            const attemptTimeoutSeconds = Math.min(normalizedProfileFailureTimeoutSeconds(), remainingSeconds);
 
             sendProfileRequest(prompt, {
                 ...options,
@@ -3385,7 +3396,7 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
                 retryAttempt,
                 fallback: index > 0,
                 profileRaceRequest: true,
-                timeoutSecondsOverride: remainingSeconds,
+                timeoutSecondsOverride: attemptTimeoutSeconds,
             }).then(response => {
                 if (finished) return;
                 finished = true;
@@ -10270,6 +10281,14 @@ function injectSettingsPanel() {
                     <span>번역 실패 시 다른 프로필 자동 사용</span>
                 </label>
                 <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
+                <div id="verba-profile-fallback-options" class="verba-profile-fallback-options" ${settings.autoProfileFallback !== false ? '' : 'hidden'}>
+                    <label for="verba-profile-failure-timeout-minutes">프로필 실패 판정 시간</label>
+                    <div class="verba-profile-fallback-time-row">
+                        <input type="number" inputmode="numeric" min="1" max="60" step="1" id="verba-profile-failure-timeout-minutes" class="text_pole" value="${normalizedProfileFailureTimeoutMinutes()}">
+                        <span>분</span>
+                    </div>
+                    <div class="verba-help">한 프로필이 이 시간 안에 응답을 끝내지 못하면 시간초과 실패로 처리해요. 자동 전환이 켜져 있으면 다음 프로필로 넘어가며, 지연 경주 중에도 각 프로필에 적용됩니다.</div>
+                </div>
 
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-profile-race-enabled" ${settings.profileRaceEnabled === true ? 'checked' : ''}>
@@ -11394,11 +11413,14 @@ function injectSettingsPanel() {
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
     const profileFallbackInput = panel.querySelector('#verba-auto-profile-fallback');
+    const profileFallbackOptions = panel.querySelector('#verba-profile-fallback-options');
+    const profileFailureTimeoutInput = panel.querySelector('#verba-profile-failure-timeout-minutes');
     const profileRaceInput = panel.querySelector('#verba-profile-race-enabled');
     const profileRaceOptions = panel.querySelector('#verba-profile-race-options');
     const profileRaceMinutesInput = panel.querySelector('#verba-profile-race-timeout-minutes');
     const syncProfileRaceUi = () => {
         const fallbackEnabled = settings.autoProfileFallback !== false;
+        if (profileFallbackOptions) profileFallbackOptions.hidden = !fallbackEnabled;
         if (profileRaceInput) profileRaceInput.disabled = !fallbackEnabled;
         if (profileRaceOptions) profileRaceOptions.hidden = !(fallbackEnabled && settings.profileRaceEnabled === true);
     };
@@ -11410,6 +11432,12 @@ function injectSettingsPanel() {
     profileRaceInput.addEventListener('change', event => {
         settings.profileRaceEnabled = event.target.checked;
         syncProfileRaceUi();
+        saveSettings();
+    });
+    profileFailureTimeoutInput.addEventListener('change', event => {
+        const minutes = normalizedProfileFailureTimeoutMinutes(event.target.value);
+        settings.timeoutSeconds = minutes * 60;
+        event.target.value = String(minutes);
         saveSettings();
     });
     profileRaceMinutesInput.addEventListener('change', event => {

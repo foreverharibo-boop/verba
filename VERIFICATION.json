@@ -1,5 +1,5 @@
 {
-  "version": "0.6.7",
+  "version": "0.6.8",
   "checks": [
     {
       "check": "syntax",
@@ -24,7 +24,7 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.7 metadata pass."
+      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.8 metadata pass."
     },
     {
       "check": "profile-race.mjs",

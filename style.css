@@ -2619,6 +2619,42 @@
     opacity: .56;
 }
 
+.verba-custom-translator-group-title {
+    margin: 9px 1px 5px;
+    font-size: .86em;
+    font-weight: 700;
+    color: var(--verba-text);
+}
+
+.verba-custom-translator-advanced {
+    margin: 9px 0;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 48%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--verba-surface) 96%, var(--verba-accent) 4%);
+    overflow: hidden;
+}
+
+.verba-custom-translator-advanced > summary {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 10px;
+    cursor: pointer;
+    font-size: .88em;
+    font-weight: 700;
+}
+
+.verba-custom-translator-advanced > summary small {
+    margin-left: auto;
+    font-size: .78em;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--verba-text) 68%, transparent);
+}
+
+.verba-custom-translator-advanced-content {
+    padding: 0 8px 3px;
+}
+
 
 /* v0.4.11: recent prompt-preset backups */
 .verba-prompt-preset-backups {

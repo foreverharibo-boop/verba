@@ -48,7 +48,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.7';
+const EXTENSION_VERSION = '0.6.8';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -10210,7 +10210,15 @@ function customTranslatorFieldMarkup(item) {
 }
 
 function customTranslatorSettingsMarkup() {
-    const fields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(customTranslatorFieldMarkup).join('');
+    const generalKeys = new Set(['output', 'input', 'selection', 'flavor']);
+    const generalFields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS
+        .filter(item => generalKeys.has(item.key))
+        .map(customTranslatorFieldMarkup)
+        .join('');
+    const advancedFields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS
+        .filter(item => !generalKeys.has(item.key))
+        .map(customTranslatorFieldMarkup)
+        .join('');
     return `
         <details id="verba-custom-translator" class="verba-tool-details verba-custom-translator">
             <summary>커스텀 번역기 <small>요청별 지침 교체</small></summary>
@@ -10221,7 +10229,14 @@ function customTranslatorSettingsMarkup() {
                 </label>
                 <div class="verba-help verba-custom-translator-intro">각 칸에는 현재 베르바가 사용하는 <b>기존 영어 내장 프롬프트 원문</b>이 표시됩니다. 원문 데이터와 잠긴 JSON 응답 계약처럼 실행할 때 자동으로 붙는 부분만 제외하고, 실제 수정 대상인 지침 본문은 줄이지 않고 그대로 불러옵니다. 그대로 두면 실제 번역은 기존 동적 내장 프롬프트를 사용하고, 베르바 업데이트 때 이 글도 최신 기본값으로 따라갑니다. 내용을 편집하면 그 항목만 커스텀 지침으로 전환되어 기존 프롬프트를 완전히 대체하며 이후 업데이트에도 보존됩니다.</div>
                 <div id="verba-custom-translator-controls" class="${settings.customTranslatorEnabled ? '' : 'verba-control-disabled'}">
-                    ${fields}
+                    <div class="verba-custom-translator-group-title">일반 사용자용</div>
+                    ${generalFields}
+                    <details class="verba-custom-translator-advanced">
+                        <summary>고급 내부 항목 <small>내부 처리용 · 수정 비추천</small></summary>
+                        <div class="verba-custom-translator-advanced-content">
+                            ${advancedFields}
+                        </div>
+                    </details>
                     <div class="verba-help">각 입력칸은 확대해서 편집할 수 있고, 확대창을 닫으면 자동 저장돼요.</div>
                     <button type="button" id="verba-custom-translator-reset" class="menu_button verba-wide">커스텀 번역기 전체 초기화</button>
                 </div>

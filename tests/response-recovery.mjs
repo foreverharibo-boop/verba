@@ -144,9 +144,9 @@ await request('prompt', [targets[0]], {}); assert.equal(log.latest(), null); ass
 settings.debugMode = true; calls = []; responses = [cut, valid];
 midway = n => { if (n === 2) { settings.debugMode = false; log.clear(); settings.debugMode = true; } };
 await request('prompt', targets, {}); assert.equal(log.latest(), null, 'successful retry must not resurrect cleared log');
-midway = () => {}; calls = []; responses = Array(6).fill('{broken');
+midway = () => {}; calls = []; responses = Array(2).fill('{broken');
 await assert.rejects(request('prompt', targets, {}), e => e.missingSegments.length === 2 && e.partialTranslations.size === 0);
-assert.equal(calls.length, 6);
+assert.equal(calls.length, 2);
 assert.equal(log.latest().recovery.status, '재시도 종료·미복구');
 console.log('PASS: safe syntax recovery, exact text preservation, truncated-row salvage, malformed/ambiguous rejection, missing-only retry, intermediate recovered logs and debug OFF/reset (mock AI).');
 

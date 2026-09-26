@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { minimalOutputEnabled, buildMinimalOutputPrompt, translateMinimalOutput } from '../minimal-output.js';
+import { minimalOutputEnabled, buildMinimalOutputPrompt, POST_TRANSLATION_AI_REPAIR_ENABLED, translateMinimalOutput } from '../minimal-output.js';
 import { splitOutputSegments } from '../output-splitting.js';
 const splitMinimalOutputSegments = segmented => splitOutputSegments(segmented, 2);
 import { segmentSource, restoreProtected, assembleTranslation, buildOutputPrompt } from '../core.js';
@@ -57,8 +57,9 @@ for(const count of [1,2,3]){
  assert.equal(merged.translation,result.translation);assert.deepEqual(merged.sourceMap,result.sourceMap);
 }
 
-// Galbwae minimal mode conditionally repairs only strong unchanged Latin
-// character-name leftovers instead of paying for another call on clean output.
+assert.equal(POST_TRANSLATION_AI_REPAIR_ENABLED, false);
+// The dormant name-repair path remains in source, but the normal request does
+// not pay for a second AI call while post-translation repair is disabled.
 const nameSegmented=segmentSource('Aila called Calix. Atlas answered Aila.');
 let nameCalls=[];
 const nameRequest=async(prompt,segments,opts)=>{
@@ -69,11 +70,9 @@ const nameRequest=async(prompt,segments,opts)=>{
  return new Map(segments.map(segment=>[segment.id,translation]));
 };
 const nameResult=await translateMinimalOutput(nameSegmented,{...settings,developerOutputSplitCount:1,chuseokGalbwaeScope:'all'},{},{requestSegments:nameRequest,buildSourceMap});
-assert.equal(nameCalls.length,2);
-assert.equal(nameCalls[1].opts.stage,'untranslated-name-repair');
-assert.match(nameCalls[1].prompt,/Every clear human or fictional character name must use natural Hangul/);
-assert.match(nameResult.translation,/아일라가 칼릭스를 불렀고 아틀라스가/);
-assert.doesNotMatch(nameResult.translation,/\b(?:Aila|Calix|Atlas)\b/);
+assert.equal(nameCalls.length,1);
+assert.match(nameResult.translation,/Aila가 Calix를 불렀고 Atlas는/);
+assert.match(fs.readFileSync(new URL('../minimal-output.js', import.meta.url),'utf8'),/repair === 'names'[\s\S]*untranslated-name-repair/);
 
 // Actual entry point must branch before any optional planning, classification,
 // banned-word repair or quality audit, even when all those options are enabled.
@@ -82,17 +81,17 @@ const run=route(settings,()=>[],segmentSource,minimalOutputEnabled,translateMini
 calls=[];await run('He waited.');assert.equal(calls.length,1);
 settings.developerMode=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMode=true;
 settings.developerMinimalPromptEnabled=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMinimalPromptEnabled=true;
-// Protect-token repair stays minimal and only retries the affected target.
-// 손상 견본은 구조 보호 토큰(<b>)으로 만든다. 이름 보호 토큰 누락은 한국어의 자연스러운
-// 주어 생략이므로 더 이상 손상으로 보지 않고 AI 복구를 요청하지 않는다.
+// Protected-token repair code stays present but inactive. A successful initial
+// batch is returned without any post-translation AI request.
 let attempts=0;const damaged=segmentSource('<b>Hong-jin</b> waited.\n\nShe nodded.',[{source:'Hong-jin',target:'홍진'}]);
 await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(prompt,segments,opts)=>{
  attempts++;assert.ok(!prompt.includes('HONGJIN FLAVOR'));
  if(opts.stage!=='protected-token-repair')return new Map(segments.map(s=>[s.id,'기다렸다.']));
  assert.equal(opts.stage,'protected-token-repair');assert.equal(segments.length,1);
  return new Map(segments.map(s=>[s.id,translated(s)]));
-}});assert.equal(attempts,3);
-attempts=0;await assert.rejects(translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(_p,ss)=>{attempts++;return new Map(ss.map(s=>[s.id,'누락']));}}),/보호 요소/);assert.equal(attempts,7);
+}});assert.equal(attempts,2);
+attempts=0;const fallbackResult=await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(_p,ss)=>{attempts++;return new Map(ss.map(s=>[s.id,'누락']));}});
+assert.equal(attempts,2);assert.match(fallbackResult.translation,/누락/);
 const controller=new AbortController();controller.abort();calls=[];
 await assert.rejects(translateMinimalOutput(segmented,settings,{signal:controller.signal},{requestSegments,buildSourceMap}),{name:'AbortError'});assert.equal(calls.length,0);
 // Existing local newline cleanup and offsets still agree after assembly.

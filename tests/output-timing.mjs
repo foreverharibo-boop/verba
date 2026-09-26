@@ -79,7 +79,7 @@ const env = {
     normalizedProfileFailureTimeoutSeconds: () => 20,
     profileRaceTimeoutError: () => Object.assign(new Error('race timeout'), { code: 'VERBA_PROFILE_RACE_TIMEOUT' }),
     sendProfileRaceAttempt: () => { throw new Error('profile race must stay disabled in this legacy timing fixture'); },
-    fallbackEligibleError: () => true, transientError: () => false, retryAfterMs: () => 0,
+    fallbackEligibleError: () => true, transientError: error => /503/.test(error?.message || ''), retryAfterMs: () => 0,
     errorText: e => e.message, profileDisplayName: id => id, notifyFallbackUsed: () => {},
     applyCustomTranslatorPrompt: prompt => prompt,
     serverRetryStates: new Map(), updateServerRetryIndicator: () => {},
@@ -103,7 +103,7 @@ time = 0; calls = 0; const retryJob = begin();
 provider = async () => { time += 100; if (++calls === 1) throw new Error('503'); return success; };
 await api.sendWithRetry('private', { timing: retryJob, stage: 'output-translation' });
 recorder.finish(retryJob, '완료'); r = recorder.latest();
-assert.equal(r.counts.total, 2); assert.equal(r.counts.retry, 1); assert.equal(r.durations.backoff, 800);
+assert.equal(r.counts.total, 2); assert.equal(r.counts.retry, 1); assert.equal(r.durations.backoff, 3000);
 assert.equal(r.rows[0].status, '오류'); assert.equal(r.rows[1].reason, '요청 오류 재시도');
 
 time = 0; calls = 0; fallbacks = [{ id: 'b', slot: 'B' }]; const fallbackJob = begin();

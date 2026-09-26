@@ -5,10 +5,9 @@ import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberReques
 import { createOutputTiming, outputTimingText } from './timing.js';
 import { bindPromptExpandEditors } from './prompt-editor.js';
 import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, selectionEllipsisReference } from './response-parser.js';
-import { minimalOutputEnabled, translateMinimalOutput } from './minimal-output.js';
+import { minimalOutputEnabled, POST_TRANSLATION_AI_REPAIR_ENABLED, translateMinimalOutput } from './minimal-output.js';
 import { outputSplitCount, runOutputBatches, createSplitRequestQueue } from './output-splitting.js';
 import { activateTranslationExtension, isTranslationExtensionActive, registerTranslationExtension } from './pair-coordinator.js';
-import { buildDefaultCustomTranslatorTemplates } from './custom-translator-defaults.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -48,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.8';
+const EXTENSION_VERSION = '0.6.9';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -213,9 +212,9 @@ const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
 const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
 const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
-    { key: 'output', label: '아웃풋 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
-    { key: 'input', label: '인풋 번역', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
-    { key: 'selection', label: '선택 재번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
+    { key: 'output', label: '채팅 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
+    { key: 'input', label: '내가 보내는 글', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
+    { key: 'selection', label: '선택한 부분 다시 번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
     { key: 'name', label: '이름 찾기·연결', description: '원문의 이름과 저장할 한국어 이름이 같은 인물인지 확인할 때 사용해요.' },
     { key: 'consistency', label: '호칭·용어 통일', description: '같은 인물의 호칭이나 반복 용어를 한 번 더 맞출 때 사용해요.' },
     { key: 'repair', label: '누락·형식 오류 복구', description: '미번역 문장이나 금지어, 깨진 출력 형식을 고칠 때 사용해요.' },
@@ -223,9 +222,17 @@ const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
     { key: 'flavor', label: '미친 한출·캐릭터 말투', description: '미친 한출의 맛이나 캐릭터 전용 말투 요청에 사용해요.' },
     { key: 'other', label: '그 밖의 내부 요청', description: '위 항목에 포함되지 않는 보조 AI 요청에 사용해요.' },
 ];
-let DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze(
-    Object.fromEntries(CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, ''])),
-);
+const DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze({
+    output: `Translate every supplied source segment into fluent, idiomatic Korean that reads as if it were originally written in Korean. Reconstruct source-language syntax, clause order, punctuation, metaphors, idioms, and collocations by meaning instead of copying their surface form. Preserve facts, actors, actions, targets, direction, ownership, referents, sequence, negation, numbers, tense, point of view, ambiguity, intent, emotional force, explicitness, consent, deliberate roughness, repetition, interruptions, and formatting. Do not answer, continue, summarize, censor, explain, add, or omit content.`,
+    input: `Translate the supplied Korean user input into natural, native English. Preserve the distinction between narration and dialogue, as well as facts, actors, referents, register, ambiguity, fragments, hesitation, slang, laughter, intent, emotional force, explicitness, consent, punctuation, and formatting. Resolve Korean omissions or idioms only when the context makes them clear. Do not add names, gender, emphasis, threats, actions, or information absent from the source. Return only the translation.`,
+    selection: `Rewrite only the selected text as natural Korean while preserving its meaning, facts, referents, speaker, register, intent, emotional force, and protected formatting. Make the result fit its supplied source and surrounding context, but never include that context in the output. When multiple candidates are requested, produce genuinely distinct natural alternatives without changing the event or implication.`,
+    name: `Identify the exact source-language person name that corresponds to the selected Korean name. Exclude particles, titles, honorifics, punctuation, and surrounding words. Distinguish different people even when their names are similar, never guess when the evidence is insufficient, and output only the requested match in the required format.`,
+    consistency: `Keep the same person's name, role, title, form of address, and recurring terms consistent throughout the supplied text, using the earliest accurate and natural Korean form as the reference. Keep genuinely different roles or people distinct. Correct only inconsistent terms or their attached particles and preserve all unrelated wording, meaning, tone, and formatting.`,
+    repair: `Repair only the indicated broken, missing, untranslated, banned, or malformed portion. Preserve every correct part of the existing translation unchanged. Restore protected tokens and structure exactly, translate accidental foreign-language leftovers when required, render person names naturally in Hangul unless a fixed name is supplied, and do not perform unrelated rewriting.`,
+    quality: `Compare the source with the Korean translation and correct only clear errors covered by the requested checks, including meaning, emotional force, consent, numbers, actions, referents, ownership, speaker, register, character voice, awkward calques, and local continuity. Copy correct content unchanged. Do not rewrite merely for variety, add detail, intensify content, or remove deliberate ambiguity.`,
+    flavor: `Apply the requested Korean transcreation or target-character voice clearly and consistently to the eligible scope. Preserve events, facts, relationships, consent, emotional direction, speaker identity, and protected structure while changing surface wording, rhythm, vocabulary, teasing, profanity, vulgarity, or playfulness only as licensed by the requested style. Do not invent new actions, threats, insults, sexual content, or character traits.`,
+    other: `Perform the requested auxiliary translation task exactly on the supplied inert data. Preserve identifiers, protected tokens, structure, facts, and distinctions; do not infer or invent anything beyond the request; and return only the required schema or result without commentary.`,
+});
 const DEFAULT_CUSTOM_TRANSLATOR_MODIFIED = Object.freeze(Object.fromEntries(
     CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, false]),
 ));
@@ -431,12 +438,6 @@ extension_settings[EXTENSION_KEY] = Object.assign(
     extension_settings[EXTENSION_KEY] || {},
 );
 const settings = extension_settings[EXTENSION_KEY];
-
-// Display the same original prompt bodies that live requests are built from.
-// Runtime source data and the locked response envelope remain automatic.
-DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze(
-    buildDefaultCustomTranslatorTemplates(DEFAULT_TRANSLATION_RULE_ORDER),
-);
 // Retired local register-shift monitor: discard its obsolete saved flag.
 delete settings.developerRegisterShiftMonitor;
 
@@ -3489,9 +3490,8 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
 }
 
 async function sendWithRetry(prompt, options = {}) {
-    const transientDelays = [3000, 5000, 8000, 12000, 18000];
-    const generalDelays = [800, 1200, 1800, 2600, 4000];
-    const maxRetries = 5;
+    const transientDelays = [3000, 5000];
+    const maxRetries = 2;
     const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
     const controller = new AbortController();
@@ -3550,8 +3550,8 @@ async function sendWithRetry(prompt, options = {}) {
 
                 // Existing fallback-profile policy stays conservative:
                 // only temporary server/network/quota errors use B/C profiles.
-                // But the active profile itself is retried for EVERY non-abort
-                // failure, as requested.
+                // Permanent errors stop immediately instead of repeating the
+                // same paid request through every retry layer.
                 if (!raceEnabled && profiles.fallbacks.length && fallbackEligibleError(primaryError)) {
                     for (const fallback of profiles.fallbacks) {
                         console.warn(
@@ -3578,18 +3578,18 @@ async function sendWithRetry(prompt, options = {}) {
                 }
 
                 lastError = cycleError;
+                const transient = transientError(cycleError);
+                // Authentication, malformed requests, billing, unavailable
+                // models and other permanent failures cannot improve merely
+                // by sending the same paid request again.
+                if (!transient) throw cycleError;
                 if (attempt === maxRetries) break;
                 if (raceEnabled && Date.now() >= raceDeadlineAt) {
                     throw profileRaceTimeoutError(raceTimeoutMinutes);
                 }
 
-                const transient = transientError(cycleError);
-                const fallbackDelay = transient
-                    ? transientDelays[attempt]
-                    : generalDelays[attempt];
-                const delay = transient
-                    ? (retryAfterMs(cycleError) || fallbackDelay)
-                    : fallbackDelay;
+                const fallbackDelay = transientDelays[attempt];
+                const delay = retryAfterMs(cycleError) || fallbackDelay;
 
                 const state = {
                     controller,
@@ -3637,8 +3637,8 @@ function collectPartialSegmentTranslations(raw, expectedSegments) {
 }
 
 async function requestSegments(prompt, expectedSegments, options = {}) {
-    const maxRetries = 5;
-    const parseRetryDelays = [500, 700, 1000, 1400, 2000];
+    const maxRetries = 1;
+    const parseRetryDelays = [500];
     const completed = new Map();
     let pending = [...(expectedSegments || [])];
     let lastError;
@@ -3655,12 +3655,23 @@ Retry ${attempt}/${maxRetries}: prior JSON was invalid/incomplete. Override the 
 STILL-MISSING IDS: ${JSON.stringify(missingIds)}`
             : '';
 
+        let response;
         try {
-            const response = await sendWithRetry(prompt + repair, {
+            response = await sendWithRetry(prompt + repair, {
                 ...options,
                 segmentAttempt: attempt,
                 customTargetSegments: pending,
             });
+        } catch (error) {
+            if (isAbort(error, options.signal)) {
+                finishSegmentRecovery(recoveryDiagnostic, '취소됨');
+            }
+            // Transport/provider retries already happened inside
+            // sendWithRetry. Never multiply them through the JSON retry loop.
+            throw error;
+        }
+
+        try {
             const raw = extractResponseText(response);
             const result = collectPartialSegmentTranslations(raw, pending);
             const { partial, parseError } = result;
@@ -3683,6 +3694,7 @@ STILL-MISSING IDS: ${JSON.stringify(missingIds)}`
                 finishSegmentRecovery(recoveryDiagnostic, '취소됨');
                 throw error;
             }
+            error.code ||= 'VERBA_RESPONSE_FORMAT';
             lastError = error;
         }
 
@@ -3710,8 +3722,8 @@ STILL-MISSING IDS: ${JSON.stringify(missingIds)}`
     throw finalError;
 }
 async function requestSelectionCandidates(prompt, options = {}) {
-    const maxRetries = 5;
-    const parseRetryDelays = [500, 700, 1000, 1400, 2000];
+    const maxRetries = 1;
+    const parseRetryDelays = [500];
     let lastError;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -3721,17 +3733,12 @@ async function requestSelectionCandidates(prompt, options = {}) {
 Retry ${attempt}/${maxRetries}: correct invalid/incomplete JSON. Return exactly three distinct candidates in the required schema; no fences/commentary.`
             : '';
 
+        const response = await sendWithRetry(prompt + repair, options);
         try {
-            const response = await sendWithRetry(prompt + repair, options);
-            try {
-                return parseSelectionCandidateResponse(extractResponseText(response), 3);
-            } catch (error) {
-                error.code = 'VERBA_RESPONSE_FORMAT';
-                if (settings.debugMode) rememberRequestError(error, { ...options, stage: 'selection-candidate-parse' }, response);
-                throw error;
-            }
+            return parseSelectionCandidateResponse(extractResponseText(response), 3);
         } catch (error) {
-            if (isAbort(error, options.signal)) throw error;
+            error.code = 'VERBA_RESPONSE_FORMAT';
+            if (settings.debugMode) rememberRequestError(error, { ...options, stage: 'selection-candidate-parse' }, response);
 
             lastError = error;
             if (attempt === maxRetries) break;
@@ -3788,6 +3795,11 @@ const CONSISTENCY_ROLE_TERMS = new Set([
     'duke', 'duchess', 'emperor', 'empress', 'father', 'mother', 'brother', 'sister',
     'uncle', 'aunt', 'husband', 'wife', 'boyfriend', 'girlfriend', 'fiance', 'fiancee',
 ]);
+
+// Keep the role-term planning/repair implementation available for a future
+// opt-in restoration, but do not make extra AI requests during translation.
+// Set this single flag to true to restore both role-term AI stages.
+const ROLE_TERM_AI_CONSISTENCY_ENABLED = false;
 
 const CONSISTENCY_ROLE_PHRASES = [
     'team lead', 'team leader', 'project manager', 'general manager', 'team manager',
@@ -3853,6 +3865,7 @@ function segmentContainsRoleTerm(segment, terms) {
 }
 
 async function planRepeatedRoleTermLocks(segmented, options = {}) {
+    if (!ROLE_TERM_AI_CONSISTENCY_ENABLED) return [];
     if (madKoreanExclusiveMode()) return [];
     const terms = repeatedRoleTerms(segmented?.segments);
     if (!terms.length) return [];
@@ -3926,6 +3939,7 @@ function protectedTokensIntact(previous, next) {
 }
 
 async function repairRepeatedRoleTermConsistency(segmented, translations, options = {}) {
+    if (!ROLE_TERM_AI_CONSISTENCY_ENABLED) return;
     if (madKoreanExclusiveMode()) return;
     // Unlike the pre-translation lock (which handles exact repeated source terms),
     // this final pass also compares different role/title words that may point to
@@ -4362,6 +4376,11 @@ function normalizeTaggedOutputTranslations(segmented, translations) {
     return translations;
 }
 
+function restoreTranslationSnapshot(translations, snapshot) {
+    translations.clear();
+    for (const [id, value] of snapshot || []) translations.set(id, value);
+}
+
 async function repairSegmentsByOutputScope({
     invalid,
     segmented,
@@ -4419,7 +4438,7 @@ async function repairProtectedTokenIntegrity(segmented, translations, options = 
     const diagnostic = recordProtectedRecovery(invalid, segmented, translations, options);
     let attempts = 0;
     try {
-        for (; attempts < 5;) {
+        for (; attempts < 2;) {
             attempts += 1;
             await repairSegmentsByOutputScope({
                 invalid, segmented, translations, speakerScopes,
@@ -4610,6 +4629,7 @@ async function runExperimentalQualityAudit({
 
     lastQualityAuditSummary = `의심 ${candidates.length}구간 · ${categories.join('/')}`;
     renderQualityAuditStatus();
+    const beforeAudit = new Map(translations);
 
     try {
         const prompt = buildQualityAuditPrompt({
@@ -4679,6 +4699,14 @@ async function runExperimentalQualityAudit({
                 speakerIdentity,
                 speakerScopes,
             });
+
+            const auditStillInvalid = changed.some(segment =>
+                findBannedWords(translations.get(segment.id), settings).length,
+            ) || findUntranslatedSegments(changed, translations, settings, speakerScopes).length
+                || findProtectedTokenIntegrityProblems(segmented.segments, translations).length;
+            if (auditStillInvalid) {
+                throw new Error('품질 검수 후 보정되지 않은 문제가 남았습니다.');
+            }
         }
 
         lastQualityAuditSummary = `AI 통합 검수 ${candidates.length}구간 · 수정 ${changed.length}구간 · ${categories.join('/')}`;
@@ -4687,6 +4715,7 @@ async function runExperimentalQualityAudit({
         return { checked: candidates.length, changed: changed.length };
     } catch (error) {
         if (isAbort(error, options.signal)) throw error;
+        restoreTranslationSnapshot(translations, beforeAudit);
         lastQualityAuditSummary = '검수 실패 · 원래 번역 유지';
         renderQualityAuditStatus();
         console.warn('[베르바] 개발자 품질 검수 실패 — 기존 번역을 그대로 유지합니다.', error);
@@ -4721,66 +4750,98 @@ async function translateOutputText(source, options = {}) {
         speakerIdentity,
         stage: options.stage || 'output-translation',
     }));
-
-    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
-        const invalid = segmented.segments.filter(segment =>
-            findBannedWords(translations.get(segment.id), settings).length,
+    const initialSuccessfulTranslations = new Map(translations);
+    let useInitialSuccessfulTranslation = false;
+    const fallBackToInitialTranslation = (stage, error = null) => {
+        restoreTranslationSnapshot(translations, initialSuccessfulTranslations);
+        useInitialSuccessfulTranslation = true;
+        console.warn(
+            `[베르바] ${stage} 보정이 완료되지 않아 최초 전체 번역본을 적용합니다.`,
+            error || '',
         );
-        if (!invalid.length) break;
-        await repairSegmentsByOutputScope({
-            invalid,
-            segmented,
-            translations,
-            speakerScopes,
-            options: { ...options, speakerIdentity },
-            buildPrompt: buildBannedRepairPrompt,
-            stage: 'banned-word-repair',
-        });
+    };
+
+    const banned = segmented.segments.filter(segment =>
+        findBannedWords(translations.get(segment.id), settings).length,
+    );
+    if (POST_TRANSLATION_AI_REPAIR_ENABLED && banned.length) {
+        try {
+            await repairSegmentsByOutputScope({
+                invalid: banned,
+                segmented,
+                translations,
+                speakerScopes,
+                options: { ...options, speakerIdentity },
+                buildPrompt: buildBannedRepairPrompt,
+                stage: 'banned-word-repair',
+            });
+            const remainingBanned = segmented.segments.some(segment =>
+                findBannedWords(translations.get(segment.id), settings).length,
+            );
+            if (remainingBanned) fallBackToInitialTranslation('금지어');
+        } catch (error) {
+            if (isAbort(error, options.signal)) throw error;
+            fallBackToInitialTranslation('금지어', error);
+        }
     }
 
-    for (let repairAttempt = 0; repairAttempt < 5; repairAttempt += 1) {
-        const invalid = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
-        if (!invalid.length) break;
-        if (repairAttempt >= 1 && invalid.every(segment => String(segment.untranslatedReason || '').startsWith('UNTRANSLATED_CHARACTER_NAME:'))) break;
-        await repairSegmentsByOutputScope({
-            invalid,
-            segmented,
-            translations,
-            speakerScopes,
-            options: { ...options, speakerIdentity },
-            buildPrompt: buildUntranslatedRepairPrompt,
-            stage: 'untranslated-repair',
-        });
+    if (POST_TRANSLATION_AI_REPAIR_ENABLED && !useInitialSuccessfulTranslation) {
+        const untranslated = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
+        if (untranslated.length) {
+            try {
+                await repairSegmentsByOutputScope({
+                    invalid: untranslated,
+                    segmented,
+                    translations,
+                    speakerScopes,
+                    options: { ...options, speakerIdentity },
+                    buildPrompt: buildUntranslatedRepairPrompt,
+                    stage: 'untranslated-repair',
+                });
+                if (findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes).length) {
+                    fallBackToInitialTranslation('미번역');
+                }
+            } catch (error) {
+                if (isAbort(error, options.signal)) throw error;
+                fallBackToInitialTranslation('미번역', error);
+            }
+        }
     }
 
-    // Planned terms are protected and no longer appear as plain source words
-    // here. The fallback therefore checks only any repeated roles that could
-    // not be planned, without touching already locked terminology.
-    await repairRepeatedRoleTermConsistency(segmented, translations, {
-        signal: options.signal,
-        timing: options.timing,
-    });
+    if (POST_TRANSLATION_AI_REPAIR_ENABLED && !useInitialSuccessfulTranslation) {
+        // The implementation remains available behind its reversible flag.
+        await repairRepeatedRoleTermConsistency(segmented, translations, {
+            signal: options.signal,
+            timing: options.timing,
+        });
 
-    // Validate against the original protected source, not merely against the
-    // previous repair result. A missing NAME token can otherwise survive every
-    // post-processing pass and only fail during final assembly.
-    await repairProtectedTokenIntegrity(segmented, translations, {
-        ...options,
-        speakerIdentity,
-        speakerScopes,
-    });
+        // Protected markers get two targeted attempts. Failure no longer
+        // discards a complete initial translation.
+        try {
+            await repairProtectedTokenIntegrity(segmented, translations, {
+                ...options,
+                speakerIdentity,
+                speakerScopes,
+            });
+        } catch (error) {
+            if (isAbort(error, options.signal)) throw error;
+            fallBackToInitialTranslation('보호 요소', error);
+        }
+    }
 
     for (const [id, translation] of translations) {
         translations.set(id, repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(translation, speakerIdentity)));
     }
 
-    await runExperimentalQualityAudit({
-        segmented,
-        translations,
-        speakerScopes,
-        speakerIdentity,
-        options,
-    });
+    if (POST_TRANSLATION_AI_REPAIR_ENABLED && !useInitialSuccessfulTranslation) {
+        await runExperimentalQualityAudit({
+            segmented,
+            translations,
+            speakerScopes,
+            speakerIdentity,
+            options,
+        });
+    }
 
     normalizeTaggedOutputTranslations(segmented, translations);
 
@@ -4803,16 +4864,16 @@ async function translateOutputText(source, options = {}) {
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));
     if (remaining.length) {
-        throw new Error(`금지어가 계속 남아 번역을 적용하지 않았습니다: ${[...new Set(remaining)].join(', ')}`);
+        console.warn(`[베르바] 금지어 의심이 남았지만 최초 번역 결과를 우선 적용합니다: ${[...new Set(remaining)].join(', ')}`);
     }
     const untranslated = findUntranslatedSegments(segmented.segments, translations, settings, speakerScopes);
     if (untranslated.length) {
-        if (untranslated.length === segmented.segments.length) {
-            throw new Error('전체 번역 결과가 외국어 원문으로 남아 번역을 적용하지 않았습니다.');
-        }
-        console.warn('[베르바] 일부 구간의 미번역 의심이 해소되지 않아 나머지 번역 결과를 우선 적용합니다.', untranslated);
+        console.warn('[베르바] 미번역 의심이 해소되지 않았지만 최초 번역 결과를 우선 적용합니다.', untranslated);
     }
-    const result = assembleTranslation(segmented, translations, { settings });
+    const result = assembleTranslation(segmented, translations, {
+        settings,
+        allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || useInitialSuccessfulTranslation,
+    });
     if (!result.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
     return {
         translation: result,
@@ -10210,15 +10271,7 @@ function customTranslatorFieldMarkup(item) {
 }
 
 function customTranslatorSettingsMarkup() {
-    const generalKeys = new Set(['output', 'input', 'selection', 'flavor']);
-    const generalFields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS
-        .filter(item => generalKeys.has(item.key))
-        .map(customTranslatorFieldMarkup)
-        .join('');
-    const advancedFields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS
-        .filter(item => !generalKeys.has(item.key))
-        .map(customTranslatorFieldMarkup)
-        .join('');
+    const fields = CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(customTranslatorFieldMarkup).join('');
     return `
         <details id="verba-custom-translator" class="verba-tool-details verba-custom-translator">
             <summary>커스텀 번역기 <small>요청별 지침 교체</small></summary>
@@ -10227,16 +10280,9 @@ function customTranslatorSettingsMarkup() {
                     <input type="checkbox" id="verba-custom-translator-enabled" ${settings.customTranslatorEnabled ? 'checked' : ''}>
                     <span>커스텀 번역기 사용</span>
                 </label>
-                <div class="verba-help verba-custom-translator-intro">각 칸에는 현재 베르바가 사용하는 <b>기존 영어 내장 프롬프트 원문</b>이 표시됩니다. 원문 데이터와 잠긴 JSON 응답 계약처럼 실행할 때 자동으로 붙는 부분만 제외하고, 실제 수정 대상인 지침 본문은 줄이지 않고 그대로 불러옵니다. 그대로 두면 실제 번역은 기존 동적 내장 프롬프트를 사용하고, 베르바 업데이트 때 이 글도 최신 기본값으로 따라갑니다. 내용을 편집하면 그 항목만 커스텀 지침으로 전환되어 기존 프롬프트를 완전히 대체하며 이후 업데이트에도 보존됩니다.</div>
+                <div class="verba-help verba-custom-translator-intro">각 칸에는 현재 베르바의 <b>영어 내장 핵심 지침</b>이 표시됩니다. 그대로 두면 실제 번역은 기존 동적 내장 프롬프트를 사용하고, 베르바 업데이트 때 이 글도 최신 기본값으로 따라갑니다. 내용을 편집하면 그 항목만 커스텀 지침으로 전환되어 기존 프롬프트를 완전히 대체하며 이후 업데이트에도 보존됩니다. 원문 데이터·JSON 응답 형식·이름·태그·보호 표식은 베르바가 자동으로 붙입니다.</div>
                 <div id="verba-custom-translator-controls" class="${settings.customTranslatorEnabled ? '' : 'verba-control-disabled'}">
-                    <div class="verba-custom-translator-group-title">일반 사용자용</div>
-                    ${generalFields}
-                    <details class="verba-custom-translator-advanced">
-                        <summary>고급 내부 항목 <small>내부 처리용 · 수정 비추천</small></summary>
-                        <div class="verba-custom-translator-advanced-content">
-                            ${advancedFields}
-                        </div>
-                    </details>
+                    ${fields}
                     <div class="verba-help">각 입력칸은 확대해서 편집할 수 있고, 확대창을 닫으면 자동 저장돼요.</div>
                     <button type="button" id="verba-custom-translator-reset" class="menu_button verba-wide">커스텀 번역기 전체 초기화</button>
                 </div>

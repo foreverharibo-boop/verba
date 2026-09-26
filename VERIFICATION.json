@@ -1,5 +1,5 @@
 {
-  "version": "0.6.8",
+  "version": "0.6.9",
   "checks": [
     {
       "check": "syntax",
@@ -24,7 +24,7 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.8 metadata pass."
+      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.9 metadata pass."
     },
     {
       "check": "profile-race.mjs",
@@ -32,9 +32,24 @@
       "output": "The opt-in delayed profile race starts later profiles after the saved 5-180 second user delay (35 seconds by default), or immediately on transient failures; it uses the first valid response, aborts losing requests, enforces the saved overall timeout and per-profile failure timeout, preserves user cancellation, and exposes compact timing inputs."
     },
     {
+      "check": "role-term-ai-disabled.mjs",
+      "status": "PASS",
+      "output": "Both role-term AI stages return before making a request while one reversible internal flag is false; their functions, prompts and call sites remain present for a future re-enable."
+    },
+    {
+      "check": "bounded-retries-and-soft-fallback.mjs",
+      "status": "PASS",
+      "output": "Permanent failures stop after one provider request; temporary failures are limited to two retries; exhausted transport requests are not multiplied by JSON recovery; post-translation AI repair paths remain present but make zero calls while the reversible switch is off."
+    },
+    {
+      "check": "post-translation-ai-repair-disabled",
+      "status": "PASS",
+      "output": "Normal and minimal-output translation paths return the first complete model result after local deterministic cleanup; banned-word, untranslated-text, protected-token, Latin-name and quality-audit AI repair code and prompts remain available behind one shared switch. Malformed or incomplete JSON gets at most one missing-segment recovery request."
+    },
+    {
       "check": "original-baseline-regression",
       "status": "PASS",
-      "output": "38 current tests pass versus 34 in the supplied baseline. The remaining 11 failures are stale long-Verba or retired prompt-pipeline tests that already failed in the supplied v0.6.5 tree; no new regression was introduced."
+      "output": "40 current tests pass. The remaining 11 failures are the same stale long-Verba or retired prompt-pipeline tests already documented before v0.6.9; no new regression was introduced."
     },
     {
       "check": "archive",
@@ -44,16 +59,16 @@
   ],
   "changed_files": [
     "index.js",
-    "style.css",
+    "minimal-output.js",
     "manifest.json",
     "README.md",
     "VERIFICATION.json",
-    "tests/backport-features.mjs",
-    "tests/custom-translator.mjs",
-    "tests/general-translation-settings.mjs",
+    "tests/bounded-retries-and-soft-fallback.mjs",
+    "tests/minimal-output.mjs",
     "tests/namespace-isolation.mjs",
+    "tests/response-recovery.mjs",
     "tests/settings-layout.mjs"
   ],
-  "scope": "Show editable built-in guidance in all nine custom-translator fields while preserving the original dynamic prompt path until a field is edited, retaining user edits, and automatically refreshing untouched defaults on later updates.",
+  "scope": "Disable post-translation AI repair calls without deleting their implementation, keep deterministic local cleanup, and limit malformed or incomplete JSON recovery to one additional request.",
   "live_mobile_test": false
 }

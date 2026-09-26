@@ -52,11 +52,11 @@ translations.set('s1','bad');action=()=>{logs.replace({newer:true});translations
 await repair(segmented,translations);assert.deepEqual(logs.latest(),{newer:true});
 translations.set('s1','bad');calls=0;action=()=>{now+=100;};
 await assert.rejects(repair(segmented,translations),e=>e.verbaProtectedRecovery.status==='복구 실패');
-assert.equal(calls,5);assert.equal(logs.latest().protectedRecovery.attempts,5);
+assert.equal(calls,2);assert.equal(logs.latest().protectedRecovery.attempts,2);
 action=()=>{throw Object.assign(new Error('cancel'),{name:'AbortError'});};
 await assert.rejects(repair(segmented,translations),e=>e.verbaProtectedRecovery.status==='취소됨');
 // Diagnostic failures cannot alter the existing recovery path.
 const broken={...deps,recordProtectedRecovery:logs.recordProtectedRecovery,protectedRecoverySnapshot:()=>{throw Error('diagnostic failed');}};
 const badLogs=Function(...Object.keys(broken),'let lastDebugDiagnostic=null;\n'+slice('function recordProtectedRecovery(', 'function createDebugDiagnostic(')+'\nreturn recordProtectedRecovery;')(...Object.values(broken));
 assert.equal(badLogs(invalid,segmented,translations,{}),null);
-console.log('PASS protected recovery: exact missing/excess counts, moved marks, mappings, redaction/limits, successful log/copy data, no-op, OFF/reset, newer-log guard, 5-attempt failure, cancellation, diagnostic isolation (mock requests).');
+console.log('PASS protected recovery: exact missing/excess counts, moved marks, mappings, redaction/limits, successful log/copy data, no-op, OFF/reset, newer-log guard, 2-attempt failure, cancellation, diagnostic isolation (mock requests).');

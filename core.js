@@ -1462,7 +1462,9 @@ export function assembleTranslation(segmented, translations, options = {}) {
         strict: true,
         allowMissing: true,
     }));
-    const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: true });
+    const fullyRestored = restoreProtected(namesRestored, segmented.tokens, {
+        strict: options?.allowDamagedProtected !== true,
+    });
 
     // Critical final surface pass: malformed alternatives can become visible
     // only after an opaque NAME token is restored, which is AFTER AI QA.

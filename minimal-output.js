@@ -1,6 +1,12 @@
 import { outputSplitCount, runOutputBatches } from './output-splitting.js';
 import { assembleTranslation, findProtectedTokenIntegrityProblems, findUntranslatedSegments, normalizeStructuredMetadataTranslation } from './core.js';
 
+// Preserve every post-translation AI repair path for later restoration while
+// keeping the normal translation path to a single successful model response.
+// Change this one flag to true to restore post-translation AI repairs in both
+// the normal and minimal-output pipelines.
+export const POST_TRANSLATION_AI_REPAIR_ENABLED = false;
+
 export function minimalOutputEnabled(settings = {}) {
     return settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
 }
@@ -45,6 +51,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
                 : 'off',
     };
     const oneTime = String(options.oneTimeInstruction || '');
+    let usedInitialFallback = false;
     const translations = await runOutputBatches(segmented, outputSplitCount(settings), options, async (segments, batchOptions) => {
         const request = (targets, repair = '') => {
             batchOptions.signal.throwIfAborted();
@@ -61,22 +68,50 @@ export async function translateMinimalOutput(segmented, settings, options, { req
             });
         };
         const translated = await request(segments);
-        for (let attempt = 0; attempt < 5; attempt++) {
-            const invalid = findProtectedTokenIntegrityProblems(segments, translated);
-            if (!invalid.length) break;
-            const repaired = await request(invalid, 'tokens');
-            for (const segment of invalid) translated.set(segment.id, repaired.get(segment.id));
+        const initialSuccessfulTranslations = new Map(translated);
+        let useInitialSuccessfulTranslation = false;
+        const restoreInitial = (stage, error = null) => {
+            translated.clear();
+            for (const [id, value] of initialSuccessfulTranslations) translated.set(id, value);
+            useInitialSuccessfulTranslation = true;
+            usedInitialFallback = true;
+            console.warn(`[베르바] 최소 프롬프트 ${stage} 보정이 완료되지 않아 최초 번역본을 적용합니다.`, error || '');
+        };
+
+        if (POST_TRANSLATION_AI_REPAIR_ENABLED) {
+            try {
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    const invalid = findProtectedTokenIntegrityProblems(segments, translated);
+                    if (!invalid.length) break;
+                    const repaired = await request(invalid, 'tokens');
+                    for (const segment of invalid) translated.set(segment.id, repaired.get(segment.id));
+                }
+                if (findProtectedTokenIntegrityProblems(segments, translated).length) {
+                    restoreInitial('보호 요소');
+                }
+            } catch (error) {
+                if (batchOptions.signal?.aborted) throw error;
+                restoreInitial('보호 요소', error);
+            }
         }
-        if (findProtectedTokenIntegrityProblems(segments, translated).length) {
-            throw new Error('보호 요소 자동 복구에 실패했습니다. 다시 번역해 주세요.');
-        }
-        const untranslatedNames = findUntranslatedSegments(segments, translated, config)
-            .filter(segment => String(segment.untranslatedReason || '').startsWith('UNTRANSLATED_CHARACTER_NAME:'));
-        if (untranslatedNames.length) {
-            const repaired = await request(untranslatedNames, 'names');
-            for (const segment of untranslatedNames) {
-                const replacement = String(repaired.get(segment.id) || '');
-                if (replacement.trim()) translated.set(segment.id, replacement);
+
+        if (POST_TRANSLATION_AI_REPAIR_ENABLED && !useInitialSuccessfulTranslation) {
+            const untranslatedNames = findUntranslatedSegments(segments, translated, config)
+                .filter(segment => String(segment.untranslatedReason || '').startsWith('UNTRANSLATED_CHARACTER_NAME:'));
+            if (untranslatedNames.length) {
+                try {
+                    const repaired = await request(untranslatedNames, 'names');
+                    for (const segment of untranslatedNames) {
+                        const replacement = String(repaired.get(segment.id) || '');
+                        if (replacement.trim()) translated.set(segment.id, replacement);
+                    }
+                    const stillUntranslated = findUntranslatedSegments(segments, translated, config)
+                        .some(segment => String(segment.untranslatedReason || '').startsWith('UNTRANSLATED_CHARACTER_NAME:'));
+                    if (stillUntranslated) restoreInitial('이름');
+                } catch (error) {
+                    if (batchOptions.signal?.aborted) throw error;
+                    restoreInitial('이름', error);
+                }
             }
         }
         return translated;
@@ -85,7 +120,9 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     for (const segment of segmented.segments) {
         if (segment.type === 'tagged_content') translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
     }
-    const translation = assembleTranslation(segmented, translations);
+    const translation = assembleTranslation(segmented, translations, {
+        allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback,
+    });
     if (!translation.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
     return { translation, sourceMap: buildSourceMap(segmented, translations, translation) };
 }

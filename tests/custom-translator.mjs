@@ -1,11 +1,25 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { buildDefaultCustomTranslatorTemplates } from '../custom-translator-defaults.js';
 
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const definitions = [
     'output', 'input', 'selection', 'name', 'consistency', 'repair', 'quality', 'flavor', 'other',
 ];
 const defaults = Object.fromEntries(definitions.map(key => [key, '']));
+const originalDefaults = buildDefaultCustomTranslatorTemplates([
+    'oneTime', 'characterDialogue', 'otherDialogue', 'allDialogue', 'global', 'fineTuning',
+]);
+assert.ok(originalDefaults.output.length > 2000);
+assert.ok(originalDefaults.input.length > 1000);
+assert.ok(originalDefaults.selection.length > 2000);
+assert.ok(originalDefaults.flavor.length > 3000);
+assert.match(originalDefaults.output, /Translate into fluent, idiomatic Korean/);
+assert.match(originalDefaults.input, /K→E: USER input→native English/);
+assert.match(originalDefaults.flavor, /MANDATORY AUTHORIZED VOICE OVERRIDE — TARGET dialogue only/);
+assert.match(originalDefaults.flavor, /MAD KOREAN — MANDATORY REAUTHORING/);
+assert.doesNotMatch(originalDefaults.output, /\{\{SOURCE_NARRATION\}\}/);
+assert.doesNotMatch(originalDefaults.input, /\{\{KOREAN_INPUT\}\}/);
 
 const normalizeStart = index.indexOf('function normalizeCustomTranslatorInstruction(');
 const normalizeEnd = index.indexOf('const DEFAULT_SETTINGS =', normalizeStart);
@@ -183,20 +197,23 @@ assert.doesNotMatch(customTranslatorUi, /data-verba-custom-translator-mode/);
 assert.doesNotMatch(customTranslatorUi, /간편 설정/);
 assert.doesNotMatch(customTranslatorUi, /고급 설정/);
 assert.doesNotMatch(customTranslatorUi, /직접 구성용 변수 보기/);
-assert.match(customTranslatorUi, /<b>영어 내장 핵심 지침<\/b>이 표시됩니다/);
+assert.match(customTranslatorUi, /<b>기존 영어 내장 프롬프트 원문<\/b>이 표시됩니다/);
+assert.match(customTranslatorUi, /실제 수정 대상인 지침 본문은 줄이지 않고 그대로 불러옵니다/);
 assert.match(customTranslatorUi, /그대로 두면 실제 번역은 기존 동적 내장 프롬프트를 사용하고/);
 assert.match(customTranslatorUi, /내용을 편집하면 그 항목만 커스텀 지침으로 전환되어 기존 프롬프트를 완전히 대체/);
-assert.match(customTranslatorUi, /원문 데이터·JSON 응답 형식·이름·태그·보호 표식은 베르바가 자동으로 붙입니다/);
+assert.match(customTranslatorUi, /원문 데이터와 잠긴 JSON 응답 계약처럼 실행할 때 자동으로 붙는 부분만 제외하고/);
 assert.match(customTranslatorUi, /내장 기본값 사용 중/);
 assert.match(customTranslatorUi, /커스텀 대체 중/);
 assert.match(customTranslatorUi, /data-verba-custom-translator-reset-key/);
-assert.match(index, /채팅 번역/);
-assert.match(index, /내가 보내는 글/);
-assert.match(index, /선택한 부분 다시 번역/);
+assert.match(index, /아웃풋 번역/);
+assert.match(index, /인풋 번역/);
+assert.match(index, /선택 재번역/);
+assert.doesNotMatch(index, /label: '채팅 번역'/);
+assert.doesNotMatch(index, /label: '내가 보내는 글'/);
 assert.match(index, /bindPromptExpandEditors\(panel\);\s*syncCustomTranslatorControls\(panel\);/);
 assert.match(index, /target\.matches\('\[data-verba-custom-translator-key\]'\)[\s\S]*?normalizeCustomTranslatorInstruction\(target\.value\)[\s\S]*?saveSettings\(\)/);
 assert.match(index, /customTranslatorModified\[key\] = instruction !== DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES\[key\]/);
 assert.match(index, /const outgoingPrompt = applyCustomTranslatorPrompt\(prompt, options\)/);
 assert.match(index, /customTargetSegments: pending/);
 
-console.log('PASS: custom translator fully replaces default prompts with plain English instructions, automatic source data, and locked response contracts.');
+console.log('PASS: custom translator displays full original built-in prompt bodies, preserves automatic source data, and keeps locked response contracts.');

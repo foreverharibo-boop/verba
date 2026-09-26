@@ -21,7 +21,7 @@ const sources = [
 const namespaceSources = sources.replace("const PEER_STATE_KEY = 'verba_deep_current_translation';", '');
 assert.equal(manifest.name, 'verba');
 assert.equal(manifest.display_name, '베르바');
-assert.equal(manifest.version, '0.6.6');
+assert.equal(manifest.version, '0.6.7');
 assert.ok(index.includes("const EXTENSION_KEY = 'verba';"));
 assert.ok(index.includes("const STATE_KEY = 'verba_current_translation';"));
 assert.ok(index.includes("const SOURCE_VIEW_KEY = 'verba_source_view';"));

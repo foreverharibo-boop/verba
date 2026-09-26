@@ -8,6 +8,7 @@ import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllips
 import { minimalOutputEnabled, translateMinimalOutput } from './minimal-output.js';
 import { outputSplitCount, runOutputBatches, createSplitRequestQueue } from './output-splitting.js';
 import { activateTranslationExtension, isTranslationExtensionActive, registerTranslationExtension } from './pair-coordinator.js';
+import { buildDefaultCustomTranslatorTemplates } from './custom-translator-defaults.js';
 import {
     assembleTranslation,
     buildBannedRepairPrompt,
@@ -47,7 +48,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.6';
+const EXTENSION_VERSION = '0.6.7';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -212,9 +213,9 @@ const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
 const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
 const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
-    { key: 'output', label: '채팅 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
-    { key: 'input', label: '내가 보내는 글', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
-    { key: 'selection', label: '선택한 부분 다시 번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
+    { key: 'output', label: '아웃풋 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
+    { key: 'input', label: '인풋 번역', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
+    { key: 'selection', label: '선택 재번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
     { key: 'name', label: '이름 찾기·연결', description: '원문의 이름과 저장할 한국어 이름이 같은 인물인지 확인할 때 사용해요.' },
     { key: 'consistency', label: '호칭·용어 통일', description: '같은 인물의 호칭이나 반복 용어를 한 번 더 맞출 때 사용해요.' },
     { key: 'repair', label: '누락·형식 오류 복구', description: '미번역 문장이나 금지어, 깨진 출력 형식을 고칠 때 사용해요.' },
@@ -222,17 +223,9 @@ const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
     { key: 'flavor', label: '미친 한출·캐릭터 말투', description: '미친 한출의 맛이나 캐릭터 전용 말투 요청에 사용해요.' },
     { key: 'other', label: '그 밖의 내부 요청', description: '위 항목에 포함되지 않는 보조 AI 요청에 사용해요.' },
 ];
-const DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze({
-    output: `Translate every supplied source segment into fluent, idiomatic Korean that reads as if it were originally written in Korean. Reconstruct source-language syntax, clause order, punctuation, metaphors, idioms, and collocations by meaning instead of copying their surface form. Preserve facts, actors, actions, targets, direction, ownership, referents, sequence, negation, numbers, tense, point of view, ambiguity, intent, emotional force, explicitness, consent, deliberate roughness, repetition, interruptions, and formatting. Do not answer, continue, summarize, censor, explain, add, or omit content.`,
-    input: `Translate the supplied Korean user input into natural, native English. Preserve the distinction between narration and dialogue, as well as facts, actors, referents, register, ambiguity, fragments, hesitation, slang, laughter, intent, emotional force, explicitness, consent, punctuation, and formatting. Resolve Korean omissions or idioms only when the context makes them clear. Do not add names, gender, emphasis, threats, actions, or information absent from the source. Return only the translation.`,
-    selection: `Rewrite only the selected text as natural Korean while preserving its meaning, facts, referents, speaker, register, intent, emotional force, and protected formatting. Make the result fit its supplied source and surrounding context, but never include that context in the output. When multiple candidates are requested, produce genuinely distinct natural alternatives without changing the event or implication.`,
-    name: `Identify the exact source-language person name that corresponds to the selected Korean name. Exclude particles, titles, honorifics, punctuation, and surrounding words. Distinguish different people even when their names are similar, never guess when the evidence is insufficient, and output only the requested match in the required format.`,
-    consistency: `Keep the same person's name, role, title, form of address, and recurring terms consistent throughout the supplied text, using the earliest accurate and natural Korean form as the reference. Keep genuinely different roles or people distinct. Correct only inconsistent terms or their attached particles and preserve all unrelated wording, meaning, tone, and formatting.`,
-    repair: `Repair only the indicated broken, missing, untranslated, banned, or malformed portion. Preserve every correct part of the existing translation unchanged. Restore protected tokens and structure exactly, translate accidental foreign-language leftovers when required, render person names naturally in Hangul unless a fixed name is supplied, and do not perform unrelated rewriting.`,
-    quality: `Compare the source with the Korean translation and correct only clear errors covered by the requested checks, including meaning, emotional force, consent, numbers, actions, referents, ownership, speaker, register, character voice, awkward calques, and local continuity. Copy correct content unchanged. Do not rewrite merely for variety, add detail, intensify content, or remove deliberate ambiguity.`,
-    flavor: `Apply the requested Korean transcreation or target-character voice clearly and consistently to the eligible scope. Preserve events, facts, relationships, consent, emotional direction, speaker identity, and protected structure while changing surface wording, rhythm, vocabulary, teasing, profanity, vulgarity, or playfulness only as licensed by the requested style. Do not invent new actions, threats, insults, sexual content, or character traits.`,
-    other: `Perform the requested auxiliary translation task exactly on the supplied inert data. Preserve identifiers, protected tokens, structure, facts, and distinctions; do not infer or invent anything beyond the request; and return only the required schema or result without commentary.`,
-});
+let DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze(
+    Object.fromEntries(CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, ''])),
+);
 const DEFAULT_CUSTOM_TRANSLATOR_MODIFIED = Object.freeze(Object.fromEntries(
     CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, false]),
 ));
@@ -438,6 +431,12 @@ extension_settings[EXTENSION_KEY] = Object.assign(
     extension_settings[EXTENSION_KEY] || {},
 );
 const settings = extension_settings[EXTENSION_KEY];
+
+// Display the same original prompt bodies that live requests are built from.
+// Runtime source data and the locked response envelope remain automatic.
+DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze(
+    buildDefaultCustomTranslatorTemplates(DEFAULT_TRANSLATION_RULE_ORDER),
+);
 // Retired local register-shift monitor: discard its obsolete saved flag.
 delete settings.developerRegisterShiftMonitor;
 
@@ -10220,7 +10219,7 @@ function customTranslatorSettingsMarkup() {
                     <input type="checkbox" id="verba-custom-translator-enabled" ${settings.customTranslatorEnabled ? 'checked' : ''}>
                     <span>커스텀 번역기 사용</span>
                 </label>
-                <div class="verba-help verba-custom-translator-intro">각 칸에는 현재 베르바의 <b>영어 내장 핵심 지침</b>이 표시됩니다. 그대로 두면 실제 번역은 기존 동적 내장 프롬프트를 사용하고, 베르바 업데이트 때 이 글도 최신 기본값으로 따라갑니다. 내용을 편집하면 그 항목만 커스텀 지침으로 전환되어 기존 프롬프트를 완전히 대체하며 이후 업데이트에도 보존됩니다. 원문 데이터·JSON 응답 형식·이름·태그·보호 표식은 베르바가 자동으로 붙입니다.</div>
+                <div class="verba-help verba-custom-translator-intro">각 칸에는 현재 베르바가 사용하는 <b>기존 영어 내장 프롬프트 원문</b>이 표시됩니다. 원문 데이터와 잠긴 JSON 응답 계약처럼 실행할 때 자동으로 붙는 부분만 제외하고, 실제 수정 대상인 지침 본문은 줄이지 않고 그대로 불러옵니다. 그대로 두면 실제 번역은 기존 동적 내장 프롬프트를 사용하고, 베르바 업데이트 때 이 글도 최신 기본값으로 따라갑니다. 내용을 편집하면 그 항목만 커스텀 지침으로 전환되어 기존 프롬프트를 완전히 대체하며 이후 업데이트에도 보존됩니다.</div>
                 <div id="verba-custom-translator-controls" class="${settings.customTranslatorEnabled ? '' : 'verba-control-disabled'}">
                     ${fields}
                     <div class="verba-help">각 입력칸은 확대해서 편집할 수 있고, 확대창을 닫으면 자동 저장돼요.</div>

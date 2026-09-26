@@ -18,24 +18,17 @@ const sources = [
     read('response-parser.js'),
     read('timing.js'),
 ].join('\n');
-const namespaceSources = sources.replace("const PEER_STATE_KEY = 'verba_current_translation';", '');
+const namespaceSources = sources.replace("const PEER_STATE_KEY = 'verba_deep_current_translation';", '');
+assert.equal(manifest.name, 'verba');
+assert.equal(manifest.display_name, '베르바');
+assert.equal(manifest.version, '0.6.6');
+assert.ok(index.includes("const EXTENSION_KEY = 'verba';"));
+assert.ok(index.includes("const STATE_KEY = 'verba_current_translation';"));
+assert.ok(index.includes("const SOURCE_VIEW_KEY = 'verba_source_view';"));
+assert.ok(index.includes("const CHARACTER_FIELD_KEY = 'verba';"));
+assert.ok(index.includes("name: 'verba'"));
+assert.ok(index.includes("name: 'verba-profile'"));
+assert.ok(index.includes('globalThis.__verbaTranslatorVersion'));
+assert.doesNotMatch(namespaceSources, /verba-deep|verba_deep|VERBA_DEEP|__verbaDeep|베에르으바아/);
 
-assert.equal(manifest.name, 'verba-deep');
-assert.equal(manifest.display_name, '베에르으바아');
-assert.equal(manifest.version, '0.5.97');
-assert.ok(index.includes("const EXTENSION_KEY = 'verba-deep';"));
-assert.ok(index.includes("const STATE_KEY = 'verba_deep_current_translation';"));
-assert.ok(index.includes("const SOURCE_VIEW_KEY = 'verba_deep_source_view';"));
-assert.ok(index.includes("const CHARACTER_FIELD_KEY = 'verba-deep';"));
-assert.ok(index.includes("name: 'verba-deep'"));
-assert.ok(index.includes("name: 'verba-deep-profile'"));
-assert.ok(index.includes('globalThis.__verbaDeepTranslatorVersion'));
-
-assert.doesNotMatch(namespaceSources, new RegExp('(?:#|\\.|--)' + 'verba-' + '(?!deep-)'));
-assert.doesNotMatch(namespaceSources, new RegExp('data-' + 'verba-' + '(?!deep-)'));
-assert.doesNotMatch(namespaceSources, new RegExp('VERBA' + '_(?!DEEP_)'));
-assert.doesNotMatch(namespaceSources, new RegExp('\\bverba' + '_(?!deep_)'));
-assert.doesNotMatch(namespaceSources, new RegExp('__verba' + '(?:Cleanup|TranslatorVersion)'));
-assert.doesNotMatch(namespaceSources, new RegExp('베' + '르바'));
-
-console.log('PASS: 베에르으바아 uses isolated verba-deep extension, DOM, storage, command, token, and global namespaces.');
+console.log('PASS: 베르바 uses its expected extension, DOM, storage, command, token, and global namespaces.');

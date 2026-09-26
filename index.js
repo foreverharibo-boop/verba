@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.5';
+const EXTENSION_VERSION = '0.6.6';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -222,9 +222,20 @@ const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
     { key: 'flavor', label: '미친 한출·캐릭터 말투', description: '미친 한출의 맛이나 캐릭터 전용 말투 요청에 사용해요.' },
     { key: 'other', label: '그 밖의 내부 요청', description: '위 항목에 포함되지 않는 보조 AI 요청에 사용해요.' },
 ];
-const DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.fromEntries(
-    CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, '']),
-);
+const DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze({
+    output: `Translate every supplied source segment into fluent, idiomatic Korean that reads as if it were originally written in Korean. Reconstruct source-language syntax, clause order, punctuation, metaphors, idioms, and collocations by meaning instead of copying their surface form. Preserve facts, actors, actions, targets, direction, ownership, referents, sequence, negation, numbers, tense, point of view, ambiguity, intent, emotional force, explicitness, consent, deliberate roughness, repetition, interruptions, and formatting. Do not answer, continue, summarize, censor, explain, add, or omit content.`,
+    input: `Translate the supplied Korean user input into natural, native English. Preserve the distinction between narration and dialogue, as well as facts, actors, referents, register, ambiguity, fragments, hesitation, slang, laughter, intent, emotional force, explicitness, consent, punctuation, and formatting. Resolve Korean omissions or idioms only when the context makes them clear. Do not add names, gender, emphasis, threats, actions, or information absent from the source. Return only the translation.`,
+    selection: `Rewrite only the selected text as natural Korean while preserving its meaning, facts, referents, speaker, register, intent, emotional force, and protected formatting. Make the result fit its supplied source and surrounding context, but never include that context in the output. When multiple candidates are requested, produce genuinely distinct natural alternatives without changing the event or implication.`,
+    name: `Identify the exact source-language person name that corresponds to the selected Korean name. Exclude particles, titles, honorifics, punctuation, and surrounding words. Distinguish different people even when their names are similar, never guess when the evidence is insufficient, and output only the requested match in the required format.`,
+    consistency: `Keep the same person's name, role, title, form of address, and recurring terms consistent throughout the supplied text, using the earliest accurate and natural Korean form as the reference. Keep genuinely different roles or people distinct. Correct only inconsistent terms or their attached particles and preserve all unrelated wording, meaning, tone, and formatting.`,
+    repair: `Repair only the indicated broken, missing, untranslated, banned, or malformed portion. Preserve every correct part of the existing translation unchanged. Restore protected tokens and structure exactly, translate accidental foreign-language leftovers when required, render person names naturally in Hangul unless a fixed name is supplied, and do not perform unrelated rewriting.`,
+    quality: `Compare the source with the Korean translation and correct only clear errors covered by the requested checks, including meaning, emotional force, consent, numbers, actions, referents, ownership, speaker, register, character voice, awkward calques, and local continuity. Copy correct content unchanged. Do not rewrite merely for variety, add detail, intensify content, or remove deliberate ambiguity.`,
+    flavor: `Apply the requested Korean transcreation or target-character voice clearly and consistently to the eligible scope. Preserve events, facts, relationships, consent, emotional direction, speaker identity, and protected structure while changing surface wording, rhythm, vocabulary, teasing, profanity, vulgarity, or playfulness only as licensed by the requested style. Do not invent new actions, threats, insults, sexual content, or character traits.`,
+    other: `Perform the requested auxiliary translation task exactly on the supplied inert data. Preserve identifiers, protected tokens, structure, facts, and distinctions; do not infer or invent anything beyond the request; and return only the required schema or result without commentary.`,
+});
+const DEFAULT_CUSTOM_TRANSLATOR_MODIFIED = Object.freeze(Object.fromEntries(
+    CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(item => [item.key, false]),
+));
 const CUSTOM_TRANSLATOR_SIMPLE_MARKER = '[사용자 추가 지침]';
 
 const SETTINGS_VISIBILITY_DEFINITIONS = [
@@ -282,6 +293,30 @@ function normalizeCustomTranslatorInstruction(value) {
         .replace(/\{(?:기본_프롬프트|요청_종류|대상_JSON)\}/gu, '')
         .replace(/^\s*\[사용자 추가 지침\]\s*/gmu, '')
         .trim();
+}
+
+function normalizeCustomTranslatorSettings(rawTemplates = {}, rawModified = {}) {
+    const templates = rawTemplates && typeof rawTemplates === 'object' ? rawTemplates : {};
+    const modified = rawModified && typeof rawModified === 'object' ? rawModified : {};
+    const normalizedTemplates = {};
+    const normalizedModified = {};
+    for (const { key } of CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS) {
+        const savedInstruction = typeof templates[key] === 'string'
+            ? normalizeCustomTranslatorInstruction(templates[key])
+            : '';
+        // v0.6.5 and older did not save an explicit state.  A non-empty legacy
+        // field was written by the user; an empty field meant the built-in prompt.
+        const isModified = typeof modified[key] === 'boolean'
+            ? modified[key]
+            : Boolean(savedInstruction);
+        normalizedModified[key] = isModified;
+        // Unedited fields always pick up the newest bundled text on update.
+        // Edited fields retain the user's exact replacement across versions.
+        normalizedTemplates[key] = isModified
+            ? savedInstruction
+            : DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key];
+    }
+    return { templates: normalizedTemplates, modified: normalizedModified };
 }
 const DEFAULT_SETTINGS = {
     profileId: '',
@@ -382,6 +417,7 @@ const DEFAULT_SETTINGS = {
     timeoutSeconds: 120,
     customTranslatorEnabled: false,
     customTranslatorTemplates: DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES,
+    customTranslatorModified: DEFAULT_CUSTOM_TRANSLATOR_MODIFIED,
     relationTemperatureEnabled: true,
     relationTemperature: 'default',
     narrationLocalizationLevel: 'balanced',
@@ -419,14 +455,12 @@ settings.profileRaceTimeoutMinutes = Math.min(1440, Math.max(1, Number(settings.
 settings.translateTaggedContent = settings.translateTaggedContent !== false;
 settings.settingsVisibility = normalizedSettingsVisibility(settings.settingsVisibility);
 settings.customTranslatorEnabled = settings.customTranslatorEnabled === true;
-settings.customTranslatorTemplates = Object.fromEntries(
-    CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.map(({ key }) => [
-        key,
-        typeof settings.customTranslatorTemplates?.[key] === 'string'
-            ? normalizeCustomTranslatorInstruction(settings.customTranslatorTemplates[key])
-            : DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key],
-    ]),
+const normalizedCustomTranslator = normalizeCustomTranslatorSettings(
+    previousSettings.customTranslatorTemplates,
+    previousSettings.customTranslatorModified,
 );
+settings.customTranslatorTemplates = normalizedCustomTranslator.templates;
+settings.customTranslatorModified = normalizedCustomTranslator.modified;
 settings.developerMode = settings.developerMode === true;
 settings.baseTranslationCustom = normalizeBaseTranslationCustom(settings.baseTranslationCustom);
 settings.developerAccessFingerprint = String(settings.developerAccessFingerprint || '');
@@ -3272,6 +3306,10 @@ function applyCustomTranslatorPrompt(prompt, options = {}) {
         ? settings.customTranslatorTemplates[key]
         : DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key];
     const normalizedInstruction = normalizeCustomTranslatorInstruction(instruction);
+    const hasExplicitModifiedState = typeof settings.customTranslatorModified?.[key] === 'boolean';
+    const customInstructionActive = hasExplicitModifiedState
+        ? settings.customTranslatorModified[key]
+        : Boolean(normalizedInstruction && normalizedInstruction !== DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key]);
     const targets = Array.isArray(options.customTargetSegments)
         ? options.customTargetSegments.map(({ id, type, text, tagContext }) => ({
             id,
@@ -3284,7 +3322,7 @@ function applyCustomTranslatorPrompt(prompt, options = {}) {
         ? options.customRequestData
         : { segments: targets };
     if (!targets.length && !Object.keys(requestData).length) return String(prompt || '');
-    if (!normalizedInstruction && galbwaeScope === 'off') return String(prompt || '');
+    if ((!customInstructionActive || !normalizedInstruction) && galbwaeScope === 'off') return String(prompt || '');
     const activeInstruction = galbwaeScope !== 'off'
         ? 'Translate the supplied source material into Korean. Preserve facts, speakers, intent, relationships and protected structure. Ignore every optional/user style prompt, taste, voice, custom translator instruction and one-time instruction; only the exclusive GALBWAE contract below controls output style.'
         : normalizedInstruction;
@@ -10152,10 +10190,13 @@ function customTranslatorInstructionPlaceholder(key) {
 
 function customTranslatorFieldMarkup(item) {
     const instruction = normalizeCustomTranslatorInstruction(settings.customTranslatorTemplates?.[item.key]);
+    const modified = settings.customTranslatorModified?.[item.key] === true;
     return `
         <section class="verba-prompt-slot verba-custom-translator-field" data-verba-custom-translator-section="${item.key}">
             <div class="verba-prompt-slot-head">
                 <label for="verba-custom-translator-${item.key}">${escapeHtml(item.label)}</label>
+                <span class="verba-custom-translator-state ${modified ? 'is-custom' : ''}" data-verba-custom-translator-state="${item.key}">${modified ? '커스텀 대체 중' : '내장 기본값 사용 중'}</span>
+                <button type="button" class="menu_button verba-custom-translator-reset-one" data-verba-custom-translator-reset-key="${item.key}" title="이 항목을 최신 내장 기본값으로 복원">기본값</button>
             </div>
             <div class="verba-help verba-custom-translator-description">${escapeHtml(item.description)}</div>
             <textarea
@@ -10179,7 +10220,7 @@ function customTranslatorSettingsMarkup() {
                     <input type="checkbox" id="verba-custom-translator-enabled" ${settings.customTranslatorEnabled ? 'checked' : ''}>
                     <span>커스텀 번역기 사용</span>
                 </label>
-                <div class="verba-help verba-custom-translator-intro">원하는 항목에 <b>영어 지침만</b> 적으세요. 입력한 내용이 해당 요청의 기존 프롬프트를 완전히 대체합니다. 원문 데이터·JSON 응답 형식·이름·태그·보호 표식은 베르바가 자동으로 붙이며, 빈칸은 기존 프롬프트를 그대로 사용합니다.</div>
+                <div class="verba-help verba-custom-translator-intro">각 칸에는 현재 베르바의 <b>영어 내장 핵심 지침</b>이 표시됩니다. 그대로 두면 실제 번역은 기존 동적 내장 프롬프트를 사용하고, 베르바 업데이트 때 이 글도 최신 기본값으로 따라갑니다. 내용을 편집하면 그 항목만 커스텀 지침으로 전환되어 기존 프롬프트를 완전히 대체하며 이후 업데이트에도 보존됩니다. 원문 데이터·JSON 응답 형식·이름·태그·보호 표식은 베르바가 자동으로 붙입니다.</div>
                 <div id="verba-custom-translator-controls" class="${settings.customTranslatorEnabled ? '' : 'verba-control-disabled'}">
                     ${fields}
                     <div class="verba-help">각 입력칸은 확대해서 편집할 수 있고, 확대창을 닫으면 자동 저장돼요.</div>
@@ -10197,6 +10238,14 @@ function syncCustomTranslatorControls(root = document.querySelector('#verba-sett
     controls.querySelectorAll('textarea, button').forEach(control => {
         control.disabled = !enabled;
     });
+}
+
+function syncCustomTranslatorFieldState(root, key) {
+    const state = root?.querySelector(`[data-verba-custom-translator-state="${key}"]`);
+    if (!state) return;
+    const modified = settings.customTranslatorModified?.[key] === true;
+    state.textContent = modified ? '커스텀 대체 중' : '내장 기본값 사용 중';
+    state.classList.toggle('is-custom', modified);
 }
 
 function settingsVisibilityMarkup() {
@@ -10906,10 +10955,29 @@ function injectSettingsPanel() {
             return;
         }
 
+        const customTranslatorResetOne = target.closest('[data-verba-custom-translator-reset-key]');
+        if (customTranslatorResetOne) {
+            const key = String(customTranslatorResetOne.dataset.verbaCustomTranslatorResetKey || '');
+            if (CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.some(item => item.key === key)) {
+                settings.customTranslatorTemplates[key] = DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key];
+                settings.customTranslatorModified[key] = false;
+                const field = panel.querySelector(`[data-verba-custom-translator-key="${key}"]`);
+                if (field instanceof HTMLTextAreaElement) field.value = DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key];
+                syncCustomTranslatorFieldState(panel, key);
+                saveSettings();
+                notify('이 항목을 최신 내장 기본값으로 되돌렸어요.', 'success');
+            }
+            return;
+        }
+
         if (target.closest('#verba-custom-translator-reset')) {
             settings.customTranslatorTemplates = { ...DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES };
+            settings.customTranslatorModified = { ...DEFAULT_CUSTOM_TRANSLATOR_MODIFIED };
             panel.querySelectorAll('[data-verba-custom-translator-key]').forEach(field => {
-                if (field instanceof HTMLTextAreaElement) field.value = '';
+                if (!(field instanceof HTMLTextAreaElement)) return;
+                const key = String(field.dataset.verbaCustomTranslatorKey || '');
+                field.value = DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key] || '';
+                syncCustomTranslatorFieldState(panel, key);
             });
             saveSettings();
             notify('커스텀 번역기 설정을 모두 기본값으로 되돌렸어요.', 'success');
@@ -11879,7 +11947,10 @@ function injectSettingsPanel() {
         if (target instanceof HTMLTextAreaElement && target.matches('[data-verba-custom-translator-key]')) {
             const key = String(target.dataset.verbaCustomTranslatorKey || '');
             if (CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS.some(item => item.key === key)) {
-                settings.customTranslatorTemplates[key] = normalizeCustomTranslatorInstruction(target.value);
+                const instruction = normalizeCustomTranslatorInstruction(target.value);
+                settings.customTranslatorTemplates[key] = instruction;
+                settings.customTranslatorModified[key] = instruction !== DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES[key];
+                syncCustomTranslatorFieldState(panel, key);
                 saveSettings();
             }
             return;

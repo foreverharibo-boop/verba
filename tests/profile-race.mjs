@@ -5,12 +5,16 @@ const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 
 assert.match(index, /profileRaceEnabled:\s*false/);
+assert.match(index, /profileRaceStaggerSeconds:\s*35/);
 assert.match(index, /profileRaceTimeoutMinutes:\s*5/);
 assert.match(index, /id="verba-profile-race-enabled"/);
+assert.match(index, /id="verba-profile-race-stagger-seconds"/);
+assert.match(index, /min="5" max="180" step="1" id="verba-profile-race-stagger-seconds"/);
 assert.match(index, /id="verba-profile-race-timeout-minutes"/);
 assert.match(index, /id="verba-profile-failure-timeout-minutes"/);
 assert.doesNotMatch(index, /id="verba-profile-failure-timeout-seconds"/);
 assert.match(index, /settings\.timeoutSeconds\s*=\s*minutes \* 60/);
+assert.match(index, /settings\.profileRaceStaggerSeconds\s*=\s*normalizedProfileRaceStaggerSeconds\(event\.target\.value\)/);
 assert.match(index, /profileFallbackOptions\.hidden\s*=\s*!fallbackEnabled/);
 assert.match(index, /profileRaceOptions\.hidden\s*=\s*!\(fallbackEnabled && settings\.profileRaceEnabled === true\)/);
 assert.match(style, /\.verba-profile-race-options\[hidden\][\s\S]*display:\s*none\s*!important/);
@@ -49,8 +53,8 @@ const env = {
     fallbackEligibleError: error => error?.code === 'TRANSIENT',
     profileRaceTimeoutError: () => Object.assign(new Error('race timeout'), { code: 'VERBA_PROFILE_RACE_TIMEOUT' }),
     normalizedProfileFailureTimeoutSeconds: () => 120,
+    normalizedProfileRaceStaggerSeconds: () => 0.012,
     notifyProfileRaceWinner: profile => notices.push(profile.slot),
-    PROFILE_RACE_STAGGER_MS: 12,
     Date, Promise, AbortController, setTimeout, clearTimeout,
 };
 const { sendProfileRaceAttempt } = Function(
@@ -148,4 +152,4 @@ const cancelled = cancelApi.sendWithRetry('translate', { signal: cancelControlle
 setTimeout(() => cancelController.abort(), 5);
 await assert.rejects(cancelled, error => error?.name === 'AbortError' && !error?.code);
 
-console.log('PASS: 지연 경주가 프로필을 시차 호출하고 첫 정상 응답만 채택하며 전체 제한·사용자 취소와 UI 분 입력값을 올바르게 처리함.');
+console.log('PASS: 지연 경주가 사용자 지정 초 간격으로 프로필을 시차 호출하고 첫 정상 응답만 채택하며 전체 제한·사용자 취소를 올바르게 처리함.');

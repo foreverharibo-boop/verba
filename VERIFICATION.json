@@ -1,5 +1,5 @@
 {
-  "version": "0.6.4",
+  "version": "0.6.5",
   "checks": [
     {
       "check": "syntax",
@@ -19,12 +19,12 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.4 metadata pass."
+      "output": "Complete settings markup, unique IDs, visibility controls, tagged-content toggle placement, compact inner UI and v0.6.5 metadata pass."
     },
     {
       "check": "profile-race.mjs",
       "status": "PASS",
-      "output": "The opt-in delayed profile race starts later profiles after 35 seconds or immediately on transient failures, uses the first valid response, aborts losing requests, enforces the saved overall timeout and per-profile failure timeout, preserves user cancellation, and exposes compact timing inputs."
+      "output": "The opt-in delayed profile race starts later profiles after the saved 5-180 second user delay (35 seconds by default), or immediately on transient failures; it uses the first valid response, aborts losing requests, enforces the saved overall timeout and per-profile failure timeout, preserves user cancellation, and exposes compact timing inputs."
     },
     {
       "check": "original-baseline-regression",
@@ -39,15 +39,12 @@
   ],
   "changed_files": [
     "index.js",
-    "style.css",
     "manifest.json",
     "README.md",
     "VERIFICATION.json",
-    "tests/diagnostics.mjs",
-    "tests/output-timing.mjs",
     "tests/profile-race.mjs",
     "tests/settings-layout.mjs"
   ],
-  "scope": "Show both profile failure timeout and overall race timeout in minutes while keeping compact timing inputs.",
+  "scope": "Let users choose the 5-180 second A-to-B and B-to-C delayed-race stagger while preserving immediate transient-error fallback and all existing timeout behavior.",
   "live_mobile_test": false
 }

@@ -47,7 +47,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.4';
+const EXTENSION_VERSION = '0.6.5';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -290,6 +290,7 @@ const DEFAULT_SETTINGS = {
     activeProfileSlot: 'A',
     autoProfileFallback: true,
     profileRaceEnabled: false,
+    profileRaceStaggerSeconds: 35,
     profileRaceTimeoutMinutes: 5,
     debugMode: false,
     developerMode: false,
@@ -413,6 +414,7 @@ let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
 settings.timeoutSeconds = Math.min(3600, Math.max(60, Number(settings.timeoutSeconds) || 120));
 settings.profileRaceEnabled = settings.profileRaceEnabled === true;
+settings.profileRaceStaggerSeconds = Math.min(180, Math.max(5, Math.round(Number(settings.profileRaceStaggerSeconds) || 35)));
 settings.profileRaceTimeoutMinutes = Math.min(1440, Math.max(1, Number(settings.profileRaceTimeoutMinutes) || 5));
 settings.translateTaggedContent = settings.translateTaggedContent !== false;
 settings.settingsVisibility = normalizedSettingsVisibility(settings.settingsVisibility);
@@ -707,7 +709,6 @@ let scopedParallelRequestActive = 0;
 // in that bounded 3 x 3 case actually start instead of leaving B/C queued
 // behind the stalled A requests they are supposed to outrun.
 const PROFILE_RACE_REQUEST_LIMIT = 9;
-const PROFILE_RACE_STAGGER_MS = 35000;
 const profileRaceRequestQueue = [];
 let profileRaceRequestActive = 0;
 const enqueueSplitOutputRequest = createSplitRequestQueue(3);
@@ -3168,6 +3169,10 @@ function normalizedProfileRaceTimeoutMinutes(value = settings.profileRaceTimeout
     return Math.min(1440, Math.max(1, Number(value) || 5));
 }
 
+function normalizedProfileRaceStaggerSeconds(value = settings.profileRaceStaggerSeconds) {
+    return Math.min(180, Math.max(5, Math.round(Number(value) || 35)));
+}
+
 function normalizedProfileFailureTimeoutSeconds(value = settings.timeoutSeconds) {
     return Math.min(3600, Math.max(60, Number(value) || 120));
 }
@@ -3368,10 +3373,11 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
                 finishFailure(profileRaceTimeoutError());
                 return;
             }
+            const staggerMs = normalizedProfileRaceStaggerSeconds() * 1000;
             staggerTimer = setTimeout(() => {
                 staggerTimer = null;
                 launchNext();
-            }, Math.min(PROFILE_RACE_STAGGER_MS, remaining));
+            }, Math.min(staggerMs, remaining));
         };
 
         const launchNext = () => {
@@ -10294,8 +10300,14 @@ function injectSettingsPanel() {
                     <input type="checkbox" id="verba-profile-race-enabled" ${settings.profileRaceEnabled === true ? 'checked' : ''}>
                     <span>지연 경주 방식</span>
                 </label>
-                <div class="verba-help">응답이 35초 동안 끝나지 않으면 다음 프로필도 겹쳐 호출하고, 먼저 정상 완료된 번역만 사용해요. 프로필 자동 사용과 서로 다른 프로필 두 개 이상이 필요합니다.</div>
+                <div class="verba-help">설정한 대기 시간이 지나도 응답이 끝나지 않으면 다음 프로필도 겹쳐 호출하고, 먼저 정상 완료된 번역만 사용해요. 프로필 자동 사용과 서로 다른 프로필 두 개 이상이 필요합니다.</div>
                 <div id="verba-profile-race-options" class="verba-profile-race-options" ${settings.profileRaceEnabled === true && settings.autoProfileFallback !== false ? '' : 'hidden'}>
+                    <label for="verba-profile-race-stagger-seconds">다음 프로필 동시 요청 대기</label>
+                    <div class="verba-profile-race-time-row">
+                        <input type="number" inputmode="numeric" min="5" max="180" step="1" id="verba-profile-race-stagger-seconds" class="text_pole" value="${normalizedProfileRaceStaggerSeconds()}">
+                        <span>초</span>
+                    </div>
+                    <div class="verba-help">A 요청 후 입력한 시간이 지나면 B를, 다시 같은 시간이 지나면 C를 시작해요. 명확한 일시적 오류가 나면 기다리지 않고 다음 프로필을 즉시 호출합니다.</div>
                     <label for="verba-profile-race-timeout-minutes">전체 강제 종료 시간</label>
                     <div class="verba-profile-race-time-row">
                         <input type="number" inputmode="decimal" min="1" max="1440" step="1" id="verba-profile-race-timeout-minutes" class="text_pole" value="${normalizedProfileRaceTimeoutMinutes()}">
@@ -11417,6 +11429,7 @@ function injectSettingsPanel() {
     const profileFailureTimeoutInput = panel.querySelector('#verba-profile-failure-timeout-minutes');
     const profileRaceInput = panel.querySelector('#verba-profile-race-enabled');
     const profileRaceOptions = panel.querySelector('#verba-profile-race-options');
+    const profileRaceStaggerInput = panel.querySelector('#verba-profile-race-stagger-seconds');
     const profileRaceMinutesInput = panel.querySelector('#verba-profile-race-timeout-minutes');
     const syncProfileRaceUi = () => {
         const fallbackEnabled = settings.autoProfileFallback !== false;
@@ -11438,6 +11451,11 @@ function injectSettingsPanel() {
         const minutes = normalizedProfileFailureTimeoutMinutes(event.target.value);
         settings.timeoutSeconds = minutes * 60;
         event.target.value = String(minutes);
+        saveSettings();
+    });
+    profileRaceStaggerInput.addEventListener('change', event => {
+        settings.profileRaceStaggerSeconds = normalizedProfileRaceStaggerSeconds(event.target.value);
+        event.target.value = String(settings.profileRaceStaggerSeconds);
         saveSettings();
     });
     profileRaceMinutesInput.addEventListener('change', event => {

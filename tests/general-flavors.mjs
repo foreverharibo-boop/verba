@@ -1,3 +1,4 @@
+import { promptTestFunction as Function } from './helpers/prompt-env.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as core from '../core.js';

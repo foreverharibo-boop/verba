@@ -1408,6 +1408,21 @@
     width: 100%;
 }
 
+.verba-name-history-candidates {
+    display: grid;
+    gap: 3px;
+    max-height: min(34vh, 260px);
+    overflow-y: auto;
+    padding: 5px 8px;
+    border: 1px solid color-mix(in srgb, var(--verba-border) 78%, transparent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--verba-surface) 94%, transparent);
+}
+
+.verba-name-history-candidates .verba-check-row {
+    min-height: 29px;
+}
+
 .verba-candidate-modal {
     width: min(620px, calc(100vw - 24px));
 }

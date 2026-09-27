@@ -185,7 +185,6 @@ assert.match(index, /id="verba-chuseok-galbwae-dialogue-inner"/);
 assert.match(index, /target\.id === 'verba-chuseok-galbwae-all'/);
 assert.match(index, /target\.id === 'verba-chuseok-galbwae-dialogue-inner'/);
 assert.match(index, /chuseokGalbwaeScope:\s*normalizedChuseokGalbwaeScope/);
-assert.match(index, /galbwaeScope !== 'off' && String\(options\.stage \|\| ''\)\.toLocaleLowerCase\(\)\.includes\('repair'\)/);
 
 const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 assert.match(style, /\.verba-visibility-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s);

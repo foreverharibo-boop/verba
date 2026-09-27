@@ -1,3 +1,4 @@
+import { promptTestFunction as Function } from './helpers/prompt-env.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { minimalOutputEnabled, buildMinimalOutputPrompt, POST_TRANSLATION_AI_REPAIR_ENABLED, translateMinimalOutput } from '../minimal-output.js';

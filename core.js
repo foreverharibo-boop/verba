@@ -4423,3 +4423,5 @@ const promptBuilders = createPromptBuilders({
     normalizedTranslationRuleOrder, parseDialoguePreferenceList, selectionTouchesDialogue,
     bilingualDialogueRequested, bilingualDialogueBracketPair,
 });
+
+export function customTranslationDefaults() { return promptBuilders.customTranslationDefaults(); }

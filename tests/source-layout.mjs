@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 import fs from 'node:fs';
 import { repairUnexpectedProseBreaks as repair, repairSourceEllipses, collectSegmentResponse } from '../response-parser.js';
 import { segmentSource, assembleTranslation } from '../core.js';
+import { runOutputBatches } from '../output-splitting.js';
 
 const prose = { id: 'seg_0000', type: 'narration', text: 'He waited. She smiled.' };
 const cases = [
@@ -22,7 +23,7 @@ const cases = [
     ['문자 그대로 \\n 표시', '문자 그대로 \\n 표시'],
 ];
 let checks = 0;
-for (const type of ['narration', 'dialogue_candidate', 'target_dialogue', 'other_dialogue', 'selection', 'multi_selection']) {
+for (const type of ['narration', 'dialogue_candidate', 'target_dialogue', 'other_dialogue', 'tagged_content', 'selection', 'multi_selection']) {
     for (const [before, after] of cases) {
         const target = { ...prose, type };
         assert.equal(repair(before, target), after);
@@ -38,7 +39,7 @@ const candidate = '첫 문장.\n\n다음 문장.';
 for (const text of ['First\nSecond', 'First\r\nSecond', 'First\u2028Second', '<div>First</div>', '`First`', '~~~code~~~', '', undefined]) {
     assert.equal(repair(candidate, { ...prose, text }), candidate);
 }
-for (const type of ['tagged_content', 'user_input', 'name_match', 'role_term', 'passthrough']) {
+for (const type of ['user_input', 'name_match', 'role_term', 'passthrough']) {
     assert.equal(repair(candidate, { ...prose, type }), candidate);
 }
 for (const text of ['<div>내용\n내용</div>', '`내용\n내용`', '```js\na()\n```', '~~~\na()\n~~~']) {
@@ -54,6 +55,25 @@ for (const gap of ['\n', '\n\n', '\r\n\r\n', '\n\n\n']) {
     const translations = new Map(segmented.segments.map(s => [s.id, s.type === 'tagged_content' ? s.text : s.type === 'dialogue_candidate' ? '“이리\n 와.”' : '기다렸다.\n\n웃었다.']));
     assert.equal(assembleTranslation(segmented, translations), '기다렸다. 웃었다.' + gap + '“이리 와.”' + gap + '<Info_block>Time: 0700<br>Weather: clear</Info_block>' + gap + '```js\nconst x = 1;\n```');
 }
+
+// Every source line break is stored outside translatable rows. Even with two
+// parallel batches, model-invented row breaks are removed and the exact source
+// separators are restored locally in their original order.
+const exactLayoutSource = 'Alpha line.\r\nBeta line.\n\nGamma line.\u2028Delta line.';
+const exactLayout = segmentSource(exactLayoutSource);
+assert.ok(exactLayout.segments.length >= 4);
+assert.ok(exactLayout.segments.every(segment => !/[\r\n\u0085\u2028\u2029]/u.test(segment.text)));
+assert.deepEqual(
+    exactLayout.parts.filter(part => part.type === 'passthrough').map(part => part.text),
+    ['\r\n', '\n\n', '\u2028'],
+);
+const batchMaps = await runOutputBatches(exactLayout, 2, {}, async segments => new Map(
+    segments.map(segment => [segment.id, `번역 ${segment.id}.\n\n이어지는 문장.`]),
+));
+assert.equal(
+    assembleTranslation(exactLayout, batchMaps),
+    '번역 seg_0000. 이어지는 문장.\r\n번역 seg_0001. 이어지는 문장.\n\n번역 seg_0002. 이어지는 문장.\u2028번역 seg_0003. 이어지는 문장.',
+);
 
 // Exercise the exact candidate cleanup expression used by the UI without
 // browser dependencies; no network request is involved in this step.

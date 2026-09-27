@@ -10,7 +10,7 @@ function segmentNumberKey(id) {
 // multi-line translations by character offsets: rewording makes that ambiguous.
 export function repairUnexpectedProseBreaks(translation, segment) {
     if (typeof translation !== 'string'
-        || !['narration', 'dialogue_candidate', 'target_dialogue', 'other_dialogue', 'selection', 'multi_selection'].includes(segment?.type)
+        || !['narration', 'dialogue_candidate', 'target_dialogue', 'other_dialogue', 'tagged_content', 'selection', 'multi_selection'].includes(segment?.type)
         || typeof segment.text !== 'string' || !segment.text.trim()
         || /[\r\n\u0085\u2028\u2029]/u.test(segment.text)
         || /[`<>]|~{3}/u.test(segment.text)) return translation;
@@ -19,6 +19,7 @@ export function repairUnexpectedProseBreaks(translation, segment) {
     // newly invented bare <br> in otherwise plain prose is treated as a break.
     const text = translation.replace(/<br\s*\/?\s*>/giu, '\n');
     if (/[`<>]|~{3}/u.test(text) || !/[\r\n\u0085\u2028\u2029]/u.test(text)) return translation;
+
     return text.replace(/[\t ]*(?:(?:\r\n|[\r\n\u0085\u2028\u2029])[\t ]*)+/gu,
         (gap, offset) => {
             const before = text[offset - 1] || '';

@@ -154,6 +154,7 @@ console.log('PASS: safe syntax recovery, exact text preservation, truncated-row 
 // Blank-line cleanup is local, scoped to single-line prose, and idempotent.
 const prose = { id: 'seg_0000', type: 'narration', text: 'She could hardly believe it.' };
 const breakCases = [
+    ['그녀의 걸음걸\n\n이 같은 것들', '그녀의 걸음걸이 같은 것들'],
     ['믿을\n\n 수 없었다.', '믿을 수 없었다.'],
     ['머리\n\n 위였다.', '머리 위였다.'],
     ['엎질\n\n러진 커피였다.', '엎질러진 커피였다.'],
@@ -175,7 +176,7 @@ for (const [before, after] of breakCases) {
         assert.equal(parsed.partial.get(prose.id), after);
     }
 }
-for (const type of ['tagged_content', 'user_input', 'name_match', 'role_term']) {
+for (const type of ['user_input', 'name_match', 'role_term']) {
     assert.equal(repairUnexpectedProseBreaks('믿을\n\n 수', { ...prose, type }), '믿을\n\n 수');
 }
 assert.equal(repairUnexpectedProseBreaks('믿을\n\n 수', { ...prose, text: 'First\nSecond' }), '믿을\n\n 수');

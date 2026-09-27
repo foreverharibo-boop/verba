@@ -1,5 +1,5 @@
 {
-  "version": "0.6.10",
+  "version": "0.6.12",
   "checks": [
     {
       "check": "syntax",
@@ -29,7 +29,7 @@
     {
       "check": "settings-layout.mjs",
       "status": "PASS",
-      "output": "Complete settings markup, unique IDs, visibility controls, engine selector, tagged-content toggle placement, compact inner UI and v0.6.10 metadata pass."
+      "output": "Complete settings markup, unique IDs, visibility controls, engine selector, tagged-content toggle placement, compact inner UI and v0.6.12 metadata pass."
     },
     {
       "check": "profile-race.mjs",
@@ -54,7 +54,7 @@
     {
       "check": "original-baseline-regression",
       "status": "PASS",
-      "output": "41 current tests pass. The remaining 11 failures are the same stale long-Verba or retired prompt-pipeline tests already documented before v0.6.10; no new regression was introduced."
+      "output": "41 current tests pass. The remaining 11 failures are the same stale long-Verba or retired prompt-pipeline tests already documented before v0.6.12; no new regression was introduced."
     },
     {
       "check": "archive",
@@ -63,6 +63,8 @@
     }
   ],
   "changed_files": [
+    "response-parser.js",
+    "core.js",
     "google-free.js",
     "index.js",
     "minimal-output.js",
@@ -71,8 +73,10 @@
     "VERIFICATION.json",
     "tests/google-free.mjs",
     "tests/namespace-isolation.mjs",
+    "tests/response-recovery.mjs",
+    "tests/source-layout.mjs",
     "tests/settings-layout.mjs"
   ],
-  "scope": "Add an optional no-key free Google translation engine with safe automatic chunking while preserving the existing AI engine and its settings.",
+  "scope": "Store every source line break outside translatable rows, remove provider-invented row breaks locally, and rebuild the exact source layout after single or parallel split translation.",
   "live_mobile_test": false
 }

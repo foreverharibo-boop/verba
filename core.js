@@ -1377,10 +1377,15 @@ export function segmentSource(value, nameLocks = [], {
     };
 
     for (const region of regions) {
-        const blocks = region.text.split(/(\n{2,})/);
+        // Store every source line break outside the AI target. The model still
+        // receives all adjacent rows together in the same request, while local
+        // assembly becomes the sole authority for CRLF, single hard wraps and
+        // blank-line counts. Any newline returned inside a row is therefore
+        // provider-invented and is removed by repairUnexpectedProseBreaks().
+        const blocks = region.text.split(/((?:(?:\r\n)|[\r\n\u0085\u2028\u2029])+)/u);
         for (const block of blocks) {
             if (!block) continue;
-            if (/^\n{2,}$/.test(block)) {
+            if (/^(?:(?:\r\n)|[\r\n\u0085\u2028\u2029])+$/u.test(block)) {
                 parts.push({ type: 'passthrough', text: block });
                 continue;
             }

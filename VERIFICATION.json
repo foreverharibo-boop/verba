@@ -1,300 +1,311 @@
 {
-  "version": "0.6.17",
-  "baselineVersion": "0.6.16",
-  "baselinePassed": 42,
-  "baselineTotal": 53,
-  "passed": 54,
-  "total": 54,
-  "failed": [],
-  "legacyTestsReplaced": 11,
-  "legacyAudit": "See TEST-MIGRATION.json and preserved tests/legacy/*.mjs.txt",
-  "defaultPrimaryPromptComparisons": 324,
-  "syntax": "All 70 JS/MJS checked",
-  "postTranslationAiEnabled": false,
-  "coverage": [
-    "Actual output entry point: no audit calls under common OFF gate",
-    "Deliberately enabled mock audit applies reviewed text",
-    "MAD all scopes, Hongjin confirmed target only, combined single taste audit",
-    "Current custom taste prose and settings/names/source/draft retained",
-    "Invalid ids, blank/layout/banned/token failures cause no partial commit",
-    "Abort and provider failure retain existing translations",
-    "Paused UI and stored settings compatibility",
-    "Existing name-lock and five-editor tests"
-  ],
-  "limitations": [
-    "No live SillyTavern browser/server session",
-    "No external model calls; semantic/style review efficacy is not empirically validated"
-  ],
-  "results": [
+  "version": "0.6.18",
+  "baselineVersion": "0.6.17",
+  "passed": 55,
+  "failed": 0,
+  "tests": [
     {
       "test": "auto-input-setting.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: auto-input initial state, ON/OFF, change/save handling and early binding; DOM adapter, not native browser clicks.\n"
     },
     {
       "test": "backport-features.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: v0.5.53 long prompts with local line-break recovery, prompt editor integration, and selection-only request isolation.\n"
     },
     {
       "test": "bilingual-dedupe-and-token-variants.mjs",
       "exit": 0,
-      "output": ""
+      "output": "bilingual-dedupe-and-token-variants ok\nname-only dialogue bilingual ok\n"
     },
     {
       "test": "bilingual-dialogue-local-format.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally.\n"
     },
     {
       "test": "bounded-retries-and-soft-fallback.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: permanent errors stop immediately, transient retries stay bounded, transport and JSON retries do not multiply, and reversible post-translation AI repair paths remain present but inactive.\n"
     },
     {
       "test": "chuseok-galbwae.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: Chuseok Galbwae defaults OFF, runs as an exclusive style prompt, supports all-text or dialogue+bold-Markdown modes, detects and repairs strong unchanged Latin character-name leftovers only while Galbwae is active, forces fixed-name-first natural Hangul names before protecting them from style corruption, rewrites eligible visible text inside ** delimiters while absolutely exempting every paired-tag interior, mixes sparse internet-grandpa/profanity/ending/punctuation mutations without mechanical repetition, respects the tagged-content toggle, and keeps visibility actions horizontal.\n"
     },
     {
       "test": "compressed-prompts.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: shortened prompt contracts (1140 route checks, custom text/scopes, no API calls).\n"
     },
     {
       "test": "custom-translator.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: five editors, original prose, exact migration/reload, separate scoped tastes, live rules/data, candidates, minimal pipeline and transport.\n"
     },
     {
       "test": "diagnostics.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: diagnostic classification, redaction, bounded raw responses, request ON/OFF, cancellation, last-record UI/copy gates\n"
     },
     {
       "test": "extreme-compressed-prompts.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 116 assertions; API calls: 0; live browser testing: not performed.\n"
     },
     {
       "test": "flavor-preset-restore.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: preset JSON roundtrip, ON/OFF, all 9 choices, visible controls and disabled states, re-save, legacy and prompt-only, developer locked/unlocked.\nPASS: minimal experiment flag/text persist in translation presets without unlocking developer mode.\nPASS: independent split count in translation presets, prompt-only preservation, legacy defaults, invalid values, no developer auto-unlock.\nPASS: removed register monitor does not return through legacy presets.\n"
     },
     {
       "test": "general-flavors.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: Mad Korean and Hongjin tastes are general-mode controls after English taste, independent of developer mode; values and speaker scope remain intact.\n"
     },
     {
       "test": "general-translation-settings.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: general split/relationship layout, solid borders, lock independence, target-only prompts, saved settings and complete monitor removal.\n"
     },
     {
       "test": "google-free.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: free Google engine selection, safe chunking, token preservation, direct segment translation, and AI-only feature guards.\n"
     },
     {
       "test": "hongjin-enforced-rewrite.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: common OFF gate makes zero requests; unchanged compliant voice is accepted.\n"
     },
     {
       "test": "hongjin-final-gate.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: Hongjin review only receives confirmed target dialogue.\n"
     },
     {
       "test": "hongjin-profanity-targeting.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: current profanity strengths, user-target guard and source-grounded review.\n"
     },
     {
       "test": "hongjin-raw-voice.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: concise voice control values and speaker/input isolation.\n"
     },
     {
       "test": "integrated-author-pass.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: audit reuses active custom taste prose, current settings, identity and original source.\n"
     },
     {
       "test": "local-speaker-attribution.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: local protected-name, speech-tag and continuity attribution marks 8 Hong-jin lines without an API call and keeps USER/NPC dialogue isolated.\n"
     },
     {
       "test": "mad-final-gate.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: combined MAD/Hongjin scopes and exclusive/minimal/free-engine exclusions.\n"
     },
     {
       "test": "mad-narration-micro-audit.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: source-grounded MAD review handles narration and retains draft on request failure.\n"
     },
     {
       "test": "mad-recomposition.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: User-approved MAD recomposition/punctuation/time/units/register/abuse guards across modes and scopes.\n"
     },
     {
       "test": "mad-targeted-repair.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: invalid ids/empty/layout/banned/token results and cancellation never commit partial edits.\n"
     },
     {
       "test": "minimal-output.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: minimal-only prompt and actual entry path, lock/enable gates, optional call exclusion, name/code/tag preservation, source mapping, local cleanup, repair bounds and cancellation.\nPASS: developer-only escaped UI, toggle restores saved settings, developer shutdown disables experiment but retains text/flavors.\n"
     },
     {
       "test": "name-lock-collision.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: exact source identities stay separate; safe repeated names update locally, ambiguous rows change only the selected occurrence, and optional AI history uses aligned evidence.\n"
     },
     {
       "test": "name-lock-flow.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: swipe evidence collection, exact identity, optional API flow, checked forms only, failure/cancel handling and popup controls.\n"
     },
     {
       "test": "name-lock-omission.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: omitted repeated NAME tokens stay omitted; present names restore once; excess names and missing structural tokens remain strict.\n"
     },
     {
       "test": "name-lock-priority.mjs",
       "exit": 0,
-      "output": ""
+      "output": "Name-lock routing: PASS (841 checks plus identity/restoration assertions; no live AI calls)\n"
     },
     {
       "test": "namespace-isolation.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 베르바 uses its expected extension, DOM, storage, command, token, and global namespaces.\n"
     },
     {
       "test": "output-action.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: /verba routing/cancellation/retry, duplicate guards, errors, popup creation/options/dismissal/placement (DOM adapter). API calls: 0; live SillyTavern browser: not tested.\n"
     },
     {
       "test": "output-splitting.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: independent 1/2/3 split gate, full coverage, unified speaker-scoped prompts, whole-output local attribution/planning/checks, minimal combinations, 3-request concurrency, order, cancellation/failure and UI.\n"
     },
     {
       "test": "output-timing.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: output timing accounting, parallel overlap, OFF/reset, newest-job isolation, real request/parse/transport retry/fallback paths, queued/active cancellation; simulated provider only.\n"
     },
     {
       "test": "pair-coordination.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: verba shares one display owner, defaults to Verba, switches manually, rejects peer display adoption, and gates automatic input/output work.\n"
+    },
+    {
+      "test": "previous-user-context.mjs",
+      "exit": 0,
+      "output": "PASS: nearest raw user turn only, old target/swipes/chat isolation, reference contract, actual output split/minimal/custom/style requests, retry snapshot, input/free-engine isolation and selection wiring. No live AI calls.\n"
     },
     {
       "test": "profile-action.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: profile command registration, A/B/C popup, current marker, disabled/stale slots, persistence, dismissal, hidden-anchor placement and existing icon cycle. DOM adapter; no API calls.\n"
     },
     {
       "test": "profile-race.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 지연 경주가 사용자 지정 초 간격으로 프로필을 시차 호출하고 첫 정상 응답만 채택하며 전체 제한·사용자 취소를 올바르게 처리함.\n"
     },
     {
       "test": "prompt-editor.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 88 DOM/event assertions including 9 custom-translator expand/close auto-saves; actual save handlers, close/Escape, viewport cleanup. Rendering/live ST not tested.\n"
     },
     {
       "test": "prompt-settings-matrix.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 192 option/mode sensitivity checks; settings, identity, source and custom notes preserved.\nPASS: implicit defaults and explicit Hongjin/pair-register overrides in all three modes.\nPASS: shared accuracy policy across built-in styles and compression modes.\n"
     },
     {
       "test": "prompt-slots-collapse.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: four prompt slots collapse together, preserve their controls, default open, and persist UI state.\n"
     },
     {
       "test": "protected-recovery.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS protected recovery: exact missing/excess counts, moved marks, mappings, redaction/limits, successful log/copy data, no-op, OFF/reset, newer-log guard, 2-attempt failure, cancellation, diagnostic isolation (mock requests).\n"
     },
     {
       "test": "real-output-regressions.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: recorded-style defect is sent with source/draft evidence and mock correction applied; no live AI quality claim.\n"
     },
     {
       "test": "response-recovery.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: safe syntax recovery, exact text preservation, truncated-row salvage, malformed/ambiguous rejection, missing-only retry, intermediate recovered logs and debug OFF/reset (mock AI).\nPASS: unexpected prose blank lines, protected layout, source-map offsets and one-call cleanup with debug ON/OFF.\n"
     },
     {
       "test": "role-term-ai-disabled.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: both role-term AI stages are runtime-disabled by one reversible flag while their implementation and prompts remain intact.\n"
     },
     {
       "test": "selection-range-only.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: selection-only retranslation sends no surrounding Korean or full-source fallback.\n"
     },
     {
       "test": "settings-layout.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: complete settings markup, default outer drawer sizing, hidden visible version, compact inner UI, exact adjacent placement, unique IDs and version; developer ON/OFF.\n"
     },
     {
       "test": "source-ellipsis.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 1260 ellipsis assertions plus parser/assembly/candidate/selection/protected-content integration; local mean 0.532 ms for 24800 characters. No API calls.\n"
     },
     {
       "test": "source-layout.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 490 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.497 ms/local pass (container, not phone).\n"
     },
     {
       "test": "source-map-selection.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: selection retranslation preserves source mapping across single, crossed, and repeated ranges.\n"
     },
     {
       "test": "source-policy-update.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: 132 prompt routes, multilingual source policies, profanity/metric scope, three-candidate local cleanup and removed register monitor. No live AI calls.\n"
     },
     {
       "test": "subject-pronoun-omission.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: general and Mad Korean prompts no longer encourage subject/pronoun omission; explicit 한캐 option remains available.\n"
     },
     {
       "test": "tagged-content-toggle.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: tagged natural-language translation defaults ON, can be disabled without touching outside text or tag structure, and 25 settings groups support persistent UI-only visibility.\n"
     },
     {
       "test": "taste-audit-wiring.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: real output entry point makes zero audit calls when OFF and applies a mock audit when deliberately enabled; UI shows disabled without resetting saved preferences.\n"
     },
     {
       "test": "translation-layer-separation.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: ordinary translation, active flavor composition and optional review remain separate.\n"
     },
     {
       "test": "voice-intensity-flexibility.mjs",
       "exit": 0,
-      "output": ""
+      "output": "PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (43 checks).\n"
     }
+  ],
+  "syntaxChecked": [
+    "base-editor.js",
+    "core.js",
+    "diagnostics.js",
+    "google-free.js",
+    "index.js",
+    "minimal-output.js",
+    "output-splitting.js",
+    "pair-coordinator.js",
+    "previous-user-context.js",
+    "prompt-builders.js",
+    "prompt-editor.js",
+    "response-parser.js",
+    "taste-audit.js",
+    "timing.js",
+    "translation-composer.js"
+  ],
+  "context": "one nearest preceding user message, raw active source only",
+  "aiAuditEnabled": false,
+  "liveApiTested": false,
+  "liveSillyTavernTested": false,
+  "unchangedModules": [
+    "core.js",
+    "translation-composer.js",
+    "minimal-output.js",
+    "taste-audit.js",
+    "base-editor.js"
   ]
 }

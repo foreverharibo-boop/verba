@@ -1,3 +1,4 @@
+import { previousUserSource } from '../previous-user-context.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createOutputTiming, outputTimingText } from '../timing.js';
@@ -196,8 +197,8 @@ assert.equal(recorder.latest(), before);
 const message = { is_user: false, mes: 'source' };
 const context = { chat: [message] };
 let applied = true;
-let seenTrace;
-const lifecycleEnv = {
+let seenTrace, seenReference;
+const lifecycleEnv = { previousUserSource,
     minimalOutputEnabled, outputSplitCount,
     EXTENSION_KEY: 'verba',
     isTranslationExtensionActive: () => true,
@@ -210,6 +211,7 @@ const lifecycleEnv = {
     clearProgress: () => {}, notify: () => {}, recentDialogueEndingRepeatHints: () => [], outputSpeakerIdentity: () => ({}),
     translateOutputText: async (_source, options) => {
         seenTrace = options.timing;
+        seenReference = options.previousUserSource;
         await api.sendProfileRequest('private', options);
         return { translation: '번역', sourceMap: [] };
     },
@@ -250,6 +252,19 @@ applied = false; assert.equal(await translate(0, {}), undefined);
 assert.equal(recorder.latest().status, '실패');
 recorder.setEnabled(false); applied = true;
 assert.equal(await translate(0, {}), true); assert.equal(seenTrace, null); assert.equal(recorder.latest(), null);
+
+// Real automatic/retranslation lifecycle selects the user before the target,
+// even while newer turns exist, and picks up a user edit on a new request.
+const priorUser={is_user:true,mes:'We are at the river.'};
+context.chat=[priorUser,message,{is_user:true,mes:'FUTURE SEA'}];
+for(const force of [false,true]) {
+ assert.equal(await translate(1,{force,automatic:!force}),true);
+ assert.equal(seenReference,'We are at the river.');
+}
+priorUser.mes='We are at the lake.';
+assert.equal(await translate(1,{force:true}),true);
+assert.equal(seenReference,'We are at the lake.');
+context.chat=[message];
 
 // Real debug UI handlers: copy one record, clear on OFF, do not resurrect on ON.
 recorder.setEnabled(true); await translate(0, {});

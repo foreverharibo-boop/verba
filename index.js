@@ -49,7 +49,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.15';
+const EXTENSION_VERSION = '0.6.16';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -6402,7 +6402,6 @@ function collectHistoricalNameCandidates(sourceName, currentName) {
         if (!isNameReplacementMessage(message)) continue;
         if (Array.isArray(message.swipes)) {
             message.swipes.forEach((rawSource, swipeId) => {
-                if (messageId === options.skipMessageId && swipeId === options.skipSwipeId) return;
                 const source = typeof rawSource === 'string'
                     ? rawSource
                     : String(rawSource?.mes ?? rawSource?.text ?? rawSource?.content ?? rawSource?.message ?? '');

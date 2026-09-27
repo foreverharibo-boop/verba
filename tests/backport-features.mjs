@@ -12,8 +12,8 @@ assert.ok(index.includes('bindPromptExpandEditors(panel);'));
 assert.ok(index.includes('value="selection"> 선택 범위만'));
 assert.ok(!index.includes('> 선택 주변</label>'));
 assert.equal(typeof bindPromptExpandEditors, 'function');
-assert.match(style, /\.verba-deep-prompt-expand[\s\S]*?width:\s*20px\s*!important/);
-assert.match(style, /#verba-deep-prompt-editor\s*\{/);
+assert.match(style, /\.verba-prompt-expand[\s\S]*?width:\s*20px\s*!important/);
+assert.match(style, /#verba-prompt-editor\s*\{/);
 
 const translation = 'LEFT_KOREAN_SENTINEL선택문RIGHT_KOREAN_SENTINEL';
 const start = 'LEFT_KOREAN_SENTINEL'.length;

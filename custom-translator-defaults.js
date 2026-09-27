@@ -1,4 +1,3 @@
-import { collectTranslationProse } from './translation-composer.js';
 import {
     buildBannedRepairPrompt,
     buildInputPrompt,
@@ -16,13 +15,21 @@ import {
 
 function editablePromptBody(value) {
     const prompt = String(value || '').trim();
-    const contractMarkers = [
-        '\nReturn exactly this schema:',
-        '\nReturn exactly:',
-        '\nReturn valid JSON only:',
-        '\nReturn exactly this JSON schema:',
+    const dataMarkers = [
+        '\nReturn {"segments"',
+        '\nReturn exactly 3 meaning-equivalent distinct candidates:',
+        '\nJSON only:',
+        '\nSEGMENTS\n',
+        '\nSOURCE\n',
+        '\nORIGINAL SOURCE\n',
+        '\nORIGINAL\n',
+        '\nDATA\n',
+        '\nTERMS\n',
+        '\nCANDIDATE SEGMENTS\n',
+        '\nIDS\n',
+        '\nCONTEXT\n',
     ];
-    const cutAt = contractMarkers
+    const cutAt = dataMarkers
         .map(marker => prompt.indexOf(marker))
         .filter(index => index >= 0)
         .reduce((earliest, index) => Math.min(earliest, index), prompt.length);
@@ -65,6 +72,11 @@ function previewSettings(ruleOrder = []) {
 
 export function buildDefaultCustomTranslatorTemplates(ruleOrder = []) {
     const baseSettings = previewSettings(ruleOrder);
+    const flavorSettings = {
+        ...baseSettings,
+        developerMadKoreanOutputEnabled: true,
+        developerHongjinFlavorEnabled: true,
+    };
     const speakerIdentity = {
         characterName: '{{char}}',
         userName: '{{user}}',
@@ -112,13 +124,11 @@ export function buildDefaultCustomTranslatorTemplates(ruleOrder = []) {
         selected: '{{SELECTED_NAME}}',
         start: 0,
         end: '{{SELECTED_NAME}}'.length,
-        settings: baseSettings,
     });
     const nameHistory = buildNameHistoryFormsPrompt({
         sourceName: '{{SOURCE_NAME}}',
         currentName: '{{CURRENT_KOREAN_NAME}}',
         candidates: ['{{CANDIDATE_KOREAN_NAME}}'],
-        settings: baseSettings,
     });
     const rolePlan = buildRoleTermPlanPrompt({
         sourceContext: '{{ORIGINAL_SOURCE_CONTEXT}}',
@@ -136,31 +146,13 @@ export function buildDefaultCustomTranslatorTemplates(ruleOrder = []) {
         settings: baseSettings,
     });
     const bannedRepair = buildBannedRepairPrompt(
-        [sourceSegment],
-        currentTranslations,
-        baseSettings,
-        speakerIdentity,
-        [],
-        null,
-        'mixed',
+        [sourceSegment], currentTranslations, baseSettings, speakerIdentity, [], null, 'mixed',
     );
     const protectedRepair = buildProtectedTokenRepairPrompt(
-        [sourceSegment],
-        currentTranslations,
-        baseSettings,
-        speakerIdentity,
-        [],
-        null,
-        'mixed',
+        [sourceSegment], currentTranslations, baseSettings, speakerIdentity, [], null, 'mixed',
     );
     const untranslatedRepair = buildUntranslatedRepairPrompt(
-        [sourceSegment],
-        currentTranslations,
-        baseSettings,
-        speakerIdentity,
-        [],
-        null,
-        'mixed',
+        [sourceSegment], currentTranslations, baseSettings, speakerIdentity, [], null, 'mixed',
     );
     const quality = buildQualityAuditPrompt({
         segments: [sourceSegment],
@@ -172,20 +164,13 @@ export function buildDefaultCustomTranslatorTemplates(ruleOrder = []) {
         tuning: null,
         enabledChecks: ['meaning', 'referent', 'voice', 'translationese', 'continuity'],
     });
+    const flavor = buildOutputPrompt(segmented, flavorSettings, '', speakerIdentity, null);
     const other = buildSpeakerAttributionPrompt(segmented, speakerIdentity, baseSettings);
 
-    const mad = collectTranslationProse({ ...baseSettings, developerMadKoreanOutputEnabled: true }, 'mad', current => buildOutputPrompt(segmented, current, '', speakerIdentity, null));
-    const hongjin = collectTranslationProse({ ...baseSettings, developerHongjinFlavorEnabled: true }, 'hongjin', current => buildOutputPrompt(segmented, current, '', speakerIdentity, null));
-
     return {
-        output: collectTranslationProse(baseSettings, 'output', current => buildOutputPrompt(segmented, current, '', speakerIdentity, null)),
-        input: collectTranslationProse(baseSettings, 'input', current => buildInputPrompt('{{KOREAN_INPUT}}', current, 'unknown', speakerIdentity)),
-        selection: collectTranslationProse(baseSettings, 'selection', current => buildSelectionPrompt({
-            source: '{{ORIGINAL_SOURCE}}', sourceContext: '{{ORIGINAL_SOURCE_CONTEXT}}',
-            translation: '{{SELECTED_KOREAN_FRAGMENT}}', selected: '{{SELECTED_KOREAN_FRAGMENT}}',
-            start: 0, end: 28, settings: current, oneTimeInstruction: '', speakerIdentity,
-            candidateCount: 1, contextMode: 'selection', tuning: null,
-        })),
+        output: editablePromptBody(output),
+        input: editablePromptBody(input),
+        selection: editablePromptBody(selection),
         name: [
             originalPromptSection('NAME MATCH', nameMatch),
             originalPromptSection('NAME HISTORY FORMS', nameHistory),
@@ -200,10 +185,7 @@ export function buildDefaultCustomTranslatorTemplates(ruleOrder = []) {
             originalPromptSection('UNTRANSLATED TEXT REPAIR', untranslatedRepair),
         ].join('\n\n'),
         quality: editablePromptBody(quality),
-        mad,
-        hongjin,
-        // Historical storage key is retained for exact legacy edit migration.
-        flavor: [mad, hongjin].join('\n\n'),
+        flavor: editablePromptBody(flavor),
         other: editablePromptBody(other),
     };
 }

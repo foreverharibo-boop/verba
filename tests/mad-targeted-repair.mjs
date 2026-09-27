@@ -72,12 +72,14 @@ const prompt = buildMadKoreanTargetedAuditPrompt({
     },
     settings: { developerHongjinFlavorEnabled: true, developerHongjinProfanity: 'natural' },
 });
-assert.match(prompt, /FINAL BLANK-PAGE REWRITE/);
-assert.match(prompt, /For EVERY row/);
-assert.match(prompt, /Do not proofread current_translation/i);
-assert.match(prompt, /from a blank page/i);
-assert.match(prompt, /only content boundary/i);
-assert.match(prompt, /throw the entire row away/i);
+assert.match(prompt, /FINAL REWRITE PASS/);
+assert.match(prompt, /for EVERY row/);
+assert.match(prompt, /active rewrite, not a conservative proofread/i);
+assert.match(prompt, /dedicated voice pass/i);
+assert.match(prompt, /담은 손/);
+assert.match(prompt, /홍진 목소리/);
+assert.match(prompt, /손을 물다/);
+assert.match(prompt, /road\/overpass ramp=경사로\/진입로/);
 assert.match(prompt, /every local_flags item/i);
 
 // Exercise the exact sparse parser/request loop extracted from index.js.

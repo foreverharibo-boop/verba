@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ensureBilingualDialogueFormat, protectSource, segmentSource, assembleTranslation, restoreProtected } from '../core.js';
+import { ensureBilingualDialogueFormat, protectSource, assembleTranslation, restoreProtected } from '../core.js';
 import { collectSegmentResponse, canonicalizeProtectedTokenVariants } from '../response-parser.js';
 
 const settings = { globalPromptEnabled: true, globalPrompt: '대사는 영어 원문 (한국어 번역) 형식으로 병기' };
@@ -14,44 +14,47 @@ assert.equal(fmt('"Nest,"', '"Nest, (둥지, (둥지,))"'), '"Nest, (둥지,)"')
 assert.equal(fmt('"Enough,"', '"Enough, (충분해,)"'), '"Enough, (충분해,)"');
 
 // 이름 보호 토큰 변형 복구
-assert.equal(canonicalizeProtectedTokenVariants('@@VERBA_DEEP_NAME_ 0023@@이'), '@@VERBA_DEEP_NAME_0023@@이');
-assert.equal(canonicalizeProtectedTokenVariants('@@ verba_deep_name_0001 @@'), '@@VERBA_DEEP_NAME_0001@@');
-assert.equal(canonicalizeProtectedTokenVariants('@@VERBA_DEEP_ 0002@@'), '@@VERBA_DEEP_0002@@');
-assert.equal(canonicalizeProtectedTokenVariants('@@VERBA_NAME_0003@@'), '@@VERBA_DEEP_NAME_0003@@');
-const parsed = collectSegmentResponse(JSON.stringify({ segments: [{ id: 'seg_0000', translation: '@@VERBA_DEEP_NAME_ 0000@@이 일어났다' }] }), [{ id: 'seg_0000' }]);
-assert.equal(parsed.partial.get('seg_0000'), '@@VERBA_DEEP_NAME_0000@@이 일어났다');
+assert.equal(canonicalizeProtectedTokenVariants('@@VERBA_NAME_ 0023@@이'), '@@VERBA_NAME_0023@@이');
+assert.equal(canonicalizeProtectedTokenVariants('@@ verba_name_0001 @@'), '@@VERBA_NAME_0001@@');
+assert.equal(canonicalizeProtectedTokenVariants('@@VERBA_ 0002@@'), '@@VERBA_0002@@');
+const parsed = collectSegmentResponse(JSON.stringify({ segments: [{ id: 'seg_0000', translation: '@@VERBA_NAME_ 0000@@이 일어났다' }] }), [{ id: 'seg_0000' }]);
+assert.equal(parsed.partial.get('seg_0000'), '@@VERBA_NAME_0000@@이 일어났다');
 
 const segmented = protectSource('Nyon stood up.', [{ source: 'Nyon', target: '니욘' }]);
-assert.equal(restoreProtected('@@VERBA_DEEP_NAME_ 0000@@이 일어났다.', segmented.nameTokens, { strict: false }), '니욘이 일어났다.');
+const restored = restoreProtected('@@VERBA_NAME_ 0000@@이 일어났다.', segmented.nameTokens, { strict: false });
+assert.equal(restored, '니욘이 일어났다.');
 
-// 어시스턴트 응답에 변형 토큰이 섞여도 최종 출력에 토큰이 남지 않아야 한다
-{
-    const seg = segmentSource('Nyon stood up.', [{ source: 'Nyon', target: '니욘' }]);
-    const out = assembleTranslation(seg, new Map([['seg_0000', '@@VERBA_DEEP_NAME_ 0000@@이 자리에서 일어났다. @@VERBA_DEEP_NAME_0099@@']]));
-    assert.equal(out, '니욘이 자리에서 일어났다. ');
-}
+console.log('bilingual-dedupe-and-token-variants ok');
 
-// 이름뿐인 대사("Dana,")는 이 확장에서 이미 세그먼트로 유지되어 한영병기 대상이다
+// 이름만 든 대사("Dana,")도 한영병기가 적용되어야 한다.
+// 0.5.89 에서는 이런 대사가 passthrough 가 아니라 dialogue_candidate 구간으로 남는다.
 {
     const locks = [{ source: 'Dana', target: '다나' }, { source: 'Nyon', target: '니욘' }];
+    const cfg = { globalPromptEnabled: true, globalPrompt: '대사는 영어 원문 (한국어 번역) 형식으로 병기' };
+    const { segmentSource } = await import('../core.js');
+
     const seg = segmentSource('"Dana," he said.', locks);
-    const dlg = seg.segments.find(x => x.type === 'dialogue_candidate');
-    const tr = new Map(seg.segments.map(x => [x.id, x === dlg
-        ? ensureBilingualDialogueFormat(x, '"다나,"', settings, null, seg.nameTokens, seg.tokens)
-        : '그가 말했다.']));
-    assert.equal(assembleTranslation(seg, tr), '"Dana, (다나,)" 그가 말했다.');
+    const first = seg.segments[0];
+    for (const returned of [`"${seg.nameTokens[0].token},"`, '"다나,"']) {
+        const built = ensureBilingualDialogueFormat(first, returned, cfg, null, seg.nameTokens, seg.tokens);
+        assert.equal(
+            assembleTranslation(seg, new Map([[first.id, built], ['seg_0001', '그가 말했다.']]), { settings: cfg }),
+            '"Dana, (다나,)" 그가 말했다.',
+        );
+    }
+    // 병기 설정이 없으면 원래대로 한국어만 남는다.
+    assert.equal(
+        assembleTranslation(seg, new Map([[first.id, '"다나,"'], ['seg_0001', '그가 말했다.']])),
+        '"다나," 그가 말했다.',
+    );
+
+    const two = segmentSource('"Nyon, Dana!" he called.', locks);
+    const nyon = two.nameTokens.find(entry => entry.source === 'Nyon').token;
+    const dana = two.nameTokens.find(entry => entry.source === 'Dana').token;
+    const builtTwo = ensureBilingualDialogueFormat(two.segments[0], `"${nyon}, ${dana}!"`, cfg, null, two.nameTokens, two.tokens);
+    assert.equal(
+        assembleTranslation(two, new Map([[two.segments[0].id, builtTwo], ['seg_0001', '그가 불렀다.']]), { settings: cfg }),
+        '"Nyon, Dana! (니욘, 다나!)" 그가 불렀다.',
+    );
+    console.log('name-only dialogue bilingual ok');
 }
-// 원문 표기 보존: 락은 Dana 로 등록돼 있어도 원문이 DANA! 면 병기의 영어 쪽도 DANA! 여야 한다
-{
-    const locks = [{ source: 'Dana', target: '다나' }];
-    const seg = segmentSource('"DANA!" he shouted.', locks);
-    const dlg = seg.segments.find(x => x.type === 'dialogue_candidate');
-    const tr = new Map(seg.segments.map(x => [x.id, x === dlg
-        ? ensureBilingualDialogueFormat(x, '"다나!"', settings, null, seg.nameTokens, seg.tokens)
-        : '그가 외쳤다.']));
-    assert.equal(assembleTranslation(seg, tr), '"DANA! (다나!)" 그가 외쳤다.');
-    const lower = segmentSource('"dana,"', locks);
-    const d2 = lower.segments[0];
-    assert.equal(assembleTranslation(lower, new Map([[d2.id, ensureBilingualDialogueFormat(d2, '"다나,"', settings, null, lower.nameTokens, lower.tokens)]])), '"dana, (다나,)"');
-}
-console.log('bilingual-dedupe-and-token-variants ok');

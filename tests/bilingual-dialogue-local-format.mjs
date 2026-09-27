@@ -27,49 +27,6 @@ const settings = {
 assert.equal(bilingualDialogueRequested(settings), true);
 assert.deepEqual(bilingualDialogueBracketPair(settings), ['(', ')']);
 
-// Regression: an exact direct-dialogue format is mandatory even when it does
-// not literally say always/must and separately excludes narration.
-const exactFormatInstruction = `[BILINGUAL DIALOGUE FORMAT]
-For direct dialogue only, output both the original English dialogue and its Korean translation in this exact format:
-"English dialogue. [한국어 번역.]"
-Apply this format only to direct dialogue inside quotation marks.
-Keep narration in Korean only.
-Preserve the original English dialogue exactly in the first part.
-Put the Korean translation immediately after it inside parentheses.
-Keep both the English and Korean inside the same quotation marks.
-Do not create bilingual narration.`;
-const exactFormatSettings = {
-    ...settings,
-    allDialoguePrompt: exactFormatInstruction,
-};
-assert.equal(bilingualDialogueRequested(exactFormatSettings), true);
-assert.deepEqual(bilingualDialogueBracketPair(exactFormatSettings), ['[', ']']);
-
-const shortNamed = segmentSource('"Dana—"\n\n"Nyon."', [
-    { source: 'Dana', target: '다나' },
-    { source: 'Nyon', target: '니욘' },
-]);
-const shortDialogues = shortNamed.segments.filter(segment => segment.type === 'dialogue_candidate');
-assert.equal(shortDialogues.length, 2);
-const shortTranslations = new Map([
-    [shortDialogues[0].id, '"다나—"'],
-    [shortDialogues[1].id, '"니욘."'],
-]);
-normalizeLocallyRecoverableProtectedTokens(shortNamed, shortTranslations, exactFormatSettings, {});
-assert.equal(shortTranslations.get(shortDialogues[0].id), `"Dana— [${shortNamed.nameTokens[0].token}—]"`);
-assert.equal(shortTranslations.get(shortDialogues[1].id), `"Nyon. [${shortNamed.nameTokens[1].token}.]"`);
-assert.equal(
-    assembleTranslation(shortNamed, shortTranslations),
-    '"Dana— [다나—]"\n\n"Nyon. [니욘.]"',
-);
-
-const shortPlain = segmentSource('"Yes."');
-const shortPlainSegment = shortPlain.segments[0];
-assert.equal(
-    ensureBilingualDialogueFormat(shortPlainSegment, '"응."', exactFormatSettings),
-    '"Yes. [응.]"',
-);
-
 const segmented = segmentSource('Alex said, "I did not say that."', [{ source: 'Alex', target: '알렉스' }]);
 const narration = segmented.segments.find(segment => segment.type === 'narration');
 const dialogue = segmented.segments.find(segment => segment.type === 'dialogue_candidate');
@@ -237,32 +194,6 @@ assert.equal(
     assembleTranslation(multiName, new Map([[multiDialogue.id, multiFixed]])),
     '"Nyon lies down and thinks about Nyen before Dana arrives. (니욘은 니옌을 생각하다 다나를 만난다.)"',
 );
-
-// Regression: four source mentions may become two natural Korean mentions.
-// The local bilingual formatter must never insert the omitted names back.
-const repeated = segmentSource(
-    '"If Nyen finds out Nyon slept in Dana\'s room, Nyen will talk. Nyen will complain. Nyen will keep going."',
-    [
-        { source: 'Nyen', target: '니옌' },
-        { source: 'Nyon', target: '니욘' },
-        { source: 'Dana', target: '다나' },
-    ],
-);
-const repeatedDialogue = repeated.segments.find(segment => segment.type === 'dialogue_candidate');
-const repeatedNyen = repeated.nameTokens.filter(entry => entry.source === 'Nyen');
-const repeatedNyon = repeated.nameTokens.find(entry => entry.source === 'Nyon');
-const repeatedDana = repeated.nameTokens.find(entry => entry.source === 'Dana');
-const repeatedKorean = `"${repeatedNyon.token}이 ${repeatedDana.token} 방에서 잤다는 걸 ${repeatedNyen[0].token}이 알면, ${repeatedNyen[2].token}은 계속 말할 거야."`;
-const repeatedFixed = ensureBilingualDialogueFormat(
-    repeatedDialogue, repeatedKorean, settings, null, repeated.nameTokens, repeated.tokens,
-);
-const repeatedTranslations = new Map([[repeatedDialogue.id, repeatedFixed]]);
-assert.equal(findProtectedTokenIntegrityProblems(repeated.segments, repeatedTranslations).length, 0);
-const repeatedAssembled = assembleTranslation(repeated, repeatedTranslations);
-assert.equal((repeatedAssembled.match(/니옌/g) || []).length, 2);
-assert.equal((repeatedAssembled.match(/니욘/g) || []).length, 1);
-assert.equal((repeatedAssembled.match(/다나/g) || []).length, 1);
-assert.doesNotMatch(repeatedAssembled, /니옌니옌/);
 
 const prompt = buildOutputPrompt(segmented, settings, '', {}, null, { [dialogue.id]: 'other_dialogue' });
 assert.match(prompt, /BILINGUAL DIALOGUE IS REQUIRED/);

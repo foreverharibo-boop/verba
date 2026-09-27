@@ -50,7 +50,7 @@ const paddedTargets = [{ id: 'seg_0000' }, { id: 'seg_0001' }, { id: 'seg_0002' 
 const encode = segments => JSON.stringify({ segments });
 const paddedRows = [
     { id: 'seg_0002', translation: '마지막' },
-    { id: 'seg_001', translation: '내용 @@VERBA_DEEP_NAME_0000@@ ... 그대로' },
+    { id: 'seg_001', translation: '내용 @@VERBA_NAME_0000@@ ... 그대로' },
     { id: 'seg_0000', translation: '처음' },
 ];
 const paddingResponse = encode(paddedRows);
@@ -154,6 +154,7 @@ console.log('PASS: safe syntax recovery, exact text preservation, truncated-row 
 // Blank-line cleanup is local, scoped to single-line prose, and idempotent.
 const prose = { id: 'seg_0000', type: 'narration', text: 'She could hardly believe it.' };
 const breakCases = [
+    ['그녀의 걸음걸\n\n이 같은 것들', '그녀의 걸음걸이 같은 것들'],
     ['믿을\n\n 수 없었다.', '믿을 수 없었다.'],
     ['머리\n\n 위였다.', '머리 위였다.'],
     ['엎질\n\n러진 커피였다.', '엎질러진 커피였다.'],

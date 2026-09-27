@@ -7,18 +7,18 @@ const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 assert.match(index, /profileRaceEnabled:\s*false/);
 assert.match(index, /profileRaceStaggerSeconds:\s*35/);
 assert.match(index, /profileRaceTimeoutMinutes:\s*5/);
-assert.match(index, /id="verba-profile-race-enabled"/);
-assert.match(index, /id="verba-profile-race-stagger-seconds"/);
-assert.match(index, /min="5" max="180" step="1" id="verba-profile-race-stagger-seconds"/);
-assert.match(index, /id="verba-profile-race-timeout-minutes"/);
-assert.match(index, /id="verba-profile-failure-timeout-minutes"/);
-assert.doesNotMatch(index, /id="verba-profile-failure-timeout-seconds"/);
+assert.match(index, /id="verba-deep-profile-race-enabled"/);
+assert.match(index, /id="verba-deep-profile-race-stagger-seconds"/);
+assert.match(index, /min="5" max="180" step="1" id="verba-deep-profile-race-stagger-seconds"/);
+assert.match(index, /id="verba-deep-profile-race-timeout-minutes"/);
+assert.match(index, /id="verba-deep-profile-failure-timeout-minutes"/);
+assert.doesNotMatch(index, /id="verba-deep-profile-failure-timeout-seconds"/);
 assert.match(index, /settings\.timeoutSeconds\s*=\s*minutes \* 60/);
 assert.match(index, /settings\.profileRaceStaggerSeconds\s*=\s*normalizedProfileRaceStaggerSeconds\(event\.target\.value\)/);
 assert.match(index, /profileFallbackOptions\.hidden\s*=\s*!fallbackEnabled/);
 assert.match(index, /profileRaceOptions\.hidden\s*=\s*!\(fallbackEnabled && settings\.profileRaceEnabled === true\)/);
-assert.match(style, /\.verba-profile-race-options\[hidden\][\s\S]*display:\s*none\s*!important/);
-assert.match(style, /\.verba-profile-race-time-row input\s*\{[\s\S]*?width:\s*62px\s*!important/);
+assert.match(style, /\.verba-deep-profile-race-options\[hidden\][\s\S]*display:\s*none\s*!important/);
+assert.match(style, /\.verba-deep-profile-race-time-row input\s*\{[\s\S]*?width:\s*62px\s*!important/);
 
 const start = index.indexOf('function sendProfileRaceAttempt(');
 const end = index.indexOf('\nasync function sendWithRetry(', start);
@@ -51,7 +51,7 @@ const env = {
     sendProfileRequest,
     abortError,
     fallbackEligibleError: error => error?.code === 'TRANSIENT',
-    profileRaceTimeoutError: () => Object.assign(new Error('race timeout'), { code: 'VERBA_PROFILE_RACE_TIMEOUT' }),
+    profileRaceTimeoutError: () => Object.assign(new Error('race timeout'), { code: 'VERBA_DEEP_PROFILE_RACE_TIMEOUT' }),
     normalizedProfileFailureTimeoutSeconds: () => 120,
     normalizedProfileRaceStaggerSeconds: () => 0.012,
     notifyProfileRaceWinner: profile => notices.push(profile.slot),
@@ -80,7 +80,6 @@ calls.length = 0;
 aborted.length = 0;
 notices.length = 0;
 let first = true;
-env.sendProfileRequest = undefined;
 function immediateFallbackRequest(prompt, options) {
     calls.push({ prompt, options });
     if (first) {
@@ -89,10 +88,11 @@ function immediateFallbackRequest(prompt, options) {
     }
     return Promise.resolve({ content: options.profileSlot });
 }
+const immediateEnv = { ...env, sendProfileRequest: immediateFallbackRequest };
 const immediateApi = Function(
-    ...Object.keys({ ...env, sendProfileRequest: immediateFallbackRequest }),
+    ...Object.keys(immediateEnv),
     `${source}\nreturn { sendProfileRaceAttempt };`,
-)(...Object.values({ ...env, sendProfileRequest: immediateFallbackRequest }));
+)(...Object.values(immediateEnv));
 const immediateStarted = Date.now();
 const immediateWinner = await immediateApi.sendProfileRaceAttempt(
     'translate',
@@ -104,8 +104,6 @@ const immediateWinner = await immediateApi.sendProfileRaceAttempt(
 assert.equal(immediateWinner.content, 'B');
 assert.ok(Date.now() - immediateStarted < 12, 'transient error launches fallback without waiting for stagger');
 
-// The user-selected overall timer starts with A and aborts every in-flight
-// race attempt.  A normal user cancellation must remain a normal AbortError.
 const retryStart = index.indexOf('async function sendWithRetry(');
 const retryEnd = index.indexOf('\nasync function requestSelectionCandidates(', retryStart);
 assert.ok(retryStart >= 0 && retryEnd > retryStart, 'sendWithRetry source');
@@ -124,7 +122,7 @@ const retryBaseEnv = {
         options.signal.addEventListener('abort', () => reject(retryAbortError()), { once: true });
     }),
     isAbort: (error, signal) => signal?.aborted || error?.name === 'AbortError',
-    profileRaceTimeoutError: minutes => Object.assign(new Error(`timeout ${minutes}`), { code: 'VERBA_PROFILE_RACE_TIMEOUT' }),
+    profileRaceTimeoutError: minutes => Object.assign(new Error(`timeout ${minutes}`), { code: 'VERBA_DEEP_PROFILE_RACE_TIMEOUT' }),
     abortError: retryAbortError,
     serverRetryStates: new Map(),
     updateServerRetryIndicator: () => {},
@@ -136,7 +134,7 @@ const retryApi = Function(
 )(...Object.values(retryBaseEnv));
 await assert.rejects(
     retryApi.sendWithRetry('translate'),
-    error => error?.code === 'VERBA_PROFILE_RACE_TIMEOUT',
+    error => error?.code === 'VERBA_DEEP_PROFILE_RACE_TIMEOUT',
 );
 
 const cancelController = new AbortController();
@@ -152,4 +150,4 @@ const cancelled = cancelApi.sendWithRetry('translate', { signal: cancelControlle
 setTimeout(() => cancelController.abort(), 5);
 await assert.rejects(cancelled, error => error?.name === 'AbortError' && !error?.code);
 
-console.log('PASS: 지연 경주가 사용자 지정 초 간격으로 프로필을 시차 호출하고 첫 정상 응답만 채택하며 전체 제한·사용자 취소를 올바르게 처리함.');
+console.log('PASS: 긴르바 지연 경주가 사용자 지정 초 간격 시차 호출·첫 정상 응답·패배 요청 취소·분 단위 제한·사용자 취소를 처리함.');

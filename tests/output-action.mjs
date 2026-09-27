@@ -60,11 +60,11 @@ function fixture() {
         slice('function abortActiveTranslations(', 'function wait('),
         slice('async function retranslateLatestOutput()', 'function setTextareaValue('),
         slice('let outputActionPending =', 'function createRetranslateButton()'),
-        'globalThis.register = registerVerbaSlashCommand; globalThis.icon = runOutputAction;',
+        'globalThis.register = registerVerbaDeepSlashCommand; globalThis.icon = runOutputAction;',
     ].join('\n'), env);
     env.register(); env.register();
     assert.equal(state.calls.filter(c => c[0] === 'register').length, 1);
-    assert.equal(state.command.name, 'verba');
+    assert.equal(state.command.name, 'verba-deep');
     const invoke = () => { assert.equal(state.command.callback(), ''); };
     return { state, env, message, invoke };
 }
@@ -118,7 +118,7 @@ for (const choice of ['recent', 'previous', 'toggle-view', null]) {
     assert.equal(f.state.calls.filter(c => c[0] === 'translate').length, 2);
 }
 assert.ok(index.includes("button.addEventListener('click', runOutputAction)"));
-assert.ok(slice('function initialize()', "if (document.readyState === 'loading')").includes('registerVerbaSlashCommand();'));
+assert.ok(slice('function initialize()', "if (document.readyState === 'loading')").includes('registerVerbaDeepSlashCommand();'));
 
 // Run the actual popup builder against a small DOM adapter: all options,
 // absent/hidden anchors, placement, dismissal and listener cleanup.
@@ -130,7 +130,7 @@ for (const anchorMode of ['visible', 'hidden', 'absent']) {
             ? { left: 0, top: 0, width: 0, height: 0, bottom: 0 }
             : { left: 320, top: 650, width: 30, height: 30, bottom: 680 } };
         const doc = {
-            querySelector: selector => selector === '#verba-retranslate-latest' ? anchor : null,
+            querySelector: selector => selector === '#verba-deep-retranslate-latest' ? anchor : null,
             body: { append: el => { menu = el; el.connected = true; } },
             addEventListener: (name, handler) => listeners.set(name, handler),
             removeEventListener: name => listeners.delete(name),
@@ -150,7 +150,7 @@ for (const anchorMode of ['visible', 'hidden', 'absent']) {
             currentRecord: () => ({ translation: '번역' }), currentSwipeExtra: () => null, sourceViewRequested: () => false,
             requestAnimationFrame: fn => frames.push(fn),
         };
-        vm.runInNewContext(slice('function positionVerbaChoiceMenu(', 'const PREVIOUS_OUTPUT_PAGE_SIZE')
+        vm.runInNewContext(slice('function positionVerbaDeepChoiceMenu(', 'const PREVIOUS_OUTPUT_PAGE_SIZE')
             + '\nglobalThis.open = requestRetranslateTargetChoice;', env);
         const result = env.open({ message: { extra: { display_text: '번역' } } });
         assert.equal(menu.connected, true); assert.ok(menu.innerHTML.includes('>원문</button>'));
@@ -166,4 +166,4 @@ for (const anchorMode of ['visible', 'hidden', 'absent']) {
         assert.equal(menu.connected, false); assert.equal(listeners.size, 0);
     }
 }
-console.log('PASS: /verba routing/cancellation/retry, duplicate guards, errors, popup creation/options/dismissal/placement (DOM adapter). API calls: 0; live SillyTavern browser: not tested.');
+console.log('PASS: /verba-deep routing/cancellation/retry, duplicate guards, errors, popup creation/options/dismissal/placement (DOM adapter). API calls: 0; live SillyTavern browser: not tested.');

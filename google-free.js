@@ -1,6 +1,6 @@
 const GOOGLE_FREE_ENDPOINT = 'https://translate.googleapis.com/translate_a/single';
 const DEFAULT_MAX_ENCODED_CHARS = 4200;
-const PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?[A-Z0-9_]*\d{4}@@|@@VERBA_[A-Z0-9_]+@@/gu;
+const PROTECTED_TOKEN_PATTERN = /@@VERBA_DEEP_(?:NAME_)?[A-Z0-9_]*\d{4}@@|@@VERBA_DEEP_[A-Z0-9_]+@@/gu;
 
 function abortError() {
     try {
@@ -48,11 +48,8 @@ function preferredCutIndex(value, hardLimit) {
     return usable[0].index || hardLimit;
 }
 
-/**
- * Splits an arbitrary text into request-sized pieces. Whitespace at request
- * boundaries is kept as local passthrough data so Google cannot collapse the
- * source layout while translating separate chunks.
- */
+// Long strings are split only for Google's URL limit. Whitespace and protected
+// tokens remain local passthrough pieces so Google cannot damage either.
 export function splitGoogleFreeText(value, maxEncodedChars = DEFAULT_MAX_ENCODED_CHARS) {
     const text = String(value || '');
     const limit = Math.max(600, Number(maxEncodedChars) || DEFAULT_MAX_ENCODED_CHARS);

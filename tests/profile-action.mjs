@@ -29,7 +29,7 @@ function fixture(overrides = {}, hidden = false) {
         : { left: 300, top: 650, width: 30, height: 30 } };
     const document = {
         createElement: element, body: { append: node => roots.push(node) },
-        querySelector: selector => selector === '#verba-profile-toggle' ? anchor
+        querySelector: selector => selector === '#verba-deep-profile-toggle' ? anchor
             : roots.find(node => !node.removed && '#' + node.id === selector),
         addEventListener: (name, fn) => listeners.set(name, fn),
         removeEventListener: name => listeners.delete(name),
@@ -44,11 +44,11 @@ function fixture(overrides = {}, hidden = false) {
         requestAnimationFrame: fn => frames.push(fn),
     };
     vm.runInNewContext(source('function activeProfileSlot()', 'let lastFallbackNoticeAt')
-        + source('function positionVerbaChoiceMenu(', 'function requestRetranslateTargetChoice(')
+        + source('function positionVerbaDeepChoiceMenu(', 'function requestRetranslateTargetChoice(')
         + source('function selectTranslationProfile(', 'function refreshProfileToggleButton()')
-        + '\nglobalThis.register = registerVerbaProfileSlashCommand; globalThis.icon = createProfileToggleButton;', env);
+        + '\nglobalThis.register = registerVerbaDeepProfileSlashCommand; globalThis.icon = createProfileToggleButton;', env);
     env.register(); env.register(); assert.equal(calls.filter(c => c[0] === 'register').length, 1);
-    assert.equal(context.command.name, 'verba-profile');
+    assert.equal(context.command.name, 'verba-deep-profile');
     const invoke = () => { assert.equal(context.command.callback(), ''); };
     return { settings, calls, listeners, frames, roots, env, invoke };
 }
@@ -77,7 +77,7 @@ for (const hidden of [false, true]) {
         f.env.visualViewport = viewport;
         for (const menuHeight of [38, 42]) {
             const menu = {style:{setProperty(k,v){this[k]=v;}}, getBoundingClientRect:()=>({width:180,height:menuHeight})};
-            f.env.positionVerbaChoiceMenu(menu, {getBoundingClientRect:()=>({width:0,height:0})});
+            f.env.positionVerbaDeepChoiceMenu(menu, {getBoundingClientRect:()=>({width:0,height:0})});
             const expected = Math.min(viewport.offsetTop + viewport.height * 0.7 + 70,
                 viewport.offsetTop + viewport.height - menuHeight - 8);
             assert.equal(parseFloat(menu.style.top), expected);
@@ -111,5 +111,5 @@ for (const how of ['escape', 'outside']) {
     const f = fixture(); const icon = f.env.icon();
     for (const slot of ['B', 'C', 'A']) { icon.click(); assert.equal(f.settings.activeProfileSlot, slot); }
 }
-assert.ok(source('function initialize()', "if (document.readyState === 'loading')").includes('registerVerbaProfileSlashCommand();'));
+assert.ok(source('function initialize()', "if (document.readyState === 'loading')").includes('registerVerbaDeepProfileSlashCommand();'));
 console.log('PASS: profile command registration, A/B/C popup, current marker, disabled/stale slots, persistence, dismissal, hidden-anchor placement and existing icon cycle. DOM adapter; no API calls.');

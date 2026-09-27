@@ -1,4 +1,3 @@
-import { promptTestFunction as Function } from './helpers/prompt-env.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { minimalOutputEnabled, buildMinimalOutputPrompt, POST_TRANSLATION_AI_REPAIR_ENABLED, translateMinimalOutput } from '../minimal-output.js';
@@ -18,23 +17,9 @@ const p=buildMinimalOutputPrompt(segmented.segments,settings,segmented.nameToken
 assert.match(p,/짧게 써줘/);assert.match(p,/홍진/);
 assert.ok(!p.includes('KEEP_CODE'));
 for(const forbidden of ['GLOBAL_SENTINEL','VOICE_SENTINEL','MAD KOREAN','HONGJIN FLAVOR','BANNED','FINE TUNING','SPEAKER ATTRIBUTION','TAGGED-CONTENT']) assert.ok(!p.includes(forbidden),forbidden);
+assert.equal(POST_TRANSLATION_AI_REPAIR_ENABLED,false);
 assert.ok(buildMinimalOutputPrompt([], {...settings,developerMinimalPrompt:'  '}).startsWith('자연스럽게 한국어로 번역하라.'));
 assert.ok(buildMinimalOutputPrompt([], {...settings,developerMinimalPrompt:'</textarea> TEST'}).startsWith('</textarea> TEST'));
-const galbwaePrompt=buildMinimalOutputPrompt(segmented.segments,{...settings,chuseokGalbwaeScope:'all'},segmented.nameTokens,'ONE_TIME_MUST_NOT_APPEAR');
-assert.match(galbwaePrompt,/EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE/);
-assert.match(galbwaePrompt,/나 알아\?→나를 아늕랴!!/);
-assert.match(galbwaePrompt,/씨핤, 씨핧, 샤갈, 쌱앐, 쌰갈, 시핣/);
-assert.match(galbwaePrompt,/요→료/);
-assert.match(galbwaePrompt,/네\/응→례/);
-assert.match(galbwaePrompt,/NAME HANDLING ORDER — ABSOLUTE/);
-assert.match(galbwaePrompt,/Aila→아일라, Calix→칼릭스, Atlas→아틀라스/);
-assert.match(galbwaePrompt,/Never leave a Latin-script character name unchanged/);
-assert.match(galbwaePrompt,/chaotic 죠캎-style Korean internet-post language/);
-assert.match(galbwaePrompt,/MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION/);
-assert.match(galbwaePrompt,/PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION/);
-assert.match(galbwaePrompt,/including Inner_Info\/Info_panel\/small\/div\/custom tags/);
-assert.doesNotMatch(galbwaePrompt,/<div>Do you know me\?<\/div>→<div>나를 아늕랴!!<\/div>/);
-assert.doesNotMatch(galbwaePrompt,/ONE_TIME_MUST_NOT_APPEAR|자연스럽게 한국어로 번역하라/);
 let calls=[];
 function translated(segment){
  const tokens=segment.text.match(/@@VERBA[A-Z0-9_]*@@/g)||[];
@@ -58,23 +43,6 @@ for(const count of [1,2,3]){
  assert.equal(merged.translation,result.translation);assert.deepEqual(merged.sourceMap,result.sourceMap);
 }
 
-assert.equal(POST_TRANSLATION_AI_REPAIR_ENABLED, false);
-// The dormant name-repair path remains in source, but the normal request does
-// not pay for a second AI call while post-translation repair is disabled.
-const nameSegmented=segmentSource('Aila called Calix. Atlas answered Aila.');
-let nameCalls=[];
-const nameRequest=async(prompt,segments,opts)=>{
- nameCalls.push({prompt,segments,opts});
- const translation=opts.stage==='untranslated-name-repair'
-  ? '아일라가 칼릭스를 불렀고 아틀라스가 아일라에게 대답했다.'
-  : 'Aila가 Calix를 불렀고 Atlas는 Aila! 하고 대답했다.';
- return new Map(segments.map(segment=>[segment.id,translation]));
-};
-const nameResult=await translateMinimalOutput(nameSegmented,{...settings,developerOutputSplitCount:1,chuseokGalbwaeScope:'all'},{},{requestSegments:nameRequest,buildSourceMap});
-assert.equal(nameCalls.length,1);
-assert.match(nameResult.translation,/Aila가 Calix를 불렀고 Atlas는/);
-assert.match(fs.readFileSync(new URL('../minimal-output.js', import.meta.url),'utf8'),/repair === 'names'[\s\S]*untranslated-name-repair/);
-
 // Actual entry point must branch before any optional planning, classification,
 // banned-word repair or quality audit, even when all those options are enabled.
 const route=Function('settings','normalizedCharacterNameLocks','segmentSource','minimalOutputEnabled','translateMinimalOutput','requestSegments','buildSourceMap','planRepeatedRoleTermLocks',between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;');
@@ -82,8 +50,8 @@ const run=route(settings,()=>[],segmentSource,minimalOutputEnabled,translateMini
 calls=[];await run('He waited.');assert.equal(calls.length,1);
 settings.developerMode=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMode=true;
 settings.developerMinimalPromptEnabled=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMinimalPromptEnabled=true;
-// Protected-token repair code stays present but inactive. A successful initial
-// batch is returned without any post-translation AI request.
+// Post-translation protected-token repair remains in source but makes no AI
+// call while the shared switch is off, even when a structural token is absent.
 let attempts=0;const damaged=segmentSource('<b>Hong-jin</b> waited.\n\nShe nodded.',[{source:'Hong-jin',target:'홍진'}]);
 await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(prompt,segments,opts)=>{
  attempts++;assert.ok(!prompt.includes('HONGJIN FLAVOR'));
@@ -91,8 +59,10 @@ await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegment
  assert.equal(opts.stage,'protected-token-repair');assert.equal(segments.length,1);
  return new Map(segments.map(s=>[s.id,translated(s)]));
 }});assert.equal(attempts,2);
-attempts=0;const fallbackResult=await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(_p,ss)=>{attempts++;return new Map(ss.map(s=>[s.id,'누락']));}});
-assert.equal(attempts,2);assert.match(fallbackResult.translation,/누락/);
+attempts=0;const omittedName=await translateMinimalOutput(damaged,settings,{}, {buildSourceMap,requestSegments:async(_p,ss)=>{attempts++;return new Map(ss.map(s=>[s.id,'누락']));}});
+assert.equal(attempts,2);assert.match(omittedName.translation,/누락/);assert.doesNotMatch(omittedName.translation,/@@VERBA_DEEP/);
+const minimalSource=fs.readFileSync(new URL('../minimal-output.js', import.meta.url),'utf8');
+assert.match(minimalSource,/if \(POST_TRANSLATION_AI_REPAIR_ENABLED\)/);assert.match(minimalSource,/protected-token-repair/);
 const controller=new AbortController();controller.abort();calls=[];
 await assert.rejects(translateMinimalOutput(segmented,settings,{signal:controller.signal},{requestSegments,buildSourceMap}),{name:'AbortError'});assert.equal(calls.length,0);
 // Existing local newline cleanup and offsets still agree after assembly.
@@ -149,20 +119,20 @@ console.log('PASS: minimal-only prompt and actual entry path, lock/enable gates,
 // Real developer markup and delegated toggle, including escaped user text.
 const defs=between('const RELATION_TEMPERATURE_OPTIONS','const baseContext =');
 const escapeHtml=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+'\n'+between('function developerFlavorSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn developerSettingsMarkup();');
+const markup=Function('settings','escapeHtml','baseTranslationEditorMarkup','lastQualityAuditSummary',defs+'\n'+between('function developerSettingsMarkup(', 'function syncDeveloperQualityControls(')+'\nreturn developerSettingsMarkup();');
 settings.developerMinimalPrompt='</textarea><script>TEST</script>';
 assert.match(markup(settings,escapeHtml,()=>'', '', ''), /&lt;\/textarea&gt;/);
-assert.ok(!markup({...settings,developerMode:false},escapeHtml,()=>'', '', '').includes('id="verba-developer-minimal-prompt"'));
+assert.ok(!markup({...settings,developerMode:false},escapeHtml,()=>'', '', '').includes('id="verba-deep-developer-minimal-prompt"'));
 class Input {}
 let saves=0;
-const change=Function('target','settings','HTMLInputElement','saveSettings','document','renderCurrentAppliedRules',between("        if (target.id === 'verba-developer-minimal-prompt-enabled'", "        if (target.id === 'verba-developer-compressed-prompt-enabled'"));
+const change=Function('target','settings','HTMLInputElement','saveSettings','document','renderCurrentAppliedRules',between("        if (target.id === 'verba-deep-developer-minimal-prompt-enabled'", "        if (target.id === 'verba-deep-developer-compressed-prompt-enabled'"));
 const preserved=structuredClone(settings);
 for(const checked of [false,true]) {
- change(Object.assign(new Input(),{id:'verba-developer-minimal-prompt-enabled',checked}),settings,Input,()=>saves++,{querySelector:()=>null},()=>{});
+ change(Object.assign(new Input(),{id:'verba-deep-developer-minimal-prompt-enabled',checked}),settings,Input,()=>saves++,{querySelector:()=>null},()=>{});
  assert.deepEqual(settings,{...preserved,developerMinimalPromptEnabled:checked});
 }
 assert.equal(saves,2);
-const disable=between("        if (target.closest('#verba-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');
+const disable=between("        if (target.closest('#verba-deep-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');
 Function('settings',disable)(settings);
 assert.equal(settings.developerMode,false);assert.equal(settings.developerMinimalPromptEnabled,false);
 assert.equal(settings.developerMinimalPrompt,preserved.developerMinimalPrompt);

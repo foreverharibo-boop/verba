@@ -33,9 +33,9 @@ for (const flags of [{}, {developerCompressedPromptEnabled:true}, {developerExtr
    assert.doesNotMatch(prompt, /USER-DIRECTED INSULT FIREWALL|45\.72미터, never 50미터/);
    if (prompt.includes('USER-DIRECTED PROFANITY GUARD')) {
     assert.ok(hongjin);
-    assert.match(prompt, /TARGET dialogue only|TARGET CHARACTER(?: direct)? dialogue|TARGET-CHARACTER DIALOGUE|TARGET DIALOGUE ONLY/i);
-    assert.match(prompt, /non-abusive rebukes/i);
-    assert.match(prompt, /no profanity directed at USER/);
+    assert.match(prompt, /TARGET CHARACTER(?: direct)? dialogue|TARGET-CHARACTER DIALOGUE|TARGET DIALOGUE ONLY/i);
+    assert.match(prompt, /rough non-profane rebuke|Non-abusive rebukes and teasing/);
+    assert.match(prompt, /never curse at USER as a person|not all criticism or teasing/);
     assert.match(prompt, /NO MISOGYNY|misogyny/i);
    }
    if (prompt.includes('KOREAN METRIC UNITS:')) {
@@ -55,13 +55,12 @@ for (const flags of [{}, {developerCompressedPromptEnabled:true}, {developerExtr
  }
 }
 const expression=index.match(/\.map\(candidate => (repairSourceEllipses\([^\n]+)\);/)[1];
-const clean=Function('candidate','repairUnexpectedProseBreaks','repairKoreanParticleAlternatives','repairIndivisibleIdentityNames','speakerIdentity','expected','repairSourceEllipses','return '+expression);
+const clean=Function('candidate','repairUnexpectedProseBreaks','repairKoreanParticleAlternatives','repairOutputIdentityNames','speakerIdentity','expected','repairSourceEllipses','return '+expression);
 const candidates=['첫째.\n다음.','둘째.<br>다음.','셋째.\n\n다음.'];
 for (const source of ['one line','two\nlines','<div>protected</div>',String.fromCharCode(96,99,111,100,101,96)]) {
  const target=[{id:'seg_0000',type:'selection',text:source}];
  const actual=candidates.map(c=>clean(c,repairUnexpectedProseBreaks,x=>x,x=>x,{},target,repairSourceEllipses));
  assert.deepEqual(actual,source==='one line'?['첫째. 다음.','둘째. 다음.','셋째. 다음.']:candidates);
 }
-assert.doesNotMatch(index,/runDeveloperRegisterShiftMonitor|register-shift-monitor/);
-assert.match(index,/delete settings\.developerRegisterShiftMonitor/,'legacy flag is removed during migration');
+assert.doesNotMatch(index,/developerRegisterShiftMonitor|runDeveloperRegisterShiftMonitor|register-shift-monitor/);
 console.log('PASS: '+routes+' prompt routes, multilingual source policies, profanity/metric scope, three-candidate local cleanup and removed register monitor. No live AI calls.');

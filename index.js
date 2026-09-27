@@ -1,3 +1,4 @@
+import { runTasteQualityAudit } from './taste-audit.js';
 import { customTranslationDefaults } from './core.js';
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
 import { messageFormatting, showMoreMessages } from '../../../../script.js';
@@ -49,7 +50,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.16';
+const EXTENSION_VERSION = '0.6.17';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -761,7 +762,7 @@ const profileRaceRequestQueue = [];
 let profileRaceRequestActive = 0;
 const enqueueSplitOutputRequest = createSplitRequestQueue(3);
 let requestTail = Promise.resolve();
-let lastQualityAuditSummary = '아직 실행되지 않음';
+let lastQualityAuditSummary = POST_TRANSLATION_AI_REPAIR_ENABLED ? '아직 실행되지 않음' : '이 버전은 AI 후검수 꺼짐';
 let chatSaveTimer = null;
 let promptEditorBackupTimer = null;
 let uiRefreshTimer = null;
@@ -2417,7 +2418,7 @@ function renderCurrentAppliedRules() {
                 ['인풋 회화 자연화', '기본 적용'],
                 ['금지어', banned.length ? `${banned.length}개 · ${banned.join(' / ')}` : '없음'],
                 ['우선순위', priority],
-                ['품질 검수 실험실', settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
+                ['품질 검수 실험실', POST_TRANSLATION_AI_REPAIR_ENABLED && settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
                 ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['xxx미친압축xxx', settings.developerMode && settings.developerExtremeCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['미친 한출의 맛', settings.developerMadKoreanOutputEnabled ? 'ON' : 'OFF'],
@@ -4829,6 +4830,11 @@ async function translateOutputText(source, options = {}) {
     }
 
     if (POST_TRANSLATION_AI_REPAIR_ENABLED && !useInitialSuccessfulTranslation) {
+        const tasteAudit = await runTasteQualityAudit({
+            enabled: POST_TRANSLATION_AI_REPAIR_ENABLED,
+            segmented, translations, settings, speakerScopes, speakerIdentity, options, requestSegments,
+        });
+        if (tasteAudit.error) console.warn('[베르바] 맛별 후검수 실패 — 기존 번역 유지', tasteAudit.error);
         await runExperimentalQualityAudit({
             segmented,
             translations,
@@ -10359,10 +10365,10 @@ function developerSettingsMarkup() {
                         <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''}>
+                                <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''} ${POST_TRANSLATION_AI_REPAIR_ENABLED ? '' : 'disabled'}>
                                 <span>품질 검수 사용</span>
                             </label>
-                            <div class="verba-help">기존 번역 프롬프트와 전체 문맥은 그대로 둡니다. 로컬에서 이상 징후가 있을 때만 AI 통합 검수 1회를 실행하고, 명확한 문제가 있는 후보 구간만 교정합니다.</div>
+                            <div class="verba-help">${POST_TRANSLATION_AI_REPAIR_ENABLED ? '로컬에서 이상 징후가 있을 때만 AI 품질 검수를 실행합니다.' : '현재 버전은 일반·미친 한출·김홍진 AI 후검수가 모두 꺼져 있습니다. 기능 코드는 보관되며 저장된 검수 설정은 유지됩니다. 추가 후검수 요청은 보내지 않습니다.'}</div>
 
                             <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
                                 <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}><span>의미 보존 검사</span></label>
@@ -10374,7 +10380,7 @@ function developerSettingsMarkup() {
 
                             <div class="verba-quality-audit-status-row">
                                 <span>최근 검수</span>
-                                <b id="verba-quality-audit-status">${escapeHtml(lastQualityAuditSummary)}</b>
+                                <b id="verba-quality-audit-status">${escapeHtml(POST_TRANSLATION_AI_REPAIR_ENABLED ? lastQualityAuditSummary : '이 버전은 AI 후검수 꺼짐')}</b>
                             </div>
                             <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
                         </div>
@@ -10396,8 +10402,9 @@ function developerSettingsMarkup() {
 function syncDeveloperQualityControls(root = document.querySelector('#verba-settings')) {
     const qualityMaster = root?.querySelector('#verba-quality-audit-enabled');
     const qualityControls = root?.querySelector('#verba-quality-audit-controls');
+    if (qualityMaster) qualityMaster.disabled = !POST_TRANSLATION_AI_REPAIR_ENABLED;
     if (qualityControls) {
-        const enabled = Boolean(qualityMaster?.checked);
+        const enabled = POST_TRANSLATION_AI_REPAIR_ENABLED && Boolean(qualityMaster?.checked);
         qualityControls.classList.toggle('verba-control-disabled', !enabled);
         qualityControls.querySelectorAll('input').forEach(input => {
             input.disabled = !enabled;
@@ -10483,7 +10490,7 @@ function enabledQualityAuditChecks() {
 
 function renderQualityAuditStatus() {
     const target = document.querySelector('#verba-quality-audit-status');
-    if (target) target.textContent = lastQualityAuditSummary;
+    if (target) target.textContent = POST_TRANSLATION_AI_REPAIR_ENABLED ? lastQualityAuditSummary : '이 버전은 AI 후검수 꺼짐';
 }
 
 function bindAutoInputSetting(panel) {

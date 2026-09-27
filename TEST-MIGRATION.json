@@ -1,0 +1,17 @@
+{
+  "baselineVersion": "0.6.16",
+  "findings": {
+    "hongjin-enforced-rewrite.mjs": "Removed compactComparableText/hongjinVoiceRewriteFailure helpers; old forced-rewrite/profanity-quota paths are absent from production.",
+    "hongjin-final-gate.mjs": "Expects removed <final_hongjin_voice_gate> text after source; current concise policy uses scoped voice rules.",
+    "hongjin-profanity-targeting.mjs": "Expects verbose wording and profanity-quota text; current concise request still has the USER-directed profanity guard and current control values.",
+    "hongjin-raw-voice.mjs": "Expects old TARGET DIALOGUE ONLY label and verbose options; concise prompt uses KIM HONG-JIN VOICE and control values.",
+    "integrated-author-pass.mjs": "Imports removed buildMadKoreanIntegratedRewritePrompt and expects a source-less second pass. New review is source-grounded.",
+    "mad-final-gate.mjs": "Expects removed <final_mad_korean_gate> marker; current MAD rules are in the primary policy.",
+    "mad-narration-micro-audit.mjs": "Imports removed micro-audit and hard-coded deterministic rewriting helpers.",
+    "mad-targeted-repair.mjs": "Imports removed targeted audit/canonical-name helpers and expects old sparse repair response schema.",
+    "real-output-regressions.mjs": "Imports removed voice/targeted audit functions and expects old literal per-example hints; no live provider response was tested.",
+    "source-policy-update.mjs": "Expects old long guard/metric wording and old repairOutputIdentityNames helper. Current response cleanup uses repairIndivisibleIdentityNames. Also incorrectly rejects the harmless startup deletion of a legacy setting.",
+    "translation-layer-separation.mjs": "Imports removed voice rewrite builder and expects old long policy sections plus a mandatory second pass."
+  },
+  "disposition": "Legacy sources retained as .mjs.txt. Active tests replaced with current policy/scope checks and executable audit/rejection/disabled tests. No legacy failure represents evidence from a live translation API."
+}

@@ -366,8 +366,10 @@ const LATIN_NAME_FALSE_POSITIVES = new Set([
 ]);
 
 function galbwaeTranslationActive(settings = {}) {
-    return ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
-        || settings.chuseokGalbwaeEnabled === true;
+    return settings.developerMode === true && (
+        ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+        || settings.chuseokGalbwaeEnabled === true
+    );
 }
 
 function countExactLatinToken(value, token) {

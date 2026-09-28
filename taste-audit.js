@@ -1,7 +1,7 @@
 import { buildScopedOutputPrompt, findBannedWords, findProtectedTokenIntegrityProblems, findUntranslatedSegments } from './core.js';
 
-const galbwae = settings => ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
-    || settings.chuseokGalbwaeEnabled === true && !['off', 'all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope);
+const galbwae = settings => settings.developerMode === true && (['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+    || settings.chuseokGalbwaeEnabled === true && !['off', 'all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope));
 export function tasteAuditScope(segment, speakerScopes = {}) {
     if (segment.type === 'tagged_content') return 'tagged_content';
     if (!['dialogue', 'dialogue_candidate'].includes(segment.type)) return 'narration';

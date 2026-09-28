@@ -11,7 +11,7 @@ const between=(a,b)=>{
 const defs=between('const RELATION_TEMPERATURE_OPTIONS','const baseContext =');
 const render=Function('dev','escapeHtml',defs+`
     const settings=structuredClone(DEFAULT_SETTINGS);settings.developerMode=dev;
-    const EXTENSION_VERSION='0.6.22',lastQualityAuditSummary='',lastDebugDiagnostic=null;
+    const EXTENSION_VERSION='0.6.23',lastQualityAuditSummary='',lastDebugDiagnostic=null;
     const outputTiming={latest:()=>null},outputTimingText=()=>'',normalizedPromptPresets=()=>[],normalizedPromptPresetBackups=()=>[],promptPresetSelectMarkup=()=>'',baseTranslationEditorMarkup=()=>'';
     const normalizedProfileRaceTimeoutMinutes=()=>5,normalizedProfileRaceStaggerSeconds=()=>35,normalizedProfileFailureTimeoutSeconds=()=>120,normalizedProfileFailureTimeoutMinutes=()=>2;
 `+between('function tuningChoiceMarkup(', 'function normalizeTranslationRuleOrder(')
@@ -28,9 +28,6 @@ for(const html of panels){
     assert.match(html,/id="verba-translation-engine"[\s\S]*?value="ai"[\s\S]*?value="google-free"/);
     assert.match(html,/id="verba-translate-tagged-content" checked/);
     assert.match(html,/id="verba-selection-candidates"[\s\S]*?id="verba-translate-tagged-content"[\s\S]*?id="verba-selection-menu-settings"/);
-    assert.match(html,/id="verba-chuseok-galbwae-all"/);
-    assert.match(html,/id="verba-chuseok-galbwae-dialogue-inner"/);
-    assert.doesNotMatch(html,/id="verba-chuseok-galbwae-(?:all|dialogue-inner)" checked/);
     assert.doesNotMatch(html,/<small>v\$?\{?EXTENSION_VERSION|<small>v0\.5\./);
     assert.match(html,/id="verba-prompt-conflict-settings"[\s\S]*?<\/details>\s*<details id="verba-developer-output-split-lab"/);
     assert.match(html,/id="verba-expression-detail"[\s\S]*?<\/details>\s*<details id="verba-developer-relationship-lab"/);
@@ -39,9 +36,12 @@ for(const html of panels){
     assert.equal(ids.filter(x=>x==='verba-developer-output-split-lab').length,1);
     assert.equal(ids.filter(x=>x==='verba-developer-relationship-lab').length,1);
 }
+assert.doesNotMatch(panels[0],/id="verba-chuseok-galbwae-(?:all|dialogue-inner)"/);
+assert.match(panels[1],/id="verba-developer-settings"[\s\S]*?id="verba-chuseok-galbwae-all"[\s\S]*?id="verba-chuseok-galbwae-dialogue-inner"/);
+assert.doesNotMatch(panels[1],/id="verba-chuseok-galbwae-(?:all|dialogue-inner)" checked/);
 const manifest=JSON.parse(fs.readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
 assert.equal(manifest.name,'verba');assert.equal(manifest.display_name,'베르바');
-assert.equal(manifest.version,'0.6.22');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
+assert.equal(manifest.version,'0.6.23');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
 assert.match(style,/#verba-settings > \.inline-drawer > \.inline-drawer-content\s*\{\s*font-size: \.86em;/);
 assert.doesNotMatch(style,/#verba-settings\s*\{\s*font-size:/);
 assert.doesNotMatch(style,/#verba-settings \.verba-drawer-header\s*\{[^}]*min-height:/s);

@@ -8,7 +8,7 @@ export function customTranslationInstruction(settings = {}, key) {
 }
 export function withTranslationComposition(settings = {}, key, build) {
     if (settings[COMPOSITION]) return build(settings);
-    const disabled = key !== 'input' && (['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+    const disabled = key !== 'input' && settings.developerMode === true && (['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
         || settings.chuseokGalbwaeEnabled === true && !['off', 'all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope));
     return build({ ...settings, [COMPOSITION]: { key, disabled, emitted: new Set() } });
 }

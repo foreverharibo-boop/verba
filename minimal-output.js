@@ -22,9 +22,9 @@ function buildMinimalOutputPromptInternal(segments, settings = {}, nameTokens = 
     }));
     const names = nameTokens.filter(row => segments.some(segment => String(segment.text).includes(row.token)))
         .map(({ token, value }) => ({ token, korean: value }));
-    const galbwaeMode = ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+    const galbwaeMode = settings.developerMode === true && ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
         ? settings.chuseokGalbwaeScope
-        : settings.chuseokGalbwaeEnabled === true
+        : settings.developerMode === true && settings.chuseokGalbwaeEnabled === true
             ? 'dialogueInner'
             : 'off';
     const galbwae = galbwaeMode !== 'off'
@@ -51,10 +51,11 @@ export async function translateMinimalOutput(segmented, settings, options, { req
         customTranslatorEnabled: settings.customTranslatorEnabled,
         customTranslatorTemplates: settings.customTranslatorTemplates,
         customTranslatorModified: settings.customTranslatorModified,
+        developerMode: settings.developerMode === true,
         developerMinimalPrompt: settings.developerMinimalPrompt,
-        chuseokGalbwaeScope: ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+        chuseokGalbwaeScope: settings.developerMode === true && ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
             ? settings.chuseokGalbwaeScope
-            : settings.chuseokGalbwaeEnabled === true
+            : settings.developerMode === true && settings.chuseokGalbwaeEnabled === true
                 ? 'dialogueInner'
                 : 'off',
     };

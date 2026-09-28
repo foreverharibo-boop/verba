@@ -47,6 +47,6 @@ const visibilityBlock = index.slice(
     index.indexOf('const SETTINGS_VISIBILITY_DEFINITIONS = ['),
     index.indexOf('const DEFAULT_SETTINGS_VISIBILITY'),
 );
-assert.equal((visibilityBlock.match(/\{ key:/g) || []).length, 26);
+assert.equal((visibilityBlock.match(/\{ key:/g) || []).length, 25);
 
-console.log('PASS: tagged natural-language translation defaults ON, can be disabled without touching outside text or tag structure, and 26 settings groups support persistent UI-only visibility.');
+console.log('PASS: tagged natural-language translation defaults ON, can be disabled without touching outside text or tag structure, and 25 settings groups support persistent UI-only visibility.');

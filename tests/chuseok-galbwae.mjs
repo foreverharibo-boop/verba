@@ -25,30 +25,31 @@ const nameLeftoverSegment = { id: 'seg_name', type: 'narration', text: 'Aila cal
 const nameLeftovers = findUntranslatedSegments(
     [nameLeftoverSegment],
     new Map([['seg_name', 'Aila가 Calix를 불렀다. Atlas는 Aila! 하고 대답했다.']]),
-    { chuseokGalbwaeScope: 'all' },
+    { developerMode: true, chuseokGalbwaeScope: 'all' },
 );
 assert.equal(nameLeftovers.length, 1);
 assert.match(nameLeftovers[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Aila, Calix, Atlas/);
 assert.equal(findUntranslatedSegments(
     [nameLeftoverSegment],
     new Map([['seg_name', '아일라가 칼릭스를 불렀다. 아틀라스가 대답했다.']]),
-    { chuseokGalbwaeScope: 'all' },
+    { developerMode: true, chuseokGalbwaeScope: 'all' },
 ).length, 0);
 assert.match(findUntranslatedSegments(
     [{ id: 'seg_bold_name', type: 'dialogue_candidate', text: '**Aila!**' }],
     new Map([['seg_bold_name', '**Aila!**']]),
-    { chuseokGalbwaeScope: 'all' },
+    { developerMode: true, chuseokGalbwaeScope: 'all' },
 )[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Aila/);
 assert.match(findUntranslatedSegments(
     [{ id: 'seg_tag_name', type: 'tagged_content', text: 'Calix' }],
     new Map([['seg_tag_name', 'Calix']]),
-    { chuseokGalbwaeScope: 'all' },
+    { developerMode: true, chuseokGalbwaeScope: 'all' },
 )[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Calix/);
 assert.match(findUntranslatedSegments(
     [{ id: 'seg_bilingual_setting', type: 'dialogue_candidate', text: 'Atlas called her.' }],
     new Map([['seg_bilingual_setting', 'Atlas가 그녀를 불렀다.']]),
     {
         chuseokGalbwaeScope: 'all',
+        developerMode: true,
         globalPromptEnabled: true,
         globalPrompt: '영어 원문과 한국어 번역을 함께 출력한다.',
     },
@@ -60,15 +61,21 @@ assert.match(findUntranslatedSegments(
         text: "Atlas's ears perk up abruptly and then flatten just as fast.",
     }],
     new Map([['seg_possessive_name', 'Atlas의 귀가 팍 솟구컬다가 순식간애 축 쳐젼내요.']]),
-    { chuseokGalbwaeScope: 'all' },
+    { developerMode: true, chuseokGalbwaeScope: 'all' },
 )[0].untranslatedReason, /UNTRANSLATED_CHARACTER_NAME: Atlas/);
 assert.equal(findUntranslatedSegments(
     [nameLeftoverSegment],
     new Map([['seg_name', 'Aila가 Calix를 불렀고 Atlas는 대답했다.']]),
     { chuseokGalbwaeScope: 'off' },
 ).length, 0);
+assert.equal(findUntranslatedSegments(
+    [nameLeftoverSegment],
+    new Map([['seg_name', 'Aila가 Calix를 불렀고 Atlas는 대답했다.']]),
+    { developerMode: false, chuseokGalbwaeScope: 'all' },
+).length, 0);
 
 const baseSettings = {
+    developerMode: true,
     translationRuleOrder: ['fineTuning'],
     globalPromptEnabled: true,
     allDialoguePromptEnabled: true,
@@ -80,6 +87,13 @@ const offPrompt = buildOutputPrompt(segmented, baseSettings, '', {
     userName: '담은',
 });
 assert.doesNotMatch(offPrompt, /TEMPORARY CHUSEOK GALBWAE STYLE/);
+
+const lockedPrompt = buildOutputPrompt(segmented, {
+    ...baseSettings,
+    developerMode: false,
+    chuseokGalbwaeScope: 'all',
+}, '', { characterName: '홍진', userName: '담은' });
+assert.doesNotMatch(lockedPrompt, /TEMPORARY CHUSEOK GALBWAE STYLE|EXCLUSIVE GALBWAE MODE/);
 
 for (const scope of ['all', 'dialogueInner']) {
     for (const extra of [{}, { developerMadKoreanOutputEnabled: true }]) {
@@ -180,6 +194,10 @@ assert.match(panelSelection, /CURRENT SCOPE=tagged_content/);
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 assert.match(index, /chuseokGalbwaeScope:\s*'off'/);
 assert.match(index, /function normalizedChuseokGalbwaeScope\(/);
+assert.match(index, /function developerChuseokGalbwaeMarkup\(/);
+assert.doesNotMatch(index, /key: 'galbwae', label: '추석 갈봬체'/);
+assert.equal((index.match(/id="verba-chuseok-galbwae-all"/g) || []).length, 1);
+assert.match(index, /settings\.developerMode \? `[\s\S]*?\$\{developerChuseokGalbwaeMarkup\(\)\}/);
 assert.match(index, /id="verba-chuseok-galbwae-all"/);
 assert.match(index, /id="verba-chuseok-galbwae-dialogue-inner"/);
 assert.match(index, /target\.id === 'verba-chuseok-galbwae-all'/);

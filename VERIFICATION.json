@@ -1,7 +1,7 @@
 {
-  "version": "0.6.18",
-  "baselineVersion": "0.6.17",
-  "passed": 55,
+  "version": "0.6.20",
+  "baselineVersion": "0.6.19",
+  "passed": 57,
   "failed": 0,
   "tests": [
     {
@@ -275,9 +275,19 @@
       "output": "PASS: ordinary translation, active flavor composition and optional review remain separate.\n"
     },
     {
+      "test": "message-long-press-copy-setting.mjs",
+      "exit": 0,
+      "output": "PASS: output blank-area long-press copy is enabled by default, user-toggleable, race-gated, and immediately cleaned up when disabled.\n"
+    },
+    {
       "test": "voice-intensity-flexibility.mjs",
       "exit": 0,
       "output": "PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (43 checks).\n"
+    },
+    {
+      "test": "settings-search.mjs",
+      "exit": 0,
+      "output": "PASS: settings search is placed below screen composition, searches groups/options/help, opens matches, restores state, and can itself be hidden.\n"
     }
   ],
   "syntaxChecked": [

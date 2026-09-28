@@ -51,7 +51,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.20';
+const EXTENSION_VERSION = '0.6.22';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -10677,6 +10677,55 @@ function settingsSearchHaystack(element, label) {
     return normalizedSettingsSearchText(`${label} ${element.textContent || ''} ${attributes}`);
 }
 
+function clearSettingsSearchHighlights(root) {
+    root.querySelectorAll('mark.verba-settings-search-highlight').forEach(mark => {
+        const parent = mark.parentNode;
+        mark.replaceWith(document.createTextNode(mark.textContent || ''));
+        parent?.normalize?.();
+    });
+}
+
+function highlightSettingsSearchTokens(element, tokens) {
+    const escaped = [...new Set(tokens)]
+        .sort((left, right) => right.length - left.length)
+        .map(token => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .filter(Boolean);
+    if (!escaped.length) return;
+    const expression = new RegExp(escaped.join('|'), 'giu');
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            if (!node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT;
+            const parent = node.parentElement;
+            if (!parent || parent.closest('mark, script, style, textarea, select, option, input, pre, [contenteditable="true"]')) {
+                return NodeFilter.FILTER_REJECT;
+            }
+            return NodeFilter.FILTER_ACCEPT;
+        },
+    });
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) nodes.push(node);
+    nodes.forEach(textNode => {
+        const value = textNode.nodeValue || '';
+        expression.lastIndex = 0;
+        const matches = [...value.matchAll(expression)];
+        if (!matches.length) return;
+        const fragment = document.createDocumentFragment();
+        let offset = 0;
+        matches.forEach(match => {
+            const index = match.index ?? 0;
+            if (index > offset) fragment.append(document.createTextNode(value.slice(offset, index)));
+            const highlight = document.createElement('mark');
+            highlight.className = 'verba-settings-search-highlight';
+            highlight.textContent = match[0];
+            fragment.append(highlight);
+            offset = index + match[0].length;
+        });
+        if (offset < value.length) fragment.append(document.createTextNode(value.slice(offset)));
+        textNode.replaceWith(fragment);
+    });
+}
+
 function rememberSettingsSearchDetails(root) {
     settingsSearchTargets(root).forEach(({ element }) => {
         const details = element.tagName === 'DETAILS'
@@ -10692,6 +10741,7 @@ function rememberSettingsSearchDetails(root) {
 
 function resetSettingsSearch(root = document.querySelector('#verba-settings')) {
     if (!root) return;
+    clearSettingsSearchHighlights(root);
     const input = root.querySelector('#verba-settings-search-input');
     const clear = root.querySelector('#verba-settings-search-clear');
     const status = root.querySelector('#verba-settings-search-status');
@@ -10699,7 +10749,6 @@ function resetSettingsSearch(root = document.querySelector('#verba-settings')) {
     if (clear) clear.hidden = true;
     if (status) status.textContent = '설정 이름과 하위 옵션, 설명을 검색해요.';
     settingsSearchTargets(root).forEach(({ element }) => {
-        element.classList.remove('verba-settings-search-match');
         const details = element.tagName === 'DETAILS'
             ? [element, ...element.querySelectorAll('details')]
             : [...element.querySelectorAll('details')];
@@ -10714,6 +10763,7 @@ function resetSettingsSearch(root = document.querySelector('#verba-settings')) {
 
 function applySettingsSearch(root = document.querySelector('#verba-settings')) {
     if (!root) return;
+    clearSettingsSearchHighlights(root);
     const input = root.querySelector('#verba-settings-search-input');
     const clear = root.querySelector('#verba-settings-search-clear');
     const status = root.querySelector('#verba-settings-search-status');
@@ -10730,7 +10780,7 @@ function applySettingsSearch(root = document.querySelector('#verba-settings')) {
     settingsSearchTargets(root).forEach(({ element, label }) => {
         const matched = tokens.every(token => settingsSearchHaystack(element, label).includes(token));
         element.toggleAttribute('hidden', !matched);
-        element.classList.toggle('verba-settings-search-match', matched);
+        if (matched) element.dataset.verbaUiHidden = 'false';
         if (matched) matches += 1;
         const details = element.tagName === 'DETAILS'
             ? [element, ...element.querySelectorAll('details')]
@@ -10739,6 +10789,7 @@ function applySettingsSearch(root = document.querySelector('#verba-settings')) {
             const detailText = normalizedSettingsSearchText(detail.textContent || '');
             detail.open = matched && tokens.every(token => detailText.includes(token));
         });
+        if (matched) highlightSettingsSearchTokens(element, tokens);
     });
     if (clear) clear.hidden = false;
     if (status) status.textContent = matches ? `${matches}개 설정 묶음을 찾았어요.` : '일치하는 설정이 없어요.';

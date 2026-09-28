@@ -3467,8 +3467,12 @@
     margin: 0;
 }
 
-#verba-settings .verba-settings-search-match {
-    box-shadow: inset 3px 0 0 var(--verba-accent);
+#verba-settings mark.verba-settings-search-highlight {
+    padding: 0 .08em;
+    border-radius: 3px;
+    color: inherit;
+    background: color-mix(in srgb, #ffeb3b 72%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, #ffeb3b 38%, transparent);
 }
 
 @media (max-width: 600px) {

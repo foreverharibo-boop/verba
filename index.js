@@ -34,6 +34,7 @@ import {
     findProtectedTokenIntegrityProblems,
     normalizeLocallyRecoverableProtectedTokens,
     findTranslationPromptConflicts,
+    findUntranslatedTaggedContentSegments,
     findUntranslatedSegments,
     hasForeignText,
     hasKorean,
@@ -51,7 +52,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.23';
+const EXTENSION_VERSION = '0.6.24';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -4434,6 +4435,86 @@ async function repairSegmentsByOutputScope({
     }
 }
 
+/**
+ * Narrow, always-on recovery for visible natural language inside paired tags.
+ * Detection is local and synchronous. When a strong untranslated signal is
+ * found, every affected tag row is sent in one additional request at most.
+ * Invalid repair output never replaces the first successful translation.
+ */
+async function repairUntranslatedTaggedContentOnce({
+    segmented,
+    translations,
+    speakerScopes,
+    speakerIdentity,
+    options,
+}) {
+    // The free Google route must never wake an AI connection profile behind
+    // the user's back. Its initial tag translation and local normalization are
+    // retained without an AI-only retry.
+    if (googleFreeEngineEnabled()) return { detected: 0, repaired: 0 };
+
+    const invalid = findUntranslatedTaggedContentSegments(
+        segmented.segments,
+        translations,
+        settings,
+        speakerScopes,
+    );
+    if (!invalid.length) return { detected: 0, repaired: 0 };
+
+    const originals = new Map(invalid.map(segment => [segment.id, translations.get(segment.id)]));
+    try {
+        const prompt = buildUntranslatedRepairPrompt(
+            invalid,
+            translations,
+            settings,
+            speakerIdentity,
+            nameTokensForSegments(segmented, invalid),
+            options.tuning || null,
+            'tagged_content',
+        );
+        const repaired = await requestSegments(prompt, invalid, {
+            ...options,
+            parallelRequest: false,
+            stage: 'tagged-content-untranslated-repair',
+        });
+
+        const candidates = new Map(translations);
+        for (const segment of invalid) {
+            const replacement = String(repaired.get(segment.id) || '');
+            if (replacement.trim()) candidates.set(
+                segment.id,
+                normalizeStructuredMetadataTranslation(replacement),
+            );
+        }
+        normalizeLocallyRecoverableProtectedTokens(segmented, candidates, settings, speakerScopes);
+
+        const stillUntranslated = new Set(findUntranslatedTaggedContentSegments(
+            invalid,
+            candidates,
+            settings,
+            speakerScopes,
+        ).map(segment => segment.id));
+        const damaged = new Set(findProtectedTokenIntegrityProblems(invalid, candidates).map(segment => segment.id));
+        let accepted = 0;
+        for (const segment of invalid) {
+            const replacement = String(candidates.get(segment.id) || '');
+            if (!replacement.trim() || stillUntranslated.has(segment.id) || damaged.has(segment.id)) {
+                translations.set(segment.id, originals.get(segment.id));
+                continue;
+            }
+            translations.set(segment.id, replacement);
+            accepted += 1;
+        }
+        console.info(`[베르바] 태그 미번역 복구: 감지 ${invalid.length}구간 · 적용 ${accepted}구간`);
+        return { detected: invalid.length, repaired: accepted };
+    } catch (error) {
+        for (const segment of invalid) translations.set(segment.id, originals.get(segment.id));
+        if (isAbort(error, options.signal)) throw error;
+        console.warn('[베르바] 태그 미번역 1회 복구 실패 — 최초 번역을 유지합니다.', error);
+        return { detected: invalid.length, repaired: 0, error };
+    }
+}
+
 async function repairProtectedTokenIntegrity(segmented, translations, options = {}) {
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = options.speakerScopes || {};
@@ -4756,6 +4837,20 @@ async function translateOutputText(source, options = {}) {
         speakerIdentity,
         stage: options.stage || 'output-translation',
     }));
+
+    // Deterministic cleanup is local and does not call the provider.
+    normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
+
+    // General AI post-audits remain disabled. Only strongly untranslated
+    // paired-tag text gets one targeted retry.
+    await repairUntranslatedTaggedContentOnce({
+        segmented,
+        translations,
+        speakerScopes,
+        speakerIdentity,
+        options,
+    });
+
     const initialSuccessfulTranslations = new Map(translations);
     let useInitialSuccessfulTranslation = false;
     const fallBackToInitialTranslation = (stage, error = null) => {

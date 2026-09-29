@@ -1,7 +1,7 @@
 {
-  "version": "0.6.23",
-  "baselineVersion": "0.6.22",
-  "passed": 57,
+  "version": "0.6.24",
+  "baselineVersion": "0.6.23",
+  "passed": 59,
   "failed": 0,
   "tests": [
     {
@@ -288,6 +288,16 @@
       "test": "settings-search.mjs",
       "exit": 0,
       "output": "PASS: settings search highlights matching words, temporarily reveals hidden groups, opens matches, and restores text/layout/open state when cleared.\n"
+    },
+    {
+      "test": "post-translation-ai-repair-disabled.mjs",
+      "exit": 0,
+      "output": "PASS: local cleanup remains active while every post-translation AI repair path is preserved but dormant.\n"
+    },
+    {
+      "test": "tagged-content-untranslated-repair.mjs",
+      "exit": 0,
+      "output": "PASS: 태그 미번역은 로컬 감지 후 문제 구간만 최대 1회 복구하고 정상·무료 Google 결과에는 추가 AI 요청이 없음.\n"
     }
   ],
   "syntaxChecked": [
@@ -309,12 +319,11 @@
   ],
   "context": "one nearest preceding user message, raw active source only",
   "aiAuditEnabled": false,
+  "taggedContentRepairEnabled": true,
   "liveApiTested": false,
   "liveSillyTavernTested": false,
   "unchangedModules": [
-    "core.js",
     "translation-composer.js",
-    "minimal-output.js",
     "taste-audit.js",
     "base-editor.js"
   ]

@@ -1323,9 +1323,33 @@ function findDialogueSpans(value) {
         .filter((span, index, all) => !all.slice(0, index).some(kept => span.start < kept.end));
 }
 
+/**
+ * 따옴표는 직접 대사뿐 아니라 서술 속 단어·표현·제목을 가리킬 때도 쓰인다.
+ * `The word "dorm" acts ...` 같은 인용어를 대사로 자르면 로컬 한영병기
+ * 조립기가 `"dorm (기숙사)"`를 만들어 주변 서술의 번역과 중복시킨다.
+ *
+ * 여기서는 명백한 메타언어/표기 문맥만 좁게 제외한다. 평범한 짧은 대사
+ * (`"Yeah."`, `"Dana..."`, `he said, "Go."`)는 기존처럼 대사로 남긴다.
+ */
+function looksLikeNarrativeQuotedMention(value, span) {
+    const text = String(value || '');
+    const before = text.slice(Math.max(0, span.start - 180), span.start);
+    const after = text.slice(span.end, Math.min(text.length, span.end + 120));
+    const metaNoun = '(?:word|term|phrase|expression|label|title|name|nickname|concept|idea|category|status|command|code|password|username|tag|keyword|spelling)';
+    const beforeMeta = new RegExp(`\\b${metaNoun}(?:\\s+(?:is|was|means?|refers?|for|like))?\\s*[:=,-]?\\s*$`, 'iu');
+    const afterMeta = new RegExp(`^\\s*(?:${metaNoun})\\b`, 'iu');
+    if (beforeMeta.test(before) || afterMeta.test(after)) return true;
+
+    // Written/displayed text is not spoken dialogue either. Keep this narrow
+    // to an explicit medium plus a display verb so ordinary “he said” remains
+    // a direct-dialogue cue.
+    return /\b(?:sign|note|message|screen|display|caption|headline|subject(?:\s+line)?|button|placard|poster|banner)\s+(?:read|reads|said|says|showed|shows|displayed|displays|flashed|flashes)\s*[:=,-]?\s*$/iu.test(before);
+}
+
 function splitDialogueAndNarration(value) {
     const text = String(value || '');
-    const spans = findDialogueSpans(text);
+    const spans = findDialogueSpans(text)
+        .filter(span => !looksLikeNarrativeQuotedMention(text, span));
     if (!spans.length) return [{ type: 'narration', text }];
     const pieces = [];
     let cursor = 0;

@@ -1,6 +1,6 @@
 {
-  "version": "0.6.24",
-  "baselineVersion": "0.6.23",
+  "version": "0.6.25",
+  "baselineVersion": "0.6.24",
   "passed": 59,
   "failed": 0,
   "tests": [
@@ -22,7 +22,7 @@
     {
       "test": "bilingual-dialogue-local-format.mjs",
       "exit": 0,
-      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally.\n"
+      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally; quoted narrative words and phrases remain narration while real short dialogue remains eligible.\n"
     },
     {
       "test": "bounded-retries-and-soft-fallback.mjs",
@@ -320,6 +320,7 @@
   "context": "one nearest preceding user message, raw active source only",
   "aiAuditEnabled": false,
   "taggedContentRepairEnabled": true,
+  "quotedNarrativeBilingualGuardEnabled": true,
   "liveApiTested": false,
   "liveSillyTavernTested": false,
   "unchangedModules": [

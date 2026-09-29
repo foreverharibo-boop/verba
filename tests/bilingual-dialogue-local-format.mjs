@@ -44,6 +44,24 @@ assert.equal(formatted, '"I did not say that. (난 그런 말 안 했어.)"');
 assert.equal(ensureBilingualDialogueFormat(narration, '알렉스가 말했다.', settings), '알렉스가 말했다.');
 assert.equal(ensureBilingualDialogueFormat(dialogue, formatted, settings), formatted);
 
+// Quoted words/phrases mentioned by narration are not spoken dialogue and
+// therefore must never be rebuilt as `"source (translation)"`.
+const quotedWord = segmentSource('The word "dorm" acts like a bucket of ice water.');
+assert.equal(quotedWord.segments.length, 1);
+assert.equal(quotedWord.segments[0].type, 'narration');
+assert.equal(quotedWord.segments[0].text, 'The word "dorm" acts like a bucket of ice water.');
+
+const quotedPhrase = segmentSource('The phrase "an important plan came up for Friday" hit him hard.');
+assert.equal(quotedPhrase.segments.length, 1);
+assert.equal(quotedPhrase.segments[0].type, 'narration');
+
+for (const spoken of ['"Yeah."', '"Dana..."', 'He said, "Go."']) {
+    assert.ok(
+        segmentSource(spoken).segments.some(segment => segment.type === 'dialogue_candidate'),
+        `real short dialogue must remain dialogue: ${spoken}`,
+    );
+}
+
 const named = segmentSource('*그는 망설였다.*\n\n"Dana..."', [{ source: 'Dana', target: '다나' }]);
 const namedDialogue = named.segments.find(segment => segment.type === 'dialogue_candidate');
 assert.ok(namedDialogue);

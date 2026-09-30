@@ -756,7 +756,7 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
  * selection replacement, so a complete model-produced Source (Korean) line is
  * never wrapped a second time.
  */
-export function normalizeBilingualMappedTranslation(translation, sourceMap = [], settings = {}) {
+export function normalizeBilingualMappedTranslation(translation, sourceMap = [], settings = {}, source = '') {
     let text = String(translation || '');
     const rows = (Array.isArray(sourceMap) ? sourceMap : []).flatMap((entry, index) => {
         const source = String(entry?.source || '').trim();
@@ -779,6 +779,74 @@ export function normalizeBilingualMappedTranslation(translation, sourceMap = [],
         for (let later = rowIndex + 1; later < rows.length; later += 1) {
             rows[later].start += delta;
             rows[later].end += delta;
+        }
+    }
+
+    // Some provider responses collapse a dialogue segment into adjacent
+    // narration, leaving no usable source-map row for the final application
+    // pass. In that case, locate only exact preserved source-dialogue bodies
+    // followed by a Korean bracketed half and normalize that narrow range.
+    // This keeps quoted narration untouched and does not require another AI
+    // request.
+    const rawSource = String(source || '');
+    if (rawSource && /[\uAC00-\uD7A3]/u.test(text)) {
+        const sourceSegments = segmentSource(rawSource).segments
+            .filter(segment => segment.type === 'dialogue_candidate');
+        for (const segment of sourceSegments) {
+            const sourceBody = String(dialogueEnvelope(segment.text).body || '');
+            if (!sourceBody) continue;
+            let cursor = 0;
+            while (cursor < text.length) {
+                const bodyAt = text.indexOf(sourceBody, cursor);
+                if (bodyAt < 0) break;
+                const bodyEnd = bodyAt + sourceBody.length;
+                let openAt = -1;
+                for (let index = bodyEnd; index < Math.min(text.length, bodyEnd + 12); index += 1) {
+                    if (BILINGUAL_OPENERS.includes(text[index])) {
+                        const between = text.slice(bodyEnd, index);
+                        if (/^[\s"'‘’“”「」『』,;:]*$/u.test(between)) openAt = index;
+                        break;
+                    }
+                    if (!/[\s"'‘’“”「」『』,;:]/u.test(text[index])) break;
+                }
+                if (openAt < 0) { cursor = bodyEnd; continue; }
+
+                const open = text[openAt];
+                const close = ({ '(': ')', '[': ']', '（': '）', '【': '】' })[open];
+                let depth = 0;
+                let closeAt = -1;
+                for (let index = openAt; index < text.length; index += 1) {
+                    if (text[index] === open) depth += 1;
+                    else if (text[index] === close) {
+                        depth -= 1;
+                        if (depth === 0) { closeAt = index; break; }
+                    }
+                }
+                if (closeAt < 0 || !/[\uAC00-\uD7A3]/u.test(validationText(text.slice(openAt + 1, closeAt)))) {
+                    cursor = bodyEnd;
+                    continue;
+                }
+
+                let start = bodyAt;
+                while (start > 0 && /["'‘’“”「」『』]/u.test(text[start - 1])) start -= 1;
+                let end = closeAt + 1;
+                while (end < text.length && /["'‘’“”「」『』,\)\]\uFF09\u3011]/u.test(text[end])) end += 1;
+
+                const current = text.slice(start, end);
+                const normalized = ensureBilingualDialogueFormat(segment, current, settings);
+                if (!normalized || normalized === current) { cursor = end; continue; }
+                text = text.slice(0, start) + normalized + text.slice(end);
+                const delta = normalized.length - (end - start);
+                for (const row of rows) {
+                    if (row.start >= end) {
+                        row.start += delta;
+                        row.end += delta;
+                    } else if (row.end > start) {
+                        row.end += delta;
+                    }
+                }
+                cursor = start + normalized.length;
+            }
         }
     }
 

@@ -53,7 +53,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.28';
+const EXTENSION_VERSION = '0.6.29';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -5877,6 +5877,7 @@ async function translateMessage(messageId, options = {}) {
                 lockedTranslation.translation,
                 lockedTranslation.sourceMap,
                 settings,
+                source,
             );
             if (options.automatic && !isTranslationExtensionActive(EXTENSION_KEY)) {
                 throw outputAbortReason(
@@ -9168,7 +9169,7 @@ Return all required ids in the same schema. For listed ids, rephrase beyond Unic
                 replacement.replacement,
             );
         }
-        const normalized = normalizeBilingualMappedTranslation(updated, sourceMap, settings);
+        const normalized = normalizeBilingualMappedTranslation(updated, sourceMap, settings, state.source);
         const context = liveContext();
         applyTranslation(state.messageId, state.message, state.source, normalized.translation, context.chat, {
             sourceMap: normalized.sourceMap,
@@ -9460,7 +9461,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             snapshot.end,
             replacement,
         );
-        const normalized = normalizeBilingualMappedTranslation(updated, sourceMap, settings);
+        const normalized = normalizeBilingualMappedTranslation(updated, sourceMap, settings, snapshot.source);
         const context = liveContext();
         const message = context.chat?.[snapshot.messageId];
         applyTranslation(snapshot.messageId, message, snapshot.source, normalized.translation, context.chat, {

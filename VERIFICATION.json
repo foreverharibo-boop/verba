@@ -1,6 +1,6 @@
 {
-  "version": "0.6.28",
-  "baselineVersion": "0.6.27",
+  "version": "0.6.29",
+  "baselineVersion": "0.6.28",
   "passed": 59,
   "failed": 0,
   "tests": [

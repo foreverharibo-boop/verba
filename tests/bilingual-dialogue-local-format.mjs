@@ -79,6 +79,17 @@ assert.equal(mappedNormalized.translation, completeCommaLine);
 assert.deepEqual(mappedNormalized.sourceMap, [
     { id: 'seg_selection', source: commaSource, start: 0, end: completeCommaLine.length },
 ]);
+const noMapMalformed = `${malformedCommaLine} 엠리스가 숨을 내쉬었다.`;
+assert.equal(
+    normalizeBilingualMappedTranslation(
+        noMapMalformed,
+        [],
+        settings,
+        `${commaSource} Emris breathed.`,
+    ).translation,
+    `${completeCommaLine} 엠리스가 숨을 내쉬었다.`,
+    'final output fallback repairs malformed bilingual dialogue even without a usable source map',
+);
 const indexSource = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 assert.ok(
     (indexSource.match(/normalizeBilingualMappedTranslation\(/gu) || []).length >= 3,

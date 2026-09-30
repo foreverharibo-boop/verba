@@ -1,6 +1,6 @@
 {
-  "version": "0.6.27",
-  "baselineVersion": "0.6.26",
+  "version": "0.6.28",
+  "baselineVersion": "0.6.27",
   "passed": 59,
   "failed": 0,
   "tests": [
@@ -323,6 +323,7 @@
   "quotedNarrativeBilingualGuardEnabled": true,
   "nameOnlyDialogueLocalRestorationEnabled": true,
   "nameAttachedParticlePromptEnabled": true,
+  "bilingualMappedNormalizationEnabled": true,
   "liveApiTested": false,
   "liveSillyTavernTested": false,
   "unchangedModules": [

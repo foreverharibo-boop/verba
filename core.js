@@ -514,6 +514,22 @@ function stripSingleParentheticalEnvelope(value) {
     return pair ? text.slice(pair[0].length, text.length - pair[1].length).trim() : text;
 }
 
+function bracketInterior(value, openAt) {
+    const text = String(value || '');
+    const open = text[openAt];
+    const close = ({ '(': ')', '[': ']', '（': '）', '【': '】' })[open];
+    if (!close) return '';
+    let depth = 0;
+    for (let index = openAt; index < text.length; index += 1) {
+        if (text[index] === open) depth += 1;
+        else if (text[index] === close) {
+            depth -= 1;
+            if (depth === 0) return text.slice(openAt + 1, index).trim();
+        }
+    }
+    return text.slice(openAt + 1).trim();
+}
+
 const BILINGUAL_OPENERS = ['(', '（', '[', '【'];
 const BILINGUAL_CLOSER_RUN = /[\)\]）】]+\s*$/u;
 
@@ -603,6 +619,23 @@ function extractKoreanDialogueHalfRaw(segment, translation, nameTokens = [], pro
     const translatedEnvelope = dialogueEnvelope(translation);
     const expectedSource = restoreBilingualDetectionTokens(sourceEnvelope.body, nameTokens, protectedTokens, 'source');
     const body = String(translatedEnvelope.body || '').trim();
+    // Prefer the first balanced Korean wrapper that follows the exact source
+    // dialogue. This also recovers model output such as
+    //   ""Source (한국어)",)"
+    // without carrying the surplus quote/comma/parenthesis into the Korean
+    // half. The final formatter then emits exactly one dialogue envelope.
+    for (let index = 0; index < body.length; index += 1) {
+        if (!BILINGUAL_OPENERS.includes(body[index])) continue;
+        const leftAsSource = restoreBilingualDetectionTokens(
+            stripLooseDialogueQuotes(body.slice(0, index)),
+            nameTokens,
+            protectedTokens,
+            'source',
+        );
+        if (normalizedDialogueSurface(leftAsSource) !== normalizedDialogueSurface(expectedSource)) continue;
+        const interior = bracketInterior(body, index);
+        if (/[가-힣]/u.test(validationText(interior))) return stripLooseDialogueQuotes(interior);
+    }
     const trailing = trailingParentheticalParts(body);
     if (trailing) {
         const leftAsSource = restoreBilingualDetectionTokens(stripLooseDialogueQuotes(trailing.left), nameTokens, protectedTokens, 'source');
@@ -715,6 +748,41 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
             ? [existingParts.open, existingParts.close]
             : bilingualDialogueBracketPair(settings);
     return `${translatedEnvelope.leading}${sourceEnvelope.open}${source} ${open}${korean}${close}${sourceEnvelope.close}${translatedEnvelope.trailing}`;
+}
+
+/**
+ * Applies the same idempotent bilingual-dialogue formatter to already assembled
+ * text. This is used after every output path, including partial and bundled
+ * selection replacement, so a complete model-produced Source (Korean) line is
+ * never wrapped a second time.
+ */
+export function normalizeBilingualMappedTranslation(translation, sourceMap = [], settings = {}) {
+    let text = String(translation || '');
+    const rows = (Array.isArray(sourceMap) ? sourceMap : []).flatMap((entry, index) => {
+        const source = String(entry?.source || '').trim();
+        const start = Number(entry?.start);
+        const end = Number(entry?.end);
+        if (!source || !Number.isInteger(start) || !Number.isInteger(end) || end <= start) return [];
+        return [{ id: String(entry?.id || `seg_${index}`), source, start, end }];
+    }).sort((left, right) => left.start - right.start);
+
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+        const row = rows[rowIndex];
+        const segmented = segmentSource(row.source);
+        if (segmented.segments.length !== 1 || segmented.segments[0]?.type !== 'dialogue_candidate') continue;
+        const current = text.slice(row.start, row.end);
+        const normalized = ensureBilingualDialogueFormat(segmented.segments[0], current, settings);
+        if (!normalized || normalized === current) continue;
+        text = text.slice(0, row.start) + normalized + text.slice(row.end);
+        const delta = normalized.length - (row.end - row.start);
+        row.end = row.start + normalized.length;
+        for (let later = rowIndex + 1; later < rows.length; later += 1) {
+            rows[later].start += delta;
+            rows[later].end += delta;
+        }
+    }
+
+    return { translation: text, sourceMap: rows };
 }
 
 /**

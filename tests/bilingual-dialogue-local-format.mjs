@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
     assembleTranslation,
     bilingualDialogueBracketPair,
@@ -6,6 +7,7 @@ import {
     buildOutputPrompt,
     ensureBilingualDialogueFormat,
     findProtectedTokenIntegrityProblems,
+    normalizeBilingualMappedTranslation,
     normalizeLocallyRecoverableProtectedTokens,
     segmentSource,
 } from '../core.js';
@@ -43,6 +45,45 @@ const formatted = ensureBilingualDialogueFormat(
 assert.equal(formatted, '"I did not say that. (난 그런 말 안 했어.)"');
 assert.equal(ensureBilingualDialogueFormat(narration, '알렉스가 말했다.', settings), '알렉스가 말했다.');
 assert.equal(ensureBilingualDialogueFormat(dialogue, formatted, settings), formatted);
+
+// Every output path must treat a complete model-produced bilingual line as an
+// idempotent final form. Partial-selection insertion can temporarily nest that
+// complete line inside the old Korean wrapper; mapped normalization collapses
+// it back to exactly one source copy, one Korean copy, and one quote pair.
+const commaSource = '"Oh, baby... Dana,"';
+const commaDialogue = segmentSource(commaSource).segments[0];
+const completeCommaLine = '"Oh, baby... Dana, (아, 자기야... 다나,)"';
+assert.equal(
+    ensureBilingualDialogueFormat(commaDialogue, completeCommaLine, settings),
+    completeCommaLine,
+    'an already-complete bilingual line is not assembled again',
+);
+const malformedCommaLine = '""Oh, baby... Dana, (아, 자기야... 다나,)",)"';
+assert.equal(
+    ensureBilingualDialogueFormat(commaDialogue, malformedCommaLine, settings),
+    completeCommaLine,
+    'surplus quote/comma/parenthesis wrappers are normalized once',
+);
+const oldCommaLine = completeCommaLine;
+const selectedKorean = '아, 자기야... 다나,';
+const selectedStart = oldCommaLine.indexOf(selectedKorean);
+const nestedSelectionResult = oldCommaLine.slice(0, selectedStart)
+    + completeCommaLine
+    + oldCommaLine.slice(selectedStart + selectedKorean.length);
+const mappedNormalized = normalizeBilingualMappedTranslation(
+    nestedSelectionResult,
+    [{ id: 'seg_selection', source: commaSource, start: 0, end: nestedSelectionResult.length }],
+    settings,
+);
+assert.equal(mappedNormalized.translation, completeCommaLine);
+assert.deepEqual(mappedNormalized.sourceMap, [
+    { id: 'seg_selection', source: commaSource, start: 0, end: completeCommaLine.length },
+]);
+const indexSource = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
+assert.ok(
+    (indexSource.match(/normalizeBilingualMappedTranslation\(/gu) || []).length >= 3,
+    'full output, single-selection and bundled-selection paths share mapped bilingual normalization',
+);
 
 // Quoted words/phrases mentioned by narration are not spoken dialogue and
 // therefore must never be rebuilt as `"source (translation)"`.

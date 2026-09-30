@@ -216,6 +216,7 @@ const lifecycleEnv = { previousUserSource,
         return { translation: '번역', sourceMap: [] };
     },
     translationWithLockedSegments: v => v,
+    normalizeBilingualMappedTranslation: (translation, sourceMap) => ({ translation, sourceMap }),
     applyTranslation: () => { time += 20; return { renderResult: { status: applied ? 'applied' : 'failed' } }; },
     clearTransientTranslationSelections: () => {}, refreshRetranslateButton: () => {}, renderOutputTiming: () => {},
     recordOutputTranslation: () => {}, isAbort: env.isAbort, reportError: () => {}, console: { info() {}, warn() {}, error() {} },

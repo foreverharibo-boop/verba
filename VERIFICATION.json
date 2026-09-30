@@ -1,6 +1,6 @@
 {
-  "version": "0.6.25",
-  "baselineVersion": "0.6.24",
+  "version": "0.6.27",
+  "baselineVersion": "0.6.26",
   "passed": 59,
   "failed": 0,
   "tests": [
@@ -321,6 +321,8 @@
   "aiAuditEnabled": false,
   "taggedContentRepairEnabled": true,
   "quotedNarrativeBilingualGuardEnabled": true,
+  "nameOnlyDialogueLocalRestorationEnabled": true,
+  "nameAttachedParticlePromptEnabled": true,
   "liveApiTested": false,
   "liveSillyTavernTested": false,
   "unchangedModules": [

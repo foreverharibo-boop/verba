@@ -23,6 +23,15 @@ const builders = {
  token: (m,s) => m.buildProtectedTokenRepairPrompt(segmented.segments,translations,s,identity),
  untranslated: (m,s) => m.buildUntranslatedRepairPrompt(segmented.segments,translations,s,identity),
 };
+const plainOutputPrompt = builders.output(core, {
+ ...defaults,
+ developerMode: false,
+ developerMadKoreanOutputEnabled: false,
+ developerHongjinFlavorEnabled: false,
+});
+assert.match(plainOutputPrompt, /NAME-ATTACHED PARTICLES:/);
+assert.match(plainOutputPrompt, /following a proper name independently from the name itself/);
+assert.doesNotMatch(builders.input(core, defaults), /NAME-ATTACHED PARTICLES:/);
 let routes = 0;
 for (const flags of [{}, {developerCompressedPromptEnabled:true}, {developerExtremeCompressedPromptEnabled:true}]) {
  for (const mad of [false,true]) for (const hongjin of [false,true]) {

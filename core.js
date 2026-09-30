@@ -648,6 +648,33 @@ function bindBilingualKoreanNameTokens(segment, korean, nameTokens = []) {
     return next;
 }
 
+/**
+ * Returns the protected source body only when a dialogue consists entirely of
+ * locked Korean character names plus punctuation/spacing. In that narrow case
+ * the model cannot safely replace the name with a bare vocative such as "야";
+ * reusing the source NAME tokens preserves the registered spelling locally.
+ */
+function lockedNameOnlyKoreanHalf(segment, korean, nameTokens = []) {
+    if (segment?.type !== 'dialogue_candidate') return '';
+    const body = String(dialogueEnvelope(segment.text).body || '');
+    const translated = String(korean || '');
+    let remainder = body;
+    let found = false;
+    let missing = false;
+    for (const entry of nameTokens || []) {
+        const token = String(entry?.token || '');
+        if (!token || !remainder.includes(token) || !/[가-힣]/u.test(String(entry?.value || ''))) continue;
+        found = true;
+        remainder = remainder.split(token).join('');
+        const visibleNames = [entry?.value, entry?.source]
+            .map(value => String(value || '').trim())
+            .filter(Boolean);
+        if (!translated.includes(token) && !visibleNames.some(value => translated.includes(value))) missing = true;
+    }
+    if (!found || !missing || remainder.includes('@@') || /[\p{L}\p{N}]/u.test(remainder)) return '';
+    return body;
+}
+
 /** Locally rebuilds the configured bilingual dialogue display without an AI request. */
 export function ensureBilingualDialogueFormat(segment, translation, settings = {}, speakerScopes = null, nameTokens = [], protectedTokens = []) {
     const result = String(translation || '');
@@ -667,7 +694,9 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     const existingParts = existingBilingual
         ? trailingParentheticalParts(translatedEnvelope.body)
         : null;
-    const korean = bindBilingualKoreanNameTokens(segment, extractKoreanDialogueHalf(segment, result, nameTokens, protectedTokens), nameTokens);
+    const extractedKorean = extractKoreanDialogueHalf(segment, result, nameTokens, protectedTokens);
+    const korean = lockedNameOnlyKoreanHalf(segment, extractedKorean, nameTokens)
+        || bindBilingualKoreanNameTokens(segment, extractedKorean, nameTokens);
     const koreanNameTokenPresent = (nameTokens || []).some(entry => korean.includes(String(entry?.token || '')) && /[가-힣]/u.test(String(entry?.value || '')));
     if (!/[가-힣]/u.test(validationText(korean)) && !koreanNameTokenPresent) return result;
 
@@ -2693,6 +2722,7 @@ function naturalKoreanBaselineRule() {
 - Preserve deliberate fragments, interruptions, trailing-off lines, repetition, ambiguity, and incompleteness when they are meaningful. Do not finish, explain, or clarify something the source intentionally leaves unfinished or ambiguous.
 - Translate interjections and discourse markers by their pragmatic function in context rather than assigning one fixed Korean dictionary equivalent to each English word.
 - Preserve register, politeness, social distance, sarcasm, humor, vulgarity, intimacy, and character voice at the same force. Naturalization must never create a new relationship implication or emotional attitude.
+- NAME-ATTACHED PARTICLES: Determine any Korean particle or suffix following a proper name independently from the name itself. Attach one only when it is genuinely required by the Korean syntax or pragmatics of the translated sentence, never merely because the source name serves a particular grammatical or discourse function. When an attachment is optional, prefer the least marked natural form that preserves the original meaning, relationship, register, and emotional force. Do not create additional familiarity, hierarchy, emphasis, or attitude through the attachment.
 - Never resolve an ambiguous referent, motive, relationship, or event by guessing. If the source is genuinely ambiguous, keep the Korean appropriately ambiguous.
 - Before returning a segment, reject wording that is technically literal but would sound conspicuously machine-translated to a fluent Korean reader when an equally faithful natural Korean rendering exists.`;
 }

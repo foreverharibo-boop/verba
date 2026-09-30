@@ -50,7 +50,8 @@ export function createPromptBuilders(h) {
     }
     const names = 'Name locks first; otherwise transliterate only human names to Hangul, no surname/title expansion or display punctuation.';
     const basic = 'Translate into fluent, idiomatic Korean. Interpret idioms, fragments and reactions in context; replace source-language syntax with natural Korean while preserving deliberate roughness, repetition, interruption and ambiguity. Translate by meaning and freely reconstruct syntax, clause order, punctuation, metaphors and collocations; never preserve a source-shaped expression that sounds translated rather than originally written in Korean, and keep every actor unambiguous.';
-    function defaultBaseTranslationPrompt() { return lines([basic, fidelity, names]); }
+    const nameParticles = 'NAME-ATTACHED PARTICLES: Determine any Korean particle or suffix following a proper name independently from the name itself. Attach one only when it is genuinely required by the Korean syntax or pragmatics of the translated sentence, never merely because the source name serves a particular grammatical or discourse function. When an attachment is optional, prefer the least marked natural form that preserves the original meaning, relationship, register, and emotional force. Do not create additional familiarity, hierarchy, emphasis, or attitude through the attachment.';
+    function defaultBaseTranslationPrompt() { return lines([basic, fidelity, names, nameParticles]); }
     function identity(i = {}, compact = false) {
         if (compact) return `TARGET/CHAR/{{char}}=${j(i.characterName || '(current character)')}; USER/{{user}}=${j(i.userName || '(current user)')}; TARGET gender=${j(i.characterGender || 'unknown')}. Resolve speakers case-insensitively from context; USER/NPC/quoted/uncertain speech gets no TARGET voice.`;
         return `IDENTITY (case-insensitive): TARGET/CHAR/{{char}}=${j(i.characterName || '(current character)')}; USER/{{user}}=${j(i.userName || '(current user)')}; TARGET gender=${j(i.characterGender || 'unknown')}. Context resolves speakers; ambiguous/quoted/USER/NPC speech=OTHER, no TARGET voice.`;
@@ -157,7 +158,7 @@ export function createPromptBuilders(h) {
         const [bilingualOpen,bilingualClose]=bilingual ? h.bilingualDialogueBracketPair(s) : ['(',')'];
         return lines([
             exclusive ? translationProse(s, 'mad', 'TOP PRIORITY — NO MISOGYNY: ban misogyny/gender degradation over all voice settings; source profanity keeps its force in non-gendered wording.') : hongjinEnabled(s) ? (targetScope(scope) ? translationProse(s, 'hongjin', noMisogyny) : noMisogyny) : '',
-            exclusive ? lines([translationProse(s,'mad',madFidelity),names,madRules(s),hongjin(s,scope,true)]) : (custom ? translationProse(s,'primary',str(s.baseTranslationCustom.prompt)) : lines([translationProse(s,'primary',mode(s) === 2 ? 'E→K: idiomatic Korean; preserve intentional fragments, roughness and ambiguity.' : basic), translationProse(s,'primary',fidelity), names])),
+            exclusive ? lines([translationProse(s,'mad',madFidelity),names,madRules(s),hongjin(s,scope,true)]) : (custom ? translationProse(s,'primary',str(s.baseTranslationCustom.prompt)) : lines([translationProse(s,'primary',mode(s) === 2 ? 'E→K: idiomatic Korean; preserve intentional fragments, roughness and ambiguity.' : basic), translationProse(s,'primary',fidelity), names, translationProse(s,'primary',nameParticles)])),
             exclusive ? madFormat : format,
             galbwae(s, scope),
             exclusive ? 'Korean only.' : userRules(s,oneTimeInstruction,over,scope),

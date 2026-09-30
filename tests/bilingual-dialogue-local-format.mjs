@@ -76,6 +76,42 @@ assert.equal(
     '*그는 망설였다.*\n\n"Dana... (다나...)"',
 );
 
+// Regression: if the model drops a locked name and returns only a Korean
+// vocative, a name-only line is rebuilt from the fixed name without another AI
+// request. Source punctuation is preserved exactly.
+const lostNamed = segmentSource('"Dana...?"', [{ source: 'Dana', target: '다나' }]);
+const lostNamedDialogue = lostNamed.segments[0];
+const lostNamedToken = lostNamed.nameTokens[0].token;
+const locallyRestoredName = ensureBilingualDialogueFormat(
+    lostNamedDialogue, '"야...?"', settings, null, lostNamed.nameTokens, lostNamed.tokens,
+);
+assert.equal(locallyRestoredName, `"Dana...? (${lostNamedToken}...?)"`);
+assert.equal(
+    assembleTranslation(lostNamed, new Map([[lostNamedDialogue.id, locallyRestoredName]])),
+    '"Dana...? (다나...?)"',
+);
+
+const dashedName = segmentSource('"Emris—"', [{ source: 'Emris', target: '엠리스' }]);
+const dashedDialogue = dashedName.segments[0];
+const dashedToken = dashedName.nameTokens[0].token;
+const locallyRestoredDash = ensureBilingualDialogueFormat(
+    dashedDialogue, '"야—"', settings, null, dashedName.nameTokens, dashedName.tokens,
+);
+assert.equal(locallyRestoredDash, `"Emris— (${dashedToken}—)"`);
+assert.equal(assembleTranslation(dashedName, new Map([[dashedDialogue.id, locallyRestoredDash]])), '"Emris— (엠리스—)"');
+
+// A normal sentence containing a name is not rewritten wholesale; its natural
+// Korean wording remains the model's output.
+const namedSentence = segmentSource('"Dana, come here."', [{ source: 'Dana', target: '다나' }]);
+const namedSentenceDialogue = namedSentence.segments[0];
+const namedSentenceToken = namedSentence.nameTokens[0].token;
+assert.equal(
+    ensureBilingualDialogueFormat(
+        namedSentenceDialogue, '"다나야, 이리 와."', settings, null, namedSentence.nameTokens, namedSentence.tokens,
+    ),
+    `"Dana, come here. (${namedSentenceToken}야, 이리 와.)"`,
+);
+
 // Already bilingual and common malformed variants must be normalized once,
 // never nested as Source (Source (Korean)).
 const already = `"${token}… (${token}…)"`;

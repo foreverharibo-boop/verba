@@ -52,8 +52,8 @@ assert.equal(calls, 1, 'permanent errors stop after the first provider request')
 
 calls = 0;
 failure = Object.assign(new Error('busy'), { code: 'TRANSIENT' });
-await assert.rejects(retryApi('prompt'), /자동 재시도 2회/);
-assert.equal(calls, 3, 'transient errors get one initial request plus two retries');
+await assert.rejects(retryApi('prompt'), /자동 재시도 5회/);
+assert.equal(calls, 6, 'transient errors get one initial request plus five retries');
 
 const requestSource = slice('function collectPartialSegmentTranslations(', 'async function requestSelectionCandidates(');
 let transportCalls = 0;

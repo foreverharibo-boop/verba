@@ -54,7 +54,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.31';
+const EXTENSION_VERSION = '0.6.32';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -3430,8 +3430,8 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
 }
 
 async function sendWithRetry(prompt, options = {}) {
-    const transientDelays = [3000, 5000];
-    const maxRetries = 2;
+    const transientDelays = [3000, 5000, 8000, 12000, 18000];
+    const maxRetries = 5;
     const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
     const controller = new AbortController();

@@ -11,6 +11,7 @@
     z-index: 2147483647 !important;
     display: flex !important;
     flex-direction: column !important;
+    align-items: flex-end !important;
     gap: 8px !important;
     overflow: auto !important;
     overscroll-behavior: contain;
@@ -26,7 +27,8 @@
     flex: 0 0 auto !important;
     align-items: flex-start !important;
     gap: 10px !important;
-    width: 100% !important;
+    width: fit-content !important;
+    max-width: 100% !important;
     min-width: 0 !important;
     padding: 11px 8px 11px 12px !important;
     margin: 0 !important;
@@ -67,7 +69,21 @@
 #st-translation-notice-dock .st-translation-notice-action { display: inline-block; width: auto !important; min-height: 28px !important; margin: 6px 6px 0 0 !important; padding: 3px 8px !important; font-size: 12px !important; border: 1px solid color-mix(in srgb, currentColor 18%, transparent) !important; }
 #st-translation-notice-dock .st-translation-notice button:hover { background: color-mix(in srgb, currentColor 8%, transparent) !important; }
 #st-translation-notice-dock .st-translation-notice button:disabled { opacity: .5; cursor: wait; }
-@media (pointer: coarse) {
-    #st-translation-notice-dock .st-translation-notice-close { flex-basis: 44px; width: 44px !important; height: 44px !important; min-height: 44px !important; }
-    #st-translation-notice-dock .st-translation-notice-action { min-height: 44px !important; }
+@media (max-width: 700px), (pointer: coarse) {
+    #st-translation-notice-dock { align-items: center !important; gap: 6px !important; }
+    #st-translation-notice-dock .st-translation-notice {
+        gap: 6px !important;
+        padding: 6px 6px 6px 9px !important;
+        border-radius: 10px !important;
+        font-size: 12px !important;
+        line-height: 1.3 !important;
+    }
+    #st-translation-notice-dock .st-translation-notice-icon { flex-basis: 14px; padding-top: 3px; font-size: 14px; }
+    #st-translation-notice-dock .st-translation-notice-brand { display: none; }
+    #st-translation-notice-dock .st-translation-notice-text { max-height: 78px; }
+    #st-translation-notice-dock .st-translation-notice-close { position: relative; flex-basis: 24px; width: 24px !important; height: 28px !important; min-height: 28px !important; font-size: 18px !important; }
+    #st-translation-notice-dock .st-translation-notice-action { position: relative; min-height: 28px !important; padding: 3px 6px !important; margin-top: 4px !important; font-size: 11px !important; }
+    /* Keep touch hit targets without inflating the visible card. */
+    #st-translation-notice-dock .st-translation-notice-close::after { content: ''; position: absolute; inset: -8px -10px; }
+    #st-translation-notice-dock .st-translation-notice-action::after { content: ''; position: absolute; inset: -8px 0; }
 }

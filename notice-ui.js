@@ -47,10 +47,11 @@ function createDock() {
         const { viewport, top, horizontal } = noticeAnchor();
         const gap = 8;
         const available = Math.max(48, top - viewport.top - gap - 8);
-        host.style.setProperty('max-height', `${Math.min(280, viewport.height * 0.42, available)}px`, 'important');
-        host.style.setProperty('width', `${Math.min(340, viewport.width - 16)}px`, 'important');
+        const compact = matchMedia('(max-width: 700px), (pointer: coarse)').matches;
+        host.style.setProperty('max-height', `${Math.min(compact ? 190 : 280, viewport.height * 0.42, available)}px`, 'important');
+        host.style.setProperty('width', `${Math.min(compact ? 260 : 340, viewport.width - 16)}px`, 'important');
         const rect = host.getBoundingClientRect();
-        const desiredLeft = viewport.width > 700 && horizontal
+        const desiredLeft = !compact && horizontal
             ? horizontal.right - rect.width
             : (horizontal ? horizontal.left + horizontal.width / 2 : viewport.left + viewport.width / 2) - rect.width / 2;
         const left = Math.max(viewport.left + 8, Math.min(desiredLeft, viewport.left + viewport.width - rect.width - 8));
@@ -112,6 +113,39 @@ function createDock() {
         unmount(handle) { handles.delete(handle); handle.element.remove(); stop(); } };
 }
 
+// Console-only previews reuse the installed renderer: no dynamic imports or AI.
+export function createNoticePreview({ prefix, title }) {
+    const ui = createNoticeUI({ prefix: prefix + '-preview', title: title + ' · 테스트' });
+    const handles = new Set();
+    const rows = {
+        '성공': ['success', '전체 재번역을 적용했어요.'],
+        '안내': ['info', '선택한 아웃풋을 아직 번역 중이에요.'],
+        '주의': ['warning', '번역기 전용 연결 프로필을 선택해 주세요.'],
+        '실패': ['error', '번역 요청에 실패했어요.\n서버 응답 시간이 초과됐어요.'],
+        '진행': ['progress', '아웃풋 전체를 다시 번역 중입니다…'],
+        '취소가능': ['progress', '인풋을 영어로 번역 중입니다…'],
+        '재시도': ['retry', '연결이 불안정해 다시 시도할게요.\n1/3회 · 5초 후 재시도'],
+        '원래위치': ['return', '이전 번역으로 이동했어요.'],
+    };
+    const close = () => { handles.forEach(handle => handle.close()); handles.clear(); };
+    function add(name, automatic = false) {
+        if (!rows[name]) { console.warn('알림 종류: ' + Object.keys(rows).join(', ')); return null; }
+        const [type, message] = rows[name];
+        const options = { type };
+        if (!automatic) options.timeout = 0;
+        if (name === '취소가능' || name === '재시도') options.onCancel = () => {};
+        if (name === '원래위치') options.actions = [{ label: '원래 위치로 돌아가기', onClick: handle => handle.close() }];
+        const handle = ui.show(message, options);
+        handles.add(handle);
+        return handle;
+    }
+    return {
+        show(name = '성공', automatic = false) { close(); return add(name, automatic); },
+        all() { close(); Object.keys(rows).forEach(name => add(name)); },
+        close,
+    };
+}
+
 export function createNoticeUI({ prefix, title }) {
     let dock;
     const getDock = () => dock ||= (globalThis[DOCK_KEY] ||= createDock());
@@ -126,6 +160,7 @@ export function createNoticeUI({ prefix, title }) {
         element.className = 'st-translation-notice';
         element.dataset.type = type;
         element.dataset.owner = prefix;
+        element.setAttribute('aria-label', title + ' 알림');
         if (id) element.id = id;
         element.setAttribute('role', type === 'error' ? 'alert' : 'status');
         const icon = document.createElement('i');

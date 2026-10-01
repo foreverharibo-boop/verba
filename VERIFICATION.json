@@ -1,6 +1,6 @@
 {
-  "version": "0.6.30",
-  "baselineVersion": "0.6.29",
+  "version": "0.6.31",
+  "baselineVersion": "0.6.30",
   "passed": 60,
   "failed": 0,
   "tests": [
@@ -309,7 +309,7 @@
     "index.js",
     "notice-ui.js"
   ],
-  "context": "Toast/composer dock UI-only update; all translation modules and prompts byte-identical to uploaded source. Browser tests use real Chromium with ST composer/quick-reply DOM fixtures, not a running SillyTavern instance.",
+  "context": "UI-only compact cards and synchronous console preview. All current tests rerun; existing 5 deep-translation test failures unchanged. Browser fixtures are not a live SillyTavern server and lack Korean fonts; exact text widths vary by device.",
   "aiAuditEnabled": false,
   "taggedContentRepairEnabled": true,
   "quotedNarrativeBilingualGuardEnabled": true,
@@ -326,6 +326,52 @@
     "translation-composer.js",
     "timing.js"
   ],
+  "compactNoticeBrowserTest": {
+    "results": [
+      {
+        "width": 1280,
+        "before": {
+          "old": true,
+          "width": 340,
+          "height": 61
+        },
+        "after": {
+          "old": false,
+          "width": 216.890625,
+          "height": 61
+        },
+        "preview": "both synchronous globals, 8 types, close/cancel/return, real notifications preserved"
+      },
+      {
+        "width": 390,
+        "before": {
+          "old": true,
+          "width": 340,
+          "height": 68
+        },
+        "after": {
+          "old": false,
+          "width": 186.890625,
+          "height": 42
+        },
+        "preview": "both synchronous globals, 8 types, close/cancel/return, real notifications preserved"
+      },
+      {
+        "width": 320,
+        "before": {
+          "old": true,
+          "width": 304,
+          "height": 68
+        },
+        "after": {
+          "old": false,
+          "width": 186.890625,
+          "height": 42
+        },
+        "preview": "both synchronous globals, 8 types, close/cancel/return, real notifications preserved"
+      }
+    ]
+  },
   "noticeUiBrowserTest": {
     "browser": "Chromium",
     "results": [

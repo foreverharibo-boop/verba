@@ -1,3 +1,4 @@
+import { createNoticeUI } from './notice-ui.js';
 import { previousUserSource, appendPreviousUserContext } from './previous-user-context.js';
 import { runTasteQualityAudit } from './taste-audit.js';
 import { customTranslationDefaults } from './core.js';
@@ -53,7 +54,8 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.29';
+const EXTENSION_VERSION = '0.6.30';
+const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_QUIET_MS = 2000;
@@ -776,7 +778,7 @@ let bypassSendClick = false;
 let selectionBusy = false;
 let selectionSnapshot = null;
 let selectionTimer = null;
-let bottomErrorTimer = null;
+let serverRetryNotice = null;
 let messageCopyHoldTimer = null;
 let messageCopyPointerId = null;
 let messageCopyStart = null;
@@ -807,21 +809,10 @@ function notify(message, type = 'info') {
             : null;
         if (diagnostic) storeDebugDiagnostic(diagnostic);
         showBottomError(message, diagnostic);
-        try {
-            globalThis.toastr?.error?.(message, '베르바');
-        } catch {
-            // Bottom notice above remains the fallback.
-        }
-        console.error(`[베르바] ${message}`);
+        console.error('[베르바]', message);
         return;
     }
-    const toaster = globalThis.toastr;
-    if (toaster && typeof toaster[type] === 'function') {
-        toaster[type](message, '베르바');
-        return;
-    }
-    const logger = type === 'error' ? console.error : type === 'warning' ? console.warn : console.log;
-    logger(`[베르바] ${message}`);
+    noticeUI.show(message, { type });
 }
 
 function renderOutputTiming() {
@@ -986,14 +977,8 @@ function reportError(stage, error, displayMessage = '') {
     const diagnostic = settings.debugMode ? createDebugDiagnostic(stage, error, message) : null;
     if (diagnostic) storeDebugDiagnostic(diagnostic);
 
-    // Keep the diagnostic-capable bottom notice, but also use SillyTavern's
-    // normal error toast so a translation failure can never end silently.
+    // One error notice; retain diagnostics without duplicating a top toastr.
     showBottomError(message, diagnostic);
-    try {
-        globalThis.toastr?.error?.(message, '베르바');
-    } catch {
-        // Bottom notice above remains the fallback.
-    }
     console.error(`[베르바] ${stage}`, error || message);
 }
 
@@ -1081,75 +1066,41 @@ function warnTranslationPromptConflicts({
 }
 
 function showBottomError(message, diagnostic = null) {
-    clearTimeout(bottomErrorTimer);
-    document.querySelector('#verba-bottom-error')?.remove();
-    const notice = document.createElement('div');
-    notice.id = 'verba-bottom-error';
-    notice.className = 'verba-bottom-notice verba-bottom-error';
-    notice.setAttribute('role', 'alert');
-    const text = document.createElement('span');
-    text.className = 'verba-error-text';
-    text.textContent = `베르바 · ${String(message || '오류가 발생했습니다.')}`;
-    const actions = document.createElement('div');
-    actions.className = 'verba-error-actions';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'verba-error-close';
-    close.textContent = '✕';
-    close.setAttribute('aria-label', '오류 알림 닫기');
-    close.addEventListener('click', () => {
-        clearTimeout(bottomErrorTimer);
-        notice.remove();
+    // Diagnostics are already stored by notify/reportError; presentation never requests AI.
+    noticeUI.show(message || '오류가 발생했습니다.', {
+        type: 'error', id: 'verba-bottom-error', timeout: 10000,
     });
-    actions.append(close);
-    notice.append(text, actions);
-    document.documentElement.append(notice);
-    bottomErrorTimer = setTimeout(() => notice.remove(), settings.debugMode && diagnostic ? 30000 : 12000);
 }
 
 function updateServerRetryIndicator() {
-    let indicator = document.querySelector('#verba-server-retry-indicator');
     if (!serverRetryStates.size) {
-        indicator?.remove();
+        serverRetryNotice?.close();
+        serverRetryNotice = null;
         return;
     }
     const state = [...serverRetryStates.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0];
-    if (!indicator) {
-        indicator = document.createElement('button');
-        indicator.id = 'verba-server-retry-indicator';
-        indicator.className = 'verba-bottom-notice';
-        indicator.type = 'button';
-        indicator.setAttribute('role', 'status');
-        indicator.setAttribute('aria-live', 'polite');
-        indicator.addEventListener('click', () => {
-            indicator.disabled = true;
-            indicator.textContent = '베르바 · 번역 재시도 취소 중…';
-            for (const retry of serverRetryStates.values()) retry.controller.abort();
-            notify('번역 자동 재시도를 취소했어요.', 'info');
+    const timing = state.delayMs > 0 ? Math.ceil(state.delayMs / 1000) + '초 후 재시도' : '다시 요청 중';
+    const message = '연결이 불안정해 다시 시도할게요.\n' + state.retryCount + '/' + state.maxRetries + '회 · ' + timing;
+    if (!serverRetryNotice) {
+        serverRetryNotice = noticeUI.show(message, {
+            type: 'retry', id: 'verba-server-retry-indicator', timeout: 0,
+            onCancel: () => {
+                for (const retry of serverRetryStates.values()) retry.controller.abort();
+                serverRetryNotice?.close();
+                notify('번역 자동 재시도를 취소했어요.', 'info');
+            },
         });
-        document.documentElement.append(indicator);
+    } else {
+        // A dismissed retry notice stays dismissed while this sequence is running.
+        serverRetryNotice.update(message);
     }
-    const timing = state.delayMs > 0 ? `${Math.ceil(state.delayMs / 1000)}초 후` : '요청 중';
-    indicator.disabled = false;
-    indicator.textContent = `베르바 · 번역 실패 · ${state.retryCount}/${state.maxRetries}회 ${timing} 재시도 · ✕`;
-    indicator.title = '눌러서 번역 자동 재시도 취소';
-    indicator.setAttribute('aria-label', indicator.title);
 }
 
 function showProgress(message, options = {}) {
-    if (!globalThis.toastr?.info) return null;
-    const toast = globalThis.toastr.info(message, '베르바', {
-        timeOut: 0,
-        extendedTimeOut: 0,
-        tapToDismiss: false,
-        closeButton: Boolean(options.onCancel),
-        onCloseClick: typeof options.onCancel === 'function' ? options.onCancel : undefined,
+    return noticeUI.show(message, {
+        type: 'progress', timeout: 0,
+        onCancel: typeof options.onCancel === 'function' ? options.onCancel : undefined,
     });
-
-    const element = toast?.[0] || toast;
-    element?.classList?.add?.('verba-progress-toast');
-    toast?.addClass?.('verba-progress-toast');
-    return toast;
 }
 
 function showInputProgress(controller) {
@@ -1162,13 +1113,7 @@ function showInputProgress(controller) {
 }
 
 function clearProgress(toast) {
-    if (!toast) return;
-    try {
-        globalThis.toastr?.clear?.(toast);
-    } catch {
-        toast?.remove?.();
-        toast?.[0]?.remove?.();
-    }
+    toast?.close?.();
 }
 
 function errorText(error) {
@@ -7468,70 +7413,11 @@ function captureChatViewportPosition() {
 }
 
 function positionPreviousOutputReturnButton(host) {
-    if (!host) return;
-
-    const viewport = globalThis.visualViewport;
-    const viewportWidth = viewport?.width || innerWidth;
-    const viewportHeight = viewport?.height || innerHeight;
-    const viewportLeft = viewport?.offsetLeft || 0;
-    const viewportTop = viewport?.offsetTop || 0;
-
-    const textarea = document.querySelector('#send_textarea');
-    const sendButton = document.querySelector('#send_but');
-
-    let anchorRect = null;
-    if (textarea) {
-        const rect = textarea.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) anchorRect = rect;
-    }
-    if (!anchorRect && sendButton) {
-        const rect = sendButton.getBoundingClientRect();
-        if (rect.width > 0 && rect.height > 0) anchorRect = rect;
-    }
-
-    const hostRect = host.getBoundingClientRect();
-    const width = hostRect.width || Math.min(200, viewportWidth - 16);
-    const height = hostRect.height || 34;
-    const gap = 8;
-
-    // Keep the control literally above the composer instead of overlapping it.
-    let centerX = viewportLeft + (viewportWidth / 2);
-    let top = viewportTop + viewportHeight - height - 96;
-    if (anchorRect) {
-        centerX = anchorRect.left + (anchorRect.width / 2);
-        top = anchorRect.top - height - gap;
-    }
-
-    const minLeft = viewportLeft + 8;
-    const maxLeft = viewportLeft + viewportWidth - width - 8;
-    const left = Math.min(
-        Math.max(minLeft, centerX - (width / 2)),
-        Math.max(minLeft, maxLeft),
-    );
-
-    const minTop = viewportTop + 8;
-    const maxTop = viewportTop + viewportHeight - height - 8;
-    top = Math.min(Math.max(minTop, top), Math.max(minTop, maxTop));
-
-    host.style.setProperty('left', `${left}px`, 'important');
-    host.style.setProperty('top', `${top}px`, 'important');
-    host.style.setProperty('right', 'auto', 'important');
-    host.style.setProperty('bottom', 'auto', 'important');
-    host.style.setProperty('transform', 'none', 'important');
+    if (host) noticeUI.reposition();
 }
+
 function dismissPreviousOutputReturnButton() {
-    const host = document.querySelector('#verba-return-position');
-    if (!host) return;
-
-    host.__verbaCleanup?.();
-    delete host.__verbaCleanup;
-
-    try {
-        host.hidePopover?.();
-    } catch {
-        // It may not be in the top layer.
-    }
-    host.remove();
+    noticeUI.remove(document.querySelector('#verba-return-position'));
 }
 
 async function restorePreviousOutputReturnPosition(position) {
@@ -7572,61 +7458,16 @@ async function restorePreviousOutputReturnPosition(position) {
 function showPreviousOutputReturnButton(position) {
     dismissPreviousOutputReturnButton();
     if (!position) return;
-
-    const host = document.createElement('div');
-    host.id = 'verba-return-position';
-    host.className = 'verba-return-position';
-    if ('showPopover' in HTMLElement.prototype) host.setAttribute('popover', 'manual');
-
-    host.innerHTML = `
-        <button type="button" class="verba-return-position-main">원래 위치</button>
-        <button type="button" class="verba-return-position-close" aria-label="닫기">✕</button>`;
-
-    (document.body || document.documentElement).append(host);
-
-    // Put it in the browser's top layer where possible. This avoids it being
-    // hidden behind SillyTavern mobile docks, transformed containers, or theme
-    // stacking contexts.
-    try {
-        host.showPopover?.();
-    } catch {
-        // Fixed-position fallback below is enough on browsers without popover.
-    }
-
-    const recalc = () => positionPreviousOutputReturnButton(host);
-    requestAnimationFrame(() => {
-        recalc();
-        requestAnimationFrame(recalc);
+    noticeUI.show('이전 번역으로 이동했어요.', {
+        type: 'return', id: 'verba-return-position', timeout: 0,
+        actions: [{
+            label: '원래 위치로 돌아가기', className: 'verba-return-position-main',
+            onClick: async handle => {
+                const restored = await restorePreviousOutputReturnPosition(position);
+                if (restored) handle.close();
+            },
+        }],
     });
-    setTimeout(recalc, 80);
-    setTimeout(recalc, 260);
-
-    globalThis.visualViewport?.addEventListener?.('resize', recalc);
-    globalThis.visualViewport?.addEventListener?.('scroll', recalc);
-    window.addEventListener('resize', recalc);
-
-    const textarea = document.querySelector('#send_textarea');
-    const resizeObserver = typeof ResizeObserver !== 'undefined' && textarea
-        ? new ResizeObserver(recalc)
-        : null;
-    resizeObserver?.observe(textarea);
-
-    host.__verbaCleanup = () => {
-        globalThis.visualViewport?.removeEventListener?.('resize', recalc);
-        globalThis.visualViewport?.removeEventListener?.('scroll', recalc);
-        window.removeEventListener('resize', recalc);
-        resizeObserver?.disconnect();
-    };
-
-    host.querySelector('.verba-return-position-main')?.addEventListener('click', async () => {
-        const button = host.querySelector('.verba-return-position-main');
-        if (button) button.disabled = true;
-        const restored = await restorePreviousOutputReturnPosition(position);
-        if (restored) dismissPreviousOutputReturnButton();
-        else if (button) button.disabled = false;
-    });
-
-    host.querySelector('.verba-return-position-close')?.addEventListener('click', dismissPreviousOutputReturnButton);
 }
 
 

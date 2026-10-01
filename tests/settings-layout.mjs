@@ -41,7 +41,7 @@ assert.match(panels[1],/id="verba-developer-settings"[\s\S]*?id="verba-chuseok-g
 assert.doesNotMatch(panels[1],/id="verba-chuseok-galbwae-(?:all|dialogue-inner)" checked/);
 const manifest=JSON.parse(fs.readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
 assert.equal(manifest.name,'verba');assert.equal(manifest.display_name,'베르바');
-assert.equal(manifest.version,'0.6.29');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
+assert.equal(manifest.version,'0.6.30');assert.ok(index.includes("const EXTENSION_VERSION = '"+manifest.version+"';"));
 assert.match(style,/#verba-settings > \.inline-drawer > \.inline-drawer-content\s*\{\s*font-size: \.86em;/);
 assert.doesNotMatch(style,/#verba-settings\s*\{\s*font-size:/);
 assert.doesNotMatch(style,/#verba-settings \.verba-drawer-header\s*\{[^}]*min-height:/s);

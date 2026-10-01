@@ -1,7 +1,7 @@
 {
-  "version": "0.6.29",
-  "baselineVersion": "0.6.28",
-  "passed": 59,
+  "version": "0.6.30",
+  "baselineVersion": "0.6.29",
+  "passed": 60,
   "failed": 0,
   "tests": [
     {
@@ -22,7 +22,7 @@
     {
       "test": "bilingual-dialogue-local-format.mjs",
       "exit": 0,
-      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally; quoted narrative words and phrases remain narration while real short dialogue remains eligible.\n"
+      "output": "PASS: bilingual dialogue is detected from user prompts and enforced locally.\n"
     },
     {
       "test": "bounded-retries-and-soft-fallback.mjs",
@@ -125,6 +125,11 @@
       "output": "PASS: invalid ids/empty/layout/banned/token results and cancellation never commit partial edits.\n"
     },
     {
+      "test": "message-long-press-copy-setting.mjs",
+      "exit": 0,
+      "output": "PASS: output blank-area long-press copy is enabled by default, user-toggleable, race-gated, and immediately cleaned up when disabled.\n"
+    },
+    {
       "test": "minimal-output.mjs",
       "exit": 0,
       "output": "PASS: minimal-only prompt and actual entry path, lock/enable gates, optional call exclusion, name/code/tag preservation, source mapping, local cleanup, repair bounds and cancellation.\nPASS: developer-only escaped UI, toggle restores saved settings, developer shutdown disables experiment but retains text/flavors.\n"
@@ -155,6 +160,11 @@
       "output": "PASS: 베르바 uses its expected extension, DOM, storage, command, token, and global namespaces.\n"
     },
     {
+      "test": "notice-ui.mjs",
+      "exit": 0,
+      "output": "PASS: all notice routes unified, safe text, shared independent dock, quick-reply/composer anchor, resize/keyboard observers, finite timeouts, close/cancel separation, and unchanged return action wiring.\n"
+    },
+    {
       "test": "output-action.mjs",
       "exit": 0,
       "output": "PASS: /verba routing/cancellation/retry, duplicate guards, errors, popup creation/options/dismissal/placement (DOM adapter). API calls: 0; live SillyTavern browser: not tested.\n"
@@ -173,6 +183,11 @@
       "test": "pair-coordination.mjs",
       "exit": 0,
       "output": "PASS: verba shares one display owner, defaults to Verba, switches manually, rejects peer display adoption, and gates automatic input/output work.\n"
+    },
+    {
+      "test": "post-translation-ai-repair-disabled.mjs",
+      "exit": 0,
+      "output": "PASS: local cleanup remains active while every post-translation AI repair path is preserved but dormant.\n"
     },
     {
       "test": "previous-user-context.mjs",
@@ -235,14 +250,19 @@
       "output": "PASS: complete settings markup, default outer drawer sizing, hidden visible version, compact inner UI, exact adjacent placement, unique IDs and version; developer ON/OFF.\n"
     },
     {
+      "test": "settings-search.mjs",
+      "exit": 0,
+      "output": "PASS: settings search highlights matching words, temporarily reveals hidden groups, opens matches, and restores text/layout/open state when cleared.\n"
+    },
+    {
       "test": "source-ellipsis.mjs",
       "exit": 0,
-      "output": "PASS: 1260 ellipsis assertions plus parser/assembly/candidate/selection/protected-content integration; local mean 0.532 ms for 24800 characters. No API calls.\n"
+      "output": "PASS: 1260 ellipsis assertions plus parser/assembly/candidate/selection/protected-content integration; local mean 0.364 ms for 24800 characters. No API calls.\n"
     },
     {
       "test": "source-layout.mjs",
       "exit": 0,
-      "output": "PASS: 490 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.497 ms/local pass (container, not phone).\n"
+      "output": "PASS: 490 layout assertions plus protected layout/candidate checks; 28500 chars, mean 0.486 ms/local pass (container, not phone).\n"
     },
     {
       "test": "source-map-selection.mjs",
@@ -265,6 +285,11 @@
       "output": "PASS: tagged natural-language translation defaults ON, can be disabled without touching outside text or tag structure, and 25 settings groups support persistent UI-only visibility.\n"
     },
     {
+      "test": "tagged-content-untranslated-repair.mjs",
+      "exit": 0,
+      "output": "[베르바] 태그 미번역 복구(최소 프롬프트): 감지 1구간 · 적용 1구간\nPASS: 태그 미번역은 로컬 감지 후 문제 구간만 최대 1회 복구하고 정상·무료 Google 결과에는 추가 AI 요청이 없음.\n"
+    },
+    {
       "test": "taste-audit-wiring.mjs",
       "exit": 0,
       "output": "PASS: real output entry point makes zero audit calls when OFF and applies a mock audit when deliberately enabled; UI shows disabled without resetting saved preferences.\n"
@@ -275,49 +300,16 @@
       "output": "PASS: ordinary translation, active flavor composition and optional review remain separate.\n"
     },
     {
-      "test": "message-long-press-copy-setting.mjs",
-      "exit": 0,
-      "output": "PASS: output blank-area long-press copy is enabled by default, user-toggleable, race-gated, and immediately cleaned up when disabled.\n"
-    },
-    {
       "test": "voice-intensity-flexibility.mjs",
       "exit": 0,
       "output": "PASS: ordinary translation keeps source-force fidelity while Mad/Hongjin alone receive flexible surface intensity across normal, compact, and extreme routes (43 checks).\n"
-    },
-    {
-      "test": "settings-search.mjs",
-      "exit": 0,
-      "output": "PASS: settings search highlights matching words, temporarily reveals hidden groups, opens matches, and restores text/layout/open state when cleared.\n"
-    },
-    {
-      "test": "post-translation-ai-repair-disabled.mjs",
-      "exit": 0,
-      "output": "PASS: local cleanup remains active while every post-translation AI repair path is preserved but dormant.\n"
-    },
-    {
-      "test": "tagged-content-untranslated-repair.mjs",
-      "exit": 0,
-      "output": "PASS: 태그 미번역은 로컬 감지 후 문제 구간만 최대 1회 복구하고 정상·무료 Google 결과에는 추가 AI 요청이 없음.\n"
     }
   ],
   "syntaxChecked": [
-    "base-editor.js",
-    "core.js",
-    "diagnostics.js",
-    "google-free.js",
     "index.js",
-    "minimal-output.js",
-    "output-splitting.js",
-    "pair-coordinator.js",
-    "previous-user-context.js",
-    "prompt-builders.js",
-    "prompt-editor.js",
-    "response-parser.js",
-    "taste-audit.js",
-    "timing.js",
-    "translation-composer.js"
+    "notice-ui.js"
   ],
-  "context": "one nearest preceding user message, raw active source only",
+  "context": "Toast/composer dock UI-only update; all translation modules and prompts byte-identical to uploaded source. Browser tests use real Chromium with ST composer/quick-reply DOM fixtures, not a running SillyTavern instance.",
   "aiAuditEnabled": false,
   "taggedContentRepairEnabled": true,
   "quotedNarrativeBilingualGuardEnabled": true,
@@ -327,8 +319,32 @@
   "liveApiTested": false,
   "liveSillyTavernTested": false,
   "unchangedModules": [
+    "core.js",
+    "minimal-output.js",
+    "prompt-builders.js",
+    "response-parser.js",
     "translation-composer.js",
-    "taste-audit.js",
-    "base-editor.js"
-  ]
+    "timing.js"
+  ],
+  "noticeUiBrowserTest": {
+    "browser": "Chromium",
+    "results": [
+      {
+        "width": 1280,
+        "passed": true,
+        "checks": "QR visible/hidden/removed/added/resized, keyboard resize, close vs cancel, production return action (both), shared dock, overflow, XSS-safe text, all default timeouts"
+      },
+      {
+        "width": 390,
+        "passed": true,
+        "checks": "QR visible/hidden/removed/added/resized, keyboard resize, close vs cancel, production return action (both), shared dock, overflow, XSS-safe text, all default timeouts"
+      },
+      {
+        "width": 320,
+        "passed": true,
+        "checks": "QR visible/hidden/removed/added/resized, keyboard resize, close vs cancel, production return action (both), shared dock, overflow, XSS-safe text, all default timeouts"
+      }
+    ]
+  },
+  "baselineFailuresUnchanged": false
 }

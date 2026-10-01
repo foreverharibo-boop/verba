@@ -1,0 +1,73 @@
+/* Shared dock: both translation extensions stack without overlapping each other. */
+#st-translation-notice-dock {
+    position: fixed !important;
+    inset: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    transform: none !important;
+    z-index: 2147483647 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    overflow: auto !important;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    pointer-events: none !important;
+}
+#st-translation-notice-dock::backdrop { background: transparent !important; pointer-events: none !important; }
+#st-translation-notice-dock .st-translation-notice {
+    --notice-surface: var(--SmartThemeBlurTintColor, #2c2d33);
+    --notice-text: var(--SmartThemeBodyColor, #efeff2);
+    position: relative !important;
+    display: flex !important;
+    flex: 0 0 auto !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 11px 8px 11px 12px !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    border: 1px solid color-mix(in srgb, var(--notice-text) 16%, var(--notice-surface)) !important;
+    border-radius: 12px !important;
+    /* Composite transparent ST theme tints over an opaque base for readability. */
+    background: linear-gradient(var(--notice-surface), var(--notice-surface)), #2c2d33 !important;
+    color: var(--notice-text) !important;
+    box-shadow: 0 3px 12px #00000018 !important;
+    font-family: var(--mainFontFamily, system-ui, sans-serif) !important;
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+    text-align: left !important;
+    pointer-events: auto !important;
+}
+#st-translation-notice-dock .st-translation-notice-icon { flex: 0 0 17px; padding-top: 4px; font-size: 16px; color: #9cbfe7; }
+#st-translation-notice-dock [data-type="success"] .st-translation-notice-icon { color: #91cbaa; }
+#st-translation-notice-dock [data-type="warning"] .st-translation-notice-icon,
+#st-translation-notice-dock [data-type="retry"] .st-translation-notice-icon { color: #dfbc78; }
+#st-translation-notice-dock [data-type="error"] .st-translation-notice-icon { color: #ed9b9f; }
+#st-translation-notice-dock .st-translation-notice-body { flex: 1 1 auto; min-width: 0; }
+#st-translation-notice-dock .st-translation-notice-brand { font-size: 11px; opacity: .72; margin-bottom: 1px; }
+#st-translation-notice-dock .st-translation-notice-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 110px; overflow: auto; }
+#st-translation-notice-dock .st-translation-notice button {
+    appearance: none !important;
+    border: 0 !important;
+    border-radius: 6px !important;
+    margin: 0 !important;
+    background: transparent !important;
+    color: inherit !important;
+    box-shadow: none !important;
+    font: inherit !important;
+    line-height: 1.4 !important;
+    cursor: pointer;
+}
+#st-translation-notice-dock .st-translation-notice-close { flex: 0 0 28px; width: 28px !important; height: 28px !important; min-height: 28px !important; padding: 0 !important; font-size: 20px !important; opacity: .72; }
+#st-translation-notice-dock .st-translation-notice-action { display: inline-block; width: auto !important; min-height: 28px !important; margin: 6px 6px 0 0 !important; padding: 3px 8px !important; font-size: 12px !important; border: 1px solid color-mix(in srgb, currentColor 18%, transparent) !important; }
+#st-translation-notice-dock .st-translation-notice button:hover { background: color-mix(in srgb, currentColor 8%, transparent) !important; }
+#st-translation-notice-dock .st-translation-notice button:disabled { opacity: .5; cursor: wait; }
+@media (pointer: coarse) {
+    #st-translation-notice-dock .st-translation-notice-close { flex-basis: 44px; width: 44px !important; height: 44px !important; min-height: 44px !important; }
+    #st-translation-notice-dock .st-translation-notice-action { min-height: 44px !important; }
+}

@@ -1,3 +1,4 @@
+import { normalizedServerRetryLimit, serverRetryBackoffMs } from '../retry-policy.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
@@ -112,6 +113,7 @@ assert.ok(retryStart >= 0 && retryEnd > retryStart, 'sendWithRetry source');
 const retrySource = index.slice(retryStart, retryEnd);
 const retryAbortError = () => Object.assign(new Error('cancelled'), { name: 'AbortError' });
 const retryBaseEnv = {
+    settings: { serverRetryLimit: 5 }, normalizedServerRetryLimit, serverRetryBackoffMs,
     profileRaceActive: () => true,
     normalizedProfileRaceTimeoutMinutes: () => 0.0003,
     AbortController,

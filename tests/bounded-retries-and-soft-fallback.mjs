@@ -1,3 +1,4 @@
+import { normalizedServerRetryLimit, serverRetryBackoffMs } from '../retry-policy.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
@@ -11,6 +12,7 @@ const slice = (startMarker, endMarker) => {
 
 const retrySource = slice('async function sendWithRetry(', 'function collectPartialSegmentTranslations(');
 const retryBase = {
+    settings: { serverRetryLimit: 5 }, normalizedServerRetryLimit, serverRetryBackoffMs,
     profileRaceActive: () => false,
     normalizedProfileRaceTimeoutMinutes: () => 5,
     AbortController,

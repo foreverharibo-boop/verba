@@ -1,3 +1,4 @@
+import { normalizedServerRetryLimit, serverRetryBackoffMs, googleRetryHintSeconds } from '../retry-policy.js';
 import { previousUserSource } from '../previous-user-context.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -65,6 +66,7 @@ let parallelQueue = execute => execute();
 let splitQueue = createSplitRequestQueue(3);
 let fallbacks = [];
 const env = {
+    normalizedServerRetryLimit, serverRetryBackoffMs, googleRetryHintSeconds,
     outputTiming: recorder, settings: { debugMode: true, profileId: 'a', timeoutSeconds: 20 },
     profileSlotForId: () => 'A', profileList: () => [{ id: 'a' }, { id: 'b' }],
     performance: { now: () => time }, AbortController, Promise, setTimeout, clearTimeout, VERBA_MAX_TOKENS: 1000,
@@ -104,7 +106,7 @@ time = 0; calls = 0; const retryJob = begin();
 provider = async () => { time += 100; if (++calls === 1) throw new Error('503'); return success; };
 await api.sendWithRetry('private', { timing: retryJob, stage: 'output-translation' });
 recorder.finish(retryJob, '완료'); r = recorder.latest();
-assert.equal(r.counts.total, 2); assert.equal(r.counts.retry, 1); assert.equal(r.durations.backoff, 3000);
+assert.equal(r.counts.total, 2); assert.equal(r.counts.retry, 1); assert.ok(r.durations.backoff >= 2850 && r.durations.backoff <= 3000);
 assert.equal(r.rows[0].status, '오류'); assert.equal(r.rows[1].reason, '요청 오류 재시도');
 
 time = 0; calls = 0; fallbacks = [{ id: 'b', slot: 'B' }]; const fallbackJob = begin();

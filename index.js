@@ -1,4 +1,5 @@
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
+import { normalizedServerRetryLimit, serverRetryBackoffMs, googleRetryHintSeconds } from './retry-policy.js';
 import { previousUserSource, appendPreviousUserContext } from './previous-user-context.js';
 import { runTasteQualityAudit } from './taste-audit.js';
 import { customTranslationDefaults } from './core.js';
@@ -54,7 +55,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.32';
+const EXTENSION_VERSION = '0.6.33';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -436,6 +437,7 @@ const DEFAULT_SETTINGS = {
     bannedWords: '',
     maxTokens: 15000,
     timeoutSeconds: 120,
+    serverRetryLimit: 5,
     customTranslatorEnabled: false,
     customTranslatorTemplates: DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES,
     customTranslatorModified: DEFAULT_CUSTOM_TRANSLATOR_MODIFIED,
@@ -474,6 +476,7 @@ settings.timeoutSeconds = Math.min(3600, Math.max(60, Number(settings.timeoutSec
 settings.profileRaceEnabled = settings.profileRaceEnabled === true;
 settings.profileRaceStaggerSeconds = Math.min(180, Math.max(5, Math.round(Number(settings.profileRaceStaggerSeconds) || 35)));
 settings.profileRaceTimeoutMinutes = Math.min(1440, Math.max(1, Number(settings.profileRaceTimeoutMinutes) || 5));
+settings.serverRetryLimit = normalizedServerRetryLimit(settings.serverRetryLimit);
 settings.translateTaggedContent = settings.translateTaggedContent !== false;
 settings.settingsVisibility = normalizedSettingsVisibility(settings.settingsVisibility);
 settings.customTranslatorEnabled = settings.customTranslatorEnabled === true;
@@ -1081,7 +1084,10 @@ function updateServerRetryIndicator() {
     }
     const state = [...serverRetryStates.values()].sort((a, b) => b.updatedAt - a.updatedAt)[0];
     const timing = state.delayMs > 0 ? Math.ceil(state.delayMs / 1000) + '초 후 재시도' : '다시 요청 중';
-    const message = '연결이 불안정해 다시 시도할게요.\n' + state.retryCount + '/' + state.maxRetries + '회 · ' + timing;
+    const attempts = state.maxRetries === 0
+        ? `${state.retryCount}회째 · 무제한`
+        : `${state.retryCount}/${state.maxRetries}회`;
+    const message = '연결이 불안정해 다시 시도할게요.\n' + attempts + ' · ' + timing;
     if (!serverRetryNotice) {
         serverRetryNotice = noticeUI.show(message, {
             type: 'retry', id: 'verba-server-retry-indicator', timeout: 0,
@@ -2908,7 +2914,7 @@ function setBoundedCache(cache, key, value, limit = 80) {
 
 function transientError(error) {
     const text = errorText(error).toLowerCase();
-    if (/\b(?:400|401|403|404|413|422)\b|bad request|invalid request|invalid api|unauthori[sz]ed|forbidden|authentication|permission|billing|credit|payment|insufficient[_ -]?(?:quota|credit|funds?)|context length|maximum context|too (?:large|long)|model.*(?:not found|may not exist)|safety|blocked|content.?filter|권한|인증|결제|크레딧|잔액|컨텍스트.*초과/.test(text)) {
+    if (/\b(?:400|401|402|403|404|413|422)\b|bad request|invalid request|invalid api|unauthori[sz]ed|forbidden|authentication|permission|billing|credit|payment|insufficient[_ -]?(?:quota|credit|funds?)|context length|maximum context|too (?:large|long)|model.*(?:not found|may not exist)|safety|blocked|content.?filter|권한|인증|결제|크레딧|잔액|컨텍스트.*초과/.test(text)) {
         return false;
     }
     return /\b(?:408|425|429|500|502|503|504)\b|resource exhausted|rate.?limit|too many requests|requests per minute|\brpm\b|\btpm\b|quota|overload|capacity|at capacity|server (?:is )?busy|temporar(?:y|ily) unavailable|try again later|internal server error|bad gateway|service unavailable|gateway timeout|upstream|timed? out|timeout|econnreset|econnrefused|connection reset|connection refused|network error|fetch failed|socket hang up|empty response|no response|빈 응답|응답 대기 시간.*초과|시간 초과|네트워크.*(?:오류|실패)|연결.*(?:재설정|실패)|서버.*(?:혼잡|과부하)|일시적.*(?:오류|실패)/.test(text);
@@ -2929,6 +2935,7 @@ function retryAfterMs(error) {
         const candidates = [
             current.retryAfter,
             current.retry_after,
+            googleRetryHintSeconds(current),
             retryAfterHeader(current.headers),
             retryAfterHeader(current.response?.headers),
         ];
@@ -2938,7 +2945,7 @@ function retryAfterMs(error) {
             const parsed = Number.isFinite(numeric) && numeric >= 0
                 ? Math.round(numeric * 1000)
                 : Math.max(0, Date.parse(String(candidate)) - Date.now());
-            if (Number.isFinite(parsed) && parsed > 0) return Math.min(120000, Math.max(1000, parsed));
+            if (Number.isFinite(parsed) && parsed > 0) return Math.min(2147483647, Math.max(1000, parsed));
         }
         current = current.cause;
     }
@@ -3430,8 +3437,7 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
 }
 
 async function sendWithRetry(prompt, options = {}) {
-    const transientDelays = [3000, 5000, 8000, 12000, 18000];
-    const maxRetries = 5;
+    const maxRetries = normalizedServerRetryLimit(settings.serverRetryLimit);
     const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
     const controller = new AbortController();
@@ -3460,7 +3466,7 @@ async function sendWithRetry(prompt, options = {}) {
     let lastError;
 
     try {
-        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        for (let attempt = 0; maxRetries === 0 || attempt <= maxRetries; attempt += 1) {
             if (controller.signal.aborted) throw abortError();
 
             const profiles = configuredProfileCycle();
@@ -3526,12 +3532,12 @@ async function sendWithRetry(prompt, options = {}) {
                 // models and other permanent failures cannot improve merely
                 // by sending the same paid request again.
                 if (!transient) throw cycleError;
-                if (attempt === maxRetries) break;
+                if (maxRetries > 0 && attempt === maxRetries) break;
                 if (raceEnabled && Date.now() >= raceDeadlineAt) {
                     throw profileRaceTimeoutError(raceTimeoutMinutes);
                 }
 
-                const fallbackDelay = transientDelays[attempt];
+                const fallbackDelay = serverRetryBackoffMs(attempt);
                 const delay = retryAfterMs(cycleError) || fallbackDelay;
 
                 const state = {
@@ -3546,7 +3552,7 @@ async function sendWithRetry(prompt, options = {}) {
                 updateServerRetryIndicator();
 
                 console.warn(
-                    `[베르바] 번역 요청 실패 — ${state.retryCount}/${state.maxRetries}회 재시도 예정`,
+                    `[베르바] 번역 요청 실패 — ${state.retryCount}/${state.maxRetries || '무제한'}회 재시도 예정`,
                     cycleError,
                 );
 
@@ -10841,6 +10847,14 @@ function injectSettingsPanel() {
                 <select id="verba-third-profile" class="text_pole"></select>
                 <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 직접 바꿀 수 있어요.</div>
 
+                <label for="verba-server-retry-limit">서버 오류 자동 재시도 횟수</label>
+                <div class="verba-profile-fallback-time-row">
+                    <input type="number" inputmode="numeric" min="0" step="1" id="verba-server-retry-limit" class="text_pole" value="${normalizedServerRetryLimit(settings.serverRetryLimit)}">
+                    <span>회</span>
+                </div>
+                <div class="verba-help">최초 요청을 제외한 추가 재시도 횟수예요. 기본 5회, 0은 무제한이며 다음 번역 요청부터 적용돼요. 429·일시적 서버·연결 오류만 재시도하고, API 키·결제 오류는 중단해요.</div>
+                <div class="verba-help">약 3→5→8→12→20초로 대기를 늘리며 이후에는 최대 20초씩 기다려요. 서버가 대기 시간을 알려주면 그 시간을 우선해요. 취소 버튼으로 중단할 수 있고, 지연 경주의 전체 강제 종료 시간은 그대로 적용돼요.</div>
+
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-auto-profile-fallback" ${settings.autoProfileFallback !== false ? 'checked' : ''}>
                     <span>번역 실패 시 다른 프로필 자동 사용</span>
@@ -12010,6 +12024,12 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
+    const serverRetryLimitInput = panel.querySelector('#verba-server-retry-limit');
+    serverRetryLimitInput.addEventListener('change', event => {
+        settings.serverRetryLimit = normalizedServerRetryLimit(event.target.value);
+        event.target.value = String(settings.serverRetryLimit);
+        saveSettings();
+    });
     const profileFallbackInput = panel.querySelector('#verba-auto-profile-fallback');
     const profileFallbackOptions = panel.querySelector('#verba-profile-fallback-options');
     const profileFailureTimeoutInput = panel.querySelector('#verba-profile-failure-timeout-minutes');

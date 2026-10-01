@@ -1,3 +1,4 @@
+import { normalizedServerRetryLimit, serverRetryBackoffMs } from '../retry-policy.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as core from '../core.js';
@@ -35,7 +36,7 @@ assert.equal(POST_TRANSLATION_AI_REPAIR_ENABLED,false);
 
 let calls=[], failures=0;
 const settings={translationEngine:'ai',dialogueEndingRepetitionReduction:false};
-const env={...core,settings,appendPreviousUserContext,outputSplitCount,runOutputBatches,
+const env={...core,settings,normalizedServerRetryLimit,serverRetryBackoffMs,appendPreviousUserContext,outputSplitCount,runOutputBatches,
  profileRaceActive:()=>false,normalizedProfileRaceTimeoutMinutes:()=>5,
  configuredProfileCycle:()=>({active:'a',slot:'A',fallbacks:[]}),
  sendProfileRequest:async(prompt,options)=>{

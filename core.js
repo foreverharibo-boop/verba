@@ -437,6 +437,21 @@ function normalizedDialogueSurface(value) {
         .replace(/…/gu, '...').replace(/[’‘]/gu, "'").replace(/\s+/gu, ' ').trim();
 }
 
+// A saved/model-produced English half may retain an opaque marker even though
+// the mapped original is intact. Accept it only when every surrounding literal
+// matches the original. Never infer a name from the marker's numeric ID.
+function bilingualSourceMatches(actual, expected) {
+    const left = normalizedDialogueSurface(actual);
+    const right = normalizedDialogueSurface(expected);
+    if (left === right) return true;
+    const marker = /@@verba_(?:name_)?\d{4}@@/gu;
+    if (right.includes('@@') || !marker.test(left)) return false;
+    const literals = left.split(marker);
+    if (!/[a-z]/u.test(literals.join(''))) return false;
+    const pattern = literals.map(escapeRegExp).join('.+?');
+    return new RegExp(`^${pattern}$`, 'u').test(right);
+}
+
 function trailingParentheticalParts(value) {
     const text = String(value || '').trim();
     for (const [open, close] of BILINGUAL_BRACKET_PAIRS) {
@@ -481,7 +496,7 @@ function canonicalizeExactBilingualDialogue(segment, translation, nameTokens = [
         'source',
     );
     const koreanHalf = restoreBilingualDetectionTokens(parts.right, nameTokens, protectedTokens, 'target');
-    if (normalizedDialogueSurface(actualSource) !== normalizedDialogueSurface(expectedSource)
+    if (!bilingualSourceMatches(actualSource, expectedSource)
         || !/[가-힣]/u.test(validationText(koreanHalf))) return null;
     return `${translationEnvelope.leading}${translationEnvelope.open}${actualSource} ${parts.open}${parts.right}${parts.close}${translationEnvelope.close}${translationEnvelope.trailing}`;
 }
@@ -632,7 +647,7 @@ function extractKoreanDialogueHalfRaw(segment, translation, nameTokens = [], pro
             protectedTokens,
             'source',
         );
-        if (normalizedDialogueSurface(leftAsSource) !== normalizedDialogueSurface(expectedSource)) continue;
+        if (!bilingualSourceMatches(leftAsSource, expectedSource)) continue;
         const interior = bracketInterior(body, index);
         if (/[가-힣]/u.test(validationText(interior))) return stripLooseDialogueQuotes(interior);
     }
@@ -640,14 +655,14 @@ function extractKoreanDialogueHalfRaw(segment, translation, nameTokens = [], pro
     if (trailing) {
         const leftAsSource = restoreBilingualDetectionTokens(stripLooseDialogueQuotes(trailing.left), nameTokens, protectedTokens, 'source');
         const misplacedQuote = /["”’」』]\s*$/u.test(trailing.left);
-        if (normalizedDialogueSurface(leftAsSource) === normalizedDialogueSurface(expectedSource) || misplacedQuote) {
+        if (bilingualSourceMatches(leftAsSource, expectedSource) || misplacedQuote) {
             return stripLooseDialogueQuotes(trailing.right);
         }
     }
     for (let index = body.length - 1; index >= 0; index -= 1) {
         if (!['(', '（', '[', '【'].includes(body[index])) continue;
         const leftAsSource = restoreBilingualDetectionTokens(stripLooseDialogueQuotes(body.slice(0, index)), nameTokens, protectedTokens, 'source');
-        if (normalizedDialogueSurface(leftAsSource) !== normalizedDialogueSurface(expectedSource)) continue;
+        if (!bilingualSourceMatches(leftAsSource, expectedSource)) continue;
         return stripLooseDialogueQuotes(body.slice(index + 1).replace(/[\)\]）】]+\s*$/gu, ''));
     }
     return stripLooseDialogueQuotes(stripSingleParentheticalEnvelope(body));
@@ -771,7 +786,10 @@ export function normalizeBilingualMappedTranslation(translation, sourceMap = [],
         const segmented = segmentSource(row.source);
         if (segmented.segments.length !== 1 || segmented.segments[0]?.type !== 'dialogue_candidate') continue;
         const current = text.slice(row.start, row.end);
-        const normalized = ensureBilingualDialogueFormat(segmented.segments[0], current, settings);
+        const normalized = ensureBilingualDialogueFormat(
+            segmented.segments[0], current, settings, null,
+            segmented.nameTokens, segmented.tokens,
+        );
         if (!normalized || normalized === current) continue;
         text = text.slice(0, row.start) + normalized + text.slice(row.end);
         const delta = normalized.length - (row.end - row.start);
@@ -790,8 +808,12 @@ export function normalizeBilingualMappedTranslation(translation, sourceMap = [],
     // request.
     const rawSource = String(source || '');
     if (rawSource && /[\uAC00-\uD7A3]/u.test(text)) {
-        const sourceSegments = segmentSource(rawSource).segments
-            .filter(segment => segment.type === 'dialogue_candidate');
+        const sourceSegmented = segmentSource(rawSource);
+        const sourceSegments = sourceSegmented.segments
+            .filter(segment => segment.type === 'dialogue_candidate')
+            .map(segment => ({ ...segment, text: restoreProtected(
+                segment.text, sourceSegmented.tokens, { strict: false },
+            ) }));
         for (const segment of sourceSegments) {
             const sourceBody = String(dialogueEnvelope(segment.text).body || '');
             if (!sourceBody) continue;

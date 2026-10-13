@@ -34,6 +34,7 @@ import {
     extractResponseText,
     findBannedWords,
     findProtectedTokenIntegrityProblems,
+    findRemainingProtectedTokens,
     normalizeLocallyRecoverableProtectedTokens,
     normalizeBilingualMappedTranslation,
     findTranslationPromptConflicts,
@@ -55,7 +56,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.34';
+const EXTENSION_VERSION = '0.6.35';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -5482,6 +5483,7 @@ function applyTranslation(messageId, message, source, translation, chatReference
         : previousRecord?.sourceHash === hashText(source)
             ? normalizedLockedSegments(previousRecord.lockedSegments)
             : [];
+    const remainingProtectedTokens = findRemainingProtectedTokens(translation);
     const record = {
         swipeId: currentSwipeId(message),
         sourceHash: hashText(source),
@@ -5502,9 +5504,17 @@ function applyTranslation(messageId, message, source, translation, chatReference
     const renderResult = updateMessageBlock(messageId, message);
     cacheRenderedTranslation(messageId, message, record);
     scheduleChatSave(chatReference);
+    if (remainingProtectedTokens.length) {
+        const count = remainingProtectedTokens.reduce((sum, entry) => sum + entry.count, 0);
+        console.warn('[베르바] 최종 보호토큰 검사: 번역문 유지', {
+            messageId, remainingProtectedTokens,
+        });
+        notify(`보호토큰 ${count}개가 남아 있어요. 번역문은 그대로 표시했어요.`, 'warning');
+    }
     return {
         record,
         renderResult,
+        remainingProtectedTokens,
     };
 }
 

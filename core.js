@@ -1850,6 +1850,16 @@ function replaceLiteralRanges(value, ranges, replacements) {
     return result + text.slice(cursor);
 }
 
+/** Final read-only check after restoration; never delete content or guess values. */
+export function findRemainingProtectedTokens(translation) {
+    const text = canonicalizeProtectedTokenVariants(String(translation ?? ''));
+    const counts = new Map();
+    for (const match of text.matchAll(/@@VERBA_(?:NAME_)?\d{4,}@@/g)) {
+        counts.set(match[0], (counts.get(match[0]) || 0) + 1);
+    }
+    return [...counts].map(([token, count]) => ({ token, count }));
+}
+
 export function findProtectedTokenIntegrityProblems(segments, translations) {
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
     const invalid = [];

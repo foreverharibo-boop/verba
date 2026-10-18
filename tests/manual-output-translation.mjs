@@ -120,8 +120,18 @@ for (const saved of [false, true]) {
                 closest() { return this.owner; }, remove() { this.owner.button = null; } }),
         } };
     for (let id = 0; id < chat.length; id++) {
+        const hint = {};
         const node = { button: null, getAttribute: () => String(id),
-            querySelector(selector) { return selector === '.extraMesButtons' ? { append: b => { this.button = b; b.owner = this; } } : this.button; } };
+            querySelector(selector) { return selector === '.mes_buttons' ? actions : this.button; } };
+        const actions = { hint, insertions: 0,
+            querySelector: selector => selector === '.extraMesButtonsHint' ? hint : null,
+            insertBefore(button, anchor) {
+                assert.equal(anchor, hint, 'translation button belongs immediately before the menu hint');
+                this.insertions++;
+                node.button = button; button.owner = node;
+                button.parentElement = this; button.nextElementSibling = hint;
+            } };
+        node.actions = actions;
         nodes.push(node);
     }
     vm.createContext(env);
@@ -130,6 +140,9 @@ for (const saved of [false, true]) {
     const button = nodes[0].button;
     assert.ok(button); assert.ok(nodes[1].button); assert.equal(nodes[2].button, null);
     env.refreshMessageTranslationButtons(); assert.equal(nodes[0].button, button, 'no duplicate icons');
+    assert.equal(button.parentElement, nodes[0].actions, 'button stays outside the collapsed extra menu');
+    assert.equal(button.nextElementSibling, nodes[0].actions.hint);
+    assert.equal(nodes[0].actions.insertions, 1, 'stable placement avoids repeated DOM mutations');
     assert.match(button.title, /이 메시지 번역$/);
     const running = button.click();
     assert.deepEqual(calls, [['translate', 0]], 'old message button must not target the latest message');

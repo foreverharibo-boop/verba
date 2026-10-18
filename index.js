@@ -56,7 +56,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.36';
+const EXTENSION_VERSION = '0.6.37';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -9987,7 +9987,7 @@ async function runMessageTranslationAction(event) {
 
 function syncMessageTranslationButton(element, id, message) {
     let button = element.querySelector('.verba-message-translate');
-    const actions = element.querySelector('.extraMesButtons');
+    const actions = element.querySelector('.mes_buttons');
     if (!actions || !Number.isInteger(id) || id < 0 || !isNameReplacementMessage(message) || !messageSource(message).trim()) {
         button?.remove();
         return;
@@ -9996,9 +9996,12 @@ function syncMessageTranslationButton(element, id, message) {
         button = document.createElement('button');
         button.type = 'button';
         button.className = 'mes_button verba-message-translate';
-        button.innerHTML = '<span class="verba-message-glyph" aria-hidden="true">↻</span>';
+        button.innerHTML = '<span class="verba-message-glyph fa-solid fa-rotate-right" aria-hidden="true"></span>';
         button.addEventListener('click', runMessageTranslationAction);
-        actions.append(button);
+    }
+    const hint = actions.querySelector('.extraMesButtonsHint');
+    if (button.parentElement !== actions || (hint && button.nextElementSibling !== hint)) {
+        actions.insertBefore(button, hint || actions.firstChild);
     }
     const pending = pendingOutputs.get(id);
     const cancelling = Boolean(pending?.controller.signal.aborted);
@@ -10928,7 +10931,7 @@ function injectSettingsPanel() {
                     <span>답변 자동번역 <small>(외국어 → 한국어)</small></span>
                     <small id="verba-auto-output-status" aria-live="polite">${settings.autoOutput ? 'ON' : 'OFF'}</small>
                 </label>
-                <div class="verba-help">꺼두면 각 AI 메시지의 메뉴(···) 안에 있는 베르바 ↻ 버튼으로 원하는 답변만 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
+                <div class="verba-help">꺼두면 각 AI 메시지의 메뉴(···) 바로 옆에 있는 베르바 ↻ 버튼으로 원하는 답변만 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
 
                 ${settingsVisibilityMarkup()}
                 ${settingsSearchMarkup()}

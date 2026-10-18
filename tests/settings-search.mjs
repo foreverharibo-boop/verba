@@ -6,7 +6,7 @@ const style = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
 const between = (start, end) => index.slice(index.indexOf(start), index.indexOf(end, index.indexOf(start)));
 
 assert.match(index, /key: 'settingsSearch', label: '설정 검색', selector: '#verba-settings-search'/);
-assert.match(index, /\$\{settingsVisibilityMarkup\(\)\}\s*\$\{settingsSearchMarkup\(\)\}\s*<section id="verba-profile-settings-group"/);
+assert.match(index, /\$\{settingsVisibilityMarkup\(\)\}\s*\$\{settingsSearchMarkup\(\)\}\s*<section id="verba-input-settings-group"/);
 assert.match(index, /id="verba-settings-search-input"[\s\S]*?placeholder="설정 이름·옵션·설명 검색"/);
 assert.match(index, /function settingsSearchHaystack[\s\S]*?element\.textContent/);
 assert.match(index, /function settingsSearchHaystack[\s\S]*?placeholder[\s\S]*?title[\s\S]*?aria-label/);

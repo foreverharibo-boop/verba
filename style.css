@@ -3367,3 +3367,33 @@
     color: inherit;
     margin: 8px 0;
 }
+
+/* Keep the everyday switches together; advanced settings open on demand. */
+#verba-settings .verba-auto-settings {
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--verba-accent) 45%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--verba-accent) 6%, transparent);
+    gap: 6px;
+}
+
+#verba-settings .verba-settings-heading {
+    margin: 0 0 2px;
+    font-size: 1em;
+    line-height: 1.4;
+}
+
+#verba-settings .verba-auto-settings > .verba-check-row {
+    margin: 0;
+    min-height: 36px;
+}
+
+#verba-settings .verba-auto-settings > .verba-check-row > span {
+    flex: 1;
+    min-width: 0;
+}
+
+#verba-settings .verba-auto-settings > .verba-check-row > small {
+    flex: 0 0 auto;
+    font-weight: 650;
+}

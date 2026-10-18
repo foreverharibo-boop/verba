@@ -56,7 +56,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.41';
+const EXTENSION_VERSION = '0.6.42';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -253,7 +253,7 @@ const CUSTOM_TRANSLATOR_SIMPLE_MARKER = '[사용자 추가 지침]';
 const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'settingsSearch', label: '설정 검색', selector: '#verba-settings-search' },
     { key: 'profiles', label: '번역 엔진·연결 프로필', selector: '#verba-profile-settings-group' },
-    { key: 'input', label: '인풋 번역', selector: '#verba-input-settings-group' },
+    { key: 'input', label: '자동번역 (답변·인풋)', selector: '#verba-input-settings-group' },
     { key: 'profileStats', label: '프로필 성능 기록', selector: '#verba-profile-stats' },
     { key: 'nameLocks', label: '이름 고정 관리', selector: '#verba-name-lock-manager' },
     { key: 'selection', label: '선택 재번역·태그·드래그 메뉴', selector: '#verba-selection-settings-group' },
@@ -10943,17 +10943,33 @@ function injectSettingsPanel() {
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content" style="display: none;">
-                <label class="verba-check-row" for="verba-auto-output">
-                    <input type="checkbox" id="verba-auto-output" ${settings.autoOutput ? 'checked' : ''}>
-                    <span>답변 자동번역 <small>(외국어 → 한국어)</small></span>
-                    <small id="verba-auto-output-status" aria-live="polite">${settings.autoOutput ? 'ON' : 'OFF'}</small>
-                </label>
-                <div class="verba-help">켜면 입력창 옆에 베르바 ↻ 버튼이 표시됩니다. 끄면 입력창 버튼은 숨겨지고 각 AI 메시지의 메뉴(···) 왼쪽에 나타나는 ↻로 원하는 답변을 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
-
                 ${settingsVisibilityMarkup()}
                 ${settingsSearchMarkup()}
 
-                <section id="verba-profile-settings-group" class="verba-settings-section-group">
+                <section id="verba-input-settings-group" class="verba-settings-section-group verba-auto-settings">
+                    <h4 class="verba-settings-heading">자동번역</h4>
+                    <label class="verba-check-row" for="verba-auto-output">
+                        <input type="checkbox" id="verba-auto-output" ${settings.autoOutput ? 'checked' : ''}>
+                        <span>답변 자동번역 <small>(외국어 → 한국어)</small></span>
+                        <small id="verba-auto-output-status" aria-live="polite">${settings.autoOutput ? 'ON' : 'OFF'}</small>
+                    </label>
+                    <label class="verba-check-row" for="verba-auto-input">
+                        <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
+                        <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
+                        <small id="verba-auto-input-status" aria-live="polite">${settings.autoInput ? 'ON' : 'OFF'}</small>
+                    </label>
+                    <details class="verba-tool-details">
+                        <summary>자동번역 사용 안내</summary>
+                        <div class="verba-tool-details-content">
+                            <div class="verba-help"><b>답변:</b> 켜면 입력창 옆에 베르바 ↻ 버튼이 표시됩니다. 끄면 입력창 버튼은 숨겨지고 각 AI 메시지의 메뉴(···) 왼쪽에 나타나는 ↻로 원하는 답변을 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
+                            <div class="verba-help"><b>인풋:</b> 켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
+                        </div>
+                    </details>
+                </section>
+
+                <details id="verba-profile-settings-group" class="verba-tool-details">
+                    <summary>번역 엔진·연결 프로필 <small>A/B/C · 재시도</small></summary>
+                    <div class="verba-tool-details-content">
                 <label for="verba-translation-engine">번역 엔진</label>
                 <select id="verba-translation-engine" class="text_pole">
                     <option value="ai" ${settings.translationEngine !== 'google-free' ? 'selected' : ''}>AI 연결 프로필</option>
@@ -11018,17 +11034,8 @@ function injectSettingsPanel() {
                 </div>
                 </div>
                 <button type="button" id="verba-test-profile" class="menu_button verba-wide">현재 번역 엔진 테스트</button>
-                </section>
-
-                <section id="verba-input-settings-group" class="verba-settings-section-group">
-                <label class="verba-check-row" for="verba-auto-input">
-                    <input type="checkbox" id="verba-auto-input" ${settings.autoInput ? 'checked' : ''}>
-                    <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
-                    <small id="verba-auto-input-status" aria-live="polite">${settings.autoInput ? 'ON' : 'OFF'}</small>
-                </label>
-                <div class="verba-help">켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
-
-                </section>
+                    </div>
+                </details>
 
                 <details id="verba-profile-stats" class="verba-tool-details">
                     <summary>프로필 성능 기록 <small>로컬 통계</small></summary>
@@ -11044,7 +11051,9 @@ function injectSettingsPanel() {
                     <div id="verba-name-lock-manager-content" class="verba-name-lock-manager-content"></div>
                 </details>
 
-                <section id="verba-selection-settings-group" class="verba-settings-section-group">
+                <details id="verba-selection-settings-group" class="verba-tool-details">
+                    <summary>선택 번역·메시지 도구 <small>태그 · 복사 · 드래그</small></summary>
+                    <div class="verba-tool-details-content">
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-selection-candidates" ${settings.selectionCandidates ? 'checked' : ''}>
                     <span>선택 재번역 후보 3개 미리보기</span>
@@ -11094,7 +11103,8 @@ function injectSettingsPanel() {
                         <div class="verba-help">선택 부분 재번역을 포함해 지정한 개수까지만 바로 표시하고, 남은 기능은 ⋯을 누르면 세로로 열려요. 5개를 선택하면 모두 한 줄에 표시할 수 있습니다.</div>
                     </div>
                 </details>
-                </section>
+                    </div>
+                </details>
 
 
 
@@ -11207,11 +11217,14 @@ function injectSettingsPanel() {
 
                 ${customTranslatorSettingsMarkup()}
 
-                <section id="verba-banned-words-group" class="verba-settings-section-group">
+                <details id="verba-banned-words-group" class="verba-tool-details">
+                    <summary>번역 금지어 <small>사용하지 않을 표현</small></summary>
+                    <div class="verba-tool-details-content">
                 <label for="verba-banned-words">번역 금지어</label>
                 <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
                 <div class="verba-help">금지어가 나오면 해당 문단만 다시 요청하고 정상 문단은 유지해요.</div>
-                </section>
+                    </div>
+                </details>
 
 
                 <details id="verba-rule-priority-settings" class="verba-tool-details">

@@ -3397,3 +3397,9 @@
     flex: 0 0 auto;
     font-weight: 650;
 }
+
+/* Separate profile switches from their descriptions in the compact panel. */
+#verba-settings #verba-ai-profile-options > .verba-check-row + .verba-help {
+    margin-top: 6px;
+    margin-bottom: 8px;
+}

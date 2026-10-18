@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { isPredominantlyKorean } from '../core.js';
 
 const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const slice = (start, end) => {
@@ -15,13 +16,13 @@ assert.match(source, /bindAutoOutputSetting\(panel\);/);
 
 // Real setting handler: persist OFF/ON, clear queued work, leave running work alone.
 {
-    let change, saves = 0;
+    let change, saves = 0, refreshes = 0;
     const cleared = [];
     const input = { checked: false, addEventListener: (_, fn) => { change = fn; } };
     const status = {};
     const env = { settings: { autoOutput: true, autoInput: true },
         automaticTranslationTimers: new Map([[2, 42]]), clearTimeout: id => cleared.push(id),
-        saveSettings: () => saves++ };
+        saveSettings: () => saves++, refreshRetranslateButton: () => refreshes++ };
     vm.createContext(env);
     vm.runInContext(slice('function bindAutoOutputSetting(', 'function bindAutoInputSetting('), env);
     const panel = { querySelector: selector => selector.endsWith('-status') ? status : input };
@@ -34,7 +35,7 @@ assert.match(source, /bindAutoOutputSetting\(panel\);/);
     env.bindAutoOutputSetting(panel);
     assert.equal(input.checked, false); assert.equal(status.textContent, 'OFF');
     input.checked = true; change();
-    assert.equal(env.settings.autoOutput, true); assert.equal(saves, 2);
+    assert.equal(env.settings.autoOutput, true); assert.equal(saves, 2); assert.equal(refreshes, 2, 'both toggles refresh buttons immediately');
     assert.equal(env.automaticTranslationTimers.size, 0, 'turning ON does not bulk-translate history');
 }
 
@@ -110,7 +111,7 @@ for (const saved of [false, true]) {
         isNameReplacementMessage: m => Boolean(m && !m.is_user), currentRecord: m => m.record,
         notify: (...args) => calls.push(['notice', ...args]),
         refreshRetranslateButton: () => env.refreshMessageTranslationButtons(),
-        retranslateOutputTarget: async t => { calls.push(['translate', t.id]); await new Promise(resolve => { release = resolve; }); },
+        runOutputTargetAction: async t => { calls.push(['translate', t.id]); await new Promise(resolve => { release = resolve; }); },
         abortPendingOutput: (id, reason) => { calls.push(['cancel', id]); env.pendingOutputs.get(id).controller.abort(reason); },
         outputAbortReason: code => code, errorText: e => e.message, reportError: (...args) => calls.push(['error', ...args]),
         document: {
@@ -120,16 +121,12 @@ for (const saved of [false, true]) {
                 closest() { return this.owner; }, remove() { this.owner.button = null; } }),
         } };
     for (let id = 0; id < chat.length; id++) {
-        const hint = {};
         const node = { button: null, getAttribute: () => String(id),
-            querySelector(selector) { return selector === '.mes_buttons' ? actions : this.button; } };
-        const actions = { hint, insertions: 0,
-            querySelector: selector => selector === '.extraMesButtonsHint' ? hint : null,
-            insertBefore(button, anchor) {
-                assert.equal(anchor, hint, 'translation button belongs immediately before the menu hint');
+            querySelector(selector) { return selector === '.extraMesButtons' ? actions : this.button; } };
+        const actions = { insertions: 0,
+            append(button) {
                 this.insertions++;
-                node.button = button; button.owner = node;
-                button.parentElement = this; button.nextElementSibling = hint;
+                node.button = button; button.owner = node; button.parentElement = this;
             } };
         node.actions = actions;
         nodes.push(node);
@@ -140,8 +137,7 @@ for (const saved of [false, true]) {
     const button = nodes[0].button;
     assert.ok(button); assert.ok(nodes[1].button); assert.equal(nodes[2].button, null);
     env.refreshMessageTranslationButtons(); assert.equal(nodes[0].button, button, 'no duplicate icons');
-    assert.equal(button.parentElement, nodes[0].actions, 'button stays outside the collapsed extra menu');
-    assert.equal(button.nextElementSibling, nodes[0].actions.hint);
+    assert.equal(button.parentElement, nodes[0].actions, 'button belongs inside the extra menu');
     assert.equal(nodes[0].actions.insertions, 1, 'stable placement avoids repeated DOM mutations');
     assert.match(button.title, /이 메시지 번역$/);
     const running = button.click();
@@ -158,10 +154,15 @@ for (const saved of [false, true]) {
     assert.equal(first.signal.aborted, true); assert.equal(second.signal.aborted, false);
     assert.equal(first.signal.reason, 'VERBA_OUTPUT_USER_CANCELLED');
     env.pendingOutputs.clear();
-    env.retranslateOutputTarget = async () => { throw new Error('failure'); };
+    env.runOutputTargetAction = async () => { throw new Error('failure'); };
     await button.click(); assert.equal(calls.at(-1)[0], 'error'); assert.equal(button.disabled, false);
-    env.retranslateOutputTarget = async t => { calls.push(['retry', t.id]); };
+    env.runOutputTargetAction = async t => { calls.push(['retry', t.id]); };
     await button.click(); assert.deepEqual(calls.at(-1), ['retry', 0]);
+    env.settings.autoOutput = true; env.refreshMessageTranslationButtons();
+    assert.equal(nodes[0].button, null); assert.equal(nodes[1].button, null, 'automatic mode removes per-message controls');
+    const countBefore = calls.length; await button.click(); assert.equal(calls.length, countBefore, 'a detached OFF-mode button cannot launch after ON');
+    env.settings.autoOutput = false; env.refreshMessageTranslationButtons();
+    assert.ok(nodes[0].button); assert.ok(nodes[1].button, 'manual controls return when OFF');
     chat[0] = { mes: 'Became user', is_user: true }; env.refreshMessageTranslationButtons();
     assert.equal(nodes[0].button, null);
 }
@@ -176,6 +177,62 @@ for (const saved of [false, true]) {
     vm.runInContext(slice('async function translateUntranslatedOutput(', 'function captureChatViewportPosition('), env);
     await env.retranslateOutputTarget({ id: 4, message: { mes: 'Older message' } });
     assert.equal(calls[0][0], 4); assert.equal(calls[0][1].automatic, undefined);
+}
+// The actual bottom control refresh follows the mode, including a running request.
+{
+    const button = { classList: { toggle() {} }, setAttribute() {} };
+    const controller = new AbortController();
+    const env = { settings: { autoOutput: true },
+        refreshMessageTranslationButtons() {}, document: { querySelector: () => button },
+        latestAssistantMessage: () => ({ id: 0, message: {} }), activeTranslationControllers: () => [controller],
+        failedOutputSignatures: new Map(), messageVersionSignature: () => '', currentRecord: () => null };
+    vm.createContext(env);
+    vm.runInContext(slice('function refreshRetranslateButton()', 'let outputActionPending ='), env);
+    for (const enabled of [true, false, true]) {
+        env.settings.autoOutput = enabled; env.refreshRetranslateButton();
+        assert.equal(button.hidden, !enabled, 'OFF hides the lower arrow even during a running job');
+    }
+    const css = fs.readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(css, /#verba-retranslate-latest\[hidden\]\s*\{\s*display: none !important;/);
+}
+// Both arrows share real untranslated routing and the exact Korean notice.
+// Stored translations share the view/retranslate chooser, scoped to the clicked message.
+{
+    const calls = [], chat = [{ mes: '이미 한국어로 작성된 답변입니다. 번역하지 않아도 됩니다.', extra: {} },
+        { mes: '이미 한국어로 작성된 답변입니다. 번역하지 않아도 됩니다.', extra: {} }];
+    let choice = null;
+    const anchor = {};
+    const env = { settings: { autoOutput: false }, pendingOutputs: new Map(), failedOutputSignatures: new Map(),
+        liveContext: () => ({ chat }), latestAssistantMessage: () => ({ id: 1, message: chat[1] }),
+        activeTranslationControllers: () => [],
+        messageSource: m => m.mes, messageVersionSignature: m => m.mes, isPredominantlyKorean,
+        currentRecord: m => m.record, currentSwipeExtra: () => null, sourceViewRequested: () => false,
+        notify: (...args) => calls.push(['notice', ...args]),
+        translateMessage: async (id, options) => calls.push(['translate', id, options]),
+        requestRetranslateTargetChoice: async (target, button, scoped) => {
+            calls.push(['menu', target.id, button, scoped]); return choice;
+        },
+        showOriginalDisplay: id => calls.push(['original', id]),
+        showTranslationDisplay: id => calls.push(['translation', id]), refreshRetranslateButton() {},
+        retranslateOutputTarget: async t => calls.push(['retranslate', t.id]),
+    };
+    vm.createContext(env);
+    vm.runInContext(slice('async function translateUntranslatedOutput(', 'async function retranslateOutputTarget(')
+        + slice('async function retranslateLatestOutput()', 'function setTextareaValue('), env);
+    const target = { id: 0, message: chat[0] };
+    await env.runOutputTargetAction(target, anchor, true);
+    await env.retranslateLatestOutput();
+    assert.deepEqual(calls[0], ['notice', '선택한 아웃풋이 이미 한국어라 번역할 필요가 없어요.', 'info']);
+    assert.deepEqual(calls[1], calls[0]); assert.equal(calls.length, 2, 'Korean makes no translation request');
+    calls.length = 0; chat.forEach(m => { m.mes = 'Hello, this is an English response.'; });
+    await env.runOutputTargetAction(target, anchor, true); await env.retranslateLatestOutput();
+    assert.deepEqual(calls.map(c => c[1]), [0, 1], 'each arrow selects its own intended target');
+    assert.ok(calls.every(c => !c[2].automatic));
+    calls.length = 0; chat[0].record = { translation: '안녕' }; chat[0].extra.display_text = '안녕';
+    choice = 'toggle-view'; await env.runOutputTargetAction(target, anchor, true);
+    assert.deepEqual(calls[0], ['menu', 0, anchor, true]); assert.deepEqual(calls[1], ['original', 0]);
+    choice = 'recent'; await env.runOutputTargetAction(target, anchor, true);
+    assert.deepEqual(calls.at(-1), ['retranslate', 0]);
 }
 await flush();
 console.log('PASS: automatic ON/OFF persistence, queue and swipe gates, saved translation restore, manual routing, message menu insertion, duplicate/error recovery and per-message cancellation. No live API/browser calls.');

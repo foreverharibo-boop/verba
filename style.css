@@ -759,6 +759,10 @@
     cursor: default;
 }
 
+#verba-retranslate-latest[hidden] {
+    display: none !important;
+}
+
 .verba-input-icon.verba-retry-needed {
     color: #d65c5c;
     opacity: 1;

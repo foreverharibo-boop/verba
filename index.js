@@ -56,7 +56,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.37';
+const EXTENSION_VERSION = '0.6.38';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -6986,7 +6986,7 @@ function positionVerbaChoiceMenu(menu, anchor) {
     menu.style.setProperty('top', `${Math.max(top + 8, Math.min(desiredY, maxY))}px`, 'important');
 }
 
-function requestRetranslateTargetChoice(target, button = document.querySelector('#verba-retranslate-latest')) {
+function requestRetranslateTargetChoice(target, button = document.querySelector('#verba-retranslate-latest'), messageScoped = false) {
     document.querySelector('#verba-retranslate-target-menu')?.remove();
     if (!target?.message) return Promise.resolve(null);
 
@@ -7008,7 +7008,7 @@ function requestRetranslateTargetChoice(target, button = document.querySelector(
         menu.className = 'verba-retranslate-target-menu';
         menu.setAttribute('role', 'menu');
         menu.innerHTML = `
-            <button type="button" class="menu_button" data-target="recent">최근</button>
+            <button type="button" class="menu_button" data-target="recent">${messageScoped ? '재번역' : '최근'}</button>
             <button type="button" class="menu_button" data-target="previous">이전</button>
             <button type="button" class="menu_button" data-target="toggle-view">${viewLabel}</button>`;
         (document.body || document.documentElement).append(menu);
@@ -7590,7 +7590,11 @@ async function retranslateLatestOutput() {
         return;
     }
 
-    // The fast path stays one tap: if the latest output has never been
+    return await runOutputTargetAction(target);
+}
+
+async function runOutputTargetAction(target, button, messageScoped = false) {
+    // The fast path stays one tap: if the selected output has never been
     // translated (including a failed attempt), immediately translate/retry it.
     if (!currentRecord(target.message)) {
         await translateUntranslatedOutput(target);
@@ -7598,7 +7602,7 @@ async function retranslateLatestOutput() {
     }
 
     const targetSignature = messageVersionSignature(target.message);
-    const choice = await requestRetranslateTargetChoice(target);
+    const choice = await requestRetranslateTargetChoice(target, button, messageScoped);
     if (!choice) return;
     if (liveContext().chat?.[target.id] !== target.message
         || messageVersionSignature(target.message) !== targetSignature) {
@@ -7625,7 +7629,7 @@ async function retranslateLatestOutput() {
         return;
     }
     if (choice === 'recent') {
-        await retranslateOutputTarget(target, '최근 아웃풋 전체 재번역');
+        await retranslateOutputTarget(target, messageScoped ? '이 메시지 전체 재번역' : '최근 아웃풋 전체 재번역');
         return;
     }
     if (choice !== 'previous') return;
@@ -9869,6 +9873,7 @@ function refreshRetranslateButton() {
     refreshMessageTranslationButtons();
     const button = document.querySelector('#verba-retranslate-latest');
     if (!button) return;
+    button.hidden = settings.autoOutput === false;
     const target = latestAssistantMessage();
     const activeControllers = activeTranslationControllers();
     const busy = activeControllers.length > 0;
@@ -9941,6 +9946,7 @@ function createRetranslateButton() {
     const button = document.createElement('button');
     button.id = 'verba-retranslate-latest';
     button.type = 'button';
+    button.hidden = settings.autoOutput === false;
     button.className = 'verba-input-icon';
     const glyph = document.createElement('span');
     glyph.className = 'verba-retranslate-glyph';
@@ -9958,6 +9964,7 @@ const pendingMessageActions = new WeakSet();
 async function runMessageTranslationAction(event) {
     event.preventDefault();
     event.stopPropagation();
+    if (settings.autoOutput !== false) return;
     const element = event.currentTarget.closest('.mes[mesid]');
     const id = Number(element?.getAttribute('mesid'));
     const message = liveContext().chat?.[id];
@@ -9976,7 +9983,7 @@ async function runMessageTranslationAction(event) {
     pendingMessageActions.add(message);
     refreshMessageTranslationButtons();
     try {
-        await retranslateOutputTarget({ id, message }, '이 메시지 전체 재번역');
+        await runOutputTargetAction({ id, message }, event.currentTarget, true);
     } catch (error) {
         reportError('message-translation', error, `메시지 번역 실패: ${errorText(error)}`);
     } finally {
@@ -9987,8 +9994,8 @@ async function runMessageTranslationAction(event) {
 
 function syncMessageTranslationButton(element, id, message) {
     let button = element.querySelector('.verba-message-translate');
-    const actions = element.querySelector('.mes_buttons');
-    if (!actions || !Number.isInteger(id) || id < 0 || !isNameReplacementMessage(message) || !messageSource(message).trim()) {
+    const actions = element.querySelector('.extraMesButtons');
+    if (settings.autoOutput !== false || !actions || !Number.isInteger(id) || id < 0 || !isNameReplacementMessage(message) || !messageSource(message).trim()) {
         button?.remove();
         return;
     }
@@ -9999,10 +10006,7 @@ function syncMessageTranslationButton(element, id, message) {
         button.innerHTML = '<span class="verba-message-glyph fa-solid fa-rotate-right" aria-hidden="true"></span>';
         button.addEventListener('click', runMessageTranslationAction);
     }
-    const hint = actions.querySelector('.extraMesButtonsHint');
-    if (button.parentElement !== actions || (hint && button.nextElementSibling !== hint)) {
-        actions.insertBefore(button, hint || actions.firstChild);
-    }
+    if (button.parentElement !== actions) actions.append(button);
     const pending = pendingOutputs.get(id);
     const cancelling = Boolean(pending?.controller.signal.aborted);
     button.disabled = cancelling || (!pending && pendingMessageActions.has(message));
@@ -10597,6 +10601,7 @@ function bindAutoOutputSetting(panel) {
         }
         sync();
         saveSettings();
+        refreshRetranslateButton();
     });
 }
 
@@ -10931,7 +10936,7 @@ function injectSettingsPanel() {
                     <span>답변 자동번역 <small>(외국어 → 한국어)</small></span>
                     <small id="verba-auto-output-status" aria-live="polite">${settings.autoOutput ? 'ON' : 'OFF'}</small>
                 </label>
-                <div class="verba-help">꺼두면 각 AI 메시지의 메뉴(···) 바로 옆에 있는 베르바 ↻ 버튼으로 원하는 답변만 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
+                <div class="verba-help">켜면 입력창 옆에 베르바 ↻ 버튼이 표시됩니다. 끄면 입력창 버튼은 숨겨지고 각 AI 메시지의 메뉴(···) 안에서 원하는 답변을 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
 
                 ${settingsVisibilityMarkup()}
                 ${settingsSearchMarkup()}

@@ -122,8 +122,10 @@ assert.ok(slice('function initialize()', "if (document.readyState === 'loading')
 
 // Run the actual popup builder against a small DOM adapter: all options,
 // absent/hidden anchors, placement, dismissal and listener cleanup.
+for (const messageScoped of [false, true]) {
 for (const anchorMode of ['visible', 'hidden', 'absent']) {
-    for (const choice of ['recent', 'previous', 'toggle-view', 'escape', 'outside']) {
+    const expectedOptions = messageScoped ? ['recent', 'toggle-view'] : ['recent', 'previous', 'toggle-view'];
+    for (const choice of [...expectedOptions, 'escape', 'outside']) {
         const listeners = new Map(); const frames = [];
         let menu;
         const anchor = anchorMode === 'absent' ? null : { getBoundingClientRect: () => anchorMode === 'hidden'
@@ -135,11 +137,17 @@ for (const anchorMode of ['visible', 'hidden', 'absent']) {
             addEventListener: (name, handler) => listeners.set(name, handler),
             removeEventListener: name => listeners.delete(name),
             createElement: () => {
-                const options = ['recent', 'previous', 'toggle-view'].map(target => ({
-                    dataset: { target }, addEventListener: (_, fn) => { options.find(o => o.dataset.target === target).click = fn; }, focus() {},
-                }));
+                const options = [];
+                let markup = '';
                 return {
                     options, style: { setProperty(name, value) { this[name] = value; } },
+                    set innerHTML(value) {
+                        markup = value;
+                        options.splice(0, options.length, ...[...value.matchAll(/data-target="([^"]+)"/g)].map(match => ({
+                            dataset: { target: match[1] }, addEventListener(_, fn) { this.click = fn; }, focus() {},
+                        })));
+                    },
+                    get innerHTML() { return markup; },
                     setAttribute() {}, getBoundingClientRect: () => ({ width: 156, height: 38 }),
                     querySelectorAll: () => options, querySelector: () => options[0],
                     contains: t => options.includes(t), remove() { this.connected = false; },
@@ -152,9 +160,10 @@ for (const anchorMode of ['visible', 'hidden', 'absent']) {
         };
         vm.runInNewContext(slice('function positionVerbaChoiceMenu(', 'const PREVIOUS_OUTPUT_PAGE_SIZE')
             + '\nglobalThis.open = requestRetranslateTargetChoice;', env);
-        const result = env.open({ message: { extra: { display_text: '번역' } } });
+        const result = env.open({ message: { extra: { display_text: '번역' } } }, anchor, messageScoped);
         assert.equal(menu.connected, true); assert.ok(menu.innerHTML.includes('>원문</button>'));
-        assert.equal(menu.options.length, 3);
+        assert.deepEqual(menu.options.map(option => option.dataset.target), expectedOptions);
+        assert.ok(menu.innerHTML.includes(messageScoped ? '>재번역</button>' : '>최근</button>'));
         assert.ok(parseFloat(menu.style.left) >= 0 && parseFloat(menu.style.left) + 156 <= 360);
         assert.ok(parseFloat(menu.style.top) >= 0 && parseFloat(menu.style.top) + 38 <= 720);
         if (anchorMode !== 'visible') assert.equal(parseFloat(menu.style.top), 574, 'hidden translation menu uses the same +70px baseline as profiles');
@@ -165,5 +174,6 @@ for (const anchorMode of ['visible', 'hidden', 'absent']) {
         assert.equal(await result, ['escape', 'outside'].includes(choice) ? null : choice);
         assert.equal(menu.connected, false); assert.equal(listeners.size, 0);
     }
+}
 }
 console.log('PASS: /verba routing/cancellation/retry, duplicate guards, errors, popup creation/options/dismissal/placement (DOM adapter). API calls: 0; live SillyTavern browser: not tested.');

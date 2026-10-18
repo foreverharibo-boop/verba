@@ -56,7 +56,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.39';
+const EXTENSION_VERSION = '0.6.40';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -7009,7 +7009,7 @@ function requestRetranslateTargetChoice(target, button = document.querySelector(
         menu.setAttribute('role', 'menu');
         menu.innerHTML = `
             <button type="button" class="menu_button" data-target="recent">${messageScoped ? '재번역' : '최근'}</button>
-            <button type="button" class="menu_button" data-target="previous">이전</button>
+            ${messageScoped ? '' : '<button type="button" class="menu_button" data-target="previous">이전</button>'}
             <button type="button" class="menu_button" data-target="toggle-view">${viewLabel}</button>`;
         (document.body || document.documentElement).append(menu);
 

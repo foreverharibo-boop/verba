@@ -117,14 +117,17 @@ for (const saved of [false, true]) {
         document: {
             querySelectorAll: () => nodes,
             createElement: () => ({ classList: { toggle() {} }, setAttribute(name, value) { this[name] = value; },
-                addEventListener(_, fn) { this.click = () => fn({ currentTarget: this, preventDefault() {}, stopPropagation() {} }); },
+                addEventListener(_, fn) { this.listenerCount = (this.listenerCount || 0) + 1; this.click = () => fn({ currentTarget: this, preventDefault() {}, stopPropagation() {} }); },
                 closest() { return this.owner; }, remove() { this.owner.button = null; } }),
         } };
     for (let id = 0; id < chat.length; id++) {
         const node = { button: null, getAttribute: () => String(id),
-            querySelector(selector) { return selector === '.extraMesButtons' ? actions : this.button; } };
-        const actions = { insertions: 0,
-            append(button) {
+            querySelector(selector) { return selector === '.mes_buttons' ? actions : this.button; } };
+        const actions = { insertions: 0, hint: {},
+            querySelector() { return this.hint; },
+            insertBefore(button, anchor) {
+                assert.equal(anchor, this.hint);
+                button.nextElementSibling = this.hint;
                 this.insertions++;
                 node.button = button; button.owner = node; button.parentElement = this;
             } };
@@ -137,8 +140,20 @@ for (const saved of [false, true]) {
     const button = nodes[0].button;
     assert.ok(button); assert.ok(nodes[1].button); assert.equal(nodes[2].button, null);
     env.refreshMessageTranslationButtons(); assert.equal(nodes[0].button, button, 'no duplicate icons');
-    assert.equal(button.parentElement, nodes[0].actions, 'button belongs inside the extra menu');
+    assert.equal(button.parentElement, nodes[0].actions, 'button belongs beside the menu hint');
     assert.equal(nodes[0].actions.insertions, 1, 'stable placement avoids repeated DOM mutations');
+    // Re-rendered/cloned markup keeps the icon but loses native event listeners.
+    const clonedButton = env.document.createElement('button');
+    clonedButton.innerHTML = button.innerHTML;
+    clonedButton.className = button.className;
+    clonedButton.title = button.title;
+    nodes[0].actions.insertBefore(clonedButton, nodes[0].actions.hint);
+    env.refreshMessageTranslationButtons();
+    assert.equal(typeof clonedButton.click, 'function', 'an existing cloned icon must regain its click handler');
+    nodes[0].actions.insertBefore(button, nodes[0].actions.hint);
+    env.refreshMessageTranslationButtons();
+    assert.equal(button.listenerCount, 1, 'refresh must not duplicate native listeners');
+    assert.equal(clonedButton.listenerCount, 1);
     assert.match(button.title, /이 메시지 번역$/);
     const running = button.click();
     assert.deepEqual(calls, [['translate', 0]], 'old message button must not target the latest message');

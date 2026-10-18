@@ -56,7 +56,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.38';
+const EXTENSION_VERSION = '0.6.39';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -9706,7 +9706,7 @@ function setupMessageCopyHold() {
 }
 
 function refreshTranslationClasses() {
-    document.querySelectorAll('.mes[mesid]').forEach(element => {
+    document.querySelectorAll('#chat .mes[mesid]').forEach(element => {
         const id = Number(element.getAttribute('mesid'));
         const message = liveContext().chat?.[id];
         syncMessageTranslationButton(element, id, message);
@@ -9960,6 +9960,7 @@ function createRetranslateButton() {
 }
 
 const pendingMessageActions = new WeakSet();
+const boundMessageTranslationButtons = new WeakSet();
 
 async function runMessageTranslationAction(event) {
     event.preventDefault();
@@ -9994,8 +9995,11 @@ async function runMessageTranslationAction(event) {
 
 function syncMessageTranslationButton(element, id, message) {
     let button = element.querySelector('.verba-message-translate');
-    const actions = element.querySelector('.extraMesButtons');
-    if (settings.autoOutput !== false || !actions || !Number.isInteger(id) || id < 0 || !isNameReplacementMessage(message) || !messageSource(message).trim()) {
+    const actions = element.querySelector('.mes_buttons');
+    // SillyTavern's hidden message template has mesid="". Number('') is 0,
+    // but the template must never acquire message 0's translation control.
+    const rawId = String(element.getAttribute('mesid') ?? '').trim();
+    if (!rawId || settings.autoOutput !== false || !actions || !Number.isInteger(id) || id < 0 || !isNameReplacementMessage(message) || !messageSource(message).trim()) {
         button?.remove();
         return;
     }
@@ -10004,9 +10008,17 @@ function syncMessageTranslationButton(element, id, message) {
         button.type = 'button';
         button.className = 'mes_button verba-message-translate';
         button.innerHTML = '<span class="verba-message-glyph fa-solid fa-rotate-right" aria-hidden="true"></span>';
-        button.addEventListener('click', runMessageTranslationAction);
     }
-    if (button.parentElement !== actions) actions.append(button);
+    // cloneNode / jQuery.clone copy markup but not native event listeners.
+    // Track actual node identities rather than treating existing markup as bound.
+    if (!boundMessageTranslationButtons.has(button)) {
+        button.addEventListener('click', runMessageTranslationAction);
+        boundMessageTranslationButtons.add(button);
+    }
+    const hint = actions.querySelector('.extraMesButtonsHint');
+    if (button.parentElement !== actions || (hint && button.nextElementSibling !== hint)) {
+        actions.insertBefore(button, hint || actions.firstChild);
+    }
     const pending = pendingOutputs.get(id);
     const cancelling = Boolean(pending?.controller.signal.aborted);
     button.disabled = cancelling || (!pending && pendingMessageActions.has(message));
@@ -10936,7 +10948,7 @@ function injectSettingsPanel() {
                     <span>답변 자동번역 <small>(외국어 → 한국어)</small></span>
                     <small id="verba-auto-output-status" aria-live="polite">${settings.autoOutput ? 'ON' : 'OFF'}</small>
                 </label>
-                <div class="verba-help">켜면 입력창 옆에 베르바 ↻ 버튼이 표시됩니다. 끄면 입력창 버튼은 숨겨지고 각 AI 메시지의 메뉴(···) 안에서 원하는 답변을 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
+                <div class="verba-help">켜면 입력창 옆에 베르바 ↻ 버튼이 표시됩니다. 끄면 입력창 버튼은 숨겨지고 각 AI 메시지의 메뉴(···) 왼쪽에 나타나는 ↻로 원하는 답변을 번역할 수 있어요. 이미 시작한 번역은 계속 진행되며, 다시 켜면 이후 답변부터 자동 번역합니다. 한국어 중심 출력은 자동 번역하지 않아요.</div>
 
                 ${settingsVisibilityMarkup()}
                 ${settingsSearchMarkup()}

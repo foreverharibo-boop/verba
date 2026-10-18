@@ -21,7 +21,7 @@ assert.match(index, /function highlightSettingsSearchTokens[\s\S]*?highlight\.cl
 assert.match(index, /인터넷 밈 농도/);
 assert.match(style, /\.verba-settings-search\s*\{/);
 assert.match(style, /\.verba-settings-search\[hidden\][\s\S]*?display:\s*none\s*!important/);
-assert.match(style, /mark\.verba-settings-search-highlight[\s\S]*?#ffeb3b/);
+assert.match(style, /mark\.verba-settings-search-highlight[\s\S]*?var\(--verba-accent\)/);
 assert.doesNotMatch(style, /\.verba-settings-search-match/);
 
 const normalizeSource = between('function normalizedSettingsSearchText(', 'function settingsSearchTargets(');

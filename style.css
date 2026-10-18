@@ -2,6 +2,7 @@
 
 :root {
     --verba-accent: var(--SmartThemeQuoteColor, var(--SmartThemeEmColor, #a98be8));
+    --verba-secondary: var(--SmartThemeEmColor, var(--verba-accent));
     --verba-surface: var(--SmartThemeBlurTintColor, #25252a);
     --verba-text: var(--SmartThemeBodyColor, #fff);
     --verba-border: var(--SmartThemeBorderColor, #888);
@@ -73,7 +74,7 @@
 }
 
 #verba-prompt-editor::backdrop {
-    background: rgb(0 0 0 / 45%);
+    background: color-mix(in srgb, var(--verba-shadow) 45%, transparent);
 }
 
 #verba-prompt-editor-title {
@@ -274,7 +275,7 @@
     cursor: pointer;
 }
 
-:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"] {
+:is(#verba-settings, .verba-modal, .verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"] {
     appearance: none !important;
     -webkit-appearance: none !important;
     position: relative;
@@ -290,16 +291,18 @@
     border-radius: 4px !important;
     background: color-mix(in srgb, var(--verba-text) 5%, transparent) !important;
     box-shadow: none !important;
+    outline: none;
+    filter: none;
     cursor: pointer;
     transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]::before {
+:is(#verba-settings, .verba-modal, .verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]::before {
     content: none !important;
 }
 
 /* Draw the tick with theme text color; SVG data URLs cannot inherit it. */
-:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]::after {
+:is(#verba-settings, .verba-modal, .verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]::after {
     content: "" !important;
     display: none !important;
     position: absolute !important;
@@ -322,17 +325,17 @@
     pointer-events: none;
 }
 
-:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:checked {
+:is(#verba-settings, .verba-modal, .verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:checked {
     border-color: var(--verba-text) !important;
     background: color-mix(in srgb, var(--verba-text) 5%, transparent) !important;
     box-shadow: none !important;
 }
 
-:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:checked::after {
+:is(#verba-settings, .verba-modal, .verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:checked::after {
     display: block !important;
 }
 
-:is(.verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:focus-visible {
+:is(#verba-settings, .verba-modal, .verba-check-row, .verba-prompt-slot-toggle, .verba-beginner-choice) input[type="checkbox"]:focus-visible {
     outline: 2px solid var(--verba-accent) !important;
     outline-offset: 2px;
 }
@@ -681,7 +684,7 @@
 }
 
 .verba-profile-slot {
-    --verba-profile-slot-color: #ad83dc;
+    --verba-profile-slot-color: var(--verba-accent);
     position: absolute;
     top: 1px;
     right: 1px;
@@ -701,13 +704,13 @@
 }
 
 .verba-profile-toggle.verba-profile-b .verba-profile-slot {
-    --verba-profile-slot-color: #dc86a3;
+    --verba-profile-slot-color: var(--verba-secondary);
     background: transparent;
     color: var(--verba-profile-slot-color);
 }
 
 .verba-profile-toggle.verba-profile-c .verba-profile-slot {
-    --verba-profile-slot-color: #6aa9da;
+    --verba-profile-slot-color: var(--verba-secondary);
     background: transparent;
     color: var(--verba-profile-slot-color);
     box-shadow: 0 0 0 1px var(--verba-profile-slot-color);
@@ -782,7 +785,7 @@
 }
 
 .verba-input-icon.verba-retry-needed {
-    color: #d65c5c;
+    color: var(--verba-accent);
     opacity: 1;
 }
 
@@ -1093,11 +1096,11 @@
 }
 
 .verba-segment-lock-action {
-    border-color: color-mix(in srgb, #d9a441 68%, transparent) !important;
+    border-color: color-mix(in srgb, var(--verba-accent) 68%, transparent) !important;
 }
 
 .verba-bundle-add-action {
-    border-color: color-mix(in srgb, #6aa9da 68%, transparent) !important;
+    border-color: color-mix(in srgb, var(--verba-secondary) 68%, transparent) !important;
 }
 
 .verba-selection-more-toggle {
@@ -1138,11 +1141,11 @@
 }
 
 ::highlight(verba-locked-segments) {
-    background-color: rgba(217, 164, 65, 0.2);
+    background-color: color-mix(in srgb, var(--verba-accent) 20%, transparent);
 }
 
 ::highlight(verba-bundle-selections) {
-    background-color: rgba(106, 169, 218, 0.2);
+    background-color: color-mix(in srgb, var(--verba-secondary) 20%, transparent);
 }
 
 .verba-context-choice {
@@ -1592,9 +1595,9 @@
     display: grid;
     gap: 6px;
     padding: 8px;
-    border: 1px solid color-mix(in srgb, #d9a441 62%, transparent);
+    border: 1px solid color-mix(in srgb, var(--verba-accent) 62%, transparent);
     border-radius: 9px;
-    background: color-mix(in srgb, #d9a441 8%, transparent);
+    background: color-mix(in srgb, var(--verba-accent) 8%, transparent);
 }
 
 .verba-conflict-card-header {
@@ -2026,7 +2029,7 @@
     align-items: center !important;
     justify-content: center !important;
     padding: 12px !important;
-    background: rgba(0,0,0,.28) !important;
+    background: color-mix(in srgb, var(--verba-shadow) 28%, transparent) !important;
 }
 
 .verba-developer-password-modal {
@@ -3316,8 +3319,8 @@
     padding: 0 .08em;
     border-radius: 3px;
     color: inherit;
-    background: color-mix(in srgb, #ffeb3b 72%, transparent);
-    box-shadow: 0 0 0 1px color-mix(in srgb, #ffeb3b 38%, transparent);
+    background: color-mix(in srgb, var(--verba-accent) 28%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--verba-accent) 55%, transparent);
 }
 
 @media (max-width: 600px) {
@@ -3330,26 +3333,7 @@
     }
 }
 
-/* The auto-input switch uses the browser's native checkmark, not pseudo-elements. */
-#verba-settings #verba-auto-input {
-    appearance: auto !important;
-    -webkit-appearance: checkbox !important;
-    accent-color: var(--verba-accent) !important;
-    background: revert !important;
-    border: revert !important;
-    border-radius: revert !important;
-    box-shadow: none !important;
-    filter: none !important;
-    opacity: 1 !important;
-}
-
-#verba-settings #verba-auto-input::before,
-#verba-settings #verba-auto-input::after {
-    content: none !important;
-    display: none !important;
-}
-
-#verba-auto-input-status {
+#verba-settings :is(#verba-auto-input-status, #verba-auto-output-status) {
     margin-inline-start: auto;
     flex: 0 0 auto;
     color: var(--verba-text);
@@ -3402,4 +3386,17 @@
 #verba-settings #verba-ai-profile-options > .verba-check-row + .verba-help {
     margin-top: 6px;
     margin-bottom: 8px;
+}
+
+/* Owner scoping keeps the shared notice dock independent of other extensions. */
+#st-translation-notice-dock .st-translation-notice:is([data-owner="verba"], [data-owner="verba-preview"]) {
+    background: var(--verba-surface) !important;
+    background: rgb(from var(--verba-surface) r g b / 1) !important;
+    color: var(--verba-text) !important;
+    border-color: var(--verba-border) !important;
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--verba-shadow) 16%, transparent) !important;
+}
+
+#st-translation-notice-dock .st-translation-notice:is([data-owner="verba"], [data-owner="verba-preview"]) .st-translation-notice-icon {
+    color: var(--verba-accent);
 }

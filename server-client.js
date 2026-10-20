@@ -42,12 +42,32 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     function remember(row){records=records.filter(x=>x.id!==row.id);records.push(row);save();}
     function forget(id){records=records.filter(x=>x.id!==id);save();}
     async function api(path,init={}) {
-        const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),20000);
+        // This controller belongs only to one HTTP exchange. It never means
+        // the user cancelled the server-owned generation/translation job.
+        const controller=new AbortController();let timedOut=false;
+        const timer=setTimeout(()=>{timedOut=true;controller.abort();},20000);
         try {
             const response=await fetchBase(API+path,{...init,headers:getContext().getRequestHeaders(),signal:controller.signal,cache:'no-store'});
-            const data=await response.json().catch(()=>({}));
+            let data;
+            try{data=await response.json();}
+            catch(error){
+                if(controller.signal.aborted||error?.name==='AbortError')throw error;
+                if(response.ok)throw Object.assign(Error('서버 응답을 끝까지 읽지 못했습니다.'),{code:'VERBA_SERVER_RESPONSE_INCOMPLETE'});
+                data={};
+            }
             if(!response.ok)throw Object.assign(Error(data.error||`서버 번역 HTTP ${response.status}`),{status:response.status});
             return data;
+        } catch(error) {
+            if(timedOut||error?.name==='AbortError') {
+                // Do not retain an AbortError cause: legacy isAbort also walks
+                // causes, and would misclassify a connection timeout as cancel.
+                throw Object.assign(Error(timedOut
+                    ? '서버 통신 대기 시간을 초과했습니다. 서버 작업의 취소를 뜻하지 않습니다.'
+                    : '서버와의 통신이 끊겼습니다. 서버 작업의 취소를 뜻하지 않습니다.'),{
+                    code:timedOut?'VERBA_SERVER_CONNECTION_TIMEOUT':'VERBA_SERVER_CONNECTION_INTERRUPTED',
+                });
+            }
+            throw error;
         } finally{clearTimeout(timer);}
     }
     const relayActive=()=>{try{return globalThis.sillyRelayReplies?.apiVersion===1 && localStorage.getItem('silly-relay-enabled-v1')==='true';}catch{return false;}};
@@ -87,6 +107,26 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         }
     }
     async function status(id,cursor=0){return api('/jobs/'+id+'?cursor='+cursor);}
+    async function reconnectStatus(id,signal){
+        let notified=false;
+        const stop=()=>void cancel(id);
+        signal?.addEventListener('abort',stop,{once:true});
+        try{
+            while(true){
+                if(signal?.aborted){await cancel(id);throw abortError();}
+                try{
+                    const state=await status(id);
+                    if(signal?.aborted)throw abortError();
+                    return state;
+                }catch(error){
+                    if(signal?.aborted)throw abortError();
+                    if(error.status)throw error;
+                    if(!notified){onNotice('서버 작업 상태를 다시 확인하고 있어요. 같은 작업에 재연결합니다.');notified=true;}
+                    await pause(2000);
+                }
+            }
+        }finally{signal?.removeEventListener('abort',stop);}
+    }
     async function waitResult(id,signal){
         const stop=()=>void cancel(id);signal?.addEventListener('abort',stop,{once:true});
         try {
@@ -111,7 +151,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         for(const record of (recent && options.stage!=='output-retranslation' ? [recent] : [])){
             if(record.cancel || record.config!==fingerprint(configurationKey()))continue;
             let state;
-            try{state=await status(record.id);}catch(error){if(error.status===404){forget(record.id);continue;}throw error;}
+            try{state=await reconnectStatus(record.id,options.signal);}catch(error){if(error.status===404){forget(record.id);continue;}throw error;}
             if(!state.generationDone||state.source!==source)continue;
             if(['failed','cancelled'].includes(state.state))throw Error(state.error);
             const done=await waitResult(record.id,options.signal);

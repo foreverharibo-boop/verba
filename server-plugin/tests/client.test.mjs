@@ -39,17 +39,21 @@ test('disabled mode has zero plugin requests; missing plugin keeps local output'
  settings.serverTranslation=true;
  assert.equal(await client.output('Hello.',{},async()=>'local'),'local');assert.equal(calls,1);
 });
-test('server completes before a browser reads its response; exact output reuses one job',async()=>{
+test('interrupted first result lookup reconnects to the completed job without another AI request',async()=>{
  let generations=0,translations=0;
  const jobs=createJobs({engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async source=>{translations++;return{translation:'안녕.',sourceMap:[]};}})}},request:async(_c,_p,p,o)=>{
   generations++;const body=Buffer.from(JSON.stringify({choices:[{message:{content:'Hello.'}}]}));o.onHeaders(200,'application/json');o.onChunk(body);return{status:200,type:'application/json',body};
  }});
- let nativeCalls=0;
+ let nativeCalls=0,abortNextStatus=false,cancellations=0;
  environment(async(url,init={})=>{
   const path=new URL(url,'http://localhost').pathname;
   if(path.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'0.6.50'}}});
   if(path==='/api/plugins/verba-server/jobs')return Response.json(jobs.status(jobs.start('a',JSON.parse(init.body),{})));
-  if(path.startsWith('/api/plugins/verba-server/jobs/')){const id=path.split('/').at(-1);return Response.json(jobs.status(jobs.lookup('a',id),new URL(url,'http://localhost').searchParams.get('cursor')));}
+  if(path.endsWith('/cancel')){cancellations++;return Response.json({});}
+  if(path.startsWith('/api/plugins/verba-server/jobs/')){
+   if(abortNextStatus){abortNextStatus=false;throw new DOMException('signal is aborted without reason','AbortError');}
+   const id=path.split('/').at(-1);return Response.json(jobs.status(jobs.lookup('a',id),new URL(url,'http://localhost').searchParams.get('cursor')));
+  }
   nativeCalls++;return Response.json({});
  });
  const handlers={};const settings={serverTranslation:true,autoOutput:true,profileId:'A'};
@@ -60,10 +64,40 @@ test('server completes before a browser reads its response; exact output reuses 
  const response=await fetch('/api/backends/chat-completions/generate',{method:'POST',body:JSON.stringify(payload)});
  assert.equal(generations,1);assert.equal(translations,1);assert.equal(nativeCalls,0);
  assert.equal((await response.json()).choices[0].message.content,'Hello.');
+ abortNextStatus=true;
  const result=await client.output('Hello.',{stage:'output-translation'},()=>{throw Error('unexpected local');});
  assert.equal(result.translation,'안녕.');assert.equal(translations,1);
+ assert.equal(cancellations,0);
  // Explicit retranslation never reuses the auto-generation result.
  await client.output('Hello.',{stage:'output-retranslation'},()=>{});assert.equal(translations,2);
+});
+
+test('the actual 20-second transport timer is a connection timeout, not user cancellation',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ environment((_url,{signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true})));
+ const client=createServerClient({variant:'verba',version:'0.6.50',getSettings:()=>({}),getContext:()=>({getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings:{}}),getGenerationOptions:()=>({options:{}})});
+ const pending=client.check();
+ const checked=assert.rejects(pending,error=>error.name!=='AbortError'&&error.code==='VERBA_SERVER_CONNECTION_TIMEOUT'&&error.cause?.name!=='AbortError');
+ t.mock.timers.tick(20000);await checked;
+});
+
+test('an interrupted JSON body is not swallowed as an empty successful response',async()=>{
+ environment(async()=>({ok:true,json:async()=>{throw new DOMException('signal is aborted without reason','AbortError');}}));
+ const client=createServerClient({variant:'verba',version:'0.6.50',getSettings:()=>({}),getContext:()=>({getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings:{}}),getGenerationOptions:()=>({options:{}})});
+ await assert.rejects(client.check(),{code:'VERBA_SERVER_CONNECTION_INTERRUPTED'});
+});
+
+test('explicit user cancellation still cancels the accepted server job',async()=>{
+ const controller=new AbortController();let accepted=0,cancelled=0;
+ environment(async(url)=>{
+  if(url.endsWith('/cancel')){cancelled++;return Response.json({state:'cancelled'});}
+  if(url.endsWith('/jobs')){accepted++;controller.abort();return Response.json({state:'queued'});}
+  throw Error('unexpected polling');
+ });
+ const settings={translationEngine:'google-free'};
+ const client=createServerClient({variant:'verba',version:'0.6.50',getSettings:()=>settings,getContext:()=>({getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings}),getGenerationOptions:()=>({options:{}})});
+ await assert.rejects(client.run('output','Hello.',{signal:controller.signal}),{name:'AbortError'});
+ assert.equal(accepted,1);assert.equal(cancelled,1);
 });
 
 test('Relay keeps original request ownership while observer translates without a second generation',async t=>{

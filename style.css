@@ -3413,3 +3413,19 @@
     min-width: 0;
     box-sizing: border-box;
 }
+
+/* Keep the server connection action readable in narrow mobile panels. */
+#verba-settings #verba-server-check.menu_button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 100% !important;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 36px !important;
+    margin: 6px 0;
+    white-space: nowrap;
+    word-break: keep-all;
+    writing-mode: horizontal-tb;
+}

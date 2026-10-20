@@ -230,6 +230,38 @@ function validationText(value) {
         .replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, ' ');
 }
 
+// Preserve offsets while excluding code, URLs, macros, tags and opaque tokens.
+export function maskProtectedForEnglishReview(value) {
+    return String(value || '')
+        .replace(PROTECTED_PATTERN, match => ' '.repeat(match.length))
+        .replace(PROTECTED_TOKEN_PATTERN, match => ' '.repeat(match.length))
+        .replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, match => ' '.repeat(match.length));
+}
+
+// Only a recognized source+translation pair may exempt its English half.
+// A bilingual instruction alone must not exempt untranslated narration.
+export function englishReviewWindow(segment, translation, nameTokens = [], protectedTokens = []) {
+    const text = String(translation || '');
+    const dialogue = { ...segment, type: 'dialogue_candidate' };
+    const body = dialogueEnvelope(text).body;
+    const pair = trailingParentheticalParts(body);
+    const source = restoreBilingualDetectionTokens(dialogueEnvelope(segment.text).body, nameTokens, protectedTokens, 'source');
+    if (pair && bilingualSourceMatches(
+        restoreBilingualDetectionTokens(stripLooseDialogueQuotes(pair.left), nameTokens, protectedTokens, 'source'), source,
+    )) {
+        const korean = stripLooseDialogueQuotes(pair.right);
+        const start = text.lastIndexOf(korean);
+        return korean && start >= 0 ? { text: korean, start } : null;
+    }
+    if (!looksLikeBilingualDialogue(dialogue, text, nameTokens, protectedTokens)) {
+        return { text, start: 0 };
+    }
+    const korean = extractKoreanDialogueHalfRaw(dialogue, text, nameTokens, protectedTokens);
+    const start = text.lastIndexOf(korean);
+    // If the extracted view is not a literal span, never guess edit offsets.
+    return korean && start >= 0 ? { text: korean, start } : null;
+}
+
 function promptRequestsBilingual(value) {
     const prompt = String(value || '');
     if (!BILINGUAL_PROMPT_PATTERN.test(prompt)) return false;

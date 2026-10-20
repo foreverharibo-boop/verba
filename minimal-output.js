@@ -4,6 +4,7 @@ import { assembleTranslation, findProtectedTokenIntegrityProblems, findUntransla
 
 // Preserve every post-translation AI repair path for later restoration while
 // keeping the normal translation path to a single successful model response.
+// The independent final English review does not use this flag.
 // Change this one flag to true to restore post-translation AI repairs in both
 // the normal and minimal-output pipelines.
 export const POST_TRANSLATION_AI_REPAIR_ENABLED = false;
@@ -46,7 +47,7 @@ export function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [
 }
 
 // Prompt content is independent of the developer split setting.
-export async function translateMinimalOutput(segmented, settings, options, { requestSegments, buildSourceMap }) {
+export async function translateMinimalOutput(segmented, settings, options, { requestSegments, buildSourceMap, reviewEnglish }) {
     const config = {
         customTranslatorEnabled: settings.customTranslatorEnabled,
         customTranslatorTemplates: settings.customTranslatorTemplates,
@@ -181,6 +182,8 @@ export async function translateMinimalOutput(segmented, settings, options, { req
             console.warn('[베르바] 태그 미번역 1회 복구 실패(최소 프롬프트) — 최초 번역을 유지합니다.', error);
         }
     }
+
+    await reviewEnglish?.({ segmented, translations, speakerIdentity: options.speakerIdentity || {}, options });
 
     const translation = assembleTranslation(segmented, translations, {
         allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback,

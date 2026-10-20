@@ -1,3 +1,4 @@
+import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
 import { normalizedServerRetryLimit, serverRetryBackoffMs, googleRetryHintSeconds } from './retry-policy.js';
@@ -777,7 +778,7 @@ const profileRaceRequestQueue = [];
 let profileRaceRequestActive = 0;
 const enqueueSplitOutputRequest = createSplitRequestQueue(3);
 let requestTail = Promise.resolve();
-let lastQualityAuditSummary = POST_TRANSLATION_AI_REPAIR_ENABLED ? '아직 실행되지 않음' : '이 버전은 AI 후검수 꺼짐';
+let lastQualityAuditSummary = POST_TRANSLATION_AI_REPAIR_ENABLED ? '아직 실행되지 않음' : '일반 품질 검수 꺼짐';
 let chatSaveTimer = null;
 let promptEditorBackupTimer = null;
 let uiRefreshTimer = null;
@@ -4768,6 +4769,30 @@ async function runExperimentalQualityAudit({
     }
 }
 
+async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {}, options = {} }) {
+    const result = await reviewEnglishLeftovers({
+        segmented, translations, settings, identity: speakerIdentity, options,
+        request: async (prompt, targets, requestOptions) => {
+            const profiles = configuredProfileCycle();
+            // A final review must not enter the normal unlimited retry/race loop.
+            const response = await sendProfileRequest(prompt, {
+                ...requestOptions,
+                profileId: profiles.active,
+                profileSlot: profiles.slot,
+                stage: 'final-english-review',
+                timeoutSecondsOverride: Math.min(60, normalizedProfileFailureTimeoutSeconds()),
+            });
+            const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
+            if (parsed.parseError || parsed.partial.size !== targets.length) {
+                throw parsed.parseError || new Error('영어 잔여 검수 결과가 불완전합니다.');
+            }
+            return parsed.partial;
+        },
+    });
+    if (result.error) console.warn('[베르바] 영어 잔여 검수 실패 — 기존 번역을 유지합니다.', result.error);
+    return result;
+}
+
 async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const segmentationOptions = {
@@ -4775,7 +4800,7 @@ async function translateOutputText(source, options = {}) {
     };
     const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);
     if (minimalOutputEnabled(settings)) {
-        return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap });
+        return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap, reviewEnglish: reviewFinalEnglish });
     }
     const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
         signal: options.signal,
@@ -4925,6 +4950,8 @@ async function translateOutputText(source, options = {}) {
         ));
     }
 
+
+    await reviewFinalEnglish({ segmented, translations, speakerIdentity, options });
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));
     if (remaining.length) {
@@ -10489,7 +10516,7 @@ function developerSettingsMarkup() {
                                 <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''} ${POST_TRANSLATION_AI_REPAIR_ENABLED ? '' : 'disabled'}>
                                 <span>품질 검수 사용</span>
                             </label>
-                            <div class="verba-help">${POST_TRANSLATION_AI_REPAIR_ENABLED ? '로컬에서 이상 징후가 있을 때만 AI 품질 검수를 실행합니다.' : '현재 버전은 일반·미친 한출·김홍진 AI 후검수가 모두 꺼져 있습니다. 기능 코드는 보관되며 저장된 검수 설정은 유지됩니다. 추가 후검수 요청은 보내지 않습니다.'}</div>
+                            <div class="verba-help">${POST_TRANSLATION_AI_REPAIR_ENABLED ? '로컬에서 이상 징후가 있을 때만 AI 품질 검수를 실행합니다.' : '현재 버전은 일반·미친 한출·김홍진 AI 후검수가 모두 꺼져 있습니다. 기능 코드는 보관되며 저장된 검수 설정은 유지됩니다. 별도로 한국어 영역에 영어가 남으면 해당 부분만 최대 1회 AI 검수합니다. 검수 실패 시 기존 번역을 유지합니다.'}</div>
 
                             <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
                                 <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}><span>의미 보존 검사</span></label>
@@ -10501,7 +10528,7 @@ function developerSettingsMarkup() {
 
                             <div class="verba-quality-audit-status-row">
                                 <span>최근 검수</span>
-                                <b id="verba-quality-audit-status">${escapeHtml(POST_TRANSLATION_AI_REPAIR_ENABLED ? lastQualityAuditSummary : '이 버전은 AI 후검수 꺼짐')}</b>
+                                <b id="verba-quality-audit-status">${escapeHtml(POST_TRANSLATION_AI_REPAIR_ENABLED ? lastQualityAuditSummary : '일반 품질 검수 꺼짐')}</b>
                             </div>
                             <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
                         </div>
@@ -10611,7 +10638,7 @@ function enabledQualityAuditChecks() {
 
 function renderQualityAuditStatus() {
     const target = document.querySelector('#verba-quality-audit-status');
-    if (target) target.textContent = POST_TRANSLATION_AI_REPAIR_ENABLED ? lastQualityAuditSummary : '이 버전은 AI 후검수 꺼짐';
+    if (target) target.textContent = POST_TRANSLATION_AI_REPAIR_ENABLED ? lastQualityAuditSummary : '일반 품질 검수 꺼짐';
 }
 
 function bindAutoOutputSetting(panel) {

@@ -1,3 +1,4 @@
+import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
 import { normalizedServerRetryLimit, serverRetryBackoffMs, googleRetryHintSeconds } from './retry-policy.js';
 import { previousUserSource, appendPreviousUserContext } from './previous-user-context.js';
@@ -6936,6 +6937,15 @@ function resolveSelectionSourceNameLocally(matchContext) {
     const candidates = orderedSourceNameCandidates(matchContext.source);
     const selected = String(matchContext.selected || '');
     if (!selected) return '';
+    // Untranslated Latin names already present in the source need no AI match.
+    // Match full name boundaries so Ann cannot resolve to Anna or Ann-Marie.
+    const literal = selected.trim();
+    if (/^[\p{Script=Latin}\p{M}]+(?:[ '\u2019\-][\p{Script=Latin}\p{M}]+)*$/u.test(literal)) {
+        const exact = String(matchContext.source || '').match(new RegExp(
+            `(?<![\\p{L}\\p{N}_\\-])${escapeRegularExpression(literal)}(?![\\p{L}\\p{N}_\\-])`, 'iu',
+        ));
+        return exact ? exact[0] : '';
+    }
     const occurrences = [];
     let cursor = 0;
     while (cursor <= matchContext.translation.length - selected.length) {
@@ -10118,7 +10128,9 @@ function renderNameLockManager() {
     if (!content) return;
 
     const groups = allCharacterNameLockGroups();
+    const entryReference = currentCharacterReference();
     content.innerHTML = `
+        ${nameLockEntryMarkup('verba', entryReference, escapeHtml)}
         <div class="verba-help">모든 캐릭터 카드에 저장된 베르바 이름을 불러옵니다. 일반 단어나 문장은 표시하지 않아요.</div>
         <div class="verba-name-lock-list">
             ${groups.length ? groups.map((group, groupIndex) => `
@@ -10141,7 +10153,13 @@ function renderNameLockManager() {
                         </div>`).join('')}
                 </section>`).join('') : '<div class="verba-name-lock-empty">아직 어떤 캐릭터에도 고정한 이름이 없어요.</div>'}
         </div>
-        <div class="verba-help">새 이름은 해당 캐릭터의 번역문에서 이름을 선택한 뒤 ‘이름으로 고정’으로 등록하세요. 현재 열린 캐릭터의 표기를 수정하면 현재 채팅의 기존 저장 번역도 함께 변경되며, 다른 캐릭터의 저장값은 카드에서만 수정됩니다.</div>`;
+        <div class="verba-help">새 이름은 위에서 직접 입력하거나 번역문에서 선택한 뒤 ‘이름으로 고정’으로 등록할 수 있어요. 현재 열린 캐릭터의 표기를 수정하면 현재 채팅의 기존 저장 번역도 함께 변경되며, 다른 캐릭터의 저장값은 카드에서만 수정됩니다.</div>`;
+
+    bindNameLockEntry({
+        content, prefix: 'verba', reference: entryReference,
+        currentReference: currentCharacterReference, save: saveCharacterNameLock,
+        refresh: renderNameLockManager, notify, reportError,
+    });
 
     content.querySelectorAll('.verba-name-lock-group').forEach(groupElement => {
         const group = groups[Number(groupElement.dataset.groupIndex)];

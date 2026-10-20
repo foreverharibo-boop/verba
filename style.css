@@ -3400,3 +3400,16 @@
 #st-translation-notice-dock .st-translation-notice:is([data-owner="verba"], [data-owner="verba-preview"]) .st-translation-notice-icon {
     color: var(--verba-accent);
 }
+
+/* Direct name entry uses the existing SillyTavern theme controls. */
+#verba-settings .verba-name-lock-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+#verba-settings .verba-name-lock-entry input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}

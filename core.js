@@ -1581,10 +1581,28 @@ function splitDialogueAndNarration(value) {
     return pieces.filter(piece => piece.text);
 }
 
+// Resolve visible name macros before protecting source structure. Otherwise
+// {{user}} is opaque to both translation and the final English review, then
+// SillyTavern renders the untranslated persona name after our work is done.
+// Do not run a general macro evaluator or touch names inside code/attributes.
+export function resolveTranslationNameMacros(value, identity = {}) {
+    const names = {
+        user: String(identity.sourceUserName || identity.userName || '').trim(),
+        char: String(identity.sourceCharacterName || identity.characterName || '').trim(),
+    };
+    return String(value || '').replace(PROTECTED_PATTERN, match => {
+        const role = /^\{\{\s*(user|char)\s*\}\}$/iu.exec(match)?.[1]?.toLowerCase();
+        const name = names[role];
+        // Missing/unsafe identity data must not erase or execute the macro.
+        return name && name.length <= 120 && !/[{}<>\r\n`]/u.test(name) ? name : match;
+    });
+}
+
 export function segmentSource(value, nameLocks = [], {
     translateTaggedContent = true,
+    speakerIdentity = {},
 } = {}) {
-    const source = String(value || '');
+    const source = resolveTranslationNameMacros(value, speakerIdentity);
     const { protectedText, tokens, nameTokens } = protectSource(source, nameLocks);
     const taggedRanges = taggedInnerRangesInProtectedText(protectedText, tokens);
     const regions = splitByTaggedRanges(protectedText, taggedRanges);

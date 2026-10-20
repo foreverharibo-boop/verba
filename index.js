@@ -58,7 +58,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.44';
+const EXTENSION_VERSION = '0.6.47';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -4797,6 +4797,7 @@ async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const segmentationOptions = {
         translateTaggedContent: settings.translateTaggedContent !== false,
+        speakerIdentity: options.speakerIdentity || {},
     };
     const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);
     if (minimalOutputEnabled(settings)) {

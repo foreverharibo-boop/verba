@@ -20,7 +20,7 @@ assert.match(source, /bindAutoOutputSetting\(panel\);/);
     const cleared = [];
     const input = { checked: false, addEventListener: (_, fn) => { change = fn; } };
     const status = {};
-    const env = { settings: { autoOutput: true, autoInput: true },
+    const env = { automaticOutputLifecycle: { discard() {} }, settings: { autoOutput: true, autoInput: true },
         automaticTranslationTimers: new Map([[2, 42]]), clearTimeout: id => cleared.push(id),
         saveSettings: () => saves++, refreshRetranslateButton: () => refreshes++ };
     vm.createContext(env);
@@ -42,12 +42,13 @@ assert.match(source, /bindAutoOutputSetting\(panel\);/);
 function schedulerFixture() {
     const calls = [], timers = new Map(); let nextTimer = 0;
     const message = { mes: 'Hello', extra: {} };
-    const env = { settings: { autoOutput: true }, EXTENSION_KEY: 'verba',
+    const chat = [message];
+    const env = { automaticOutputLifecycle: { busy: () => false, isComplete: () => false, trace() {} }, settings: { autoOutput: true }, EXTENSION_KEY: 'verba',
         isTranslationExtensionActive: () => true,
         automaticTranslationTimers: new Map(), swipeTranslationJobs: new Map(),
         setTimeout: fn => { timers.set(++nextTimer, fn); return nextTimer; },
         clearTimeout: id => timers.delete(id),
-        liveContext: () => ({ chat: [message] }),
+        liveContext: () => ({ chat }),
         repairSwipeTranslationIndexes: () => false, scheduleChatSave() {},
         clearStaleCurrentTranslation: id => calls.push(['clear', id]),
         translateMessage: (id, options) => calls.push(['translate', id, options.automatic]),
@@ -197,7 +198,7 @@ for (const saved of [false, true]) {
 {
     const button = { classList: { toggle() {} }, setAttribute() {} };
     const controller = new AbortController();
-    const env = { settings: { autoOutput: true },
+    const env = { automaticOutputLifecycle: { busy: () => false, isComplete: () => false, trace() {} }, settings: { autoOutput: true },
         refreshMessageTranslationButtons() {}, document: { querySelector: () => button },
         latestAssistantMessage: () => ({ id: 0, message: {} }), activeTranslationControllers: () => [controller],
         failedOutputSignatures: new Map(), messageVersionSignature: () => '', currentRecord: () => null };

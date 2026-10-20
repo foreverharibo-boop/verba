@@ -59,7 +59,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.48';
+const EXTENSION_VERSION = '0.6.49';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -842,7 +842,7 @@ function storeDebugDiagnostic(diagnostic) {
     if (!settings.debugMode) return;
     lastDebugDiagnostic = diagnostic;
     const copy = document.querySelector('#verba-copy-last-debug');
-    if (copy) copy.disabled = !diagnostic;
+    if (copy) copy.disabled = !settings.debugMode;
 }
 
 function recordSegmentRecovery(result, response, options, attempt) {
@@ -985,8 +985,22 @@ function debugDiagnosticText(diagnostic) {
 }
 
 async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
-    if (!settings.debugMode || !diagnostic) throw new Error('복사할 최근 오류 로그가 없습니다.');
-    await copyText(debugDiagnosticText(diagnostic));
+    if (!settings.debugMode) throw new Error('복사하려면 디버그 모드를 켜 주세요.');
+    const snapshot = createDebugDiagnostic('manual-status', null, '복사 시점의 번역 상태');
+    snapshot.activeWork = {
+        outputMessageIds: [...pendingOutputs.keys()],
+        scheduledMessageIds: [...automaticTranslationTimers.keys()],
+        swipeMessageIds: [...swipeTranslationJobs.keys()],
+        retryRequests: [...serverRetryStates.values()].map(state => ({
+            retryCount: state.retryCount,
+            maxRetries: state.maxRetries,
+            phase: state.delayMs > 0 ? 'retry-wait' : 'request-pending',
+            updatedAt: state.updatedAt,
+            retryAt: state.delayMs > 0 ? state.updatedAt + state.delayMs : null,
+        })),
+    };
+    if (diagnostic) snapshot.lastRecordedDiagnostic = diagnostic;
+    await copyText(debugDiagnosticText(snapshot));
 }
 
 function reportError(stage, error, displayMessage = '') {
@@ -11607,8 +11621,8 @@ function injectSettingsPanel() {
                             <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
                             <span>디버그 모드</span>
                         </label>
-                        <div class="verba-help">마지막 오류·응답 형식·보호 표식 복구 1건을 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
-                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode && lastDebugDiagnostic ? '' : 'disabled'}>로그 복사</button>
+                        <div class="verba-help">오류가 없어도 로그 복사로 현재 번역 대기·재시도 상태와 백그라운드 전환 기록을 확인할 수 있어요. 마지막 오류·응답 형식·보호 표식 복구 1건도 함께 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
+                        <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode ? '' : 'disabled'}>로그 복사</button>
                         <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>
                             <div class="verba-tool-details-content">
@@ -12271,7 +12285,7 @@ function injectSettingsPanel() {
     const debugCopyButton = panel.querySelector('#verba-copy-last-debug');
     const syncDebugCopyButton = () => {
         if (!debugCopyButton) return;
-        debugCopyButton.disabled = !settings.debugMode || !lastDebugDiagnostic;
+        debugCopyButton.disabled = !settings.debugMode;
     };
     debugModeInput?.addEventListener('change', event => {
         settings.debugMode = event.target.checked;
@@ -12285,10 +12299,10 @@ function injectSettingsPanel() {
     debugCopyButton?.addEventListener('click', async () => {
         try {
             await copyDebugDiagnostic();
-            notify('마지막 오류 로그를 복사했어요.', 'success');
+            notify('현재 번역 상태와 최근 오류 로그를 복사했어요.', 'success');
         } catch (error) {
             console.error('[베르바] 최근 오류 진단 복사 실패', error);
-            notify(lastDebugDiagnostic ? '로그 복사에 실패했어요. 클립보드 권한을 확인해 주세요.' : '복사할 최근 오류 로그가 없어요.', 'warning');
+            notify('로그 복사에 실패했어요. 디버그 모드와 클립보드 권한을 확인해 주세요.', 'warning');
         }
     });
     syncDebugCopyButton();

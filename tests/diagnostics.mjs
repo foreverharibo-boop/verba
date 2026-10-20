@@ -87,9 +87,25 @@ await assert.rejects(pending, error => error.name === 'AbortError');
 const storeSource = index.slice(index.indexOf('function storeDebugDiagnostic('), index.indexOf('function createDebugDiagnostic('));
 const copySource = index.slice(index.indexOf('async function copyDebugDiagnostic('), index.indexOf('function reportError('));
 const button = { disabled: true };
+const copies = [];
+const outputJobs = new Map([[8, {}]]);
+const retries = new Map([[1, { retryCount: 2, maxRetries: 20, delayMs: 5000, updatedAt: 10000 }]]);
+let lifecycleEvents = ['page-hidden'];
 const api = Function('settings', 'document', 'copyText', 'debugDiagnosticText',
+    'createDebugDiagnostic', 'pendingOutputs', 'automaticTranslationTimers', 'swipeTranslationJobs', 'serverRetryStates',
     'let lastDebugDiagnostic = null;\n' + storeSource + copySource + '\nreturn { storeDebugDiagnostic, copyDebugDiagnostic, latest: () => lastDebugDiagnostic };')(
-    settings, { querySelector: () => button }, async value => value, JSON.stringify);
+    settings, { querySelector: () => button }, async value => copies.push(JSON.parse(value)), JSON.stringify,
+    () => ({ automaticOutput: { events: [...lifecycleEvents] } }), outputJobs, new Map(), new Map(), retries);
+settings.debugMode = true;
+await api.copyDebugDiagnostic();
+assert.deepEqual(copies.at(-1).activeWork.outputMessageIds, [8], 'capture running output without any error');
+assert.equal(copies.at(-1).activeWork.retryRequests[0].retryAt, 15000);
+assert.equal(copies.at(-1).lastRecordedDiagnostic, undefined);
+lifecycleEvents.push('page-visible');
+retries.clear();
+await api.copyDebugDiagnostic();
+assert.deepEqual(copies.at(-1).automaticOutput.events, ['page-hidden', 'page-visible'], 'copy captures current resume state, not an old error snapshot');
+assert.equal(copies.at(-1).activeWork.retryRequests.length, 0);
 settings.debugMode = false;
 api.storeDebugDiagnostic({ id: 1 });
 assert.equal(api.latest(), null);
@@ -99,8 +115,9 @@ api.storeDebugDiagnostic({ id: 2 });
 assert.deepEqual(api.latest(), { id: 2 });
 assert.equal(button.disabled, false, 'button updates when an error arrives');
 await api.copyDebugDiagnostic();
+assert.deepEqual(copies.at(-1).lastRecordedDiagnostic, { id: 2 }, 'retain prior diagnostic alongside live status');
 settings.debugMode = false;
-await assert.rejects(api.copyDebugDiagnostic(), /복사할/);
+await assert.rejects(api.copyDebugDiagnostic(), /디버그 모드/);
 assert.ok(index.includes('if (!settings.debugMode) lastDebugDiagnostic = null;'));
 assert.equal((index.match(/>로그 복사<\/button>/g) || []).length, 1);
 assert.ok(!index.includes("copy.textContent = '진단 복사'"));

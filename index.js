@@ -1,3 +1,4 @@
+import { createServerClient } from './server-client.js';
 import { createAutomaticOutputLifecycle } from './automatic-output.js';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
@@ -59,7 +60,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.49';
+const EXTENSION_VERSION = '0.6.50';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -343,6 +344,7 @@ function normalizeCustomTranslatorSettings(rawTemplates = {}, rawModified = {}) 
     return { templates: normalizedTemplates, modified: normalizedModified };
 }
 const DEFAULT_SETTINGS = {
+    serverTranslation: false,
     translationEngine: 'ai',
     profileId: '',
     fallbackProfileId: '',
@@ -812,6 +814,77 @@ let lastDebugDiagnostic = null;
 const outputTiming = createOutputTiming();
 outputTiming.setEnabled(settings.debugMode);
 let lastPromptConflicts = [];
+
+
+const verbaServer = createServerClient({
+    variant: EXTENSION_KEY, version: EXTENSION_VERSION,
+    getSettings: () => settings, getContext: liveContext,
+    isActive: () => isTranslationExtensionActive(EXTENSION_KEY),
+    getSnapshot: () => ({
+        settings: { ...settings, profileStats: undefined },
+        nameLocks: normalizedCharacterNameLocks(),
+        character: { name: currentCharacterReference()?.character?.name || liveContext().name2 || '', gender: detectCharacterGender(currentCharacterReference()?.character) },
+        context: { name1: liveContext().name1, name2: liveContext().name2 },
+    }),
+    getGenerationOptions: type => {
+        const chat = liveContext().chat || [];
+        const last = chat.at(-1);
+        const target = last && !last.is_user ? last : { name: liveContext().name2 };
+        const id = last && !last.is_user ? chat.length - 1 : chat.length;
+        return {
+            prefix: type === 'continue' ? messageSource(last) : '',
+            options: {
+                speakerIdentity: outputSpeakerIdentity(target),
+                previousUserSource: previousUserSource(chat, id, messageSource),
+                tuning: { dialogueEndingRepeatHints: recentDialogueEndingRepeatHints(id) },
+                stage: 'output-translation',
+            },
+        };
+    },
+    onProgress: applyServerTranslationProgress,
+    onNotice: text => notify(text, 'warning'),
+});
+
+function applyServerTranslationProgress(state) {
+    const prefix = `server:${state.id}:`;
+    for (const event of state.events || []) {
+        if (event.kind === 'profile') recordProfileAttempt(event.slot, event);
+        if (event.kind === 'notice') notify(event.message, event.type);
+        if (event.kind === 'retry') {
+            for (const key of serverRetryStates.keys()) if (typeof key === 'string' && key.startsWith(prefix)) serverRetryStates.delete(key);
+            (event.requests || []).forEach((entry, index) => {
+                const controller = new AbortController();
+                controller.signal.addEventListener('abort', () => void verbaServer.cancel(state.id), { once: true });
+                serverRetryStates.set(prefix + index, { ...entry, controller });
+            });
+        }
+    }
+    if (['completed', 'failed', 'cancelled'].includes(state.state)) {
+        for (const key of serverRetryStates.keys()) if (typeof key === 'string' && key.startsWith(prefix)) serverRetryStates.delete(key);
+    }
+    updateServerRetryIndicator();
+}
+
+function bindServerTranslationSetting(panel) {
+    const input = panel.querySelector('#verba-server-translation');
+    const status = panel.querySelector('#verba-server-status');
+    const check = panel.querySelector('#verba-server-check');
+    input.addEventListener('change', async () => {
+        if (!input.checked) { settings.serverTranslation = false; saveSettings(); status.textContent = '기존 브라우저 번역 · 진행 중인 서버 작업은 계속됩니다.'; return; }
+        input.disabled = true;
+        try {
+            await verbaServer.check(); settings.serverTranslation = true; saveSettings();
+            status.textContent = '서버 번역 연결됨 · 다음 요청부터 적용됩니다.';
+        } catch (error) { input.checked = false; status.textContent = error.message; }
+        finally { input.disabled = false; }
+    });
+    check.addEventListener('click', async () => {
+        check.disabled = true;
+        try { await verbaServer.check(); status.textContent = '서버 플러그인과 버전이 일치합니다.'; }
+        catch (error) { status.textContent = error.message; }
+        finally { check.disabled = false; }
+    });
+}
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -3464,6 +3537,9 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
 }
 
 async function sendWithRetry(prompt, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (settings.serverTranslation === true && await verbaServer.available()) { return verbaServer.run("request", prompt, options); }
+    /* SERVER_DISPATCH_END */
     const maxRetries = normalizedServerRetryLimit(settings.serverRetryLimit);
     const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
@@ -3613,6 +3689,9 @@ function collectPartialSegmentTranslations(raw, expectedSegments) {
 }
 
 async function requestSegments(prompt, expectedSegments, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (settings.serverTranslation === true && await verbaServer.available()) { return new Map(await verbaServer.run("segments", prompt, options, expectedSegments)); }
+    /* SERVER_DISPATCH_END */
     const googleOptions = typeof settings !== 'undefined' && settings.translationEngine === 'google-free'
         ? googleFreeStageOptions(options.stage)
         : null;
@@ -4815,6 +4894,9 @@ async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {
 }
 
 async function translateOutputText(source, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (!options.browserLocal && (settings.serverTranslation === true || verbaServer.hasPendingGeneration())) { return verbaServer.output(source, options, () => translateOutputText(source, { ...options, browserLocal: true })); }
+    /* SERVER_DISPATCH_END */
     const characterNameLocks = normalizedCharacterNameLocks();
     const segmentationOptions = {
         translateTaggedContent: settings.translateTaggedContent !== false,
@@ -5026,6 +5108,9 @@ function inputIdentitySpellingContext() {
 }
 
 async function translateInputText(source, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (settings.serverTranslation === true && await verbaServer.available()) { return verbaServer.run("input", source, options); }
+    /* SERVER_DISPATCH_END */
     const expected = [{ id: 'seg_0000', type: 'user_input', text: source }];
     const targetGender = detectCharacterGender(currentCharacterReference()?.character);
     const identityContext = inputIdentitySpellingContext();
@@ -11034,7 +11119,21 @@ function injectSettingsPanel() {
                             <div class="verba-help"><b>인풋:</b> 켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
                         </div>
                     </details>
-                </section>
+
+                    <details class="verba-tool-details">
+                        <summary>서버 번역 <small>선택 설치 · 실험 기능</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row" for="verba-server-translation">
+                                <input type="checkbox" id="verba-server-translation" ${settings.serverTranslation === true ? 'checked' : ''}>
+                                <span>서버에서 번역</span>
+                            </label>
+                            <div class="verba-help">별도 서버 플러그인을 설치한 경우 사용해요. 설치하지 않으면 기존 브라우저 번역을 그대로 이용합니다. 서버는 계속 켜져 있어야 합니다.</div>
+                            <div class="verba-help">새 답변의 백그라운드 수신은 채팅 완성 API를 지원합니다. 다른 확장이 답변을 수정하면 최종 원문과 일치하는 번역만 사용합니다. 서버 재시작 시 진행 중인 작업은 복구되지 않습니다.</div>
+                            <button type="button" id="verba-server-check" class="menu_button">서버 연결 확인</button>
+                            <div id="verba-server-status" class="verba-help" aria-live="polite">${settings.serverTranslation === true ? '서버 번역 켜짐' : '기존 브라우저 번역'}</div>
+                        </div>
+                    </details>
+</section>
 
                 <details id="verba-profile-settings-group" class="verba-tool-details">
                     <summary>번역 엔진·연결 프로필 <small>A/B/C · 재시도</small></summary>
@@ -11641,6 +11740,7 @@ function injectSettingsPanel() {
     bindSettingsSearch(panel);
     bindAutoInputSetting(panel);
     bindAutoOutputSetting(panel);
+    bindServerTranslationSetting(panel);
     bindBaseTranslationEditor(panel, settings, { save: saveSettings, notify });
     refreshProfileSelect();
     syncTranslationEngineUi(panel);
@@ -13577,6 +13677,7 @@ function initialize() {
     setupSelection();
     setupEvents();
     setupAutomaticOutputLifecycle();
+    verbaServer.install();
     setupObserver();
     setTimeout(() => {
         scheduleRecentInsteadRevisionTranslations(220);

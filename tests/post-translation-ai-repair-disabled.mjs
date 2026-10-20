@@ -19,6 +19,8 @@ const segmented = {
     tokens: [],
 };
 const env = {
+    verbaServer: { hasPendingGeneration: () => false },
+    reviewFinalEnglish: async () => {},
     settings: {},
     POST_TRANSLATION_AI_REPAIR_ENABLED: false,
     normalizedCharacterNameLocks: () => [],

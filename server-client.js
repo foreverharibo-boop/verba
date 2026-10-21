@@ -6,7 +6,20 @@ const abortError = () => new DOMException('번역을 중지했습니다.','Abort
 const clean = value => JSON.parse(JSON.stringify(value));
 const fingerprint = value => { let h=14695981039346656037n; for(const c of value){h^=BigInt(c.codePointAt(0));h=BigInt.asUintN(64,h*1099511628211n);}return h.toString(16); };
 const hasMarker = (data,marker) => JSON.stringify(data).includes(marker);
-export async function captureConnectionProfiles(context, ids) {
+// Both translator extensions share ST's service classes. Serialize only this
+// short, non-network capture so nested wrappers cannot restore each other in
+// the wrong order. Translation requests themselves still run concurrently.
+const CAPTURE_QUEUE = Symbol.for('verba.profile-capture.queue.v1');
+export function captureConnectionProfiles(context, ids) {
+    const selected = [...ids];
+    const previous = globalThis[CAPTURE_QUEUE] || Promise.resolve();
+    const request = previous.then(() => captureProfiles(context, selected));
+    const tail = request.then(() => undefined, () => undefined);
+    globalThis[CAPTURE_QUEUE] = tail;
+    void tail.then(() => { if (globalThis[CAPTURE_QUEUE] === tail) delete globalThis[CAPTURE_QUEUE]; });
+    return request;
+}
+async function captureProfiles(context, ids) {
     const result={};
     for(const id of [...new Set(ids.filter(Boolean))]) {
         const marker='VERBA_CAPTURE_'+newId();

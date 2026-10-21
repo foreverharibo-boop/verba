@@ -4,7 +4,7 @@ const { failure, extractReply } = require('./provider.cjs');
 const ID = /^[a-f0-9]{32}$/;
 const MAX_SNAPSHOT = 4 * 1024 * 1024;
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-function createJobs({ engines, request, profileRequest, versions, now = Date.now, retention = 86400000, maxJobs = 32, maxActive = 4, prepareNotification = () => null }) {
+function createJobs({ engines, request, profileRequest, versions, now = Date.now, retention = 86400000, maxJobs = 32, maxActive = 4, prepareNotification = () => null, onLifecycle = () => {} }) {
     const jobs = new Map();
     const key = (owner,id) => JSON.stringify([owner,id]);
     function prune() {
@@ -17,6 +17,12 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         return job;
     }
     function report(job,event) { job.events.push({...event, seq: job.eventSequence++}); if(job.events.length>200) job.events.shift(); }
+    function lifecycle(job, stage) {
+        // Fixed metadata only; never send prompts, names, translated text or provider errors to logs.
+        if (!['generation','observed-generation','output'].includes(job.kind)) return;
+        try { onLifecycle({id:job.id,kind:job.kind,stage,at:now(),elapsedMs:Math.max(0,now()-job.createdAt)}); }
+        catch { /* Diagnostics cannot interrupt generation or translation. */ }
+    }
     function status(job,cursor=0) {
         const start=Math.max(0,Math.min(job.raw.length,Number(cursor)||0));
         const next=Math.min(job.raw.length,start+128*1024);
@@ -46,6 +52,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         const job={id,owner,kind,digest:hash,createdAt:now(),finishedAt:null,state:'queued',events:[],eventSequence:0,
             controller,raw:Buffer.alloc(0),generationDone:!['generation','observed-generation'].includes(kind),httpStatus:0,type:'',source:source||'',result:null,error:''};
         jobs.set(key(owner,id),job);
+        lifecycle(job, 'accepted');
         let notify = null;
         if (['generation','observed-generation'].includes(kind)) {
             try {
@@ -88,7 +95,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
                 else if(kind==='segments') result=[...await engine.segments(job.source,envelope.segments,runOptions)];
                 else if(kind==='request') result=await engine.request(job.source,runOptions);
                 else if(['generation','observed-generation'].includes(kind) && !engine.shouldTranslate(job.source)) result={skipped:true,translation:job.source,sourceMap:[]};
-                else result=await engine.output(job.source,runOptions);
+                else { lifecycle(job, 'translation_started'); result=await engine.output(job.source,runOptions); }
                 if(controller.signal.aborted) throw new DOMException('취소','AbortError');
                 job.result=result; job.state='completed';
             } catch(error) {
@@ -97,6 +104,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
                 job.error=controller.signal.aborted?'사용자가 작업을 중지했습니다.':`서버 작업 실패${error.status?' (HTTP '+error.status+')':''}. 진단 단계와 연결 프로필을 확인해 주세요.`;
                 report(job,{kind:'failure',code:String(error.code||error.name||'Error'),httpStatus:Number(error.status)||null});
             } finally { job.finishedAt=now(); job.generationDone=true; }
+            lifecycle(job, job.result?.skipped ? 'skipped' : job.state);
             // Translation is committed to server memory before any notification.
             // Delivery failure must never fail/retry the translation or charge another AI call.
             if (job.state === 'completed' && !job.result?.skipped

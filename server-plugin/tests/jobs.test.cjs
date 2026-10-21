@@ -72,3 +72,24 @@ test('Korean automatic reply is skipped; job identity and user limits remain bou
  const newer=jobs.start('a',{id:'b'.repeat(32),kind:'observed-generation',snapshot},{});
  assert.throws(()=>jobs.lookup('a',id),e=>e.status===404);jobs.cancel('a',newer.id);await newer.done;
 });
+
+test('lifecycle timestamps prove translation completes before any browser status lookup',async()=>{
+ for(const kind of ['generation','observed-generation']) {
+  let clock=1000;const events=[];
+  const response={state:'completed',status:200,type:'application/json',body:Buffer.from('{"choices":[{"message":{"content":"PRIVATE SOURCE"}}]}')};
+  const jobs=createJobs({now:()=>clock,onLifecycle:event=>events.push(event),
+   engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async()=>{clock=3000;return{translation:'PRIVATE RESULT'};}})}},
+   request:async()=>{clock=2000;return response;}});
+  const job=jobs.start('PRIVATE OWNER',{id,kind,snapshot,generation:{path:'/api/backends/chat-completions/generate',payload:{}}},{});
+  if(kind==='observed-generation'){clock=2000;jobs.observed('PRIVATE OWNER',id,response);}
+  await job.done;
+  assert.deepEqual(events.map(e=>e.stage),['accepted','translation_started','completed']);
+  assert.deepEqual(events.map(e=>e.at),[1000,2000,3000]);
+  assert.equal(events.at(-1).elapsedMs,2000);assert.doesNotMatch(JSON.stringify(events),/PRIVATE/);
+  clock=9000;assert.equal(jobs.status(job).state,'completed');assert.equal(events.at(-1).at,3000);
+ }
+});
+test('a broken diagnostic sink cannot fail a successful translation',async()=>{
+ const jobs=createJobs({onLifecycle:()=>{throw Error('broken log');},engines:{verba:{createEngine:()=>({output:async()=>({translation:'ok'})})}}});
+ const job=jobs.start('a',{id,kind:'output',snapshot,source:'hello'},{});await job.done;assert.equal(job.state,'completed');
+});

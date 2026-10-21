@@ -60,7 +60,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.51';
+const EXTENSION_VERSION = '0.6.52';
+// This client-only fix uses the existing server translation engine unchanged.
+const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -817,7 +819,7 @@ let lastPromptConflicts = [];
 
 
 const verbaServer = createServerClient({
-    variant: EXTENSION_KEY, version: EXTENSION_VERSION,
+    variant: EXTENSION_KEY, version: SERVER_ENGINE_VERSION,
     getSettings: () => settings, getContext: liveContext,
     isActive: () => isTranslationExtensionActive(EXTENSION_KEY),
     getSnapshot: () => ({

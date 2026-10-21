@@ -1,4 +1,5 @@
 // Optional server transport. Disabled installations do not contact the plugin.
+import { installVertexModelCompatibility } from './model-compat.js';
 const API = '/api/plugins/verba-server';
 const newId = () => [...crypto.getRandomValues(new Uint8Array(16))].map(x=>x.toString(16).padStart(2,'0')).join('');
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
@@ -46,6 +47,8 @@ async function captureProfiles(context, ids) {
     return result;
 }
 export function createServerClient({variant,version,getSettings,getContext,isActive,getSnapshot,getGenerationOptions,onProgress=()=>{},onNotice=()=>{}}) {
+    // Register during module evaluation, before ST announces APP_READY.
+    installVertexModelCompatibility(getContext);
     const storageKey='verba-server-jobs:'+variant;
     const frames=[]; let records=[]; let ready=false; let relayObserver=false; let installedFetch=null;
     const fetchBase=globalThis.fetch.bind(globalThis);

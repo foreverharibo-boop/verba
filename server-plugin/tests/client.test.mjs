@@ -157,3 +157,33 @@ test('Relay keeps original request ownership while observer translates without a
  assert.equal((await client.output('Hello.',{},()=>{throw Error('unexpected local');})).translation,'안녕.');
  assert.equal(delegated,1);assert.equal(translations,1);
 });
+
+test('a dry-run preview without GENERATION_ENDED cannot hide the real reply from server translation',async()=>{
+ let nativeCalls=0;const accepted=[];
+ environment(async(url,init={})=>{
+  const path=new URL(url,'http://localhost').pathname;
+  if(path.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'0.6.51'}}});
+  if(path==='/api/plugins/verba-server/jobs'){accepted.push(JSON.parse(init.body));return Response.json({state:'queued'});}
+  if(path.startsWith('/api/plugins/verba-server/jobs/'))return Response.json({state:'completed',status:200,type:'application/json',cursor:0,next:0,generationDone:true});
+  nativeCalls++;return Response.json({});
+ });
+ const handlers={};const settings={serverTranslation:true,autoOutput:true,translationEngine:'google-free'};
+ const context={chatId:'one',getRequestHeaders:()=>({}),eventTypes:{GENERATION_STARTED:'start',GENERATE_AFTER_DATA:'data',CHAT_COMPLETION_SETTINGS_READY:'settings',GENERATION_ENDED:'end'},eventSource:{on:(name,fn)=>handlers[name]=fn}};
+ const client=createServerClient({variant:'verba',version:'0.6.51',getSettings:()=>settings,getContext:()=>context,isActive:()=>true,getSnapshot:()=>({settings}),getGenerationOptions:()=>({options:{}})});
+ client.install();
+ handlers.start('normal',{},false);
+ // ST returns directly after GENERATE_AFTER_DATA for dryRun; it emits no ENDED.
+ handlers.start('normal',{},true);handlers.data({prompt:[{role:'user',content:'preview'}]},true);
+ handlers.start('normal',{},true);handlers.data({prompt:[{role:'user',content:'second preview'}]},true);
+ const messages=[{role:'user',content:'real reply'}];handlers.data({prompt:messages},false);
+ // A quiet helper sharing the messages is still not a character reply.
+ const helper={messages,type:'quiet',stream:false};handlers.settings(helper);
+ await fetch('/api/backends/chat-completions/generate',{method:'POST',body:JSON.stringify(helper)});
+ assert.equal(accepted.length,0);assert.equal(nativeCalls,1);nativeCalls=0;
+ const payload={messages,type:'normal',stream:false};handlers.settings(payload);
+ await fetch('/api/backends/chat-completions/generate',{method:'POST',body:JSON.stringify(payload)});
+ assert.equal(nativeCalls,0,'the native reply must be handed to the server before the browser is suspended');
+ assert.equal(accepted.length,1);assert.equal(accepted[0].kind,'generation');
+ assert.equal(client.diagnostics().events.filter(row=>row.event==='preview-ignored').length,2);
+ assert.equal(JSON.stringify(client.diagnostics()).includes('real reply'),false);
+});

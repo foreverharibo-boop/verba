@@ -51,6 +51,11 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     installVertexModelCompatibility(getContext);
     const storageKey='verba-server-jobs:'+variant;
     const frames=[]; let records=[]; let ready=false; let relayObserver=false; let installedFetch=null;
+    const history=[];
+    function trace(event,detail={}){
+        history.push({event,at:Date.now(),...detail});
+        if(history.length>40)history.shift();
+    }
     const fetchBase=globalThis.fetch.bind(globalThis);
     const scopeKey=()=>{const c=getContext();return JSON.stringify([c.chatId??'',c.characterId??'',c.groupId??'',c.name2??'']);};
     try{records=JSON.parse(localStorage.getItem(storageKey)||'[]').filter(x=>/^[a-f0-9]{32}$/.test(x.id)).slice(-32);}catch{}
@@ -165,16 +170,18 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // reusable. Regex/other extension changes never receive stale results.
         const recent=[...records].reverse().find(r=>r.scope===scopeKey()&&r.kind==='generation');
         for(const record of (recent && options.stage!=='output-retranslation' ? [recent] : [])){
-            if(record.cancel || record.config!==fingerprint(configurationKey()))continue;
+            if(record.cancel || record.config!==fingerprint(configurationKey())){trace('reuse-skipped',{reason:record.cancel?'cancelled':'settings-changed'});continue;}
             let state;
             try{state=await reconnectStatus(record.id,options.signal);}catch(error){if(error.status===404){forget(record.id);continue;}throw error;}
-            if(!state.generationDone||state.source!==source)continue;
+            if(!state.generationDone||state.source!==source){trace('reuse-skipped',{reason:!state.generationDone?'generation-pending':'source-changed'});continue;}
             if(['failed','cancelled'].includes(state.state))throw Error(state.error);
             const done=await waitResult(record.id,options.signal);
             record.kind='used';save();
+            trace('automatic-result-reused');
             return done.result;
         }
         if(!await available())return local();
+        trace('browser-output-submitted',{automaticJobKnown:!!recent});
         return run('output',source,options);
     }
     async function run(kind,source,options={},segments){
@@ -187,16 +194,22 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     }
     async function input(source,options,local){return await available()?run('input',source,options):local();}
     function generationStarted(type,options={},dryRun=false){
+        // ST's prompt previews return after GENERATE_AFTER_DATA without an
+        // ENDED event. Pushing them would strand an ineligible frame over the
+        // live reply, silently bypassing automatic server job admission.
+        if(dryRun){trace('preview-ignored');return;}
         frames.push({eligible:!dryRun&&!options?.quietToLoud&&[undefined,'normal','regenerate','swipe','continue'].includes(type),type,data:null,request:null});
         if(frames.length>32)frames.splice(0,frames.length-32);
     }
     function afterData(data,dryRun=false){const frame=frames.at(-1);if(frame?.eligible&&!dryRun)frame.data=data;}
     function settingsReady(data){
         const frame=frames.at(-1);const prompt=frame?.data?.prompt;
-        if(!frame?.eligible||!Array.isArray(prompt)||!Array.isArray(data?.messages))return;
+        if(!frame?.eligible||![undefined,'normal','regenerate','swipe','continue'].includes(data?.type))return;
+        if(!Array.isArray(prompt)||!Array.isArray(data?.messages)){trace('reply-not-bound',{reason:'missing-prompt'});return;}
         const messages=prompt.filter(x=>x&&typeof x==='object');
-        if(messages.length!==data.messages.length||!messages.every((x,i)=>x===data.messages[i]))return;
+        if(!messages.length||messages.length!==data.messages.length||!messages.every((x,i)=>x===data.messages[i])){trace('reply-not-bound',{reason:'different-messages'});return;}
         frame.request=data;
+        trace('reply-bound');
         ensureHook();
     }
     async function generatedResponse(envelope,signal){
@@ -244,7 +257,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             if(!isActive()||getSettings().serverTranslation!==true||getSettings().autoOutput===false||!frame?.request
                 ||url.origin!==location.origin||url.pathname!=='/api/backends/chat-completions/generate'
                 ||String(init?.method||'GET').toUpperCase()!=='POST'||typeof init?.body!=='string')return previous.call(this,input,init);
-            if(JSON.stringify(frame.request)!==init.body)return previous.call(this,input,init);
+            if(JSON.stringify(frame.request)!==init.body){trace('reply-not-bound',{reason:'wire-body-changed'});return previous.call(this,input,init);}
             const nativePayload=frame.request; frame.request=null;
             // Capture the initiating character before asynchronous profile preparation.
             // Only bound automatic reply jobs get this opt-in metadata, never helpers.
@@ -253,12 +266,13 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             catch { /* An optional notifier cannot prevent a reply. */ }
             let snap;
             try { if(!await available())return previous.call(this,input,init); snap=await snapshot(); }
-            catch(error) { onNotice('서버 번역 준비 실패: '+error.message+' · 답변 생성은 기존 방식으로 진행합니다.'); return previous.call(this,input,init); }
+            catch(error) { trace('automatic-prepare-failed');onNotice('서버 번역 준비 실패: '+error.message+' · 답변 생성은 기존 방식으로 진행합니다.'); return previous.call(this,input,init); }
             const generationOptions=getGenerationOptions(frame.type);
             if(relayActive()) {
                 if(!relayObserver){onNotice('실리릴레이 서버를 업데이트해야 백그라운드 번역을 연결할 수 있습니다.');return previous.call(this,input,init);}
                 const ticket=newId();
                 await submit({id:ticket,kind:'observed-generation',snapshot:snap,notification,options:clean(generationOptions.options),generation:{prefix:generationOptions.prefix||''}},init.signal);
+                trace('automatic-submitted',{kind:'observed-generation'});
                 // Mutate the same final payload object that Relay identifies,
                 // retaining its existing request binding and recovery journal.
                 nativePayload.__verba_server_ticket=ticket;
@@ -267,18 +281,19 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 catch(error){await cancel(ticket);throw error;}
                 finally{init.signal?.removeEventListener('abort',stop);}
             }
+            trace('automatic-starting',{kind:'generation'});
             return generatedResponse({id:newId(),kind:'generation',snapshot:snap,notification,
                 options:clean(generationOptions.options),generation:{path:url.pathname,payload:JSON.parse(init.body),prefix:generationOptions.prefix||''}},init.signal);
         };
         globalThis.fetch=installedFetch;
     }
     function install(){
-        const context=getContext();const on=(name,fn)=>{if(context.eventTypes?.[name])context.eventSource.on(context.eventTypes[name],fn);};
+        const context=getContext();const types=context.eventTypes||context.event_types;const on=(name,fn)=>{if(types?.[name])context.eventSource.on(types[name],fn);};
         on('GENERATION_STARTED',generationStarted);on('GENERATE_AFTER_DATA',afterData);on('CHAT_COMPLETION_SETTINGS_READY',settingsReady);
         on('GENERATION_ENDED',()=>frames.pop());on('GENERATION_STOPPED',()=>{frames.length=0;});
         const flush=()=>{for(const r of records)if(r.cancel)void cancel(r.id);};
         window.addEventListener('online',flush);document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});
         ensureHook();flush();
     }
-    return {check,available,output,input,run,install,status,cancel,hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
+    return {check,available,output,input,run,install,status,cancel,diagnostics:()=>({events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
 }

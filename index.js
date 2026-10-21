@@ -1,4 +1,4 @@
-import { createServerClient } from './server-client.js';
+import { createServerClient } from './server-client.js?v=0.6.55';
 import { createAutomaticOutputLifecycle } from './automatic-output.js';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
@@ -60,7 +60,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.54';
+const EXTENSION_VERSION = '0.6.55';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -1055,6 +1055,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             hasStoredTranslation: Boolean(currentRecord(latest.message)),
         } : null,
         automaticOutput: automaticOutputLifecycle.diagnostics(),
+        serverTranslation: verbaServer.diagnostics(),
         settingsState: {
             autoInput: Boolean(settings.autoInput),
             autoOutput: settings.autoOutput !== false,

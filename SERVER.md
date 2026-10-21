@@ -95,3 +95,9 @@ Silly-Pop 실험판 웹 확장 1.5.8 · 서버 2.4.6에서 **서버 번역 완�
 - 설치만으로 서버 번역이 켜지지는 않습니다. 확장 설정의 서버 번역과 답변 자동번역을 모두 켜야 합니다. 자동 요청을 서버에 접수하기 전에 브라우저가 멈추거나 지원하지 않는 생성 경로라면 미리 번역을 시작할 수 없습니다.
 
 현재 방식은 화면의 최종 본문과 서버가 받은 원문이 정확히 같고 같은 채팅·설정일 때만 준비된 결과를 재사용합니다. 정규식이나 다른 확장이 원문을 바꾼 경우에는 복귀 후 새 번역이 필요할 수 있습니다.
+
+## Web 0.6.55: automatic admission correction
+
+Prompt previews (dry runs) do not emit a matching generation-ended event in SillyTavern. They no longer leave an inactive frame over a real reply and prevent its automatic server translation job from being admitted. Quiet helper requests remain excluded. Diagnostics include bounded event/reason codes for admission and result reuse without storing message bodies, names, or credentials.
+
+Update the web extension on `codex/server-translation-experimental` and reload SillyTavern. Existing server 0.1.2, Relay server 1.0.6, and the APK need no update for this correction. This addresses a reproduced admission defect; it does not establish the cause of every late `output` job.

@@ -60,7 +60,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.53';
+const EXTENSION_VERSION = '0.6.54';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });

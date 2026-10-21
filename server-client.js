@@ -246,6 +246,11 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 ||String(init?.method||'GET').toUpperCase()!=='POST'||typeof init?.body!=='string')return previous.call(this,input,init);
             if(JSON.stringify(frame.request)!==init.body)return previous.call(this,input,init);
             const nativePayload=frame.request; frame.request=null;
+            // Capture the initiating character before asynchronous profile preparation.
+            // Only bound automatic reply jobs get this opt-in metadata, never helpers.
+            let notification;
+            try { notification=globalThis.sillyPopNotifications?.captureTranslation?.(frame.type) || undefined; }
+            catch { /* An optional notifier cannot prevent a reply. */ }
             let snap;
             try { if(!await available())return previous.call(this,input,init); snap=await snapshot(); }
             catch(error) { onNotice('서버 번역 준비 실패: '+error.message+' · 답변 생성은 기존 방식으로 진행합니다.'); return previous.call(this,input,init); }
@@ -253,7 +258,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             if(relayActive()) {
                 if(!relayObserver){onNotice('실리릴레이 서버를 업데이트해야 백그라운드 번역을 연결할 수 있습니다.');return previous.call(this,input,init);}
                 const ticket=newId();
-                await submit({id:ticket,kind:'observed-generation',snapshot:snap,options:clean(generationOptions.options),generation:{prefix:generationOptions.prefix||''}},init.signal);
+                await submit({id:ticket,kind:'observed-generation',snapshot:snap,notification,options:clean(generationOptions.options),generation:{prefix:generationOptions.prefix||''}},init.signal);
                 // Mutate the same final payload object that Relay identifies,
                 // retaining its existing request binding and recovery journal.
                 nativePayload.__verba_server_ticket=ticket;
@@ -262,7 +267,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 catch(error){await cancel(ticket);throw error;}
                 finally{init.signal?.removeEventListener('abort',stop);}
             }
-            return generatedResponse({id:newId(),kind:'generation',snapshot:snap,
+            return generatedResponse({id:newId(),kind:'generation',snapshot:snap,notification,
                 options:clean(generationOptions.options),generation:{path:url.pathname,payload:JSON.parse(init.body),prefix:generationOptions.prefix||''}},init.signal);
         };
         globalThis.fetch=installedFetch;

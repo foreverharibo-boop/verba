@@ -16,10 +16,14 @@ module.exports.info={id:'verba-server',name:'Verba Server',description:'선택�
 module.exports.init=async router=>{
     const engines={};
     for(const variant of Object.keys(manifest.engines)) engines[variant]=await import(pathToFileURL(path.join(__dirname,'engines',variant+'.mjs')).href);
-    jobs=createJobs({engines,request:provider.requestLocal,profileRequest:provider.sendProfile,versions:manifest.engines});
+    jobs=createJobs({engines,request:provider.requestLocal,profileRequest:provider.sendProfile,versions:manifest.engines,
+        prepareNotification(owner, marker) {
+            const hook=globalThis[Symbol.for('silly-pop.translation-notifier')];
+            return hook?.apiVersion===1 ? hook.prepare(owner, marker) : null;
+        }});
     observer={apiVersion:1,complete:(owner,id,response)=>jobs.observed(owner,id,response)};
     globalThis[Symbol.for('verba.relay-observer')]=observer;
-    router.get('/capabilities',route(req=>{owner(req);return{protocol:1,version:'0.1.0',engines:manifest.engines,retentionSeconds:86400,relayObserver:globalThis[Symbol.for('verba.relay-capability')]===1};}));
+    router.get('/capabilities',route(req=>{owner(req);return{protocol:1,version:'0.1.1',engines:manifest.engines,retentionSeconds:86400,relayObserver:globalThis[Symbol.for('verba.relay-capability')]===1};}));
     router.post('/jobs',route(req=>jobs.status(jobs.start(owner(req),req.body,provider.ownConnection(req)))));
     router.get('/jobs/:id',route(req=>jobs.status(jobs.lookup(owner(req),req.params.id),req.query.cursor)));
     router.post('/jobs/:id/cancel',route(req=>jobs.status(jobs.cancel(owner(req),req.params.id))));

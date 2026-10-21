@@ -61,7 +61,10 @@ test('both installed but disabled clients leave native model settings and wire b
  }
  assert.equal(calls.length,3);assert.equal(nativeSettings.vertexai_model,'gemini-4-argon');
 });
-test('interrupted first result lookup reconnects to the completed job without another AI request',async()=>{
+test('interrupted first result lookup reconnects to the completed job without another AI request',async t=>{
+ const notification={protocol:1,translationEnabled:true,clientId:'tab',generationId:'reply',characterName:'Chris'};
+ globalThis.sillyPopNotifications={captureTranslation:type=>{assert.equal(type,'normal');return notification;}};
+ t.after(()=>delete globalThis.sillyPopNotifications);
  let generations=0,translations=0;
  const jobs=createJobs({engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async source=>{translations++;return{translation:'안녕.',sourceMap:[]};}})}},request:async(_c,_p,p,o)=>{
   generations++;const body=Buffer.from(JSON.stringify({choices:[{message:{content:'Hello.'}}]}));o.onHeaders(200,'application/json');o.onChunk(body);return{status:200,type:'application/json',body};
@@ -70,7 +73,7 @@ test('interrupted first result lookup reconnects to the completed job without an
  environment(async(url,init={})=>{
   const path=new URL(url,'http://localhost').pathname;
   if(path.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'0.6.51'}}});
-  if(path==='/api/plugins/verba-server/jobs')return Response.json(jobs.status(jobs.start('a',JSON.parse(init.body),{})));
+  if(path==='/api/plugins/verba-server/jobs'){const input=JSON.parse(init.body);assert.deepEqual(input.notification,input.kind==='generation'?notification:undefined);return Response.json(jobs.status(jobs.start('a',input,{})));}
   if(path.endsWith('/cancel')){cancellations++;return Response.json({});}
   if(path.startsWith('/api/plugins/verba-server/jobs/')){
    if(abortNextStatus){abortNextStatus=false;throw new DOMException('signal is aborted without reason','AbortError');}
@@ -124,11 +127,14 @@ test('explicit user cancellation still cancels the accepted server job',async()=
 
 test('Relay keeps original request ownership while observer translates without a second generation',async t=>{
  let delegated=0,translations=0;let finalPayload;
+ const notification={protocol:1,translationEnabled:true,clientId:'tab',generationId:'reply'};
+ globalThis.sillyPopNotifications={captureTranslation:()=>notification};
+ t.after(()=>delete globalThis.sillyPopNotifications);
  const jobs=createJobs({engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async()=>{translations++;return{translation:'안녕.',sourceMap:[]};}})}},request:()=>{throw Error('must not generate twice');}});
  const storage=environment(async(url,init={})=>{
   const parsed=new URL(url,'http://localhost');const path=parsed.pathname;
   if(path.endsWith('/capabilities'))return Response.json({protocol:1,relayObserver:true,engines:{verba:{version:'0.6.51'}}});
-  if(path==='/api/plugins/verba-server/jobs')return Response.json(jobs.status(jobs.start('alice',JSON.parse(init.body),{})));
+  if(path==='/api/plugins/verba-server/jobs'){const input=JSON.parse(init.body);assert.deepEqual(input.notification,notification);return Response.json(jobs.status(jobs.start('alice',input,{})));}
   if(path.startsWith('/api/plugins/verba-server/jobs/'))return Response.json(jobs.status(jobs.lookup('alice',path.split('/').at(-1))));
   delegated++;
   const payload=JSON.parse(init.body);

@@ -4,7 +4,7 @@ const { failure, extractReply } = require('./provider.cjs');
 const ID = /^[a-f0-9]{32}$/;
 const MAX_SNAPSHOT = 4 * 1024 * 1024;
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-function createJobs({ engines, request, profileRequest, versions, now = Date.now, retention = 86400000, maxJobs = 32, maxActive = 4 }) {
+function createJobs({ engines, request, profileRequest, versions, now = Date.now, retention = 86400000, maxJobs = 32, maxActive = 4, prepareNotification = () => null }) {
     const jobs = new Map();
     const key = (owner,id) => JSON.stringify([owner,id]);
     function prune() {
@@ -46,6 +46,15 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         const job={id,owner,kind,digest:hash,createdAt:now(),finishedAt:null,state:'queued',events:[],eventSequence:0,
             controller,raw:Buffer.alloc(0),generationDone:!['generation','observed-generation'].includes(kind),httpStatus:0,type:'',source:source||'',result:null,error:''};
         jobs.set(key(owner,id),job);
+        let notify = null;
+        if (['generation','observed-generation'].includes(kind)) {
+            try {
+                notify = prepareNotification(owner, envelope.notification);
+                if (envelope.notification?.translationEnabled === true && typeof notify !== 'function')
+                    report(job, {kind:'notification', code:'notifier_unavailable'});
+            }
+            catch { report(job, {kind:'notification', code:'prepare_failed'}); }
+        }
         if(kind==='observed-generation')job.response=new Promise((resolve,reject)=>{
             job.receive=resolve;
             controller.signal.addEventListener('abort',()=>reject(new DOMException('취소','AbortError')),{once:true});
@@ -88,6 +97,15 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
                 job.error=controller.signal.aborted?'사용자가 작업을 중지했습니다.':`서버 작업 실패${error.status?' (HTTP '+error.status+')':''}. 진단 단계와 연결 프로필을 확인해 주세요.`;
                 report(job,{kind:'failure',code:String(error.code||error.name||'Error'),httpStatus:Number(error.status)||null});
             } finally { job.finishedAt=now(); job.generationDone=true; }
+            // Translation is committed to server memory before any notification.
+            // Delivery failure must never fail/retry the translation or charge another AI call.
+            if (job.state === 'completed' && !job.result?.skipped
+                && typeof job.result?.translation === 'string' && job.result.translation.trim()
+                && typeof notify === 'function') {
+                job.notificationDone = Promise.resolve().then(() => notify()).then(
+                    result => report(job, {kind:'notification', code:result?.reason || 'completed'}),
+                    () => report(job, {kind:'notification', code:'delivery_failed'}));
+            }
         })();
         return job;
     }

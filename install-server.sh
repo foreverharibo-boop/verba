@@ -20,7 +20,7 @@ done
 cp -R -- "$verba_source/server-plugin/engines" "$verba_dest/engines"
 cp -- "$verba_source/SERVER.md" "$verba_dest/README.md"
 if [[ -f "$verba_source/LICENSE" ]]; then cp -- "$verba_source/LICENSE" "$verba_dest/"; fi
-echo "Verba Server 0.1.0 실험판 설치 완료 (두 번역기 공용, 한 번만 설치)"
+echo "Verba Server 0.1.1 실험판 설치 완료 (두 번역기 공용, 한 번만 설치)"
 echo "config.yaml에서 enableServerPlugins: true를 확인하고 서버를 완전히 재시작해 주세요."
 echo "동일한 실험판 확장을 설치한 뒤 자동번역 → 서버 번역 → 연결 확인을 누르고 켜세요."
 echo "Silly Relay를 쓰는 경우 Relay 서버도 1.0.6으로 업데이트해야 합니다."

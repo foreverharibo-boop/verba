@@ -187,3 +187,69 @@ test('a dry-run preview without GENERATION_ENDED cannot hide the real reply from
  assert.equal(client.diagnostics().events.filter(row=>row.event==='preview-ignored').length,2);
  assert.equal(JSON.stringify(client.diagnostics()).includes('real reply'),false);
 });
+
+for(const ttottoFirst of [true,false])for(const relay of [false,true])test(`TTOTTO outbound copies/marker removal retain automatic translation (earlier listener=${ttottoFirst}, relay=${relay})`,async t=>{
+ let generations=0,translations=0,helpers=0;const admitted=[];let nativePayload;
+ const body=Buffer.from(JSON.stringify({choices:[{message:{content:'Hello.'}}]}));
+ const jobs=createJobs({engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async()=>{translations++;return{translation:'안녕.',sourceMap:[]};}})}},request:async(_c,_path,payload,observer)=>{
+  generations++;assert.equal(payload.messages[0].content,'Hi + instructions');
+  assert.equal(Object.hasOwn(payload,'__ttotto_main_request'),false);
+  observer.onHeaders(200,'application/json');observer.onChunk(body);
+  return{status:200,type:'application/json',body};
+ }});
+ const storage=environment(async(url,init={})=>{
+  const path=new URL(url,'http://localhost').pathname;
+  if(path.endsWith('/capabilities'))return Response.json({protocol:1,relayObserver:true,engines:{verba:{version:'0.6.51'}}});
+  if(path==='/api/plugins/verba-server/jobs'){
+   const envelope=JSON.parse(init.body);admitted.push(envelope);
+   return Response.json(jobs.status(jobs.start('alice',envelope,{})));
+  }
+  if(path.startsWith('/api/plugins/verba-server/jobs/'))return Response.json(jobs.status(jobs.lookup('alice',path.split('/').at(-1)),new URL(url,'http://localhost').searchParams.get('cursor')));
+  const payload=JSON.parse(init.body);
+  if(payload.type==='quiet'){helpers++;return Response.json({helper:true});}
+  generations++;
+  assert.ok(relay,'the original reply must be intercepted for server generation');
+  assert.equal(Object.hasOwn(payload,'__ttotto_main_request'),false,'do not restore a consumed local marker');
+  const serialize=value=>JSON.stringify(value,(key,value)=>key==='__ttotto_main_request'?undefined:value);
+  assert.equal(serialize(payload),serialize(nativePayload),'Relay must still recognize the bound final payload');
+  assert.match(payload.__verba_server_ticket||'',/^[a-f0-9]{32}$/);
+  jobs.observed('alice',payload.__verba_server_ticket,{state:'completed',status:200,type:'application/json',body});
+  await jobs.lookup('alice',payload.__verba_server_ticket).done;
+  return new Response(body,{headers:{'content-type':'application/json'}});
+ });
+ if(relay){storage.set('silly-relay-enabled-v1','true');globalThis.sillyRelayReplies={apiVersion:1};}
+ t.after(()=>{delete globalThis.sillyRelayReplies;jobs.stopAll();});
+ const handlers=new Map();const on=(name,fn)=>{if(!handlers.has(name))handlers.set(name,[]);handlers.get(name).push(fn);};
+ const makeFirst=(name,fn)=>{if(!handlers.has(name))handlers.set(name,[]);handlers.set(name,[fn,...handlers.get(name).filter(existing=>existing!==fn)]);};
+ const emit=async(name,...args)=>{for(const fn of [...(handlers.get(name)||[])])await fn(...args);};
+ const settings={serverTranslation:true,autoOutput:true,translationEngine:'google-free'};
+ const context={chatId:'one',getRequestHeaders:()=>({}),eventTypes:{GENERATION_STARTED:'start',GENERATE_AFTER_DATA:'data',CHAT_COMPLETION_SETTINGS_READY:'settings'},eventSource:{on,makeFirst}};
+ // Reproduce TTOTTO's SETTINGS_READY outbound copy and fetch-final marker consumption.
+ const ttotto=payload=>{
+  const previous=globalThis.fetch;
+  globalThis.fetch=(input,init)=>{
+   if(String(input).endsWith('/chat-completions/generate')){
+    const wire=JSON.parse(init.body);delete wire.__ttotto_main_request;
+    return previous(input,{...init,body:JSON.stringify(wire)});
+   }
+   return previous(input,init);
+  };
+  payload.messages=payload.messages.map(message=>({...message,content:message.content+' + instructions'}));
+  payload.__ttotto_main_request='one-use-local-marker';
+ };
+ if(ttottoFirst)on('settings',ttotto);
+ const client=createServerClient({variant:'verba',version:'0.6.51',getSettings:()=>settings,getContext:()=>context,isActive:()=>true,getSnapshot:()=>({settings:{...settings}}),getGenerationOptions:()=>({options:{}})});
+ client.install();if(!ttottoFirst)on('settings',ttotto);
+ const messages=[{role:'user',content:'Hi'}];
+ await emit('start','normal',{},false);await emit('data',{prompt:messages},false);
+ nativePayload={messages,type:'normal',stream:false};await emit('settings',nativePayload);
+ await fetch('/api/backends/chat-completions/generate',{method:'POST',body:JSON.stringify({...nativePayload,type:'quiet'})});
+ assert.equal(helpers,1);assert.equal(admitted.length,0,'a helper must not consume the native reply binding');
+ const response=await fetch('/api/backends/chat-completions/generate',{method:'POST',body:JSON.stringify(nativePayload)});
+ assert.equal((await response.json()).choices[0].message.content,'Hello.');
+ assert.equal(admitted.length,1);assert.equal(admitted[0].kind,relay?'observed-generation':'generation');
+ assert.equal(translations,1,'translation must already finish before any browser output callback');
+ assert.equal((await client.output('Hello.',{},()=>{throw Error('unexpected browser translation');})).translation,'안녕.');
+ assert.equal(generations,1);assert.equal(translations,1);
+ assert.equal(messages[0].content,'Hi','shared chat messages remain untouched');
+});

@@ -101,3 +101,11 @@ Silly-Pop 실험판 웹 확장 1.5.8 · 서버 2.4.6에서 **서버 번역 완�
 Prompt previews (dry runs) do not emit a matching generation-ended event in SillyTavern. They no longer leave an inactive frame over a real reply and prevent its automatic server translation job from being admitted. Quiet helper requests remain excluded. Diagnostics include bounded event/reason codes for admission and result reuse without storing message bodies, names, or credentials.
 
 Update the web extension on `codex/server-translation-experimental` and reload SillyTavern. Existing server 0.1.2, Relay server 1.0.6, and the APK need no update for this correction. This addresses a reproduced admission defect; it does not establish the cause of every late `output` job.
+
+## 웹 확장 0.6.56: 또또와 서버 번역 연결 수정
+
+또또가 전송 문장 객체를 복사하기 전에 원래 답변 요청을 식별하도록 이벤트 순서를 수정했습니다. 이후 또또가 반영한 프롬프트는 그대로 사용합니다. 또또가 전송 직전에 제거하는 내부 표식은 요청 비교에서 제외하며, 제거한 표식을 다시 넣지 않습니다. 보조 요청과 실제 내용이 다른 요청은 여전히 제외합니다.
+
+또또의 이벤트 등록 순서 두 가지와 릴레이 사용 여부를 조합한 네 가지 회귀 테스트에서 수정 전 실패와 수정 후 성공을 확인했습니다. 브라우저 번역 콜백 전에 서버 번역이 완료되고, 돌아온 뒤 같은 결과를 재사용하며 생성·번역 요청이 중복되지 않는지 검사합니다. 실제 폰과 유료 모델 호출을 대신하는 검증은 아닙니다.
+
+`codex/server-translation-experimental`의 웹 확장만 업데이트하고 실리태번을 새로고침합니다. 이번 수정에 서버 플러그인이나 APK 업데이트는 필요하지 않습니다.

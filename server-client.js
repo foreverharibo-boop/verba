@@ -7,6 +7,9 @@ const abortError = () => new DOMException('번역을 중지했습니다.','Abort
 const clean = value => JSON.parse(JSON.stringify(value));
 const fingerprint = value => { let h=14695981039346656037n; for(const c of value){h^=BigInt(c.codePointAt(0));h=BigInt.asUintN(64,h*1099511628211n);}return h.toString(16); };
 const hasMarker = (data,marker) => JSON.stringify(data).includes(marker);
+// TTOTTO consumes this browser-only marker in its fetch wrapper. Its removal
+// does not change the bound AI request; every other field must still match.
+const replyBody = data => { const body={...data};delete body.__ttotto_main_request;return JSON.stringify(body); };
 // Both translator extensions share ST's service classes. Serialize only this
 // short, non-network capture so nested wrappers cannot restore each other in
 // the wrong order. Translation requests themselves still run concurrently.
@@ -257,7 +260,9 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             if(!isActive()||getSettings().serverTranslation!==true||getSettings().autoOutput===false||!frame?.request
                 ||url.origin!==location.origin||url.pathname!=='/api/backends/chat-completions/generate'
                 ||String(init?.method||'GET').toUpperCase()!=='POST'||typeof init?.body!=='string')return previous.call(this,input,init);
-            if(JSON.stringify(frame.request)!==init.body){trace('reply-not-bound',{reason:'wire-body-changed'});return previous.call(this,input,init);}
+            let wirePayload;
+            try{wirePayload=JSON.parse(init.body);}catch{return previous.call(this,input,init);}
+            if(!wirePayload||Array.isArray(wirePayload)||typeof wirePayload!=='object'||replyBody(frame.request)!==replyBody(wirePayload)){trace('reply-not-bound',{reason:'wire-body-changed'});return previous.call(this,input,init);}
             const nativePayload=frame.request; frame.request=null;
             // Capture the initiating character before asynchronous profile preparation.
             // Only bound automatic reply jobs get this opt-in metadata, never helpers.
@@ -276,20 +281,31 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 // Mutate the same final payload object that Relay identifies,
                 // retaining its existing request binding and recovery journal.
                 nativePayload.__verba_server_ticket=ticket;
+                // Preserve the actual outgoing body: do not reintroduce a
+                // marker already consumed by TTOTTO's outer fetch wrapper.
+                wirePayload.__verba_server_ticket=ticket;
                 const stop=()=>void cancel(ticket);init.signal?.addEventListener('abort',stop,{once:true});
-                try{return await previous.call(this,input,{...init,body:JSON.stringify(nativePayload)});}
+                try{return await previous.call(this,input,{...init,body:JSON.stringify(wirePayload)});}
                 catch(error){await cancel(ticket);throw error;}
                 finally{init.signal?.removeEventListener('abort',stop);}
             }
             trace('automatic-starting',{kind:'generation'});
             return generatedResponse({id:newId(),kind:'generation',snapshot:snap,notification,
-                options:clean(generationOptions.options),generation:{path:url.pathname,payload:JSON.parse(init.body),prefix:generationOptions.prefix||''}},init.signal);
+                options:clean(generationOptions.options),generation:{path:url.pathname,payload:wirePayload,prefix:generationOptions.prefix||''}},init.signal);
         };
         globalThis.fetch=installedFetch;
     }
     function install(){
-        const context=getContext();const types=context.eventTypes||context.event_types;const on=(name,fn)=>{if(types?.[name])context.eventSource.on(types[name],fn);};
-        on('GENERATION_STARTED',generationStarted);on('GENERATE_AFTER_DATA',afterData);on('CHAT_COMPLETION_SETTINGS_READY',settingsReady);
+        const context=getContext();const types=context.eventTypes||context.event_types;
+        const on=(name,fn,first=false)=>{
+            if(!types?.[name])return;
+            if(first&&typeof context.eventSource.makeFirst==='function')context.eventSource.makeFirst(types[name],fn);
+            else context.eventSource.on(types[name],fn);
+        };
+        on('GENERATION_STARTED',generationStarted);on('GENERATE_AFTER_DATA',afterData);
+        // Bind native message identity before TTOTTO clones/replaces messages.
+        // Keep the payload object itself so later legitimate edits are sent.
+        on('CHAT_COMPLETION_SETTINGS_READY',settingsReady,true);
         on('GENERATION_ENDED',()=>frames.pop());on('GENERATION_STOPPED',()=>{frames.length=0;});
         const flush=()=>{for(const r of records)if(r.cancel)void cancel(r.id);};
         window.addEventListener('online',flush);document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});

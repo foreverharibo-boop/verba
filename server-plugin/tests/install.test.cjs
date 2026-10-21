@@ -15,7 +15,7 @@ function fixture(t){
 function install(st,from=source){return spawnSync('bash',[path.join(from,'install-server.sh'),st],{encoding:'utf8'});}
 test('one command installs and overwrites managed files, without deleting settings, extras or making backups',t=>{
  const {st,dest}=fixture(t);
- const first=install(st);assert.equal(first.status,0,first.stderr);assert.match(first.stdout,/0\.1\.2/);
+ const first=install(st);assert.equal(first.status,0,first.stderr);assert.match(first.stdout,/0\.1\.3/);
  fs.writeFileSync(path.join(dest,'index.cjs'),'old version');
  fs.writeFileSync(path.join(dest,'custom-note.txt'),'keep note');
  fs.writeFileSync(path.join(dest,'engines/custom.txt'),'keep extra');

@@ -54,7 +54,8 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         jobs.set(key(owner,id),job);
         lifecycle(job, 'accepted');
         let notify = null;
-        if (['generation','observed-generation'].includes(kind)) {
+        if (['generation','observed-generation'].includes(kind)
+            || kind==='output' && options?.automatic===true && options?.stage==='output-translation') {
             try {
                 notify = prepareNotification(owner, envelope.notification);
                 if (envelope.notification?.translationEnabled === true && typeof notify !== 'function')

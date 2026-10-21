@@ -55,6 +55,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     const storageKey='verba-server-jobs:'+variant;
     const frames=[]; let records=[]; let ready=false; let relayObserver=false; let installedFetch=null;
     const history=[];
+    const pendingReads=new Set();
+    const resumedRead=()=>Object.assign(Error('서버 결과 수신 연결 재개'),{code:'VERBA_SERVER_READ_RESUMED'});
     function trace(event,detail={}){
         history.push({event,at:Date.now(),...detail});
         if(history.length>40)history.shift();
@@ -69,8 +71,14 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // This controller belongs only to one HTTP exchange. It never means
         // the user cancelled the server-owned generation/translation job.
         const controller=new AbortController();let timedOut=false;
-        const timer=setTimeout(()=>{timedOut=true;controller.abort();},20000);
+        let interrupt;
+        const interrupted=new Promise((_,reject)=>{interrupt=error=>{reject(error);controller.abort();};});
+        const restart=()=>{pendingReads.delete(restart);interrupt(resumedRead());};
+        const resumable=path.startsWith('/jobs/')&&(!init.method||init.method==='GET');
+        if(resumable)pendingReads.add(restart);
+        const timer=setTimeout(()=>{timedOut=true;interrupt(new DOMException('서버 통신 시간 초과','AbortError'));},20000);
         try {
+            return await Promise.race([interrupted,(async()=>{
             const response=await fetchBase(API+path,{...init,headers:getContext().getRequestHeaders(),signal:controller.signal,cache:'no-store'});
             let data;
             try{data=await response.json();}
@@ -81,6 +89,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             }
             if(!response.ok)throw Object.assign(Error(data.error||`서버 번역 HTTP ${response.status}`),{status:response.status});
             return data;
+            })()]);
         } catch(error) {
             if(timedOut||error?.name==='AbortError') {
                 // Do not retain an AbortError cause: legacy isAbort also walks
@@ -92,7 +101,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 });
             }
             throw error;
-        } finally{clearTimeout(timer);}
+        } finally{clearTimeout(timer);pendingReads.delete(restart);}
     }
     const relayActive=()=>{try{return globalThis.sillyRelayReplies?.apiVersion===1 && localStorage.getItem('silly-relay-enabled-v1')==='true';}catch{return false;}};
     async function check(){
@@ -145,6 +154,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 }catch(error){
                     if(signal?.aborted)throw abortError();
                     if(error.status)throw error;
+                    if(error.code==='VERBA_SERVER_READ_RESUMED')continue;
                     if(!notified){onNotice('서버 작업 상태를 다시 확인하고 있어요. 같은 작업에 재연결합니다.');notified=true;}
                     await pause(2000);
                 }
@@ -157,7 +167,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             while(true){
                 if(signal?.aborted){await cancel(id);throw abortError();}
                 let state;
-                try{state=await status(id);}catch(error){if(error.status)throw error;await pause(2000);continue;}
+                try{state=await status(id);}catch(error){if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
                 const record=records.find(r=>r.id===id);
             const events=(state.events||[]).filter(e=>e.seq>(record?.eventSeq??-1));
             onProgress({...state,events});
@@ -189,7 +199,13 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     }
     async function run(kind,source,options={},segments){
         const id=newId();
-        const envelope={id,kind,source,snapshot:await snapshot(),options:clean({...options,signal:undefined,timing:undefined}),...(segments?{segments}: {})};
+        // Snapshot opt-in metadata before profile preparation can yield or the
+        // user switches chats. Manual/helper translations remain silent.
+        let notification;
+        if(kind==='output'&&options.automatic===true&&options.stage==='output-translation'){
+            try{notification=globalThis.sillyPopNotifications?.captureTranslation?.('normal')||undefined;}catch{}
+        }
+        const envelope={id,kind,source,snapshot:await snapshot(),options:clean({...options,signal:undefined,timing:undefined}),...(notification?{notification}:{}),...(segments?{segments}: {})};
         if(options.signal?.aborted)throw abortError();
         await submit(envelope,options.signal);
         const state=await waitResult(id,options.signal);
@@ -224,7 +240,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         try{
             while(true){
                 if(signal?.aborted){await cancel(id);throw abortError();}
-                try{state=await status(id);}catch(error){if(error.status)throw error;await pause(2000);continue;}
+                try{state=await status(id);}catch(error){if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
                 if(state.status)break;
                 if(['failed','cancelled'].includes(state.state))throw Error(state.error);
                 await pause(200);
@@ -236,7 +252,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                     while(true){
                         if(signal?.aborted)throw abortError();
                         if(state.cursor!==cursor){
-                            try{state=await status(id,cursor);}catch(error){if(error.status)throw error;await pause(2000);continue;}
+                            try{state=await status(id,cursor);}catch(error){if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
                         }
                         if(state.next>cursor){
                             const bytes=Uint8Array.from(atob(state.data),c=>c.charCodeAt(0));
@@ -307,8 +323,13 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // Keep the payload object itself so later legitimate edits are sent.
         on('CHAT_COMPLETION_SETTINGS_READY',settingsReady,true);
         on('GENERATION_ENDED',()=>frames.pop());on('GENERATION_STOPPED',()=>{frames.length=0;});
-        const flush=()=>{for(const r of records)if(r.cancel)void cancel(r.id);};
-        window.addEventListener('online',flush);document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});
+        const flush=()=>{
+            if(pendingReads.size)trace('result-read-resumed',{count:pendingReads.size});
+            for(const restart of [...pendingReads])restart();
+            for(const r of records)if(r.cancel)void cancel(r.id);
+        };
+        window.addEventListener('online',flush);window.addEventListener('pageshow',flush);
+        document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});
         ensureHook();flush();
     }
     return {check,available,output,input,run,install,status,cancel,diagnostics:()=>({events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};

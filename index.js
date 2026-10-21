@@ -1,5 +1,5 @@
-import { createServerClient } from './server-client.js?v=0.6.57';
-import { createAutomaticOutputLifecycle } from './automatic-output.js';
+import { createServerClient } from './server-client.js?v=0.6.58';
+import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.58';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -60,7 +60,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.57';
+const EXTENSION_VERSION = '0.6.58';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -1052,7 +1052,11 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             swipeId: currentSwipeId(latest.message),
             sourceHash: source ? hashText(source) : '',
             sourceLength: source.length,
-            hasStoredTranslation: Boolean(currentRecord(latest.message)),
+            hasStoredTranslation: Boolean(currentRecord(latest.message, latest.id)),
+            displayMatchesStored: Boolean(currentRecord(latest.message, latest.id)
+                && latest.message.extra?.display_text === currentRecord(latest.message, latest.id).translation),
+            sourceViewRequested: Boolean(sourceViewRequested(latest.message, currentRecord(latest.message, latest.id))),
+            mounted: Boolean(document.querySelector(`.mes[mesid="${latest.id}"] .mes_text`)),
         } : null,
         automaticOutput: automaticOutputLifecycle.diagnostics(),
         serverTranslation: verbaServer.diagnostics(),
@@ -1080,6 +1084,7 @@ function debugDiagnosticText(diagnostic) {
 
 async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
     if (!settings.debugMode) throw new Error('복사하려면 디버그 모드를 켜 주세요.');
+    await verbaServer.refreshDiagnostics();
     const snapshot = createDebugDiagnostic('manual-status', null, '복사 시점의 번역 상태');
     snapshot.activeWork = {
         outputMessageIds: [...pendingOutputs.keys()],
@@ -5202,7 +5207,7 @@ function currentTranslationRecoveryScope() {
 }
 
 function inferredMessageId(message, explicitId = null) {
-    const direct = Number(explicitId);
+    const direct = explicitId == null ? NaN : Number(explicitId);
     if (Number.isInteger(direct) && direct >= 0) return direct;
     const chat = liveContext().chat;
     if (!Array.isArray(chat) || !message) return -1;
@@ -5724,7 +5729,7 @@ function showOriginalDisplay(messageId, message, record) {
     }
 }
 
-function restoreCurrentDisplay(messageId, message, record) {
+function restoreCurrentDisplay(messageId, message, record, { forceRender = false } = {}) {
     if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
     if (!message.extra || typeof message.extra !== 'object') message.extra = {};
     if (sourceViewRequested(message, record)) {
@@ -5738,7 +5743,9 @@ function restoreCurrentDisplay(messageId, message, record) {
     const sourceViewChanged = Boolean(message.extra[SOURCE_VIEW_KEY]);
     if (sourceViewChanged) delete message.extra[SOURCE_VIEW_KEY];
     const cacheChanged = syncOwnedTranslationToCurrentSwipe(message, record);
-    if (displayChanged || recordChanged) updateMessageBlock(messageId, message);
+    const mounted = forceRender && document.querySelector(`.mes[mesid="${Number(messageId)}"]`);
+    const redraw = mounted && !mounted.querySelector('.edit_textarea');
+    if (displayChanged || recordChanged || redraw) updateMessageBlock(messageId, message);
     cacheRenderedTranslation(messageId, message, record);
     if (displayChanged || recordChanged || sourceViewChanged || cacheChanged) scheduleChatSave(liveContext().chat);
 }
@@ -13412,6 +13419,14 @@ function handleGenerationEnded() {
 function resumeAutomaticOutputs() {
     automaticOutputLifecycle.trace('page-resumed');
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;
+    // A started/completed job is absent from ready(), but ST may have redrawn
+    // its original text while this page was suspended. Restore saved display
+    // for exact completed versions without submitting another translation.
+    for (const id of automaticOutputLifecycle.completedIds()) {
+        const message = liveContext().chat?.[id];
+        const record = currentRecord(message, id);
+        if (record) restoreCurrentDisplay(id, message, record, { forceRender: true });
+    }
     // Only versions completed in this session: opening a chat must not translate old history.
     for (const id of automaticOutputLifecycle.ready()) startCompletedAutomaticOutput(id);
 }

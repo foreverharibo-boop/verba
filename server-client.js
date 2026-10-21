@@ -55,6 +55,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     const storageKey='verba-server-jobs:'+variant;
     const frames=[]; let records=[]; let ready=false; let relayObserver=false; let installedFetch=null;
     const history=[];
+    let serverVersion=null;
+    const jobDiagnostics=new Map();
     const pendingReads=new Set();
     const resumedRead=()=>Object.assign(Error('서버 결과 수신 연결 재개'),{code:'VERBA_SERVER_READ_RESUMED'});
     function trace(event,detail={}){
@@ -67,7 +69,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     function save(){try{localStorage.setItem(storageKey,JSON.stringify(records.slice(-32)));}catch{}}
     function remember(row){records=records.filter(x=>x.id!==row.id);records.push(row);save();}
     function forget(id){records=records.filter(x=>x.id!==id);save();}
-    async function api(path,init={}) {
+    async function api(path,init={},timeoutMs=20000) {
         // This controller belongs only to one HTTP exchange. It never means
         // the user cancelled the server-owned generation/translation job.
         const controller=new AbortController();let timedOut=false;
@@ -76,7 +78,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         const restart=()=>{pendingReads.delete(restart);interrupt(resumedRead());};
         const resumable=path.startsWith('/jobs/')&&(!init.method||init.method==='GET');
         if(resumable)pendingReads.add(restart);
-        const timer=setTimeout(()=>{timedOut=true;interrupt(new DOMException('서버 통신 시간 초과','AbortError'));},20000);
+        const timer=setTimeout(()=>{timedOut=true;interrupt(new DOMException('서버 통신 시간 초과','AbortError'));},timeoutMs);
         try {
             return await Promise.race([interrupted,(async()=>{
             const response=await fetchBase(API+path,{...init,headers:getContext().getRequestHeaders(),signal:controller.signal,cache:'no-store'});
@@ -107,6 +109,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     async function check(){
         const caps=await api('/capabilities');
         if(caps.protocol!==1||caps.engines?.[variant]?.version!==version)throw Error('확장과 서버 플러그인의 버전이 다릅니다. 서버 플러그인도 업데이트해 주세요.');
+        serverVersion=/^\d+\.\d+\.\d+$/.test(caps.version)?caps.version:null;
         relayObserver=caps.relayObserver===true;
         if(relayActive()&&!relayObserver)throw Error('실리릴레이 서버 1.0.6 이상이 필요합니다. 기존 답변 복구 기능을 유지하기 위한 연결입니다.');
         ready=true;return caps;
@@ -132,14 +135,44 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     async function submit(envelope,signal){
         // Retain the ID before sending. An ambiguous timeout never falls back to
         // another translation request. Only the exact same ID/body is retried.
-        remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),at:Date.now()});
+        remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),notificationRequested:envelope.notification?.translationEnabled===true,at:Date.now()});
         for(let i=0;;i++){
             if(signal?.aborted){await cancel(envelope.id);throw abortError();}
             try{return await api('/jobs',{method:'POST',body:JSON.stringify(envelope)});}
             catch(error){if(error.status){forget(envelope.id);throw error;}if(i===0)onNotice('접수 여부 확인 중입니다. 같은 작업 번호로 재연결합니다.');await pause(2000);}
         }
     }
-    async function status(id,cursor=0){return api('/jobs/'+id+'?cursor='+cursor);}
+    function observeStatus(id,state) {
+        // Fixed structural fields only. Never copy source, result, names, profile
+        // payloads or provider error strings into the diagnostic report.
+        const notificationCodes=new Set(['notifier_unavailable','prepare_failed','completed','dispatched','duplicate','foreground','disabled','inactive','capacity','delivery_failed']);
+        const record=records.find(r=>r.id===id);
+        jobDiagnostics.set(id,{
+            jobId:id.slice(0,8),
+            kind:['generation','observed-generation','output','input','segments','request'].includes(state.kind)?state.kind:'unknown',
+            state:['queued','generating','translating','completed','failed','cancelled'].includes(state.state)?state.state:'unknown',
+            generationDone:state.generationDone===true,
+            hasTranslation:typeof state.result?.translation==='string'&&!!state.result.translation.trim(),
+            skipped:state.result?.skipped===true,
+            notificationRequested:typeof record?.notificationRequested==='boolean'?record.notificationRequested:null,
+            notificationResults:(state.events||[]).filter(e=>e.kind==='notification').map(e=>notificationCodes.has(e.code)?e.code:'unknown').slice(-8),
+        });
+        if(jobDiagnostics.size>16)jobDiagnostics.delete(jobDiagnostics.keys().next().value);
+    }
+    async function status(id,cursor=0,timeoutMs=20000){
+        const state=await api('/jobs/'+id+'?cursor='+cursor,{},timeoutMs);
+        observeStatus(id,state);return state;
+    }
+    async function refreshDiagnostics(){
+        if(getSettings().serverTranslation!==true||!isActive())return;
+        const recent=records.filter(r=>r.scope===scopeKey()).slice(-3);
+        // Read-only and bounded: copying a diagnostic cannot generate, cancel,
+        // retranslate, or deliver an extra notification.
+        await Promise.all([
+            api('/capabilities',{},3000).then(caps=>{serverVersion=/^\d+\.\d+\.\d+$/.test(caps.version)?caps.version:null;}).catch(()=>{}),
+            ...recent.map(r=>status(r.id,0,3000).catch(error=>trace('diagnostic-read-unavailable',{jobId:r.id.slice(0,8),httpStatus:Number(error.status)||null}))),
+        ]);
+    }
     async function reconnectStatus(id,signal){
         let notified=false;
         const stop=()=>void cancel(id);
@@ -332,5 +365,5 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});
         ensureHook();flush();
     }
-    return {check,available,output,input,run,install,status,cancel,diagnostics:()=>({events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
+    return {check,available,output,input,run,install,status,cancel,refreshDiagnostics,diagnostics:()=>({serverVersion,jobs:records.filter(r=>r.scope===scopeKey()).map(r=>jobDiagnostics.get(r.id)).filter(Boolean).map(row=>({...row,notificationResults:[...row.notificationResults]})),events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
 }

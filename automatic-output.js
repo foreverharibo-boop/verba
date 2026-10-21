@@ -45,6 +45,7 @@ export function createAutomaticOutputLifecycle({ getChat, signature, now = Date.
     }
     return {
         reset, complete, isComplete, ready, trace,
+        completedIds() { sync(); return [...completed.keys()].filter(isComplete); },
         busy() { sync(); return generation !== null; },
         start(type, options = {}, dryRun = false) {
             sync();

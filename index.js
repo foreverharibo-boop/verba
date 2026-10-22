@@ -5860,30 +5860,40 @@ async function translateMessage(messageId, options = {}) {
     const message = chatReference?.[id];
     if (!message || message.is_user || !isNameReplacementMessage(message)) return;
     const source = messageSource(message);
-    if (!source.trim()) return;
+    if (!source.trim()) {
+        executionTrace.trace('translation-skipped',id,{reason:'empty-source'});
+        return;
+    }
     traceSourceForMessage(id,'translation-entered');
 
     if (options.automatic && isPredominantlyKorean(source)) {
         console.log(`[베르바] 한국어 중심 출력 자동 제외 #${id}`);
+        executionTrace.trace('translation-skipped',id,{reason:'korean-source'});
         return;
     }
     if (!hasForeignText(source)) {
+        executionTrace.trace('translation-skipped',id,{reason:'no-foreign-text'});
         if (!options.automatic) notify('번역할 외국어 원문이 없어요.', 'warning');
         return;
     }
     if (settings.translationEngine !== 'google-free' && !settings.profileId) {
+        executionTrace.trace('translation-skipped',id,{reason:'missing-profile'});
         if (!options.automatic) notify('먼저 번역기 전용 연결 프로필을 선택해 주세요.', 'warning');
         return;
     }
 
     const record = currentRecord(message);
     if (!options.force && record) {
+        executionTrace.trace('stored-translation-reused',id);
         failedOutputSignatures.delete(id);
         restoreCurrentDisplay(id, message, record);
         return;
     }
     if (pendingOutputs.has(id)) {
-        if (!options.force) return pendingOutputs.get(id).work;
+        if (!options.force) {
+            executionTrace.trace('already-translating',id);
+            return pendingOutputs.get(id).work;
+        }
         abortPendingOutput(id, outputAbortReason(
             'VERBA_OUTPUT_REPLACED',
             '새 전체 재번역 요청으로 이전 작업을 교체했습니다.',

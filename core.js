@@ -741,6 +741,92 @@ function lockedNameOnlyKoreanHalf(segment, korean, nameTokens = []) {
     return body;
 }
 
+/**
+ * Restore leaked name markers in an ALREADY bilingual AI response without
+ * enabling bilingual assembly. The English half must match the actual source;
+ * the Korean half remains untouched, and unrelated formatting is preserved.
+ *
+ * Known NAME markers have an explicit source spelling. Unknown numeric markers
+ * are restored only when full literal context proves one name from the source.
+ * An unrelated/unverifiable marker is never mapped by its numeric suffix.
+ */
+function restoreVerifiedBilingualEnglishNames(segment, translation, nameTokens = [], protectedTokens = []) {
+    const result = String(translation || '');
+    if (segment?.type !== 'dialogue_candidate') return result;
+    const envelope = dialogueEnvelope(result);
+    const pair = trailingParentheticalParts(envelope.body);
+    const koreanNameTokenPresent = (nameTokens || []).some(entry =>
+        pair?.right?.includes(String(entry?.token || '')) && /[가-힣]/u.test(String(entry?.value || ''))
+    );
+    if (!pair || (!/[가-힣]/u.test(validationText(pair.right)) && !koreanNameTokenPresent)) return result;
+    const rawEnglish = stripLooseDialogueQuotes(pair.left);
+    const english = canonicalizeProtectedTokenVariants(rawEnglish);
+    const markerPattern = new RegExp(PROTECTED_TOKEN_PATTERN.source, 'gu');
+    if (!markerPattern.test(english)) return result;
+    markerPattern.lastIndex = 0;
+
+    const original = restoreBilingualDetectionTokens(
+        dialogueEnvelope(segment.text).body, nameTokens, protectedTokens, 'source',
+    );
+    // Refuse ambiguous source templates rather than guessing from a marker ID.
+    if (!original || new RegExp(PROTECTED_TOKEN_PATTERN.source, 'u').test(original)) return result;
+    const nameSource = new Map((nameTokens || [])
+        .map(entry => [String(entry?.token || ''), String(entry?.original || entry?.source || '')])
+        .filter(([token, name]) => token && name));
+    const knownRestored = english.replace(markerPattern, token => nameSource.get(token) || token);
+    let recovered = knownRestored;
+    const unknownTokens = [...knownRestored.matchAll(markerPattern)];
+    if (!unknownTokens.length) {
+        // Source punctuation may vary only cosmetically (e.g. ellipsis glyph).
+        // Preserve the literal English source only when it is a proven match.
+        if (normalizedDialogueSurface(recovered) !== normalizedDialogueSurface(original)) return result;
+        recovered = original;
+    } else {
+        if (unknownTokens.length > 4 || original.length > 1500 || recovered.length > 1500) return result;
+        const literals = recovered.split(markerPattern);
+        // No bare marker or adjacent markers: those lack independent evidence.
+        if (literals.join('').replace(/[^\p{L}]/gu, '').length < 2
+            || literals.slice(1, -1).some(part => !part.trim())) return result;
+        if (!original.startsWith(literals[0])) return result;
+        const values = [];
+        const seen = new Map();
+        let cursor = literals[0].length;
+        for (let i = 0; i < unknownTokens.length; i++) {
+            const nextLiteral = literals[i + 1];
+            const end = nextLiteral ? original.indexOf(nextLiteral, cursor) : original.length;
+            if (end < cursor || end < 0) return result;
+            // Multiple candidate boundaries mean that the inferred name is not
+            // unique. Never choose one arbitrarily.
+            if (nextLiteral && original.indexOf(nextLiteral, end + 1) !== -1) return result;
+            const value = original.slice(cursor, end);
+            if (!/^[\p{Script=Latin}][\p{Script=Latin}\p{M}.'’ \-]{0,79}$/u.test(value)
+                || !/[\p{Script=Latin}]{2}/u.test(value)) return result;
+            const marker = unknownTokens[i][0];
+            if (seen.has(marker) && seen.get(marker) !== value) return result;
+            seen.set(marker, value);
+            values.push(value);
+            cursor = end + nextLiteral.length;
+        }
+        if (cursor !== original.length) return result;
+        let number = 0;
+        recovered = recovered.replace(markerPattern, () => values[number++]);
+        if (recovered !== original) return result;
+    }
+    if (!pair.left.includes(rawEnglish)) return result;
+    const openAt = envelope.body.lastIndexOf(pair.open);
+    if (openAt < 0) return result;
+    const prefix = envelope.body.slice(0, openAt);
+    if (!prefix.includes(pair.left)) return result;
+    // A model may close the English quote before opening the Korean wrapper.
+    // Only after an exact source match, remove that redundant inner quote pair.
+    const innerQuote = [['"', '"'], ['“', '”'], ['「', '」'], ['『', '』']]
+        .some(([open, close]) => pair.left === open + rawEnglish + close);
+    const correctedPrefix = prefix.replace(pair.left,
+        innerQuote ? recovered : pair.left.replace(rawEnglish, recovered));
+    return envelope.leading + envelope.open + correctedPrefix + envelope.body.slice(openAt)
+        + envelope.close + envelope.trailing;
+}
+
 /** Locally rebuilds the configured bilingual dialogue display without an AI request. */
 export function ensureBilingualDialogueFormat(segment, translation, settings = {}, speakerScopes = null, nameTokens = [], protectedTokens = []) {
     const result = String(translation || '');
@@ -750,7 +836,9 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     // ALL-DIALOGUE prompt. A bilingual-looking AI reply alone is not permission
     // to reconstruct/append source English. With no authorization, preserve the
     // received translation byte-for-byte (no deletion or format changes).
-    if (!bilingualDialogueRequested(settings)) return result;
+    if (!bilingualDialogueRequested(settings)) return restoreVerifiedBilingualEnglishNames(
+        segment, result, nameTokens, protectedTokens,
+    );
     const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
     const translatedEnvelope = dialogueEnvelope(result);
     const existingParts = existingBilingual

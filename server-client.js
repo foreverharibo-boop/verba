@@ -1,4 +1,4 @@
-import { compatibleCompletedSource, reconcileCompletedResult, describeSourceChange } from './server-result-compat.js?v=1';
+import { compatibleCompletedSource, reconcileCompletedResult, describeSourceChange } from './server-result-compat.js?v=2';
 // Optional server transport. Disabled installations do not contact the plugin.
 import { installVertexModelCompatibility } from './model-compat.js';
 const API = '/api/plugins/verba-server';

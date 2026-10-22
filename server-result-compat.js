@@ -3,7 +3,7 @@
 // those deletions structurally instead of naming extension-specific tags.
 const normalize=value=>String(value??'').replace(/\r\n/g,'\n').trim();
 const VOID_TAGS=new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-const TOKEN=/<\!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<![^>]*>|<\/?[A-Za-z][\w:.-]*(?:\s[^<>]*?)?\/?>/g;
+const TOKEN=/<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<![^>]*>|<\/?[A-Za-z][\w:.-]*(?:\s[^<>]*?)?\/?>/g;
 
 function parseMarkup(value) {
     const source=String(value??'');
@@ -47,24 +47,49 @@ function deletionPlan(before,after) {
         starts.set(node.start,list);
     }
     for(const list of starts.values())list.sort((a,b)=>b.end-a.end);
-    const memo=new Map();
-    function solve(i,j) {
-        const key=i+':'+j;
-        if(memo.has(key))return memo.get(key);
-        if(i===source.length){const value=j===target.length?[]:null;memo.set(key,value);return value;}
-        if(j<target.length&&source[i]===target[j]){
-            const kept=solve(i+1,j+1);
-            if(kept){memo.set(key,kept);return kept;}
+
+    // The old recursive matcher consumed one JavaScript stack frame per source
+    // character. Long RP replies could therefore finish translating on the
+    // server, notify the phone, then crash while applying the result. Use an
+    // explicit DFS stack instead. If a pathological document creates too many
+    // states, fail closed and let the exact final source take the safe path.
+    const stateKey=(i,j)=>`${i}:${j}`;
+    const stack=[{i:0,j:0,prev:null,removed:null}];
+    const parents=new Map();
+    const maxStates=Math.max(10000,Math.min(500000,
+        (source.length+target.length+parsed.nodes.length)*12));
+    let explored=0,endKey=null;
+    while(stack.length) {
+        const state=stack.pop();
+        const key=stateKey(state.i,state.j);
+        if(parents.has(key))continue;
+        parents.set(key,{prev:state.prev,removed:state.removed});
+        if(++explored>maxStates)return null;
+        if(state.i===source.length) {
+            if(state.j===target.length){endKey=key;break;}
+            continue;
         }
-        for(const node of starts.get(i)||[]){
-            const tail=solve(node.end,j);
-            if(tail){const value=[node,...tail];memo.set(key,value);return value;}
+        // Push deletion choices first and the character match last so the LIFO
+        // traversal preserves the previous keep-first behavior.
+        const nodes=starts.get(state.i)||[];
+        for(let index=nodes.length-1;index>=0;index--) {
+            const node=nodes[index];
+            stack.push({i:node.end,j:state.j,prev:key,removed:node});
         }
-        memo.set(key,null);
-        return null;
+        if(state.j<target.length&&source[state.i]===target[state.j]) {
+            stack.push({i:state.i+1,j:state.j+1,prev:key,removed:null});
+        }
     }
-    const removed=solve(0,0);
-    return removed?.length?{parsed,removed}:null;
+    if(!endKey)return null;
+    const removed=[];
+    for(let key=endKey;;) {
+        const step=parents.get(key);
+        if(!step?.prev)break;
+        if(step.removed)removed.push(step.removed);
+        key=step.prev;
+    }
+    removed.reverse();
+    return removed.length?{parsed,removed}:null;
 }
 
 const structureSignature=parsed=>parsed.nodes.map(node=>`${node.path.join('.')}:${node.name}`);

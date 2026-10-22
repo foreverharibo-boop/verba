@@ -63,6 +63,25 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         history.push({event,at:Date.now(),...detail});
         if(history.length>40)history.shift();
     }
+    function captureNotification(type='normal') {
+        // APK has a dedicated bridge so other notification extensions cannot
+        // replace its opt-in state through the shared legacy global.
+        const dedicated=globalThis[Symbol.for('silly-pop.apk.notifications.v1')];
+        const bridge=dedicated||globalThis.sillyPopNotifications;
+        const owner=dedicated?'apk':bridge?'legacy':'missing';
+        try {
+            if(typeof bridge?.captureTranslation!=='function'){
+                trace('notification-capture',{bridge:owner,requested:false,reason:'unavailable'});return undefined;
+            }
+            const marker=bridge.captureTranslation(type)||undefined;
+            const requested=marker?.translationEnabled===true;
+            trace('notification-capture',{bridge:owner,requested,reason:requested?'captured':'disabled-or-unsupported'});
+            return requested?marker:undefined;
+        } catch {
+            trace('notification-capture',{bridge:owner,requested:false,reason:'capture-error'});
+            return undefined;
+        }
+    }
     const fetchBase=globalThis.fetch.bind(globalThis);
     const scopeKey=()=>{const c=getContext();return JSON.stringify([c.chatId??'',c.characterId??'',c.groupId??'',c.name2??'']);};
     try{records=JSON.parse(localStorage.getItem(storageKey)||'[]').filter(x=>/^[a-f0-9]{32}$/.test(x.id)).slice(-32);}catch{}
@@ -214,8 +233,13 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     async function output(source,options,local){
         // Only a generation in the same chat and with the EXACT final source is
         // reusable. Regex/other extension changes never receive stale results.
-        const recent=[...records].reverse().find(r=>r.scope===scopeKey()&&r.kind==='generation');
-        for(const record of (recent && options.stage!=='output-retranslation' ? [recent] : [])){
+        // Reading is not an acknowledgement of UI application: a frozen page or
+        // message finalization may retry after the first read. Include the most
+        // recent used generation, without searching older mismatching replies.
+        // A later standalone/manual output is a barrier: never restore an older
+        // generation over a newer translation or final-source change.
+        const recent=[...records].reverse().find(r=>r.scope===scopeKey()&&['generation','used','output'].includes(r.kind));
+        for(const record of (recent && recent.kind!=='output' && options.stage!=='output-retranslation' ? [recent] : [])){
             if(record.cancel || record.config!==fingerprint(configurationKey())){trace('reuse-skipped',{reason:record.cancel?'cancelled':'settings-changed'});continue;}
             let state;
             try{state=await reconnectStatus(record.id,options.signal);}catch(error){if(error.status===404){forget(record.id);continue;}throw error;}
@@ -236,7 +260,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // user switches chats. Manual/helper translations remain silent.
         let notification;
         if(kind==='output'&&options.automatic===true&&options.stage==='output-translation'){
-            try{notification=globalThis.sillyPopNotifications?.captureTranslation?.('normal')||undefined;}catch{}
+            notification=captureNotification('normal');
         }
         const envelope={id,kind,source,snapshot:await snapshot(),options:clean({...options,signal:undefined,timing:undefined}),...(notification?{notification}:{}),...(segments?{segments}: {})};
         if(options.signal?.aborted)throw abortError();
@@ -316,8 +340,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             // Capture the initiating character before asynchronous profile preparation.
             // Only bound automatic reply jobs get this opt-in metadata, never helpers.
             let notification;
-            try { notification=globalThis.sillyPopNotifications?.captureTranslation?.(frame.type) || undefined; }
-            catch { /* An optional notifier cannot prevent a reply. */ }
+            notification=captureNotification(frame.type);
             let snap;
             try { if(!await available())return previous.call(this,input,init); snap=await snapshot(); }
             catch(error) { trace('automatic-prepare-failed');onNotice('서버 번역 준비 실패: '+error.message+' · 답변 생성은 기존 방식으로 진행합니다.'); return previous.call(this,input,init); }

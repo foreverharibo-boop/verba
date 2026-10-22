@@ -39,6 +39,12 @@ const exclusion = [
     /(?:원문|영어|영문)[^\n.;]{0,45}(?:한국어|한글|번역)[^\n.;]{0,35}(?:괄호\s*없이\s*(?:단독|한국어만)|포함하지)/iu,
     /(?:한\s*영|영\s*한)\s*병기[^\n.;]{0,45}(?:요청|지시|요구)[^\n.;]{0,30}(?:했을\s*때|할\s*때|있는\s*경우|한\s*경우)\s*만/iu,
     /\b(?:bilingual|dual[-\s]?language)\b[^\n.;]{0,90}\b(?:only\s+when|only\s+if|if|when)\b[^\n.;]{0,45}\b(?:user|requested|ask|explicitly)\b/iu,
+    // Explicit bilingual refusals/non-requests: these are not output commands.
+    // Check negations after "한영병기" or "bilingual" before any ON rule.
+    /(?:한\s*영|영\s*한)\s*병기[^\n.;]{0,55}(?:요청|지시|요구)(?:을|를|은|는|이|가|도)?\s*(?:(?:안|못)\s*(?:함|했|하|해|했어|했다|할)|하지\s*않|한\s*적\s*없|없|아니|않|미\s*요청|하지\s*마)/iu,
+    /(?:한\s*영|영\s*한)\s*병기[^\n.;]{0,45}(?:안\s*(?:함|했|하|해|할|시킴)|한\s*적\s*없|원치|거절|요청한\s*적\s*없|시킨\s*적\s*없|시키지\s*않|시키지\s*마)/iu,
+    /\b(?:bilingual(?:ly)?|dual[-\s]?language|parallel[-\s]?language)\b[^\n.;]{0,90}\b(?:(?:should|must|can|may|will|shall)\s+(?:not|never)|(?:should|must|can|may|will|shall)n['’]t|(?:is|are|was|were)\s+not|(?:isn['’]t|aren['’]t|wasn['’]t|weren['’]t)|not)\s+(?:be\s+)?(?:used|enabled|allowed|shown|displayed|output|rendered|included|applied|requested|wanted|required|mandatory|forced|shown|appear)\b/iu,
+    /\b(?:bilingual(?:ly)?|dual[-\s]?language|parallel[-\s]?language)\b[^\n.;]{0,90}\b(?:should|must)\s+(?:be\s+)?(?:avoided|disabled|prohibited|suppressed|omitted)\b/iu,
 ];
 const characterTraits = [
     /\b(?:character|he|she|they|speaker|person|student|npc|user)\s+(?:is|are|can\s+speak|speaks|understands|knows)\s+(?:both\s+languages|bilingual|english\s+and\s+korean)\b/iu,

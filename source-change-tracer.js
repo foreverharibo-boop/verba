@@ -35,9 +35,9 @@ function callingCode() {
         if (line.includes('source-change-tracer.js')) continue;
         const match = line.match(/(?:https?:\/\/[^\s)]+|file:\/\/\/[^\s)]+|\/scripts\/[^\s)]+|\/script\.js:\d+:\d+)/u);
         if (!match) continue;
-        const raw = match[0].split(/[?#]/u)[0];
+        const raw = match[0];
         const pos = /:(\d+):(\d+)$/u.exec(raw);
-        const pathname = raw.replace(/:(\d+):(\d+)$/u, '');
+        const pathname = raw.replace(/:(\d+):(\d+)$/u, '').split(/[?#]/u)[0];
         const ext = /\/scripts\/extensions\/(?:third-party\/)?([a-z0-9_.-]+)\/([a-z0-9_./-]+\.m?js)$/iu.exec(pathname);
         const script = /\/([a-z0-9_.-]+\.m?js)$/iu.exec(pathname);
         if (!script) continue;

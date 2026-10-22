@@ -7,6 +7,7 @@ import {
     clearBilingualPromptVerdicts,
     buildBilingualVerdictPrompt,
 } from '../bilingual-intent.js';
+import { ensureBilingualDialogueFormat, normalizeBilingualMappedTranslation } from '../core.js';
 
 const ON = [
     '한영병기로 출력해',
@@ -71,4 +72,53 @@ controller.abort();
 await assert.rejects(promise, { name: 'AbortError' });
 assert.equal(bilingualPromptRequestsOutput(weak), false);
 assert.ok(buildBilingualVerdictPrompt({ prompt: weak }).includes('bilingual_0000'));
-console.log('PASS bilingual intent detection + one-flight AI + failure fallback + cancellation');
+
+const deniedBilingual = [
+    '한영병기 요청 안 함.',
+    '한영병기 요청안함',
+    '한영병기 요청 안했어',
+    '한영병기 요청한 적 없어.',
+    '한영병기 요청은 안 했어.',
+    '한영병기 시킨 적 없는데요.',
+    '한영병기 시키지 마세요.',
+    'Bilingual dialogue should not be used.',
+    'Bilingual output is not requested.',
+    "Bilingual dialogue shouldn't be used.",
+    "Bilingual formatting wasn't requested.",
+    'Bilingual output should be avoided.',
+];
+for (const prompt of deniedBilingual) assert.equal(classifyBilingualIntent(prompt), 'off', prompt);
+const explicitlyAllowed = [
+    '한영병기로 출력해',
+    '한영병기하되 괄호 없이 원문과 한국어를 나란히 출력해.',
+    'Bilingual dialogue is mandatory.',
+    'Do not output bilingual narration. For dialogue, always show bilingual output.',
+];
+for (const prompt of explicitlyAllowed) assert.equal(classifyBilingualIntent(prompt), 'on', prompt);
+
+// With bilingual OFF, never reconstruct source English, even if the model
+// already returned a bilingual-looking output. Don't strip the model's text.
+const sampleDialogue = { type: 'dialogue_candidate', text: '"Hello."' };
+const koreanOnly = { globalPrompt: '한영병기 요청 안 함.' };
+const modelTranslation = '"안녕."';
+const modelBilingual = '"Hello. (안녕.)"';
+assert.equal(ensureBilingualDialogueFormat(sampleDialogue, modelTranslation, koreanOnly), modelTranslation);
+assert.equal(ensureBilingualDialogueFormat(sampleDialogue, modelBilingual, koreanOnly), modelBilingual);
+assert.equal(ensureBilingualDialogueFormat(sampleDialogue, modelTranslation, {
+    globalPrompt: '한영병기로 출력해',
+    globalPromptEnabled: false,
+}), modelTranslation);
+assert.equal(ensureBilingualDialogueFormat(sampleDialogue, modelTranslation, {
+    globalPrompt: '한영병기로 출력해',
+}), modelBilingual);
+assert.equal(ensureBilingualDialogueFormat(sampleDialogue, modelBilingual, {
+    globalPrompt: '한영병기로 출력해',
+}), modelBilingual);
+assert.equal(ensureBilingualDialogueFormat({ type: 'narration', text: 'Hello.' }, modelTranslation, {
+    globalPrompt: '한영병기로 출력해',
+}), modelTranslation);
+assert.equal(normalizeBilingualMappedTranslation(modelBilingual, [{
+    id: 'seg_0000', source: sampleDialogue.text, start: 0, end: modelBilingual.length,
+}], koreanOnly, sampleDialogue.text).translation, modelBilingual);
+
+console.log('PASS bilingual intent regression + safe assembly gate + AI fallback');

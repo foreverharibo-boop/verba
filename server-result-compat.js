@@ -48,6 +48,9 @@ function stripVerifiedSceneReports(value) {
     }
     return stripSpans(source,spans);
 }
+export function hasVerifiedSceneReport(value) {
+    return stripVerifiedSceneReports(value).spans.length > 0;
+}
 function stripCombinedBlocks(value) {
     const source=String(value??'');
     const states=stripStateBlocks(source);

@@ -1,5 +1,7 @@
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { createAutomaticOutputLifecycle } from './automatic-output.js';
+import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.55';
+import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.55';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -60,7 +62,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.54';
+const EXTENSION_VERSION = '0.6.55';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -812,6 +814,39 @@ let lastDesktopSelectionAt = 0;
 let lastDebugDiagnostic = null;
 const outputTiming = createOutputTiming();
 outputTiming.setEnabled(settings.debugMode);
+// Diagnostic-only runtime, enabled only after the user turns on debug mode.
+let fullSourceSnapshotsEnabled = false;
+const executionTrace = createBrowserExecutionDiagnostics({
+    enabled: () => settings.debugMode === true,
+    visibility: () => document.visibilityState || 'unknown',
+});
+const sourceChangeTracer = createSourceChangeTracer({
+    enabled: () => settings.debugMode === true,
+    fullTextEnabled: () => fullSourceSnapshotsEnabled,
+    readSource: messageSource,
+    onChange: meta => executionTrace.trace('source-write-observed', meta.messageId, {
+        reason: meta.method,
+        beforeLength: Math.max(0, meta.removedLength),
+        afterLength: Math.max(0, meta.insertedLength),
+    }),
+});
+function traceSourceForMessage(messageId, phase) {
+    if (!settings.debugMode) return;
+    const id=Number(messageId);
+    if(Number.isInteger(id)&&id>=0) sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
+}
+function traceLatestAssistantSource(phase) {
+    if(!settings.debugMode) return;
+    const chat=liveContext().chat;
+    if(!Array.isArray(chat)) return;
+    for(let id=chat.length-1;id>=Math.max(0,chat.length-6);id--) {
+        const message=chat[id];
+        if(message&&!message.is_user&&!message.is_system){
+            traceSourceForMessage(id,phase);break;
+        }
+    }
+}
+ 
 let lastPromptConflicts = [];
 
 function liveContext() {
@@ -963,6 +998,8 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             hasStoredTranslation: Boolean(currentRecord(latest.message)),
         } : null,
         automaticOutput: automaticOutputLifecycle.diagnostics(),
+        browserExecution: executionTrace.diagnostics(),
+        sourceChangeTrace: sourceChangeTracer.diagnostics(),
         settingsState: {
             autoInput: Boolean(settings.autoInput),
             autoOutput: settings.autoOutput !== false,
@@ -976,7 +1013,10 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
         privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
-        limitation: '터먹스·서버 터미널에만 출력되고 브라우저에 전달되지 않은 로그는 읽을 수 없음',
+        ...(fullSourceSnapshotsEnabled && settings.debugMode ? {
+            fullSourceWarning: '원문 전체 기록 ON: sourceChangeTrace.events에 RP 원문과 삭제·추가된 내용이 그대로 포함됩니다. 공유 전 확인하세요.',
+        } : {}),
+        limitation: '숨김은 브라우저 동결의 증거가 아닙니다. freeze 이벤트나 타이머 지연은 참고 정황이며, 실제 동결 중에는 브라우저 로그를 기록할 수 없습니다. 터먹스 로그는 별도입니다.',
     };
 }
 
@@ -987,6 +1027,8 @@ function debugDiagnosticText(diagnostic) {
 
 async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
     if (!settings.debugMode) throw new Error('복사하려면 디버그 모드를 켜 주세요.');
+    executionTrace.heartbeat();
+    traceLatestAssistantSource('log-copy');
     const snapshot = createDebugDiagnostic('manual-status', null, '복사 시점의 번역 상태');
     snapshot.activeWork = {
         outputMessageIds: [...pendingOutputs.keys()],
@@ -11659,6 +11701,11 @@ function injectSettingsPanel() {
                             <span>디버그 모드</span>
                         </label>
                         <div class="verba-help">오류가 없어도 로그 복사로 현재 번역 대기·재시도 상태와 백그라운드 전환 기록을 확인할 수 있어요. 마지막 오류·응답 형식·보호 표식 복구 1건도 함께 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-debug-full-source" ${settings.debugMode && fullSourceSnapshotsEnabled ? 'checked' : ''} ${settings.debugMode ? '' : 'disabled'}>
+                            <span>원문 변경 전·후 전체 기록 (선택)</span>
+                        </label>
+                        <div class="verba-help">기본 로그는 삭제 글자 수·위치·태그만 기록합니다. 이 옵션을 켜면 변경 전후 본문과 삭제된 텍스트 전체를 최근 3건만 기록합니다. RP 내용이 포함되므로 공유 전 확인해 주세요. 새로고침하면 꺼집니다.</div>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode ? '' : 'disabled'}>로그 복사</button>
                         <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>
@@ -12319,19 +12366,41 @@ function injectSettingsPanel() {
     });
     syncProfileRaceUi();
     const debugModeInput = panel.querySelector('#verba-debug-mode');
+    const fullSourceInput = panel.querySelector('#verba-debug-full-source');
     const debugCopyButton = panel.querySelector('#verba-copy-last-debug');
     const syncDebugCopyButton = () => {
-        if (!debugCopyButton) return;
-        debugCopyButton.disabled = !settings.debugMode;
+        if(debugCopyButton)debugCopyButton.disabled=!settings.debugMode;
+        if(fullSourceInput){
+            fullSourceInput.disabled=!settings.debugMode;
+            fullSourceInput.checked=Boolean(settings.debugMode&&fullSourceSnapshotsEnabled);
+        }
     };
     debugModeInput?.addEventListener('change', event => {
         settings.debugMode = event.target.checked;
-        if (!settings.debugMode) lastDebugDiagnostic = null;
+        if(!settings.debugMode){
+            fullSourceSnapshotsEnabled=false;
+            sourceChangeTracer.reset();
+            executionTrace.clear({dropTimer:true});
+            lastDebugDiagnostic=null;
+        } else {
+            executionTrace.start();
+            traceLatestAssistantSource('debug-enabled');
+        }
         outputTiming.setEnabled(settings.debugMode);
         renderOutputTiming();
         saveSettings();
         syncDebugCopyButton();
         notify(settings.debugMode ? '디버그를 켰어요. 다음 출력 번역 시간과 마지막 오류를 기록해요.' : '디버그를 끄고 오류·시간 기록을 지웠어요.', 'info');
+    });
+    fullSourceInput?.addEventListener('change', event => {
+        fullSourceSnapshotsEnabled=Boolean(event.target.checked)&&settings.debugMode===true;
+        sourceChangeTracer.reset();
+        lastDebugDiagnostic=null;
+        traceLatestAssistantSource(fullSourceSnapshotsEnabled?'full-text-on':'full-text-off');
+        syncDebugCopyButton();
+        notify(fullSourceSnapshotsEnabled
+          ? '원문 전체 기록을 시작합니다. 복사한 로그에 RP 본문이 포함됩니다.'
+          : '원문 전체 기록을 끄고 수집된 원문 기록을 지웠어요.', 'info');
     });
     debugCopyButton?.addEventListener('click', async () => {
         try {

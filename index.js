@@ -1,7 +1,7 @@
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { createAutomaticOutputLifecycle } from './automatic-output.js';
-import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.55';
-import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.55';
+import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.56';
+import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.56';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -62,7 +62,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.55';
+const EXTENSION_VERSION = '0.6.56';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -12957,12 +12957,13 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
         stableChecks: 0,
         timer: null,
         check: null,
+        dispatchStarted: false,
     };
     swipeTranslationJobs.set(id, job);
     renderSwipeHold(id, job);
 
     const check = () => {
-        if (swipeTranslationJobs.get(id) !== job) return;
+        if (swipeTranslationJobs.get(id) !== job || job.dispatchStarted) return;
         if (automaticOutputLifecycle.busy() && !automaticOutputLifecycle.isComplete(id)) {
             job.timer = setTimeout(check, 180);
             return;
@@ -13017,7 +13018,17 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
         if (signature !== job.candidateSignature) {
             job.candidateSignature = signature;
             job.stableChecks = 0;
-            job.timer = setTimeout(check, 120);
+            // A real completion signal proves this exact active swipe/source.
+            // Recheck in a microtask so other synchronous completion handlers can
+            // finish, without letting background timer throttling delay the API call.
+            if (job.rendered && automaticOutputLifecycle.isComplete(id)) {
+                automaticOutputLifecycle.trace('swipe-final-microtask', id);
+                executionTrace.trace('swipe-final-microtask', id);
+                queueMicrotask(check);
+            } else {
+                // Unproven/streaming swipe content still needs stability checks.
+                job.timer = setTimeout(check, 120);
+            }
             return;
         }
 
@@ -13035,6 +13046,7 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
             finishSwipeTranslationJob(id, job);
             return;
         }
+        job.dispatchStarted = true;
         Promise.resolve(translateMessage(id, { automatic: true })).finally(() => {
             finishSwipeTranslationJob(id, job);
             refreshRetranslateButton();

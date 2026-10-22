@@ -4,6 +4,126 @@ const MAX_EVENTS = 48;
 const MAX_FULL_TEXT_EVENTS = 8;
 const MAX_TRACKED = 6;
 
+const MODULE_URL = String(import.meta.url || '');
+const IS_DEEP_VARIANT = /(?:\/|\\)(?:veereubaa|verba-deep)(?:\/|\\)/iu.test(MODULE_URL);
+const FULL_TEXT_PREFERENCE = Object.freeze({
+    storageKey: IS_DEEP_VARIANT ? 'verba-deep.debugFullSource.v1' : 'verba.debugFullSource.v1',
+    checkboxId: IS_DEEP_VARIANT ? 'verba-deep-debug-full-source' : 'verba-debug-full-source',
+    helpClass: IS_DEEP_VARIANT ? 'verba-deep-help' : 'verba-help',
+});
+const UI_INSTALL_KEY = Symbol.for(`verba.full-source-preference.ui.${IS_DEEP_VARIANT ? 'deep' : 'standard'}.v1`);
+const MEMORY_PREFERENCE_KEY = Symbol.for(`verba.full-source-preference.memory.${IS_DEEP_VARIANT ? 'deep' : 'standard'}.v1`);
+
+function usableStorage(storage) {
+    try {
+        const candidate = storage === undefined ? globalThis.localStorage : storage;
+        if (!candidate || typeof candidate.getItem !== 'function' || typeof candidate.setItem !== 'function') return null;
+        return candidate;
+    } catch {
+        return null;
+    }
+}
+
+export function readPersistentFullTextPreference(storage, key = FULL_TEXT_PREFERENCE.storageKey) {
+    const target = usableStorage(storage);
+    if (target) {
+        try { return target.getItem(key) === 'true'; }
+        catch { /* Fall through to the in-memory preference. */ }
+    }
+    return globalThis[MEMORY_PREFERENCE_KEY] === true;
+}
+
+export function writePersistentFullTextPreference(value, storage, key = FULL_TEXT_PREFERENCE.storageKey) {
+    const enabled = value === true;
+    globalThis[MEMORY_PREFERENCE_KEY] = enabled;
+    const target = usableStorage(storage);
+    if (target) {
+        try { target.setItem(key, enabled ? 'true' : 'false'); }
+        catch { /* Private browsing may reject writes; memory still works for this page. */ }
+    }
+    return enabled;
+}
+
+function installPersistentFullTextPreferenceUi() {
+    const doc = globalThis.document;
+    if (!doc?.addEventListener || globalThis[UI_INSTALL_KEY]) return;
+    globalThis[UI_INSTALL_KEY] = true;
+
+    let syncQueued = false;
+    const scheduleSync = () => {
+        if (syncQueued) return;
+        syncQueued = true;
+        queueMicrotask(() => {
+            syncQueued = false;
+            syncPreferenceUi();
+        });
+    };
+    const updateHelp = input => {
+        const help = input.closest?.('label')?.nextElementSibling;
+        if (!help?.classList?.contains(FULL_TEXT_PREFERENCE.helpClass)) return;
+        const before = '세션 전용으로 새로고침하면 꺼집니다.';
+        const after = '한 번 켜면 직접 끌 때까지 새로고침 후에도 유지됩니다.';
+        if (help.textContent?.includes(before)) help.textContent = help.textContent.replace(before, after);
+    };
+    const syncPreferenceUi = () => {
+        const input = doc.getElementById?.(FULL_TEXT_PREFERENCE.checkboxId);
+        if (!input) return;
+        const preferred = readPersistentFullTextPreference();
+        updateHelp(input);
+
+        if (!preferred) {
+            delete input.dataset.verbaPersistentFullSourceApplied;
+            return;
+        }
+
+        // Keep the visible preference checked even while its prerequisites are
+        // temporarily disabled. Recording itself is still gated by debug mode
+        // and server translation through createSourceChangeTracer().
+        const restoredCheckedState = !input.checked;
+        if (restoredCheckedState) input.checked = true;
+        if (input.disabled) {
+            delete input.dataset.verbaPersistentFullSourceApplied;
+            return;
+        }
+        if (!restoredCheckedState && input.dataset.verbaPersistentFullSourceApplied === '1') return;
+        input.dataset.verbaPersistentFullSourceApplied = '1';
+        const EventClass = doc.defaultView?.Event || globalThis.Event;
+        if (typeof EventClass === 'function') input.dispatchEvent(new EventClass('change', { bubbles: true }));
+    };
+
+    doc.addEventListener('change', event => {
+        const input = event.target;
+        if (input?.id !== FULL_TEXT_PREFERENCE.checkboxId) {
+            scheduleSync();
+            return;
+        }
+        if (event.isTrusted) {
+            writePersistentFullTextPreference(Boolean(input.checked));
+            if (!input.checked) delete input.dataset.verbaPersistentFullSourceApplied;
+            else input.dataset.verbaPersistentFullSourceApplied = '1';
+        }
+        scheduleSync();
+    }, true);
+    for (const name of ['click', 'input', 'focusin']) doc.addEventListener(name, scheduleSync, true);
+    doc.addEventListener('visibilitychange', scheduleSync);
+    globalThis.addEventListener?.('pageshow', scheduleSync);
+
+    // The settings panel can be inserted before index.js attaches its local
+    // change handler. A few bounded retries make the persisted choice reach
+    // that handler without polling forever.
+    for (const delay of [0, 50, 250, 1000]) globalThis.setTimeout?.(scheduleSync, delay);
+
+    const root = doc.documentElement;
+    if (root && typeof globalThis.MutationObserver === 'function') {
+        const observer = new MutationObserver(scheduleSync);
+        observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+    }
+    if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', scheduleSync, { once: true });
+    scheduleSync();
+}
+
+installPersistentFullTextPreferenceUi();
+
 function describeChange(before, after) {
     before = String(before ?? '');
     after = String(after ?? '');
@@ -50,12 +170,20 @@ function callingCode() {
     return { possibleWriter: frames.find(frame => frame.startsWith('extension:')) || frames[0] || null, frames };
 }
 
-export function createSourceChangeTracer({ enabled, fullTextEnabled, readSource, now = Date.now } = {}) {
+export function createSourceChangeTracer({
+    enabled,
+    fullTextEnabled,
+    persistentFullTextEnabled = readPersistentFullTextPreference,
+    readSource,
+    now = Date.now,
+} = {}) {
     const tracked = new Map();
     const events = [];
     const isEnabled = () => enabled?.() === true;
-    const wantsFullText = () => isEnabled() && fullTextEnabled?.() === true;
-    // Text is kept in memory only, not in extension settings or server requests.
+    const wantsFullText = () => isEnabled()
+        && (fullTextEnabled?.() === true || persistentFullTextEnabled?.() === true);
+    // Only the opt-in boolean is persisted. Full source text remains in memory
+    // for the latest eight events and is never written to settings or storage.
     const textSnapshot = (before, after, change) => wantsFullText() ? {
         beforeText: before,
         afterText: after,
@@ -205,7 +333,7 @@ export function createSourceChangeTracer({ enabled, fullTextEnabled, readSource,
                 frames: row.frames ? [...row.frames] : undefined,
                 removedTagHints: row.removedTagHints ? [...row.removedTagHints] : undefined,
             })),
-            limitation: 'possibleWriter is a clue, not proof. Object replacement or changes before tracking may only be visible at checkpoints. Full source text is captured only after explicit opt-in, in memory for the last eight changes; manually copied logs then contain the complete RP text.',
+            limitation: 'possibleWriter is a clue, not proof. Object replacement or changes before tracking may only be visible at checkpoints. Full source text is captured only after explicit opt-in, in memory for the last eight changes; the opt-in preference persists locally until it is unchecked, and manually copied logs then contain the complete RP text.',
         };
     }
     return { observe, compare, reset, diagnostics };

@@ -3128,7 +3128,7 @@ async function sendProfileRequest(prompt, options = {}) {
                 return service.sendRequest(
                     profileId,
                     [{ role: 'user', content: prompt }],
-                    VERBA_MAX_TOKENS,
+                    options.stage === 'bilingual-check' ? 512 : VERBA_MAX_TOKENS,
                     { signal: controller.signal },
                 );
             });

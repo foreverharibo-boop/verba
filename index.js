@@ -1,7 +1,7 @@
 import { reconcileCompletedResult } from './server-result-compat.js?v=1';
 import { createServerClient } from './server-client.js?v=0.6.61';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
-import { createSourceChangeTracer } from './source-change-tracer.js';
+import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.63';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -62,7 +62,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.62';
+const EXTENSION_VERSION = '0.6.63';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -818,7 +818,9 @@ let lastDebugDiagnostic = null;
 const outputTiming = createOutputTiming();
 outputTiming.setEnabled(settings.debugMode);
 // Experimental diagnostics only: observe source writes without storing chat content.
+let fullSourceSnapshotsEnabled = false; // Opt-in only for this page session; not persisted.
 const sourceChangeTracer = createSourceChangeTracer({
+    fullTextEnabled: () => fullSourceSnapshotsEnabled,
     enabled: () => settings.debugMode === true && settings.serverTranslation === true
         && isTranslationExtensionActive(EXTENSION_KEY),
     readSource: messageSource,
@@ -915,13 +917,26 @@ function bindServerTranslationSetting(panel) {
     const check = panel.querySelector('#verba-server-check');
     if (!input || !status || !check) return;
     input.addEventListener('change', async () => {
-        if (!input.checked) { settings.serverTranslation = false; saveSettings(); status.textContent = '기존 브라우저 번역 · 진행 중인 서버 작업은 계속됩니다.'; return; }
+        if (!input.checked) {
+            settings.serverTranslation = false;
+            fullSourceSnapshotsEnabled = false;
+            sourceChangeTracer.reset();
+            const detail = panel.querySelector('#verba-debug-full-source');
+            if (detail) { detail.checked = false; detail.disabled = true; }
+            saveSettings();
+            status.textContent = '기존 브라우저 번역 · 진행 중인 서버 작업은 계속됩니다.';
+            return;
+        }
         input.disabled = true;
         try {
             await verbaServer.check(); settings.serverTranslation = true; saveSettings();
             status.textContent = '서버 번역 연결됨 · 다음 요청부터 적용됩니다.';
         } catch (error) { input.checked = false; status.textContent = error.message; }
-        finally { input.disabled = false; }
+        finally {
+            input.disabled = false;
+            const detail = panel.querySelector('#verba-debug-full-source');
+            if (detail) detail.disabled = !settings.debugMode || settings.serverTranslation !== true;
+        }
     });
     check.addEventListener('click', async () => {
         check.disabled = true;
@@ -1099,6 +1114,8 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
         privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
+        ...(fullSourceSnapshotsEnabled && settings.debugMode === true && settings.serverTranslation === true
+            ? { fullSourceWarning: '원문 전체 비교 기록이 활성화되어 있습니다. sourceChangeTrace.events에는 변경 전후의 RP 본문 전체, 삭제/추가된 글이 포함됩니다. 외부 공유 전 반드시 내용을 검토하세요.' } : {}),
         limitation: '터먹스·서버 터미널에만 출력되고 브라우저에 전달되지 않은 로그는 읽을 수 없음',
     };
 }
@@ -11788,6 +11805,11 @@ function injectSettingsPanel() {
                             <span>디버그 모드</span>
                         </label>
                         <div class="verba-help">오류가 없어도 로그 복사로 현재 번역 대기·재시도 상태와 백그라운드 전환 기록을 확인할 수 있어요. 마지막 오류·응답 형식·보호 표식 복구 1건도 함께 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
+                        <label class="verba-check-row">
+                            <input type="checkbox" id="verba-debug-full-source" ${fullSourceSnapshotsEnabled ? 'checked' : ''} ${settings.debugMode && settings.serverTranslation === true ? '' : 'disabled'}>
+                            <span>원문 변경 전·후 전체 기록 (실험용)</span>
+                        </label>
+                        <div class="verba-help">디버그 + 서버 번역을 켠 뒤, 이 옵션까지 켜야 원문 전체를 기록합니다. 변경 전·후 본문과 삭제/추가된 문장이 로그에 그대로 포함됩니다. 최근 변경 8건만 원문 전체를 보관하며, 다른 정보는 기존처럼 기록합니다. 세션 전용으로 새로고침하면 꺼집니다. 외부 공유 전 RP 내용을 반드시 확인해 주세요.</div>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode ? '' : 'disabled'}>로그 복사</button>
                         <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>
@@ -12449,14 +12471,19 @@ function injectSettingsPanel() {
     });
     syncProfileRaceUi();
     const debugModeInput = panel.querySelector('#verba-debug-mode');
+    const fullSourceInput = panel.querySelector('#verba-debug-full-source');
     const debugCopyButton = panel.querySelector('#verba-copy-last-debug');
     const syncDebugCopyButton = () => {
-        if (!debugCopyButton) return;
-        debugCopyButton.disabled = !settings.debugMode;
+        if (debugCopyButton) debugCopyButton.disabled = !settings.debugMode;
+        if (fullSourceInput) {
+            fullSourceInput.disabled = !settings.debugMode || settings.serverTranslation !== true;
+            fullSourceInput.checked = fullSourceSnapshotsEnabled && !fullSourceInput.disabled;
+        }
     };
     debugModeInput?.addEventListener('change', event => {
         settings.debugMode = event.target.checked;
         if (!settings.debugMode) {
+            fullSourceSnapshotsEnabled = false;
             sourceChangeTracer.reset();
             lastDebugDiagnostic = null;
         } else {
@@ -12467,6 +12494,17 @@ function injectSettingsPanel() {
         saveSettings();
         syncDebugCopyButton();
         notify(settings.debugMode ? '디버그를 켰어요. 다음 출력 번역 시간과 마지막 오류를 기록해요.' : '디버그를 끄고 오류·시간 기록을 지웠어요.', 'info');
+    });
+    fullSourceInput?.addEventListener('change', event => {
+        fullSourceSnapshotsEnabled = Boolean(event.target.checked)
+            && settings.debugMode === true && settings.serverTranslation === true;
+        sourceChangeTracer.reset();
+        traceLatestAssistantSource(fullSourceSnapshotsEnabled ? 'full-text-enabled' : 'full-text-disabled');
+        syncDebugCopyButton();
+        notify(fullSourceSnapshotsEnabled
+            ? '이제부터 원문 변경 전후 본문 전체를 기록합니다. 로그 공유 전 내용을 확인해 주세요.'
+            : '원문 전체 기록을 끄고 저장된 본문 비교 로그를 지웠어요.',
+            fullSourceSnapshotsEnabled ? 'warning' : 'info');
     });
     debugCopyButton?.addEventListener('click', async () => {
         try {

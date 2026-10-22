@@ -1,3 +1,4 @@
+import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { createAutomaticOutputLifecycle } from './automatic-output.js';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
@@ -59,7 +60,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.51';
+const EXTENSION_VERSION = '0.6.52';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -4814,6 +4815,37 @@ async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {
     return result;
 }
 
+/**
+ * Optional bilingual-intent check. Only uncertain direct-dialogue formatting
+ * requests reach the AI, with one provider attempt and a 20-second cap.
+ */
+async function planBilingualDialogueVerdicts(segmented, options = {}) {
+    if (settings.translationEngine === 'google-free') return;
+    if (!segmented?.segments?.some(item => item.type === 'dialogue_candidate')) return;
+    const pending = bilingualPromptsNeedingVerdict(settings);
+    if (!pending.length) return;
+    const profiles = configuredProfileCycle();
+    if (!profiles.active) return;
+    for (const prompt of pending) {
+        if (options.signal?.aborted) throw abortError();
+        await resolveBilingualIntent(prompt, async (text, sharedSignal) => {
+            const expected = [{ id: 'bilingual_0000', type: 'bilingual_check', text }];
+            const response = await sendProfileRequest(buildBilingualVerdictPrompt({ prompt: text }), {
+                profileId: profiles.active,
+                profileSlot: profiles.slot,
+                signal: sharedSignal,
+                stage: 'bilingual-check',
+                timeoutSecondsOverride: 20,
+                timing: options.timing,
+            });
+            const result = collectPartialSegmentTranslations(extractResponseText(response), expected);
+            if (result.parseError || result.partial.size !== 1) return null;
+            const verdict = String(result.partial.get('bilingual_0000') ?? '').trim().toLowerCase();
+            return verdict === 'true' ? true : verdict === 'false' ? false : null;
+        }, options.signal);
+    }
+}
+
 async function translateOutputText(source, options = {}) {
     const characterNameLocks = normalizedCharacterNameLocks();
     const segmentationOptions = {
@@ -5836,6 +5868,7 @@ async function translateMessage(messageId, options = {}) {
     let toast = showProgress(options.force ? '아웃풋 전체를 다시 번역 중입니다…' : '아웃풋을 번역 중입니다…');
     const work = (async () => {
         try {
+            await planBilingualDialogueVerdicts(segmentSource(source), { signal: controller.signal, timing });
             const translated = await translateOutputText(source, {
                 previousUserSource: previousUserSource(chatReference, id, messageSource),
                 signal: controller.signal,
@@ -9026,20 +9059,22 @@ async function retranslateSelectionBundle() {
         sourceContext: selectionSourceContext({ ...state, ...range }, contextMode),
     }));
     const expected = selections.map(row => ({ id: row.id, type: 'multi_selection', text: row.selected, ellipsisSource: selectionEllipsisReference({ ...state, ...row }) }));
-    const prompt = buildMultiSelectionPrompt({
-        source: state.source,
-        translation: state.translation,
-        selections,
-        settings,
-        oneTimeInstruction: instruction,
-        speakerIdentity,
-        contextMode,
-        tuning,
-    });
+    let prompt;
     const controller = new AbortController();
     trackSelectionTranslation(controller);
     let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
     try {
+        await planBilingualDialogueVerdicts({ segments: bundleHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });
+        prompt = buildMultiSelectionPrompt({
+            source: state.source,
+            translation: state.translation,
+            selections,
+            settings,
+            oneTimeInstruction: instruction,
+            speakerIdentity,
+            contextMode,
+            tuning,
+        });
         const result = await requestSegments(prompt, expected, {
             signal: controller.signal,
             previousUserSource: previousUserSourceText,
@@ -9298,25 +9333,27 @@ async function retranslateSelection(snapshot) {
     const controller = new AbortController();
     trackSelectionTranslation(controller);
     const candidateMode = Boolean(settings.selectionCandidates);
-    const prompt = buildSelectionPrompt({
-        source: snapshot.source,
-        translation: snapshot.translation,
-        selected: snapshot.selected,
-        start: snapshot.start,
-        end: snapshot.end,
-        settings,
-        oneTimeInstruction: instruction,
-        speakerIdentity,
-        candidateCount: candidateMode ? 3 : 1,
-        contextMode,
-        sourceContext: selectionSourceContext(snapshot, contextMode),
-        tuning,
-    });
+    let prompt;
     const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected, ellipsisSource: selectionEllipsisReference(snapshot) }];
     let toast = showProgress(candidateMode
         ? '선택한 부분의 번역 후보 3개를 만드는 중입니다…'
         : '선택한 부분만 다시 번역 중입니다…');
     try {
+        await planBilingualDialogueVerdicts({ segments: selectionHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });
+        prompt = buildSelectionPrompt({
+            source: snapshot.source,
+            translation: snapshot.translation,
+            selected: snapshot.selected,
+            start: snapshot.start,
+            end: snapshot.end,
+            settings,
+            oneTimeInstruction: instruction,
+            speakerIdentity,
+            candidateCount: candidateMode ? 3 : 1,
+            contextMode,
+            sourceContext: selectionSourceContext(snapshot, contextMode),
+            tuning,
+        });
         let replacement = '';
         if (candidateMode) {
             const received = (await requestSelectionCandidates(prompt, {

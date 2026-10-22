@@ -229,8 +229,20 @@ const BILINGUAL_PROMPT_SIGNALS = [
     /한\s*영\s*병기|영\s*한\s*병기/iu,
     /(?:영어|영문)(?:\s*원문)?\s*(?:와|과|및|그리고|\/|\+)\s*(?:한국어|한글)(?:\s*번역)?[^\n.;]{0,70}(?:병기|함께\s*(?:출력|표기|표시|보여)|나란히|같이\s*(?:출력|표기|표시|보여)|(?:둘\s*다|모두)\s*(?:출력|표기|표시|보여))/iu,
     /(?:한국어|한글)(?:\s*번역)?\s*(?:와|과|및|그리고|\/|\+)\s*(?:영어|영문)(?:\s*원문)?[^\n.;]{0,70}(?:병기|함께\s*(?:출력|표기|표시|보여)|나란히|같이\s*(?:출력|표기|표시|보여)|(?:둘\s*다|모두)\s*(?:출력|표기|표시|보여))/iu,
-    /(?:원문|영어|영문)[^\n.;]{0,70}(?:한국어|한글)(?:\s*번역)?[^\n.;]{0,70}(?:병기|나란히|괄호|함께\s*(?:표시|출력|표기)|같이\s*(?:표시|출력|표기))/iu,
+    /(?:원문|영어|영문)[^\n.;]{0,70}(?:한국어|한글)(?:\s*번역)?[^\n.;]{0,70}(?:병기|나란히|괄호(?!\s*(?:없이|없|빼|쓰지|넣지|말고|금지))|함께\s*(?:표시|출력|표기)|같이\s*(?:표시|출력|표기))/iu,
     /(?:원문|영어|영문)[^\n.;]{0,60}\(\s*(?:한국어|한글|번역)/iu,
+
+    // Explicit paired-output forms missed by the first strict detector.
+    /\bboth\s+(?:the\s+)?(?:original\s+)?english\s+and\s+(?:its|their|the|a)\s+korean(?:\s+translation)?\b/iu,
+    /\b(?:original\s+(?:english\s+)?(?:dialogue|speech|text|lines?|words)|english\s+(?:original|dialogue|speech|text|lines?))\b[^\n.;]{0,70}\b(?:beside|alongside|next\s+to|followed\s+by|with|and)\b[^\n.;]{0,45}\b(?:its|the|a|their)?\s*korean\s+(?:translation|version|text)\b/iu,
+    /\b(?:show|display|output|write|render|include|print|format)\b[^\n.;]{0,80}\benglish\b[^\n.;]{0,55}\b(?:beside|alongside|next\s+to|with|then|followed\s+by)\b[^\n.;]{0,40}\b(?:its|the|a|their)?\s*korean\b/iu,
+    /\b(?:source|original)(?:\s+(?:english|text|dialogue|speech|line))?\b[^\n.;]{0,60}\b(?:followed\s+by|then|next\s+to|alongside|paired\s+with)\b[^\n.;]{0,55}\bkorean\b[^\n.;]{0,40}\b(?:translation|parenthetical)\b/iu,
+    /\bkorean\s+translation\b[^\n.;]{0,60}\b(?:in\s+parentheses|parenthesi[sz]ed|parenthetical)\b[^\n.;]{0,55}\bafter\b[^\n.;]{0,45}\b(?:the\s+)?original(?:\s+(?:english|source|dialogue|text))?\b/iu,
+    // Parentheses and displayed order distinguish bilingual output from understanding source meaning first.
+    /(?:원문|영어|영문)[^\n.;]{0,50}괄호[^\n.;]{0,65}(?:한국어|한글|번역문)[^\n.;]{0,45}(?:붙|넣|쓰|표기|출력|표시|적)/iu,
+    /(?:원문|영어|영문)[^\n.;]{0,60}(?:한국어|한글|번역문)[^\n.;]{0,60}괄호[^\n.;]{0,45}(?:붙|넣|쓰|표기|출력|표시|적)/iu,
+    /(?:원문|영어|영문)[^\n.;]{0,35}(?:먼저\s*(?:쓰|적|표기|출력|표시|보여)|(?:먼저\s*)?(?:쓰고|적고|표기하고|출력하고|표시하고|보여주고))[^\n.;]{0,65}(?:한국어|한글|번역문)[^\n.;]{0,50}(?:붙|넣|쓰|표기|출력|표시|적)/iu,
+    /(?:원문|영어|영문)[^\n.;]{0,35}(?:먼저|앞에)\s*(?:보여|출력|표기|표시|제시|적|쓰)[^\n.;]{0,65}(?:한국어|한글|번역문)[^\n.;]{0,50}(?:함께|같이|뒤에|다음에|제시|출력|붙)/iu,
 ];
 const BILINGUAL_NEGATION_SIGNALS = [
     /\b(?:do\s+not|don't|never|avoid|without|forbid|prohibit|disable|exclude|no|must\s+not)\b[^\n.;]{0,85}\b(?:bilingual(?:ly)?|dual[-\s]?language|parallel[-\s]?language)\b/iu,
@@ -239,10 +251,16 @@ const BILINGUAL_NEGATION_SIGNALS = [
     /\bbilingual\b[^\n.;]{0,70}\b(?:forbidden|prohibited|disabled|unwanted|not\s+(?:allowed|required|wanted)|should\s+not)\b/iu,
     /\b(?:korean\s+only|only\s+korean)\b/iu,
     /(?:한국어|한글)(?:로)?\s*만\s*(?:출력|번역|작성|표시|표기)/iu,
-    /(?:한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문)[^\n.;]{0,25}(?:한국어|한글))[^\n.;]{0,65}(?:금지|불필요|하지\s*마|하지\s*않|안\s*함|사용\s*안|제외|없이|말고|사용하지|필요\s*없)/iu,
+    /(?:한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문)[^\n.;]{0,25}(?:한국어|한글))[^\n.;]{0,65}(?:금지|불필요|하지\s*마|하지\s*않|안\s*함|사용\s*안|제외|사용하지|필요\s*없)/iu,
     /(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)[^\n.;]{0,60}(?:한\s*영\s*병기|영\s*한\s*병기)/iu,
     /\bbilingual(?:ly)?\b[^\n.;]{0,85}\bonly\s+(?:if|when)\b[^\n.;]{0,45}\b(?:user|i|explicitly|ask|request)\b/iu,
     /한\s*영\s*병기[^\n.;]{0,60}(?:요청|요구|지시)[^\n.;]{0,20}(?:할\s*때|한\s*경우|있을\s*때)만/iu,
+
+    // "Bilingual is optional" does not instruct the engine to enable it.
+    /\b(?:bilingual(?:ly)?|dual[-\s]?language|parallel[-\s]?language)\b[^\n.;]{0,70}\b(?:optional|unnecessary|not\s+(?:needed|required)|not\s+necessary)\b/iu,
+    // Without "bilingual", not without "parentheses": those are different requests.
+    /(?:한\s*영\s*병기|영\s*한\s*병기)\s*(?:없이|말고)/iu,
+    /(?:영어|영문)[^\n.;]{0,25}(?:한국어|한글)[^\n.;]{0,20}병기\s*(?:없이|말고)/iu,
 ];
 
 function validationText(value) {

@@ -55,4 +55,73 @@ const readSource = message => {
     assert.ok(!JSON.stringify(tracer.diagnostics()).includes('0123456789'));
     tracer.reset();
 }
-console.log('PASS: source change hints, writable-property restoration, no payload leakage');
+
+{
+    const before = 'A' + 'old dialogue.'.repeat(1000) + 'THE SECRET END';
+    const after = 'A' + 'new scene'.repeat(1100) + 'NEW END';
+    let detailed = false;
+    const message = { mes: before };
+    const tracer = createSourceChangeTracer({
+        enabled: () => true,
+        fullTextEnabled: () => detailed,
+        readSource,
+    });
+    tracer.observe(2, message, 'message-received');
+    message.mes = after;
+    let event = tracer.diagnostics().events.at(-1);
+    assert.equal(event.beforeText, undefined, 'full text must default off');
+    assert.equal(event.removedText, undefined);
+
+    detailed = true;
+    tracer.reset();
+    tracer.observe(2, message, 'full-text-enabled');
+    message.mes = before;
+    event = tracer.diagnostics().events.at(-1);
+    assert.equal(event.beforeText, after);
+    assert.equal(event.afterText, before);
+    assert.equal(event.removedText, after.slice(event.commonPrefixLength, after.length - event.commonSuffixLength));
+    assert.equal(event.insertedText, before.slice(event.commonPrefixLength, before.length - event.commonSuffixLength));
+    assert.equal(event.beforeText.length, after.length, 'full source must not be truncated');
+
+    tracer.compare(2, before, after, 'before-result-apply');
+    event = tracer.diagnostics().events.at(-1);
+    assert.equal(event.event, 'server-versus-live');
+    assert.equal(event.beforeText, before);
+    assert.equal(event.afterText, after);
+    assert.equal(event.removedText.length > 1000, true);
+
+    for (let i = 0; i < 12; i += 1) message.mes = 'EDIT-' + String(i).repeat(1000);
+    assert.equal(tracer.diagnostics().events.filter(item => typeof item.beforeText === 'string').length, 8);
+    assert.ok(tracer.diagnostics().events.some(item => item.fullTextExpired === true));
+
+    detailed = false;
+    tracer.reset();
+    assert.equal(tracer.diagnostics().events.length, 0);
+    assert.ok(!JSON.stringify(tracer.diagnostics()).includes('THE SECRET END'));
+    message.mes = 'another private edit';
+    assert.equal(tracer.diagnostics().events.length, 0, 'reset unhooks source');
+}
+{
+    const message = { mes: 'initial', swipe_id: 0, swipes: [{ mes: 'PERSONAL START', note: 'unmodified' }] };
+    const tracer = createSourceChangeTracer({ enabled: () => true, fullTextEnabled: () => true, readSource });
+    tracer.observe(3, message, 'message-received');
+    message.swipes[0].mes = 'PERSONAL END';
+    const event = tracer.diagnostics().events.at(-1);
+    assert.equal(event.field, 'swipes[0].mes');
+    assert.equal(event.beforeText, 'PERSONAL START');
+    assert.equal(event.afterText, 'PERSONAL END');
+    tracer.reset();
+    assert.ok('value' in Object.getOwnPropertyDescriptor(message.swipes[0], 'mes'));
+}
+{
+    let enabled = true;
+    const message = { mes: 'PRIVATE' };
+    const tracer = createSourceChangeTracer({ enabled: () => enabled, fullTextEnabled: () => true, readSource });
+    tracer.observe(9, message);
+    enabled = false;
+    message.mes = 'PRIVATE NEW';
+    assert.equal(tracer.diagnostics().events.length, 0, 'server/debug disabled must not log property writes');
+    tracer.reset();
+}
+
+console.log('PASS: source change hints, writable-property restoration, opt-in full-text snapshots and default privacy');

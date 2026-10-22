@@ -93,3 +93,37 @@ test('a broken diagnostic sink cannot fail a successful translation',async()=>{
  const jobs=createJobs({onLifecycle:()=>{throw Error('broken log');},engines:{verba:{createEngine:()=>({output:async()=>({translation:'ok'})})}}});
  const job=jobs.start('a',{id,kind:'output',snapshot,source:'hello'},{});await job.done;assert.equal(job.state,'completed');
 });
+
+
+test('both server generation routes translate after excluding a verified Ttotto report', async () => {
+    const report='<scene_state>{"_v":2,"scene":{"location":"room"},"heat":8}</scene_state>';
+    const original='A narrative paragraph.\n\n'+report+'\n\n<Info_panel>Preserve</Info_panel>';
+    const expected='A narrative paragraph.\n\n\n\n<Info_panel>Preserve</Info_panel>';
+    for(const kind of ['generation','observed-generation']) {
+        let translated = '', generationRequests = 0, notices = 0;
+        const response={state:'completed',status:200,type:'application/json',
+            body:Buffer.from(JSON.stringify({choices:[{message:{content:original}}]}))};
+        const jobs=createJobs({
+            engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async source=>{
+                translated=source;return{translation:'한국어 결과',sourceMap:[]};
+            }})}},
+            request:async()=>{generationRequests++;return response;},
+            prepareNotification:()=>async()=>{notices++;return{reason:'dispatched'};},
+        });
+        const jobId=kind==='generation'?'c'.repeat(32):'d'.repeat(32);
+        const job=jobs.start('alice',{id:jobId,kind,snapshot,
+            generation:{path:'/api/backends/chat-completions/generate',payload:{}},
+            notification:{translationEnabled:true}}, {});
+        if(kind==='observed-generation')assert.equal(jobs.observed('alice',jobId,response),true);
+        await job.done;await job.notificationDone;
+        assert.equal(translated,expected);
+        assert.equal(job.source,expected);
+        assert.equal(job.result.translation,'한국어 결과');
+        assert.equal(job.state,'completed');
+        assert.equal(notices,1);
+        assert.equal(generationRequests,kind==='generation'?1:0);
+        assert.ok(job.events.some(event=>event.code==='scene-report-excluded'));
+        assert.equal(extractReply(response.body,'application/json'),original,
+            'original generation reply must remain intact for Ttotto scene collection');
+    }
+});

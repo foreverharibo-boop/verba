@@ -1,6 +1,7 @@
 'use strict';
 const { createHash } = require('node:crypto');
 const { failure, extractReply } = require('./provider.cjs');
+const { excludeVerifiedSceneReports } = require('./scene-report-compat.cjs');
 const ID = /^[a-f0-9]{32}$/;
 const MAX_SNAPSHOT = 4 * 1024 * 1024;
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -85,8 +86,14 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
                     }); } finally { clearTimeout(timeout); }
                     job.generationDone=true;
                     if(response.status<200||response.status>=300) throw failure(response.status,`답변 생성 HTTP ${response.status}`);
-                    job.source=(String(generation?.prefix || '')+extractReply(response.body,response.type)).trim();
-                    if(!job.source.trim()) throw failure(422,'자동번역할 답변 텍스트가 없습니다.');
+                    const generatedSource=(String(generation?.prefix || '')+extractReply(response.body,response.type)).trim();
+                    if(!generatedSource) throw failure(422,'자동번역할 답변 텍스트가 없습니다.');
+                    // Clean ONLY the translation input. The original response stream
+                    // remains unchanged for Ttotto's own scene collection on the client.
+                    const cleaned=excludeVerifiedSceneReports(generatedSource);
+                    job.source=cleaned.source;
+                    if(cleaned.removed) report(job,{kind:'source_cleanup',code:'scene-report-excluded',
+                        blocks:cleaned.removed,removedChars:cleaned.removedChars});
                 }
                 if(controller.signal.aborted) throw new DOMException('취소','AbortError');
                 job.state='translating';

@@ -1,6 +1,7 @@
 // Diagnostic-only, bounded source mutation tracker. Never modifies translation text.
 // Active only while the experiment's server translation and debug modes are enabled.
 const MAX_EVENTS = 48;
+const MAX_FULL_TEXT_EVENTS = 8;
 const MAX_TRACKED = 6;
 
 function describeChange(before, after) {
@@ -49,22 +50,41 @@ function callingCode() {
     return { possibleWriter: frames.find(frame => frame.startsWith('extension:')) || frames[0] || null, frames };
 }
 
-export function createSourceChangeTracer({ enabled, readSource, now = Date.now } = {}) {
+export function createSourceChangeTracer({ enabled, fullTextEnabled, readSource, now = Date.now } = {}) {
     const tracked = new Map();
     const events = [];
     const isEnabled = () => enabled?.() === true;
+    const wantsFullText = () => isEnabled() && fullTextEnabled?.() === true;
+    // Text is kept in memory only, not in extension settings or server requests.
+    const textSnapshot = (before, after, change) => wantsFullText() ? {
+        beforeText: before,
+        afterText: after,
+        removedText: before.slice(change.commonPrefixLength, before.length - change.commonSuffixLength),
+        insertedText: after.slice(change.commonPrefixLength, after.length - change.commonSuffixLength),
+    } : {};
     const safeRead = message => {
         try { return String(readSource?.(message) ?? ''); } catch { return ''; }
     };
     const push = entry => {
         events.push({ at: now(), ...entry });
         if (events.length > MAX_EVENTS) events.shift();
+        // Keep entire (untruncated) strings for only the latest eight changes.
+        const detailed = events.filter(row => Object.hasOwn(row, 'beforeText'));
+        for (const row of detailed.slice(0, -MAX_FULL_TEXT_EVENTS)) {
+            delete row.beforeText;
+            delete row.afterText;
+            delete row.removedText;
+            delete row.insertedText;
+            row.fullTextExpired = true;
+        }
     };
     const logChange = (entry, before, after, method, field, phase, writer = null) => {
         if (before === after) return;
+        const change = describeChange(before, after);
         push({
             event: 'source-changed', messageId: entry.id, method, field, phase,
-            ...describeChange(before, after), ...(writer || { possibleWriter: null, frames: [] }),
+            ...change, ...textSnapshot(before, after, change),
+            ...(writer || { possibleWriter: null, frames: [] }),
         });
     };
     const unhook = entry => {
@@ -74,6 +94,10 @@ export function createSourceChangeTracer({ enabled, readSource, now = Date.now }
         entry.restores.length = 0;
         try { entry.swipeStop?.(); } catch { /* Ignore superseded descriptor. */ }
         entry.swipeStop = null;
+        for (const stop of (entry.swipeNestedStops || []).reverse()) {
+            try { stop(); } catch { /* Ignore superseded descriptor. */ }
+        }
+        entry.swipeNestedStops = [];
     };
     // Only configurable, writable *own data* properties are observed.
     // Accessor properties already owned by SillyTavern or other extensions are left alone.
@@ -84,11 +108,14 @@ export function createSourceChangeTracer({ enabled, readSource, now = Date.now }
         let value = desc.value;
         const get = () => value;
         const set = next => {
-            const before = safeRead(entry.message);
+            const active = isEnabled();
+            const before = active ? safeRead(entry.message) : null;
             value = next;
-            const after = safeRead(entry.message);
-            logChange(entry, before, after, 'property-write', path, entry.phase, callingCode());
-            entry.lastSource = after;
+            if (active) {
+                const after = safeRead(entry.message);
+                logChange(entry, before, after, 'property-write', path, entry.phase, callingCode());
+                entry.lastSource = after;
+            }
             try { changed?.(); } catch { /* Diagnostics must never block source writes. */ }
         };
         try { Object.defineProperty(target, field, { configurable: true, enumerable: desc.enumerable, get, set }); }
@@ -103,10 +130,22 @@ export function createSourceChangeTracer({ enabled, readSource, now = Date.now }
     const trackSwipe = entry => {
         try { entry.swipeStop?.(); } catch { /* Ignore superseded descriptor. */ }
         entry.swipeStop = null;
+        for (const stop of (entry.swipeNestedStops || []).reverse()) {
+            try { stop(); } catch { /* Ignore superseded descriptor. */ }
+        }
+        entry.swipeNestedStops = [];
         const swipes = entry.message?.swipes;
         const slot = Number(entry.message?.swipe_id);
         if (!Array.isArray(swipes) || !Number.isInteger(slot) || slot < 0 || !Object.hasOwn(swipes, slot)) return;
         entry.swipeStop = watchData(entry, swipes, String(slot), 'swipes[' + slot + ']', () => trackSwipe(entry));
+        // Some versions hold swipe text inside an object rather than a string.
+        const activeSwipe = swipes[slot];
+        if (activeSwipe && typeof activeSwipe === 'object') {
+            for (const field of ['mes', 'text', 'content', 'message']) {
+                const stop = watchData(entry, activeSwipe, field, 'swipes[' + slot + '].' + field);
+                if (stop) entry.swipeNestedStops.push(stop);
+            }
+        }
     };
     const hook = entry => {
         for (const name of ['mes', 'swipes', 'swipe_id']) {
@@ -127,7 +166,7 @@ export function createSourceChangeTracer({ enabled, readSource, now = Date.now }
                 unhook(entry);
                 tracked.delete(id);
             }
-            entry = { id, message, lastSource: source, phase, restores: [], swipeStop: null };
+            entry = { id, message, lastSource: source, phase, restores: [], swipeStop: null, swipeNestedStops: [] };
             tracked.set(id, entry);
             hook(entry);
             if (tracked.size > MAX_TRACKED) {
@@ -143,8 +182,9 @@ export function createSourceChangeTracer({ enabled, readSource, now = Date.now }
     }
     function compare(id, before, after, phase = 'before-apply') {
         if (!isEnabled() || before === after) return;
+        const change = describeChange(before, after);
         push({
-            event: 'server-versus-live', messageId: id, phase, ...describeChange(before, after),
+            event: 'server-versus-live', messageId: id, phase, ...change, ...textSnapshot(before, after, change),
             possibleWriter: null,
             interpretation: 'Compare earlier source-changed events for attribution; this difference alone does not prove the writer.',
         });
@@ -157,13 +197,15 @@ export function createSourceChangeTracer({ enabled, readSource, now = Date.now }
     function diagnostics() {
         return {
             enabled: isEnabled(),
+            fullTextEnabled: wantsFullText(),
+            fullTextEventLimit: MAX_FULL_TEXT_EVENTS,
             trackedMessageIds: [...tracked.keys()],
             events: events.map(row => ({
                 ...row,
                 frames: row.frames ? [...row.frames] : undefined,
                 removedTagHints: row.removedTagHints ? [...row.removedTagHints] : undefined,
             })),
-            limitation: 'possibleWriter is a call-stack clue, not proof. Object replacement, in-place mutation or changes before tracking may only be visible at checkpoints. Source text is not logged.',
+            limitation: 'possibleWriter is a clue, not proof. Object replacement or changes before tracking may only be visible at checkpoints. Full source text is captured only after explicit opt-in, in memory for the last eight changes; manually copied logs then contain the complete RP text.',
         };
     }
     return { observe, compare, reset, diagnostics };

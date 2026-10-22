@@ -17,7 +17,7 @@ fi
 verba_stage="$(mktemp -d "$verba_st/.verba-install.XXXXXX")"
 trap 'rm -rf -- "$verba_stage"' EXIT
 mkdir -- "$verba_stage/engines"
-verba_files=(package.json index.cjs jobs.cjs provider.cjs engines/manifest.json engines/verba.mjs engines/verba-deep.mjs)
+verba_files=(package.json index.cjs jobs.cjs scene-report-compat.cjs provider.cjs engines/manifest.json engines/verba.mjs engines/verba-deep.mjs)
 for verba_file in "${verba_files[@]}"; do
     cp -- "$verba_source/server-plugin/$verba_file" "$verba_stage/$verba_file"
 done
@@ -34,7 +34,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,"engines/manifest.json"
 if(pkg.name!=="verba-server" || !pkg.version || !manifest.engines.verba || !manifest.engines["verba-deep"])process.exit(1);
 process.stdout.write(pkg.version);
 ' "$verba_stage")"
-for verba_file in index.cjs jobs.cjs provider.cjs engines/verba.mjs engines/verba-deep.mjs; do
+for verba_file in index.cjs jobs.cjs scene-report-compat.cjs provider.cjs engines/verba.mjs engines/verba-deep.mjs; do
     node --check "$verba_stage/$verba_file"
 done
 if [[ -L "$verba_dest/engines" || ( -e "$verba_dest/engines" && ! -d "$verba_dest/engines" ) ]]; then

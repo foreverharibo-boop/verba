@@ -15,12 +15,13 @@ function fixture(t){
 function install(st,from=source){return spawnSync('bash',[path.join(from,'install-server.sh'),st],{encoding:'utf8'});}
 test('one command installs and overwrites managed files, without deleting settings, extras or making backups',t=>{
  const {st,dest}=fixture(t);
- const first=install(st);assert.equal(first.status,0,first.stderr);assert.match(first.stdout,/0\.1\.3/);
+ const first=install(st);assert.equal(first.status,0,first.stderr);assert.match(first.stdout,/0\.1\.4/);
  fs.writeFileSync(path.join(dest,'index.cjs'),'old version');
  fs.writeFileSync(path.join(dest,'custom-note.txt'),'keep note');
  fs.writeFileSync(path.join(dest,'engines/custom.txt'),'keep extra');
  const second=install(st);assert.equal(second.status,0,second.stderr);
  assert.equal(fs.readFileSync(path.join(dest,'index.cjs'),'utf8'),fs.readFileSync(path.join(source,'server-plugin/index.cjs'),'utf8'));
+ assert.equal(fs.readFileSync(path.join(dest,'scene-report-compat.cjs'),'utf8'),fs.readFileSync(path.join(source,'server-plugin/scene-report-compat.cjs'),'utf8'));
  assert.equal(fs.readFileSync(path.join(st,'config.yaml'),'utf8'),'keep: true');
  assert.equal(fs.readFileSync(path.join(dest,'custom-note.txt'),'utf8'),'keep note');
  assert.equal(fs.readFileSync(path.join(dest,'engines/custom.txt'),'utf8'),'keep extra');

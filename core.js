@@ -746,16 +746,12 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     const result = String(translation || '');
     if (segment?.type !== 'dialogue_candidate') return result;
 
-    // A fully custom prompt can request bilingual dialogue without placing the
-    // instruction in the legacy global/all-dialogue fields inspected by
-    // bilingualDialogueRequested(). In that case the model may already return
-    // Source (Korean), but both halves still contain the same opaque NAME token.
-    // If we skip this local rebuild, assembleTranslation() restores that token
-    // globally and turns the copied English name into its Korean locked spelling.
-    // Detect an already-bilingual result from its actual structure as well as
-    // from settings, so the English half is always rebuilt from the source.
+    // Source+Korean assembly requires an enabled, authorized GLOBAL or
+    // ALL-DIALOGUE prompt. A bilingual-looking AI reply alone is not permission
+    // to reconstruct/append source English. With no authorization, preserve the
+    // received translation byte-for-byte (no deletion or format changes).
+    if (!bilingualDialogueRequested(settings)) return result;
     const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
-    if (!bilingualDialogueRequested(settings) && !existingBilingual) return result;
     const translatedEnvelope = dialogueEnvelope(result);
     const existingParts = existingBilingual
         ? trailingParentheticalParts(translatedEnvelope.body)

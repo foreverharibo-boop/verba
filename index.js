@@ -13687,7 +13687,12 @@ function setupEvents() {
     if (types.GENERATION_ENDED) source.on(types.GENERATION_ENDED, handleGenerationEnded);
     if (types.CHAT_CHANGED) {
         source.on(types.CHAT_CHANGED, () => {
-            if (fullSourceSnapshotsEnabled) lastDebugDiagnostic = null;
+            if (fullSourceSnapshotsEnabled) {
+                lastDebugDiagnostic = null;
+                fullSourceSnapshotsEnabled = false;
+                const fullInput = document.querySelector('#verba-debug-full-source');
+                if (fullInput) fullInput.checked = false;
+            }
             sourceChangeTracer.reset();
             automaticOutputLifecycle.reset();
             // Locks and bundles are one-shot editing state. Clear tracked

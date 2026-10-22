@@ -99,3 +99,22 @@ test('changed final source gets a separate completion notice; rereading it never
  await f.output('Revised again');assert.equal(f.count(),3);assert.equal(notices.length,3);
  await f.output('Revised again','output-retranslation');assert.equal(f.count(),4);assert.equal(notices.length,3,'explicit manual translation remains silent');
 });
+
+
+test('Ttotto-cleaned assistant reply reuses a single background translation',async t=>{
+ const f=fixture(t);
+ const report='<scene_state>{"_v":2,"scene":{"location":"sofa"},"heat":6}</scene_state>';
+ const original='Narration before.\n\n'+report+'\n\n<Info_panel>Keep unchanged</Info_panel>';
+ const cleaned='Narration before.\n\n\n\n<Info_panel>Keep unchanged</Info_panel>';
+ await f.generate(original);
+ const first=await f.output(cleaned);
+ assert.equal(first.translation,'Translated: '+cleaned);
+ assert.equal(f.count(),1,'server must translate one time, not again after Ttotto cleanup');
+ assert.equal(f.submitted.length,1);
+ assert.equal((await f.output(cleaned)).translation,first.translation);
+ assert.equal(f.count(),1);
+ assert.equal(f.submitted.length,1);
+ assert.equal(f.client.diagnostics().events.some(e=>e.event==='browser-output-submitted'),false);
+ await f.output(cleaned+' genuinely edited');
+ assert.equal(f.count(),2,'real narrative changes must still retranslate');
+});

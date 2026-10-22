@@ -1,6 +1,6 @@
 import { reconcileCompletedResult } from './server-result-compat.js?v=1';
-import { createServerClient } from './server-client.js?v=0.6.60';
-import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.60';
+import { createServerClient } from './server-client.js?v=0.6.61';
+import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -61,7 +61,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.60';
+const EXTENSION_VERSION = '0.6.61';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });

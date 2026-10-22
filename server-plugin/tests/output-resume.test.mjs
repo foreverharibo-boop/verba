@@ -13,7 +13,8 @@ for(const bodyStall of [false,true])test(`automatic output notifies and resumes 
  globalThis.sillyPopNotifications={captureTranslation:()=>notification};
  t.after(()=>delete globalThis.sillyPopNotifications);
  const jobs=createJobs({engines:{verba:{createEngine:()=>({output:async()=>{translations++;return{translation:'완료된 번역',sourceMap:[]};}})}},prepareNotification:(_owner,marker)=>{
-  assert.deepEqual(marker,notification);return()=>{notices++;};
+  assert.match(marker.generationId,/^verba:verba:[a-f0-9]{32}$/);
+  assert.deepEqual({...marker,generationId:notification.generationId},notification);return()=>{notices++;};
  }});
  globalThis.localStorage={getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,v)};
  globalThis.window={addEventListener:(n,f)=>handlers[n]=f};

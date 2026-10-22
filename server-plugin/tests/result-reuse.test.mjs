@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { createServerClient } from '../../server-client.js';
 import { createJobs } from '../jobs.cjs';
 const BRIDGE=Symbol.for('silly-pop.apk.notifications.v1');
-function fixture(t) {
+function fixture(t, prepareNotification) {
  const storage=new Map(),handlers={},submitted=[];
  let translations=0,reply='Original reply';
  const settings={serverTranslation:true,autoOutput:true,translationEngine:'google-free'};
  const context={chatId:'one',characterId:0,name2:'Character',getRequestHeaders:()=>({}),
   eventTypes:{GENERATION_STARTED:'start',GENERATE_AFTER_DATA:'data',CHAT_COMPLETION_SETTINGS_READY:'settings',GENERATION_ENDED:'end'},
   eventSource:{on:(name,fn)=>handlers[name]=fn}};
- const jobs=createJobs({engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async source=>{translations++;return{translation:'Translated: '+source,sourceMap:[]};}})}},request:async(_c,_p,_payload,o)=>{
+ const jobs=createJobs({prepareNotification,engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async source=>{translations++;return{translation:'Translated: '+source,sourceMap:[]};}})}},request:async(_c,_p,_payload,o)=>{
   const body=Buffer.from(JSON.stringify({choices:[{message:{content:reply}}]}));o.onHeaders(200,'application/json');o.onChunk(body);return{status:200,type:'application/json',body};
  }});
  t.after(()=>{jobs.stopAll();delete globalThis[BRIDGE];delete globalThis.sillyPopNotifications;});
@@ -56,7 +56,7 @@ test('APK-specific bridge survives a different legacy bridge for both generation
  globalThis[BRIDGE]={apiVersion:1,captureTranslation:()=>marker};
  globalThis.sillyPopNotifications={apiVersion:1,captureTranslation:()=>null};
  await f.generate();await f.output('Different final source');
- assert.equal(f.submitted.length,2);for(const envelope of f.submitted)assert.deepEqual(envelope.notification,marker);
+ assert.equal(f.submitted.length,2);assert.deepEqual(f.submitted[0].notification,marker);assert.deepEqual(f.submitted[1].notification,{...marker,generationId:`verba:verba:${f.submitted[1].id}`});
 });
 test('disabled dedicated bridge does not fall through to a legacy opt-in',async t=>{
  const f=fixture(t);globalThis[BRIDGE]={apiVersion:1,captureTranslation:()=>null};
@@ -78,4 +78,24 @@ test('removed real tail is not silently reused and reports bounded structural ev
  const f=fixture(t);await f.generate('Hello unchanged tail');await f.output();await f.output('Hello');
  assert.equal(f.count(),2);const event=f.client.diagnostics().events.find(e=>e.event==='reuse-skipped');
  assert.equal(event.relation,'tail-removed');assert.equal(event.afterLength,5);assert(!JSON.stringify(event).includes('unchanged'));
+});
+
+// The APK bridge may keep the same generationId throughout one reply. A new
+// final-source translation must not collide with the original completion key.
+test('changed final source gets a separate completion notice; rereading it never retranslates or renotifies',async t=>{
+ const handled=new Set(),notices=[];
+ const f=fixture(t,(_owner,marker)=>marker?.translationEnabled?async()=>{
+  if(handled.has(marker.generationId))return{reason:'duplicate'};
+  handled.add(marker.generationId);notices.push(marker.generationId);return{reason:'dispatched'};
+ }:null);
+ const marker={protocol:1,translationEnabled:true,clientId:'tab',generationId:'one-reply',type:'normal'};
+ globalThis[BRIDGE]={apiVersion:1,captureTranslation:()=>marker};
+ await f.generate();await f.output();assert.equal(notices.length,1);
+ await f.output('Revised reply');assert.equal(notices.length,2,'the new translation completion must not be suppressed as the old reply');
+ assert.equal(marker.generationId,'one-reply','never mutate the shared APK marker');
+ const revised=await f.output('Revised reply');assert.equal(revised.translation,'Translated: Revised reply');
+ assert.equal(f.count(),2,'a repeated UI read must reuse the revised translation');assert.equal(notices.length,2);
+ await f.output('Revised again');assert.equal(f.count(),3);assert.equal(notices.length,3);
+ await f.output('Revised again');assert.equal(f.count(),3);assert.equal(notices.length,3);
+ await f.output('Revised again','output-retranslation');assert.equal(f.count(),4);assert.equal(notices.length,3,'explicit manual translation remains silent');
 });

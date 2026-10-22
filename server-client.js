@@ -155,7 +155,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     async function submit(envelope,signal){
         // Retain the ID before sending. An ambiguous timeout never falls back to
         // another translation request. Only the exact same ID/body is retried.
-        remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),notificationRequested:envelope.notification?.translationEnabled===true,at:Date.now()});
+        remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),notificationRequested:envelope.notification?.translationEnabled===true,automaticOutput:envelope.kind==='output'&&envelope.options?.automatic===true&&envelope.options?.stage==='output-translation',at:Date.now()});
         for(let i=0;;i++){
             if(signal?.aborted){await cancel(envelope.id);throw abortError();}
             try{return await api('/jobs',{method:'POST',body:JSON.stringify(envelope)});}
@@ -237,10 +237,10 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // Reading is not an acknowledgement of UI application: a frozen page or
         // message finalization may retry after the first read. Include the most
         // recent used generation, without searching older mismatching replies.
-        // A later standalone/manual output is a barrier: never restore an older
-        // generation over a newer translation or final-source change.
+        // A later output is a barrier against older generations. Automatic output
+        // results themselves are reusable; a manual output remains a barrier.
         const recent=[...records].reverse().find(r=>r.scope===scopeKey()&&['generation','used','output'].includes(r.kind));
-        for(const record of (recent && recent.kind!=='output' && options.stage!=='output-retranslation' ? [recent] : [])){
+        for(const record of (recent && (recent.kind!=='output'||recent.automaticOutput&&options.automatic===true) && options.stage!=='output-retranslation' ? [recent] : [])){
             if(record.cancel || record.config!==fingerprint(configurationKey())){trace('reuse-skipped',{reason:record.cancel?'cancelled':'settings-changed'});continue;}
             let state;
             try{state=await reconnectStatus(record.id,options.signal);}catch(error){if(error.status===404){forget(record.id);continue;}throw error;}
@@ -249,7 +249,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             const done=await waitResult(record.id,options.signal);
             const result=reconcileCompletedResult(done.source,source,done.result);
             if(!result){trace('reuse-skipped',{reason:'result-cleanup-unsafe',...describeSourceChange(done.source,source)});continue;}
-            record.kind='used';save();
+            if(record.kind!=='output')record.kind='used';save();
             trace('automatic-result-reused',{...describeSourceChange(done.source,source)});
             return result;
         }
@@ -263,7 +263,12 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // user switches chats. Manual/helper translations remain silent.
         let notification;
         if(kind==='output'&&options.automatic===true&&options.stage==='output-translation'){
-            notification=captureNotification('normal');
+            const marker=captureNotification('normal');
+            // Every newly submitted automatic translation is a new revision.
+            // Keep one stable completion key for HTTP retries of this exact job,
+            // independent of the APK's still-active generation frame. Reusing a
+            // finished result never reaches this branch and cannot notify again.
+            if(marker)notification={...marker,generationId:`verba:${variant}:${id}`};
         }
         const envelope={id,kind,source,snapshot:await snapshot(),options:clean({...options,signal:undefined,timing:undefined}),...(notification?{notification}:{}),...(segments?{segments}: {})};
         if(options.signal?.aborted)throw abortError();

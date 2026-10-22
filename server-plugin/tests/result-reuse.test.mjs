@@ -69,10 +69,10 @@ test('manual retranslation is a barrier against restoring an older automatic res
  assert.equal(f.count(),2);await f.output('Original reply');assert.equal(f.count(),3,'do not resurrect the generation result after a newer manual translation');
 });
 
-test('reuse survives closed control block removal after the first result read without another model call',async t=>{
- const f=fixture(t);await f.generate('Hello\n<archive-now>state</archive-now>');await f.output();
+test('reuse survives complete markup block removal after the first result read without another model call',async t=>{
+ const f=fixture(t);await f.generate('Hello\n<vendor-state>state</vendor-state>');await f.output();
  const result=await f.output('Hello');assert.equal(result.translation,'Translated: Hello');assert.equal(f.count(),1);
- assert.equal(f.client.diagnostics().events.at(-1).relation,'closed-state-blocks-removed');
+ assert.equal(f.client.diagnostics().events.at(-1).relation,'closed-markup-blocks-removed');
 });
 test('removed real tail is not silently reused and reports bounded structural evidence',async t=>{
  const f=fixture(t);await f.generate('Hello unchanged tail');await f.output();await f.output('Hello');
@@ -101,15 +101,15 @@ test('changed final source gets a separate completion notice; rereading it never
 });
 
 
-test('Ttotto-cleaned assistant reply reuses a single background translation',async t=>{
+test('unknown extension cleanup reuses one background translation and keeps visible info markup',async t=>{
  const f=fixture(t);
- const report='<scene_state>{"_v":2,"scene":{"location":"sofa"},"heat":6}</scene_state>';
+ const report='<vendor_private>{"_v":2,"scene":{"location":"sofa"},"heat":6}</vendor_private>';
  const original='Narration before.\n\n'+report+'\n\n<Info_panel>Keep unchanged</Info_panel>';
  const cleaned='Narration before.\n\n\n\n<Info_panel>Keep unchanged</Info_panel>';
  await f.generate(original);
  const first=await f.output(cleaned);
  assert.equal(first.translation,'Translated: '+cleaned);
- assert.equal(f.count(),1,'server must translate one time, not again after Ttotto cleanup');
+ assert.equal(f.count(),1,'server must translate one time, not again after extension cleanup');
  assert.equal(f.submitted.length,1);
  assert.equal((await f.output(cleaned)).translation,first.translation);
  assert.equal(f.count(),1);

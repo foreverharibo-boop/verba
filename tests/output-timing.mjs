@@ -200,7 +200,7 @@ const message = { is_user: false, mes: 'source' };
 const context = { chat: [message] };
 let applied = true;
 let seenTrace, seenReference;
-const lifecycleEnv = { previousUserSource,
+const lifecycleEnv = { previousUserSource, automaticOutputLifecycle: { started() {} },
     minimalOutputEnabled, outputSplitCount,
     EXTENSION_KEY: 'verba',
     isTranslationExtensionActive: () => true,

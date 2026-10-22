@@ -68,3 +68,14 @@ test('manual retranslation is a barrier against restoring an older automatic res
  const f=fixture(t);await f.generate();await f.output();await f.output('Original reply','output-retranslation');
  assert.equal(f.count(),2);await f.output('Original reply');assert.equal(f.count(),3,'do not resurrect the generation result after a newer manual translation');
 });
+
+test('reuse survives closed control block removal after the first result read without another model call',async t=>{
+ const f=fixture(t);await f.generate('Hello\n<archive-now>state</archive-now>');await f.output();
+ const result=await f.output('Hello');assert.equal(result.translation,'Translated: Hello');assert.equal(f.count(),1);
+ assert.equal(f.client.diagnostics().events.at(-1).relation,'closed-state-blocks-removed');
+});
+test('removed real tail is not silently reused and reports bounded structural evidence',async t=>{
+ const f=fixture(t);await f.generate('Hello unchanged tail');await f.output();await f.output('Hello');
+ assert.equal(f.count(),2);const event=f.client.diagnostics().events.find(e=>e.event==='reuse-skipped');
+ assert.equal(event.relation,'tail-removed');assert.equal(event.afterLength,5);assert(!JSON.stringify(event).includes('unchanged'));
+});

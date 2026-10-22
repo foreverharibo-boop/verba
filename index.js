@@ -1,5 +1,6 @@
-import { createServerClient } from './server-client.js?v=0.6.59';
-import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.59';
+import { reconcileCompletedResult } from './server-result-compat.js?v=1';
+import { createServerClient } from './server-client.js?v=0.6.60';
+import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.60';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -60,7 +61,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.59';
+const EXTENSION_VERSION = '0.6.60';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -5891,7 +5892,7 @@ async function translateMessage(messageId, options = {}) {
     const chatReference = context.chat;
     const message = chatReference?.[id];
     if (!message || message.is_user || !isNameReplacementMessage(message)) return;
-    const source = messageSource(message);
+    let source = messageSource(message);
     if (!source.trim()) return;
 
     if (options.automatic && isPredominantlyKorean(source)) {
@@ -5949,7 +5950,7 @@ async function translateMessage(messageId, options = {}) {
     let toast = showProgress(options.force ? '아웃풋 전체를 다시 번역 중입니다…' : '아웃풋을 번역 중입니다…');
     const work = (async () => {
         try {
-            const translated = await translateOutputText(source, {
+            let translated = await translateOutputText(source, {
                 automatic: options.automatic === true && options.force !== true,
                 previousUserSource: previousUserSource(chatReference, id, messageSource),
                 signal: controller.signal,
@@ -5968,13 +5969,30 @@ async function translateMessage(messageId, options = {}) {
             const latest = latestContext.chat?.[id];
             const latestSource = messageSource(latest);
             const chatChanged = latestContext.chat !== snapshot.chatReference;
-            const swipeChanged = currentSwipeId(latest) !== snapshot.swipeId;
+            const latestSwipeId = currentSwipeId(latest);
+            // ST initializes the first swipe only after its receive/render events.
+            // This is the same slot; actual 0 -> 1 (etc.) transitions still reject.
+            const swipeChanged = latestSwipeId !== snapshot.swipeId
+                && !(snapshot.swipeId === null && latestSwipeId === 0);
             const sourceChanged = hashText(latestSource) !== snapshot.sourceHash;
+
+            let reconciled = false;
+            if (!chatChanged && !swipeChanged && sourceChanged) {
+                const compatible = reconcileCompletedResult(snapshot.source, latestSource, translated);
+                if (compatible) {
+                    translated = compatible;
+                    source = latestSource;
+                    reconciled = true;
+                }
+            }
+            if (chatChanged || swipeChanged || sourceChanged) {
+                verbaServer.noteSourceChange(id, snapshot.source, latestSource, { chatChanged, swipeChanged, reconciled });
+            }
 
             // SillyTavern may replace a message object during its own save/render
             // finalization without changing the actual active swipe or source text.
             // Object identity alone must NOT invalidate a completed translation.
-            if (chatChanged || swipeChanged || sourceChanged) {
+            if (chatChanged || swipeChanged || (sourceChanged && !reconciled)) {
                 const canRetryLatest = !chatChanged
                     && latest
                     && !latest.is_user

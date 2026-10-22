@@ -1,3 +1,4 @@
+import { compatibleCompletedSource, reconcileCompletedResult, describeSourceChange } from './server-result-compat.js?v=1';
 // Optional server transport. Disabled installations do not contact the plugin.
 import { installVertexModelCompatibility } from './model-compat.js';
 const API = '/api/plugins/verba-server';
@@ -243,12 +244,14 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             if(record.cancel || record.config!==fingerprint(configurationKey())){trace('reuse-skipped',{reason:record.cancel?'cancelled':'settings-changed'});continue;}
             let state;
             try{state=await reconnectStatus(record.id,options.signal);}catch(error){if(error.status===404){forget(record.id);continue;}throw error;}
-            if(!state.generationDone||state.source!==source){trace('reuse-skipped',{reason:!state.generationDone?'generation-pending':'source-changed'});continue;}
+            if(!state.generationDone||!compatibleCompletedSource(state.source,source)){trace('reuse-skipped',{reason:!state.generationDone?'generation-pending':'source-changed',...describeSourceChange(state.source,source)});continue;}
             if(['failed','cancelled'].includes(state.state))throw Error(state.error);
             const done=await waitResult(record.id,options.signal);
+            const result=reconcileCompletedResult(done.source,source,done.result);
+            if(!result){trace('reuse-skipped',{reason:'result-cleanup-unsafe',...describeSourceChange(done.source,source)});continue;}
             record.kind='used';save();
-            trace('automatic-result-reused');
-            return done.result;
+            trace('automatic-result-reused',{...describeSourceChange(done.source,source)});
+            return result;
         }
         if(!await available())return local();
         trace('browser-output-submitted',{automaticJobKnown:!!recent});
@@ -388,5 +391,5 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});
         ensureHook();flush();
     }
-    return {check,available,output,input,run,install,status,cancel,refreshDiagnostics,diagnostics:()=>({serverVersion,jobs:records.filter(r=>r.scope===scopeKey()).map(r=>jobDiagnostics.get(r.id)).filter(Boolean).map(row=>({...row,notificationResults:[...row.notificationResults]})),events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
+    return {noteSourceChange:(id,before,after,flags)=>trace('application-source-changed',{messageId:Number.isInteger(id)?id:null,...describeSourceChange(before,after),chatChanged:flags.chatChanged===true,swipeChanged:flags.swipeChanged===true,reconciled:flags.reconciled===true}),check,available,output,input,run,install,status,cancel,refreshDiagnostics,diagnostics:()=>({serverVersion,jobs:records.filter(r=>r.scope===scopeKey()).map(r=>jobDiagnostics.get(r.id)).filter(Boolean).map(row=>({...row,notificationResults:[...row.notificationResults]})),events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
 }

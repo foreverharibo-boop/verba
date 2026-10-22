@@ -1,5 +1,5 @@
-import { reconcileCompletedResult } from './server-result-compat.js?v=1';
-import { createServerClient } from './server-client.js?v=0.6.61';
+import { reconcileCompletedResult, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
+import { createServerClient } from './server-client.js?v=0.6.64';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.63';
 import { reviewEnglishLeftovers } from './english-review.js';
@@ -62,7 +62,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.63';
+const EXTENSION_VERSION = '0.6.64';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.51';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -12993,6 +12993,24 @@ function scheduleAutomaticTranslation(messageId, delay = 100, translationOptions
         }
 
         const message = liveContext().chat?.[id];
+        // The server is already translating independently in the background.
+        // On the foreground only, let Ttotto harvest and remove its scene
+        // report before matching the completed server result to the final source.
+        // This prevents an unnecessary second AI request. Never wait forever
+        // when Ttotto is disabled or the original markup is intentionally kept.
+        if (message && settings.serverTranslation === true
+            && hasVerifiedSceneReport(messageSource(message))) {
+            const waitCount = Math.max(0, Number(translationOptions.sceneCleanupWaitCount) || 0);
+            if (waitCount < 12) {
+                automaticOutputLifecycle.trace('scene-report-cleanup-wait', id);
+                scheduleAutomaticTranslation(id, 120, {
+                    ...translationOptions,
+                    sceneCleanupWaitCount: waitCount + 1,
+                });
+                return;
+            }
+            automaticOutputLifecycle.trace('scene-report-cleanup-timeout', id);
+        }
         if (repairSwipeTranslationIndexes(message)) scheduleChatSave(liveContext().chat);
         clearStaleCurrentTranslation(id);
         translateMessage(id, { automatic: true, ...translationOptions });

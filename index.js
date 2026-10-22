@@ -1,6 +1,7 @@
 import { reconcileCompletedResult } from './server-result-compat.js?v=1';
 import { createServerClient } from './server-client.js?v=0.6.61';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
+import { createSourceChangeTracer } from './source-change-tracer.js';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -816,6 +817,29 @@ let lastDesktopSelectionAt = 0;
 let lastDebugDiagnostic = null;
 const outputTiming = createOutputTiming();
 outputTiming.setEnabled(settings.debugMode);
+// Experimental diagnostics only: observe source writes without storing chat content.
+const sourceChangeTracer = createSourceChangeTracer({
+    enabled: () => settings.debugMode === true && settings.serverTranslation === true
+        && isTranslationExtensionActive(EXTENSION_KEY),
+    readSource: messageSource,
+});
+function traceSourceForMessage(messageId, phase) {
+    if (settings.debugMode !== true || settings.serverTranslation !== true) return;
+    const id = Number(messageId);
+    if (!Number.isInteger(id) || id < 0) return;
+    sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
+}
+function traceLatestAssistantSource(phase) {
+    if (settings.debugMode !== true || settings.serverTranslation !== true) return;
+    const chat = liveContext().chat;
+    if (!Array.isArray(chat)) return;
+    for (let id = chat.length - 1; id >= Math.max(0, chat.length - 4); id -= 1) {
+        const message = chat[id];
+        if (!message || message.is_user || message.is_system) continue;
+        traceSourceForMessage(id, phase);
+        break;
+    }
+}
 let lastPromptConflicts = [];
 
 
@@ -1061,6 +1085,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
         } : null,
         automaticOutput: automaticOutputLifecycle.diagnostics(),
         serverTranslation: verbaServer.diagnostics(),
+        sourceChangeTrace: sourceChangeTracer.diagnostics(),
         settingsState: {
             autoInput: Boolean(settings.autoInput),
             autoOutput: settings.autoOutput !== false,
@@ -1085,6 +1110,7 @@ function debugDiagnosticText(diagnostic) {
 
 async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
     if (!settings.debugMode) throw new Error('복사하려면 디버그 모드를 켜 주세요.');
+    traceLatestAssistantSource('log-copy');
     await verbaServer.refreshDiagnostics();
     const snapshot = createDebugDiagnostic('manual-status', null, '복사 시점의 번역 상태');
     snapshot.activeWork = {
@@ -5894,6 +5920,7 @@ async function translateMessage(messageId, options = {}) {
     if (!message || message.is_user || !isNameReplacementMessage(message)) return;
     let source = messageSource(message);
     if (!source.trim()) return;
+    traceSourceForMessage(id, 'translation-started');
 
     if (options.automatic && isPredominantlyKorean(source)) {
         console.log(`[베르바] 한국어 중심 출력 자동 제외 #${id}`);
@@ -5967,6 +5994,7 @@ async function translateMessage(messageId, options = {}) {
             outputTiming.applying(timing);
             const latestContext = liveContext();
             const latest = latestContext.chat?.[id];
+            traceSourceForMessage(id, 'server-result-arrived');
             const latestSource = messageSource(latest);
             const chatChanged = latestContext.chat !== snapshot.chatReference;
             const latestSwipeId = currentSwipeId(latest);
@@ -5986,6 +6014,7 @@ async function translateMessage(messageId, options = {}) {
                 }
             }
             if (chatChanged || swipeChanged || sourceChanged) {
+                sourceChangeTracer.compare(id, snapshot.source, latestSource, 'before-result-apply');
                 verbaServer.noteSourceChange(id, snapshot.source, latestSource, { chatChanged, swipeChanged, reconciled });
             }
 
@@ -12427,7 +12456,12 @@ function injectSettingsPanel() {
     };
     debugModeInput?.addEventListener('change', event => {
         settings.debugMode = event.target.checked;
-        if (!settings.debugMode) lastDebugDiagnostic = null;
+        if (!settings.debugMode) {
+            sourceChangeTracer.reset();
+            lastDebugDiagnostic = null;
+        } else {
+            traceLatestAssistantSource('debug-enabled');
+        }
         outputTiming.setEnabled(settings.debugMode);
         renderOutputTiming();
         saveSettings();
@@ -13416,12 +13450,14 @@ function handleCompletedAssistantMessage(payload) {
     let id = normalizedMessageId(payload);
     if (id < 0) id = latestAssistantMessage()?.id ?? -1;
     if (id < 0) return;
+    traceSourceForMessage(id, 'message-received');
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;
     automaticOutputLifecycle.complete(id);
     startCompletedAutomaticOutput(id);
 }
 
 function handleGenerationEnded() {
+    traceLatestAssistantSource('generation-ended');
     const ready = automaticOutputLifecycle.end();
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) {
         automaticOutputLifecycle.discard();
@@ -13435,6 +13471,7 @@ function handleGenerationEnded() {
 }
 
 function resumeAutomaticOutputs() {
+    traceLatestAssistantSource('page-resumed');
     automaticOutputLifecycle.trace('page-resumed');
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;
     // A started/completed job is absent from ready(), but ST may have redrawn
@@ -13451,6 +13488,7 @@ function resumeAutomaticOutputs() {
 
 function setupAutomaticOutputLifecycle() {
     document.addEventListener('visibilitychange', () => {
+        traceLatestAssistantSource(document.hidden ? 'page-hidden' : 'page-visible');
         automaticOutputLifecycle.trace(document.hidden ? 'page-hidden' : 'page-visible');
         if (!document.hidden) resumeAutomaticOutputs();
     });
@@ -13607,6 +13645,7 @@ function setupEvents() {
     if (types.GENERATION_ENDED) source.on(types.GENERATION_ENDED, handleGenerationEnded);
     if (types.CHAT_CHANGED) {
         source.on(types.CHAT_CHANGED, () => {
+            sourceChangeTracer.reset();
             automaticOutputLifecycle.reset();
             // Locks and bundles are one-shot editing state. Clear tracked
             // records before caches are discarded, and also clear any stale
@@ -13668,12 +13707,14 @@ function setupEvents() {
     }
     if (types.MESSAGE_EDITED) {
         source.on(types.MESSAGE_EDITED, payload => {
+            traceSourceForMessage(normalizedMessageId(payload), 'message-edited');
             const id = normalizedMessageId(payload);
             scheduleAutomaticTranslation(id, 80);
         });
     }
     if (types.MESSAGE_UPDATED) {
         source.on(types.MESSAGE_UPDATED, payload => {
+            traceSourceForMessage(normalizedMessageId(payload), 'message-updated');
             restoreTranslationAfterMessageUpdate(payload);
             schedulePotentialAssistantRevision(payload, 160, { allowUntranslated: true });
             setTimeout(
@@ -13692,6 +13733,7 @@ function setupObserver() {
     const observer = new MutationObserver(() => {
         if (uiRefreshTimer !== null) return;
         uiRefreshTimer = setTimeout(() => {
+            traceLatestAssistantSource('dom-updated');
             uiRefreshTimer = null;
             injectSettingsPanel();
             injectInputAction();
@@ -13722,6 +13764,7 @@ function initialize() {
     setupMessageCopyHold();
     setupSelection();
     setupEvents();
+    traceLatestAssistantSource('startup');
     setupAutomaticOutputLifecycle();
     verbaServer.install();
     setupObserver();

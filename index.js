@@ -952,6 +952,13 @@ function finishProtectedRecovery(diagnostic, status, started, attempts, remainin
     }
 }
 
+function recentDiagnosticEvents(snapshot, maxEvents=20) {
+    return {...snapshot,
+        events:Array.isArray(snapshot?.events)?snapshot.events.slice(-maxEvents):[],
+        ...(Array.isArray(snapshot?.jobs)?{jobs:snapshot.jobs.slice(-6)}:{}),
+        ...(Array.isArray(snapshot?.latestJobs)?{latestJobs:snapshot.latestJobs.slice(-6)}:{}),
+    };
+}
 function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage = '') {
     const context = liveContext();
     const latest = (() => {
@@ -997,9 +1004,9 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             sourceLength: source.length,
             hasStoredTranslation: Boolean(currentRecord(latest.message)),
         } : null,
-        automaticOutput: automaticOutputLifecycle.diagnostics(),
-        browserExecution: executionTrace.diagnostics(),
-        sourceChangeTrace: sourceChangeTracer.diagnostics(),
+        automaticOutput: recentDiagnosticEvents(automaticOutputLifecycle.diagnostics(),22),
+        browserExecution: recentDiagnosticEvents(executionTrace.diagnostics(),24),
+        sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(),16),
         settingsState: {
             autoInput: Boolean(settings.autoInput),
             autoOutput: settings.autoOutput !== false,

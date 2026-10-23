@@ -61,6 +61,7 @@ const requestSource = slice('function collectPartialSegmentTranslations(', 'asyn
 let transportCalls = 0;
 const transportError = Object.assign(new Error('transport exhausted'), { code: 'TRANSIENT' });
 const requestEnv = {
+    settings: {},
     collectSegmentResponse: () => { throw new Error('must not parse a transport failure'); },
     extractResponseText: value => value,
     recordSegmentRecovery: () => null,
@@ -92,6 +93,8 @@ const segmented = {
     tokens: [],
 };
 const translateEnv = {
+    verbaServer: { hasPendingGeneration: () => false },
+    reviewFinalEnglish: async () => {},
     settings,
     POST_TRANSLATION_AI_REPAIR_ENABLED: false,
     normalizedCharacterNameLocks: () => [],

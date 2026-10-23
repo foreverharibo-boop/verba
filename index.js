@@ -1,7 +1,9 @@
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
-import { createAutomaticOutputLifecycle } from './automatic-output.js';
-import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.56';
-import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.56';
+import { reconcileCompletedResult, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
+import { createServerClient } from './server-client.js?v=0.6.64';
+import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
+import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
+import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -62,7 +64,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.56';
+const EXTENSION_VERSION = '0.6.66';
+// This client-only fix uses the existing server translation engine unchanged.
+const SERVER_ENGINE_VERSION = '0.6.65';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -346,6 +350,7 @@ function normalizeCustomTranslatorSettings(rawTemplates = {}, rawModified = {}) 
     return { templates: normalizedTemplates, modified: normalizedModified };
 }
 const DEFAULT_SETTINGS = {
+    serverTranslation: false,
     translationEngine: 'ai',
     profileId: '',
     fallbackProfileId: '',
@@ -814,14 +819,16 @@ let lastDesktopSelectionAt = 0;
 let lastDebugDiagnostic = null;
 const outputTiming = createOutputTiming();
 outputTiming.setEnabled(settings.debugMode);
-// Diagnostic-only runtime, enabled only after the user turns on debug mode.
+// Diagnostic-only runtime. It remains dormant unless debug mode is enabled.
+// Full-text opt-in is persisted locally by source-change-tracer.js, while
+// the actual RP text remains memory-only and bounded.
 let fullSourceSnapshotsEnabled = false;
 const executionTrace = createBrowserExecutionDiagnostics({
     enabled: () => settings.debugMode === true,
     visibility: () => document.visibilityState || 'unknown',
 });
 const sourceChangeTracer = createSourceChangeTracer({
-    enabled: () => settings.debugMode === true,
+    enabled: () => settings.debugMode === true && isTranslationExtensionActive(EXTENSION_KEY),
     fullTextEnabled: () => fullSourceSnapshotsEnabled,
     readSource: messageSource,
     onChange: meta => executionTrace.trace('source-write-observed', meta.messageId, {
@@ -831,23 +838,121 @@ const sourceChangeTracer = createSourceChangeTracer({
     }),
 });
 function traceSourceForMessage(messageId, phase) {
-    if (!settings.debugMode) return;
-    const id=Number(messageId);
-    if(Number.isInteger(id)&&id>=0) sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
+    if (settings.debugMode !== true) return;
+    const id = Number(messageId);
+    if (Number.isInteger(id) && id >= 0) sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
 }
 function traceLatestAssistantSource(phase) {
-    if(!settings.debugMode) return;
-    const chat=liveContext().chat;
-    if(!Array.isArray(chat)) return;
-    for(let id=chat.length-1;id>=Math.max(0,chat.length-6);id--) {
-        const message=chat[id];
-        if(message&&!message.is_user&&!message.is_system){
-            traceSourceForMessage(id,phase);break;
+    if (settings.debugMode !== true) return;
+    const chat = liveContext().chat;
+    if (!Array.isArray(chat)) return;
+    for (let id = chat.length - 1; id >= Math.max(0, chat.length - 6); id -= 1) {
+        const message = chat[id];
+        if (message && !message.is_user && !message.is_system) {
+            traceSourceForMessage(id, phase);
+            break;
         }
     }
 }
- 
 let lastPromptConflicts = [];
+
+
+const verbaServer = createServerClient({
+    variant: EXTENSION_KEY, version: SERVER_ENGINE_VERSION,
+    getSettings: () => settings, getContext: liveContext,
+    isActive: () => isTranslationExtensionActive(EXTENSION_KEY),
+    getSnapshot: () => ({
+        settings: { ...settings, profileStats: undefined },
+        nameLocks: normalizedCharacterNameLocks(),
+        character: { name: currentCharacterReference()?.character?.name || liveContext().name2 || '', gender: detectCharacterGender(currentCharacterReference()?.character) },
+        context: { name1: liveContext().name1, name2: liveContext().name2 },
+    }),
+    getGenerationOptions: type => {
+        const chat = liveContext().chat || [];
+        const last = chat.at(-1);
+        const target = last && !last.is_user ? last : { name: liveContext().name2 };
+        const id = last && !last.is_user ? chat.length - 1 : chat.length;
+        return {
+            prefix: type === 'continue' ? messageSource(last) : '',
+            options: {
+                speakerIdentity: outputSpeakerIdentity(target),
+                previousUserSource: previousUserSource(chat, id, messageSource),
+                tuning: { dialogueEndingRepeatHints: recentDialogueEndingRepeatHints(id) },
+                stage: 'output-translation',
+            },
+        };
+    },
+    onProgress: applyServerTranslationProgress,
+    onNotice: text => notify(text, 'warning'),
+});
+
+function applyServerTranslationProgress(state) {
+    const prefix = `server:${state.id}:`;
+    for (const event of state.events || []) {
+        if (event.kind === 'profile') recordProfileAttempt(event.slot, event);
+        if (event.kind === 'notice') notify(event.message, event.type);
+        if (event.kind === 'retry') {
+            for (const key of serverRetryStates.keys()) if (typeof key === 'string' && key.startsWith(prefix)) serverRetryStates.delete(key);
+            (event.requests || []).forEach((entry, index) => {
+                const controller = new AbortController();
+                controller.signal.addEventListener('abort', () => void verbaServer.cancel(state.id), { once: true });
+                serverRetryStates.set(prefix + index, { ...entry, controller });
+            });
+        }
+    }
+    if (['completed', 'failed', 'cancelled'].includes(state.state)) {
+        for (const key of serverRetryStates.keys()) if (typeof key === 'string' && key.startsWith(prefix)) serverRetryStates.delete(key);
+    }
+    updateServerRetryIndicator();
+}
+
+function serverTranslationSettingsMarkup() {
+    return `
+                    <details class="verba-tool-details">
+                        <summary>서버 번역 <small>선택 설치 · 기본 OFF</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row" for="verba-server-translation">
+                                <input type="checkbox" id="verba-server-translation" ${settings.serverTranslation === true ? 'checked' : ''}>
+                                <span>서버에서 번역</span>
+                            </label>
+                            <div class="verba-help">별도 서버 플러그인을 설치한 경우 사용해요. 설치하지 않으면 기존 브라우저 번역을 그대로 이용합니다. 서버는 계속 켜져 있어야 합니다.</div>
+                            <div class="verba-help">새 답변의 백그라운드 수신은 채팅 완성 API를 지원합니다. 다른 확장이 답변을 수정하면 최종 원문과 일치하는 번역만 사용합니다. 서버 재시작 시 진행 중인 작업은 복구되지 않습니다.</div>
+                            <button type="button" id="verba-server-check" class="menu_button">서버 연결 확인</button>
+                            <div id="verba-server-status" class="verba-help" aria-live="polite">${settings.serverTranslation === true ? '서버 번역 켜짐' : '기존 브라우저 번역'}</div>
+                        </div>
+                    </details>`;
+}
+
+function bindServerTranslationSetting(panel) {
+    const input = panel.querySelector('#verba-server-translation');
+    const status = panel.querySelector('#verba-server-status');
+    const check = panel.querySelector('#verba-server-check');
+    if (!input || !status || !check) return;
+    input.addEventListener('change', async () => {
+        if (!input.checked) {
+            settings.serverTranslation = false;
+            saveSettings();
+            status.textContent = '기존 브라우저 번역 · 진행 중인 서버 작업은 계속됩니다.';
+            return;
+        }
+        input.disabled = true;
+        try {
+            await verbaServer.check(); settings.serverTranslation = true; saveSettings();
+            status.textContent = '서버 번역 연결됨 · 다음 요청부터 적용됩니다.';
+        } catch (error) { input.checked = false; status.textContent = error.message; }
+        finally {
+            input.disabled = false;
+            const detail = panel.querySelector('#verba-debug-full-source');
+            if (detail) detail.disabled = !settings.debugMode;
+        }
+    });
+    check.addEventListener('click', async () => {
+        check.disabled = true;
+        try { await verbaServer.check(); status.textContent = '서버 플러그인과 버전이 일치합니다.'; }
+        catch (error) { status.textContent = error.message; }
+        finally { check.disabled = false; }
+    });
+}
 
 function liveContext() {
     return globalThis.SillyTavern?.getContext?.() || baseContext;
@@ -952,13 +1057,15 @@ function finishProtectedRecovery(diagnostic, status, started, attempts, remainin
     }
 }
 
-function recentDiagnosticEvents(snapshot, maxEvents=20) {
-    return {...snapshot,
-        events:Array.isArray(snapshot?.events)?snapshot.events.slice(-maxEvents):[],
-        ...(Array.isArray(snapshot?.jobs)?{jobs:snapshot.jobs.slice(-6)}:{}),
-        ...(Array.isArray(snapshot?.latestJobs)?{latestJobs:snapshot.latestJobs.slice(-6)}:{}),
+function recentDiagnosticEvents(snapshot, maxEvents = 20) {
+    return {
+        ...snapshot,
+        events: Array.isArray(snapshot?.events) ? snapshot.events.slice(-maxEvents) : [],
+        ...(Array.isArray(snapshot?.jobs) ? { jobs: snapshot.jobs.slice(-6) } : {}),
+        ...(Array.isArray(snapshot?.latestJobs) ? { latestJobs: snapshot.latestJobs.slice(-6) } : {}),
     };
 }
+
 function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage = '') {
     const context = liveContext();
     const latest = (() => {
@@ -1002,11 +1109,16 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             swipeId: currentSwipeId(latest.message),
             sourceHash: source ? hashText(source) : '',
             sourceLength: source.length,
-            hasStoredTranslation: Boolean(currentRecord(latest.message)),
+            hasStoredTranslation: Boolean(currentRecord(latest.message, latest.id)),
+            displayMatchesStored: Boolean(currentRecord(latest.message, latest.id)
+                && latest.message.extra?.display_text === currentRecord(latest.message, latest.id).translation),
+            sourceViewRequested: Boolean(sourceViewRequested(latest.message, currentRecord(latest.message, latest.id))),
+            mounted: Boolean(document.querySelector(`.mes[mesid="${latest.id}"] .mes_text`)),
         } : null,
-        automaticOutput: recentDiagnosticEvents(automaticOutputLifecycle.diagnostics(),22),
-        browserExecution: recentDiagnosticEvents(executionTrace.diagnostics(),24),
-        sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(),16),
+        automaticOutput: recentDiagnosticEvents(automaticOutputLifecycle.diagnostics(), 22),
+        browserExecution: recentDiagnosticEvents(executionTrace.diagnostics(), 24),
+        serverTranslation: verbaServer.diagnostics(),
+        sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(), 16),
         settingsState: {
             autoInput: Boolean(settings.autoInput),
             autoOutput: settings.autoOutput !== false,
@@ -1020,9 +1132,8 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
         privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
-        ...(fullSourceSnapshotsEnabled && settings.debugMode ? {
-            fullSourceWarning: '원문 전체 기록 ON: sourceChangeTrace.events에 RP 원문과 삭제·추가된 내용이 그대로 포함됩니다. 공유 전 확인하세요.',
-        } : {}),
+        ...(sourceChangeTracer.diagnostics().fullTextEnabled && settings.debugMode === true
+            ? { fullSourceWarning: '원문 전체 비교 기록이 활성화되어 있습니다. sourceChangeTrace.events에는 변경 전후의 RP 본문 전체, 삭제/추가된 글이 포함됩니다. 외부 공유 전 반드시 내용을 검토하세요.' } : {}),
         limitation: '숨김은 브라우저 동결의 증거가 아닙니다. freeze 이벤트나 타이머 지연은 참고 정황이며, 실제 동결 중에는 브라우저 로그를 기록할 수 없습니다. 터먹스 로그는 별도입니다.',
     };
 }
@@ -1036,6 +1147,7 @@ async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
     if (!settings.debugMode) throw new Error('복사하려면 디버그 모드를 켜 주세요.');
     executionTrace.heartbeat();
     traceLatestAssistantSource('log-copy');
+    await verbaServer.refreshDiagnostics();
     const snapshot = createDebugDiagnostic('manual-status', null, '복사 시점의 번역 상태');
     snapshot.activeWork = {
         outputMessageIds: [...pendingOutputs.keys()],
@@ -3514,6 +3626,9 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
 }
 
 async function sendWithRetry(prompt, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (settings.serverTranslation === true && await verbaServer.available()) { return verbaServer.run("request", prompt, options); }
+    /* SERVER_DISPATCH_END */
     const maxRetries = normalizedServerRetryLimit(settings.serverRetryLimit);
     const token = Symbol('verba-translation-retry');
     const outerSignal = options.signal || null;
@@ -3663,6 +3778,9 @@ function collectPartialSegmentTranslations(raw, expectedSegments) {
 }
 
 async function requestSegments(prompt, expectedSegments, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (settings.serverTranslation === true && await verbaServer.available()) { return new Map(await verbaServer.run("segments", prompt, options, expectedSegments)); }
+    /* SERVER_DISPATCH_END */
     const googleOptions = typeof settings !== 'undefined' && settings.translationEngine === 'google-free'
         ? googleFreeStageOptions(options.stage)
         : null;
@@ -4866,7 +4984,8 @@ async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {
 
 /**
  * Optional bilingual-intent check. Only uncertain direct-dialogue formatting
- * requests reach the AI, with one provider attempt and a 20-second cap.
+ * requests reach the AI, with one provider attempt and a bounded
+ * 20-second / 512-token decision request.
  */
 async function planBilingualDialogueVerdicts(segmented, options = {}) {
     if (settings.translationEngine === 'google-free') return;
@@ -4896,12 +5015,16 @@ async function planBilingualDialogueVerdicts(segmented, options = {}) {
 }
 
 async function translateOutputText(source, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (!options.browserLocal && (settings.serverTranslation === true || verbaServer.hasPendingGeneration())) { return verbaServer.output(source, options, () => translateOutputText(source, { ...options, browserLocal: true })); }
+    /* SERVER_DISPATCH_END */
     const characterNameLocks = normalizedCharacterNameLocks();
     const segmentationOptions = {
         translateTaggedContent: settings.translateTaggedContent !== false,
         speakerIdentity: options.speakerIdentity || {},
     };
     const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);
+    await planBilingualDialogueVerdicts(initialSegmented, { signal: options.signal, timing: options.timing });
     if (minimalOutputEnabled(settings)) {
         return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap, reviewEnglish: reviewFinalEnglish });
     }
@@ -5107,6 +5230,9 @@ function inputIdentitySpellingContext() {
 }
 
 async function translateInputText(source, options = {}) {
+    /* SERVER_DISPATCH_BEGIN */
+    if (settings.serverTranslation === true && await verbaServer.available()) { return verbaServer.run("input", source, options); }
+    /* SERVER_DISPATCH_END */
     const expected = [{ id: 'seg_0000', type: 'user_input', text: source }];
     const targetGender = detectCharacterGender(currentCharacterReference()?.character);
     const identityContext = inputIdentitySpellingContext();
@@ -5177,7 +5303,7 @@ function currentTranslationRecoveryScope() {
 }
 
 function inferredMessageId(message, explicitId = null) {
-    const direct = Number(explicitId);
+    const direct = explicitId == null ? NaN : Number(explicitId);
     if (Number.isInteger(direct) && direct >= 0) return direct;
     const chat = liveContext().chat;
     if (!Array.isArray(chat) || !message) return -1;
@@ -5699,7 +5825,7 @@ function showOriginalDisplay(messageId, message, record) {
     }
 }
 
-function restoreCurrentDisplay(messageId, message, record) {
+function restoreCurrentDisplay(messageId, message, record, { forceRender = false } = {}) {
     if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
     if (!message.extra || typeof message.extra !== 'object') message.extra = {};
     if (sourceViewRequested(message, record)) {
@@ -5713,7 +5839,9 @@ function restoreCurrentDisplay(messageId, message, record) {
     const sourceViewChanged = Boolean(message.extra[SOURCE_VIEW_KEY]);
     if (sourceViewChanged) delete message.extra[SOURCE_VIEW_KEY];
     const cacheChanged = syncOwnedTranslationToCurrentSwipe(message, record);
-    if (displayChanged || recordChanged) updateMessageBlock(messageId, message);
+    const mounted = forceRender && document.querySelector(`.mes[mesid="${Number(messageId)}"]`);
+    const redraw = mounted && !mounted.querySelector('.edit_textarea');
+    if (displayChanged || recordChanged || redraw) updateMessageBlock(messageId, message);
     cacheRenderedTranslation(messageId, message, record);
     if (displayChanged || recordChanged || sourceViewChanged || cacheChanged) scheduleChatSave(liveContext().chat);
 }
@@ -5859,41 +5987,34 @@ async function translateMessage(messageId, options = {}) {
     const chatReference = context.chat;
     const message = chatReference?.[id];
     if (!message || message.is_user || !isNameReplacementMessage(message)) return;
-    const source = messageSource(message);
+    let source = messageSource(message);
     if (!source.trim()) {
-        executionTrace.trace('translation-skipped',id,{reason:'empty-source'});
+        executionTrace.trace('translation-skipped', id, { reason: 'empty-source' });
         return;
     }
-    traceSourceForMessage(id,'translation-entered');
+    traceSourceForMessage(id, 'translation-entered');
 
     if (options.automatic && isPredominantlyKorean(source)) {
         console.log(`[베르바] 한국어 중심 출력 자동 제외 #${id}`);
-        executionTrace.trace('translation-skipped',id,{reason:'korean-source'});
         return;
     }
     if (!hasForeignText(source)) {
-        executionTrace.trace('translation-skipped',id,{reason:'no-foreign-text'});
         if (!options.automatic) notify('번역할 외국어 원문이 없어요.', 'warning');
         return;
     }
     if (settings.translationEngine !== 'google-free' && !settings.profileId) {
-        executionTrace.trace('translation-skipped',id,{reason:'missing-profile'});
         if (!options.automatic) notify('먼저 번역기 전용 연결 프로필을 선택해 주세요.', 'warning');
         return;
     }
 
     const record = currentRecord(message);
     if (!options.force && record) {
-        executionTrace.trace('stored-translation-reused',id);
         failedOutputSignatures.delete(id);
         restoreCurrentDisplay(id, message, record);
         return;
     }
     if (pendingOutputs.has(id)) {
-        if (!options.force) {
-            executionTrace.trace('already-translating',id);
-            return pendingOutputs.get(id).work;
-        }
+        if (!options.force) return pendingOutputs.get(id).work;
         abortPendingOutput(id, outputAbortReason(
             'VERBA_OUTPUT_REPLACED',
             '새 전체 재번역 요청으로 이전 작업을 교체했습니다.',
@@ -5902,7 +6023,6 @@ async function translateMessage(messageId, options = {}) {
     }
 
     if (options.automatic) automaticOutputLifecycle.started(id);
-    executionTrace.trace('output-started',id,{reason:options.force?'manual-retranslation':options.automatic?'automatic':'manual'});
     const outputJobStartedAt = performance.now();
     const outputJobSlot = activeProfileSlot();
     const timing = outputTiming.begin({
@@ -5929,10 +6049,9 @@ async function translateMessage(messageId, options = {}) {
     let toast = showProgress(options.force ? '아웃풋 전체를 다시 번역 중입니다…' : '아웃풋을 번역 중입니다…');
     const work = (async () => {
         try {
-            executionTrace.trace('bilingual-precheck-started',id);
-            await planBilingualDialogueVerdicts(segmentSource(source), { signal: controller.signal, timing });
-            executionTrace.trace('translation-requested',id);
-            const translated = await translateOutputText(source, {
+            executionTrace.trace('translation-requested', id);
+            let translated = await translateOutputText(source, {
+                automatic: options.automatic === true && options.force !== true,
                 previousUserSource: previousUserSource(chatReference, id, messageSource),
                 signal: controller.signal,
                 timing,
@@ -5944,22 +6063,39 @@ async function translateMessage(messageId, options = {}) {
                 speakerIdentity: outputSpeakerIdentity(message),
                 stage: options.force ? 'output-retranslation' : 'output-translation',
             });
-            executionTrace.trace('model-result-received',id);
             if (controller.signal.aborted) throw controller.signal.reason || abortError();
             outputTiming.applying(timing);
             const latestContext = liveContext();
             const latest = latestContext.chat?.[id];
-            traceSourceForMessage(id,'before-apply');
+            executionTrace.trace('translation-response-received', id);
+            traceSourceForMessage(id, 'before-result-apply');
             const latestSource = messageSource(latest);
             const chatChanged = latestContext.chat !== snapshot.chatReference;
-            const swipeChanged = currentSwipeId(latest) !== snapshot.swipeId;
+            const latestSwipeId = currentSwipeId(latest);
+            // ST initializes the first swipe only after its receive/render events.
+            // This is the same slot; actual 0 -> 1 (etc.) transitions still reject.
+            const swipeChanged = latestSwipeId !== snapshot.swipeId
+                && !(snapshot.swipeId === null && latestSwipeId === 0);
             const sourceChanged = hashText(latestSource) !== snapshot.sourceHash;
+
+            let reconciled = false;
+            if (!chatChanged && !swipeChanged && sourceChanged) {
+                const compatible = reconcileCompletedResult(snapshot.source, latestSource, translated);
+                if (compatible) {
+                    translated = compatible;
+                    source = latestSource;
+                    reconciled = true;
+                }
+            }
+            if (chatChanged || swipeChanged || sourceChanged) {
+                sourceChangeTracer.compare(id, snapshot.source, latestSource, 'before-result-apply');
+                verbaServer.noteSourceChange(id, snapshot.source, latestSource, { chatChanged, swipeChanged, reconciled });
+            }
 
             // SillyTavern may replace a message object during its own save/render
             // finalization without changing the actual active swipe or source text.
             // Object identity alone must NOT invalidate a completed translation.
-            if (chatChanged || swipeChanged || sourceChanged) {
-                if(sourceChanged)sourceChangeTracer.compare(id,source,latestSource,'model-result-versus-current-source');
+            if (chatChanged || swipeChanged || (sourceChanged && !reconciled)) {
                 const canRetryLatest = !chatChanged
                     && latest
                     && !latest.is_user
@@ -5967,8 +6103,7 @@ async function translateMessage(messageId, options = {}) {
                     && latestSource.trim();
                 const staleRetryCount = Math.max(0, Number(options.staleRetryCount) || 0);
                 const willRetryLatest = canRetryLatest && staleRetryCount < 2;
-                executionTrace.trace('translation-stale',id,{sourceChanged,swipeChanged,chatChanged,
-                    beforeLength:source.length,afterLength:latestSource.length,retryScheduled:willRetryLatest});
+
                 if (willRetryLatest) {
                     // Give SillyTavern a short settling window before translating
                     // the newest source. Repeated late finalization is allowed one
@@ -6003,7 +6138,6 @@ async function translateMessage(messageId, options = {}) {
                     true,
                 );
             }
-            executionTrace.trace('translation-apply-started',id);
             const applied = applyTranslation(
                 id,
                 latest,
@@ -6019,7 +6153,6 @@ async function translateMessage(messageId, options = {}) {
             clearTransientTranslationSelections();
 
             if (applied?.renderResult?.status === 'failed') {
-                executionTrace.trace('translation-render-failed',id);
                 // The translated text is preserved in Verba storage, but the
                 // user must not see the progress toast simply disappear while
                 // the visible message remains unchanged.
@@ -6030,7 +6163,7 @@ async function translateMessage(messageId, options = {}) {
 
             failedOutputSignatures.delete(id);
             outputJobSuccess = true;
-            executionTrace.trace('translation-applied',id,{success:true});
+            executionTrace.trace('translation-applied', id);
             notify(options.force ? '전체 재번역을 적용했어요.' : '번역을 적용했어요.', 'success');
         } catch (error) {
             if (isAbort(error, controller.signal)) {
@@ -6055,20 +6188,17 @@ async function translateMessage(messageId, options = {}) {
                     }
                     outputJobSuperseded = true;
                     outputJobSuccess = false;
-                    executionTrace.trace('translation-aborted',id,{reason:'intentional-abort'});
                     failedOutputSignatures.delete(id);
                 } else {
                     outputJobSuccess = false;
                     failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
                     const reasonMessage = String(reason?.message || error?.message || '알 수 없는 이유');
-                    executionTrace.trace('translation-aborted',id,{reason:'unexpected-abort'});
                     console.warn('[베르바] 출력 번역 중단', reason || error);
                     reportError('output-aborted', reason || error, `출력 번역 중단: ${reasonMessage}`);
                 }
             } else {
                 outputJobSuccess = false;
                 failedOutputSignatures.set(id, `${snapshot.swipeId ?? 'none'}:${snapshot.sourceHash}`);
-                executionTrace.trace('translation-failed',id,{reason:'request-or-processing-error'});
                 console.error('[베르바] 출력 번역 실패', error);
                 reportError(options.force ? 'output-retranslation' : 'output-translation', error, `출력 번역 실패: ${errorText(error)}`);
             }
@@ -6087,8 +6217,6 @@ async function translateMessage(messageId, options = {}) {
             }
             clearProgress(toast);
             if (pendingOutputs.get(id)?.controller === controller) pendingOutputs.delete(id);
-            executionTrace.trace('output-finalized',id,{success:outputJobSuccess===true,
-                reason:outputJobSuperseded?'replaced':controller.signal.aborted?'aborted':outputJobSuccess?'applied':'failed'});
             refreshRetranslateButton();
             outputTiming.finish(timing, controller.signal.aborted || outputJobSuperseded ? '취소·전환' : outputJobSuccess ? '완료' : '실패');
             renderOutputTiming();
@@ -9141,15 +9269,15 @@ async function retranslateSelectionBundle() {
     try {
         await planBilingualDialogueVerdicts({ segments: bundleHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });
         prompt = buildMultiSelectionPrompt({
-            source: state.source,
-            translation: state.translation,
-            selections,
-            settings,
-            oneTimeInstruction: instruction,
-            speakerIdentity,
-            contextMode,
-            tuning,
-        });
+        source: state.source,
+        translation: state.translation,
+        selections,
+        settings,
+        oneTimeInstruction: instruction,
+        speakerIdentity,
+        contextMode,
+        tuning,
+    });
         const result = await requestSegments(prompt, expected, {
             signal: controller.signal,
             previousUserSource: previousUserSourceText,
@@ -9416,19 +9544,19 @@ async function retranslateSelection(snapshot) {
     try {
         await planBilingualDialogueVerdicts({ segments: selectionHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });
         prompt = buildSelectionPrompt({
-            source: snapshot.source,
-            translation: snapshot.translation,
-            selected: snapshot.selected,
-            start: snapshot.start,
-            end: snapshot.end,
-            settings,
-            oneTimeInstruction: instruction,
-            speakerIdentity,
-            candidateCount: candidateMode ? 3 : 1,
-            contextMode,
-            sourceContext: selectionSourceContext(snapshot, contextMode),
-            tuning,
-        });
+        source: snapshot.source,
+        translation: snapshot.translation,
+        selected: snapshot.selected,
+        start: snapshot.start,
+        end: snapshot.end,
+        settings,
+        oneTimeInstruction: instruction,
+        speakerIdentity,
+        candidateCount: candidateMode ? 3 : 1,
+        contextMode,
+        sourceContext: selectionSourceContext(snapshot, contextMode),
+        tuning,
+    });
         let replacement = '';
         if (candidateMode) {
             const received = (await requestSelectionCandidates(prompt, {
@@ -10605,11 +10733,12 @@ function developerChuseokGalbwaeMarkup() {
 
 function developerSettingsMarkup() {
     return `
-        <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings" open>
+        <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings">
             <summary>개발자 모드 <small>${settings.developerMode ? '품질 검수 실험실' : '번호 입력'}</small></summary>
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+                    ${serverTranslationSettingsMarkup()}
                     ${developerChuseokGalbwaeMarkup()}
                     
                     <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
@@ -10755,7 +10884,9 @@ function refreshSettingsPanelForDeveloperMode() {
     const replacement = holder.firstElementChild;
     if (!replacement) return;
 
+    replacement.open = current.open;
     current.replaceWith(replacement);
+    bindServerTranslationSetting(panel);
     syncDeveloperQualityControls(panel);
     applySettingsVisibility(panel);
     renderQualityAuditStatus();
@@ -11146,7 +11277,9 @@ function injectSettingsPanel() {
                             <div class="verba-help"><b>인풋:</b> 켜면 한국어 인풋을 영어로 바꾼 뒤 전송해요. 캐릭터 카드에 명시된 성별·대명사는 로컬에서 성별값만 확인하며, 카드 원문은 번역 AI에 보내지 않습니다. 실패하면 원문을 보내지 않고 생성을 중단합니다.</div>
                         </div>
                     </details>
-                </section>
+
+
+</section>
 
                 <details id="verba-profile-settings-group" class="verba-tool-details">
                     <summary>번역 엔진·연결 프로필 <small>A/B/C · 재시도</small></summary>
@@ -11735,10 +11868,10 @@ function injectSettingsPanel() {
                         </label>
                         <div class="verba-help">오류가 없어도 로그 복사로 현재 번역 대기·재시도 상태와 백그라운드 전환 기록을 확인할 수 있어요. 마지막 오류·응답 형식·보호 표식 복구 1건도 함께 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
                         <label class="verba-check-row">
-                            <input type="checkbox" id="verba-debug-full-source" ${settings.debugMode && fullSourceSnapshotsEnabled ? 'checked' : ''} ${settings.debugMode ? '' : 'disabled'}>
+                            <input type="checkbox" id="verba-debug-full-source" ${sourceChangeTracer.diagnostics().fullTextEnabled ? 'checked' : ''} ${settings.debugMode ? '' : 'disabled'}>
                             <span>원문 변경 전·후 전체 기록 (선택)</span>
                         </label>
-                        <div class="verba-help">기본 로그는 삭제 글자 수·위치·태그만 기록합니다. 이 옵션을 켜면 변경 전후 본문과 삭제된 텍스트 전체를 최근 3건만 기록합니다. RP 내용이 포함되므로 공유 전 확인해 주세요. 새로고침하면 꺼집니다.</div>
+                        <div class="verba-help">디버그를 켠 뒤 이 옵션까지 켜면 변경 전·후 본문과 삭제/추가된 문장이 로그에 포함됩니다. 실제 본문은 최근 변경 8건만 메모리에 보관하며, 체크 상태만 기기에 저장됩니다. 한 번 켜면 직접 끌 때까지 새로고침 후에도 유지됩니다. 외부 공유 전 RP 내용을 반드시 확인해 주세요.</div>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode ? '' : 'disabled'}>로그 복사</button>
                         <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>
@@ -11758,6 +11891,7 @@ function injectSettingsPanel() {
     bindSettingsSearch(panel);
     bindAutoInputSetting(panel);
     bindAutoOutputSetting(panel);
+    bindServerTranslationSetting(panel);
     bindBaseTranslationEditor(panel, settings, { save: saveSettings, notify });
     refreshProfileSelect();
     syncTranslationEngineUi(panel);
@@ -12402,19 +12536,19 @@ function injectSettingsPanel() {
     const fullSourceInput = panel.querySelector('#verba-debug-full-source');
     const debugCopyButton = panel.querySelector('#verba-copy-last-debug');
     const syncDebugCopyButton = () => {
-        if(debugCopyButton)debugCopyButton.disabled=!settings.debugMode;
-        if(fullSourceInput){
-            fullSourceInput.disabled=!settings.debugMode;
-            fullSourceInput.checked=Boolean(settings.debugMode&&fullSourceSnapshotsEnabled);
+        if (debugCopyButton) debugCopyButton.disabled = !settings.debugMode;
+        if (fullSourceInput) {
+            fullSourceInput.disabled = !settings.debugMode;
+            fullSourceInput.checked = sourceChangeTracer.diagnostics().fullTextEnabled;
         }
     };
     debugModeInput?.addEventListener('change', event => {
         settings.debugMode = event.target.checked;
-        if(!settings.debugMode){
-            fullSourceSnapshotsEnabled=false;
+        if (!settings.debugMode) {
+            fullSourceSnapshotsEnabled = false;
             sourceChangeTracer.reset();
-            executionTrace.clear({dropTimer:true});
-            lastDebugDiagnostic=null;
+            executionTrace.clear({ dropTimer: true });
+            lastDebugDiagnostic = null;
         } else {
             executionTrace.start();
             traceLatestAssistantSource('debug-enabled');
@@ -12426,14 +12560,17 @@ function injectSettingsPanel() {
         notify(settings.debugMode ? '디버그를 켰어요. 다음 출력 번역 시간과 마지막 오류를 기록해요.' : '디버그를 끄고 오류·시간 기록을 지웠어요.', 'info');
     });
     fullSourceInput?.addEventListener('change', event => {
-        fullSourceSnapshotsEnabled=Boolean(event.target.checked)&&settings.debugMode===true;
+        fullSourceSnapshotsEnabled = Boolean(event.target.checked)
+            && settings.debugMode === true;
         sourceChangeTracer.reset();
-        lastDebugDiagnostic=null;
-        traceLatestAssistantSource(fullSourceSnapshotsEnabled?'full-text-on':'full-text-off');
+        // Do not leave a previous error report holding full snapshots after opt-out.
+        if (!fullSourceSnapshotsEnabled) lastDebugDiagnostic = null;
+        traceLatestAssistantSource(fullSourceSnapshotsEnabled ? 'full-text-enabled' : 'full-text-disabled');
         syncDebugCopyButton();
         notify(fullSourceSnapshotsEnabled
-          ? '원문 전체 기록을 시작합니다. 복사한 로그에 RP 본문이 포함됩니다.'
-          : '원문 전체 기록을 끄고 수집된 원문 기록을 지웠어요.', 'info');
+            ? '이제부터 원문 변경 전후 본문 전체를 기록합니다. 로그 공유 전 내용을 확인해 주세요.'
+            : '원문 전체 기록을 끄고 저장된 본문 비교 로그를 지웠어요.',
+            fullSourceSnapshotsEnabled ? 'warning' : 'info');
     });
     debugCopyButton?.addEventListener('click', async () => {
         try {
@@ -12897,7 +13034,6 @@ function scheduleAutomaticTranslation(messageId, delay = 100, translationOptions
     const run = () => {
         if (automaticTranslationTimers.get(id) !== ticket) return;
         automaticTranslationTimers.delete(id);
-        executionTrace.trace('translation-dispatch-attempt',id);
         if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
         if (settings.autoOutput === false) return;
         if (liveContext().chat !== chatReference) return;
@@ -12919,13 +13055,32 @@ function scheduleAutomaticTranslation(messageId, delay = 100, translationOptions
         }
 
         const message = liveContext().chat?.[id];
+        // The server is already translating independently in the background.
+        // On the foreground only, let Ttotto harvest and remove its scene
+        // report before matching the completed server result to the final source.
+        // This prevents an unnecessary second AI request. Never wait forever
+        // when Ttotto is disabled or the original markup is intentionally kept.
+        if (message && settings.serverTranslation === true
+            && hasVerifiedSceneReport(messageSource(message))) {
+            const waitCount = Math.max(0, Number(translationOptions.sceneCleanupWaitCount) || 0);
+            if (waitCount < 12) {
+                automaticOutputLifecycle.trace('scene-report-cleanup-wait', id);
+                scheduleAutomaticTranslation(id, 120, {
+                    ...translationOptions,
+                    sceneCleanupWaitCount: waitCount + 1,
+                });
+                return;
+            }
+            automaticOutputLifecycle.trace('scene-report-cleanup-timeout', id);
+        }
         if (repairSwipeTranslationIndexes(message)) scheduleChatSave(liveContext().chat);
         clearStaleCurrentTranslation(id);
-        translateMessage(id, { automatic: true, ...translationOptions });
+        // Keep the local coordination counter out of server request options.
+        const { sceneCleanupWaitCount, ...forwardOptions } = translationOptions;
+        translateMessage(id, { automatic: true, ...forwardOptions });
         refreshRetranslateButton();
     };
     automaticOutputLifecycle.trace('translation-scheduled', id);
-    executionTrace.trace('translation-scheduled',id,{delayMs:Math.max(0,Number(delay)||0)});
     if (translationOptions.completedSignal && delay === 0) {
         // Leave the event callback before starting work, without a background-throttled timer.
         ticket = {};
@@ -13019,14 +13174,13 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
             job.candidateSignature = signature;
             job.stableChecks = 0;
             // A real completion signal proves this exact active swipe/source.
-            // Recheck in a microtask so other synchronous completion handlers can
-            // finish, without letting background timer throttling delay the API call.
+            // Recheck in a microtask so Android background timer throttling
+            // cannot postpone an already completed swipe translation.
             if (job.rendered && automaticOutputLifecycle.isComplete(id)) {
                 automaticOutputLifecycle.trace('swipe-final-microtask', id);
                 executionTrace.trace('swipe-final-microtask', id);
                 queueMicrotask(check);
             } else {
-                // Unproven/streaming swipe content still needs stability checks.
                 job.timer = setTimeout(check, 120);
             }
             return;
@@ -13431,16 +13585,16 @@ function handleCompletedAssistantMessage(payload) {
     let id = normalizedMessageId(payload);
     if (id < 0) id = latestAssistantMessage()?.id ?? -1;
     if (id < 0) return;
-    traceSourceForMessage(id,'message-received');
-    executionTrace.trace('assistant-message-received',id);
+    traceSourceForMessage(id, 'message-received');
+    executionTrace.trace('assistant-message-received', id);
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;
     automaticOutputLifecycle.complete(id);
     startCompletedAutomaticOutput(id);
 }
 
 function handleGenerationEnded() {
-    traceLatestAssistantSource('generation-ended');
     executionTrace.trace('generation-ended');
+    traceLatestAssistantSource('generation-ended');
     const ready = automaticOutputLifecycle.end();
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) {
         automaticOutputLifecycle.discard();
@@ -13458,6 +13612,14 @@ function resumeAutomaticOutputs() {
     traceLatestAssistantSource('page-resumed');
     automaticOutputLifecycle.trace('page-resumed');
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;
+    // A started/completed job is absent from ready(), but ST may have redrawn
+    // its original text while this page was suspended. Restore saved display
+    // for exact completed versions without submitting another translation.
+    for (const id of automaticOutputLifecycle.completedIds()) {
+        const message = liveContext().chat?.[id];
+        const record = currentRecord(message, id);
+        if (record) restoreCurrentDisplay(id, message, record, { forceRender: true });
+    }
     // Only versions completed in this session: opening a chat must not translate old history.
     for (const id of automaticOutputLifecycle.ready()) startCompletedAutomaticOutput(id);
 }
@@ -13465,21 +13627,13 @@ function resumeAutomaticOutputs() {
 function setupAutomaticOutputLifecycle() {
     document.addEventListener('visibilitychange', () => {
         executionTrace.page(document.hidden ? 'hidden' : 'visible');
+        traceLatestAssistantSource(document.hidden ? 'page-hidden' : 'page-visible');
         automaticOutputLifecycle.trace(document.hidden ? 'page-hidden' : 'page-visible');
         if (!document.hidden) resumeAutomaticOutputs();
     });
-    document.addEventListener('freeze', () => {
-        executionTrace.page('freeze');
-        automaticOutputLifecycle.trace('page-frozen');
-    });
-    document.addEventListener('resume', () => {
-        executionTrace.page('resume');
-        resumeAutomaticOutputs();
-    });
-    window.addEventListener('pageshow', () => {
-        executionTrace.page('resume');
-        resumeAutomaticOutputs();
-    });
+    document.addEventListener('freeze', () => automaticOutputLifecycle.trace('page-frozen'));
+    document.addEventListener('resume', resumeAutomaticOutputs);
+    window.addEventListener('pageshow', resumeAutomaticOutputs);
 }
 
 /**
@@ -13609,10 +13763,7 @@ function setupEvents() {
     if (!source?.on) return;
 
     if (types.GENERATION_STARTED) {
-        source.on(types.GENERATION_STARTED, (type, options, dryRun) => {
-            automaticOutputLifecycle.start(type,options,dryRun);
-            if(!dryRun)executionTrace.trace('generation-started',null);
-        });
+        source.on(types.GENERATION_STARTED, (type, options, dryRun) => automaticOutputLifecycle.start(type, options, dryRun));
         source.on(types.GENERATION_STARTED, translateInputBeforeGeneration);
         source.makeLast?.(types.GENERATION_STARTED, translateInputBeforeGeneration);
     }
@@ -13633,14 +13784,14 @@ function setupEvents() {
     if (types.GENERATION_ENDED) source.on(types.GENERATION_ENDED, handleGenerationEnded);
     if (types.CHAT_CHANGED) {
         source.on(types.CHAT_CHANGED, () => {
+            if (fullSourceSnapshotsEnabled) {
+                lastDebugDiagnostic = null;
+                fullSourceSnapshotsEnabled = false;
+                const fullInput = document.querySelector('#verba-debug-full-source');
+                if (fullInput) fullInput.checked = false;
+            }
             sourceChangeTracer.reset();
             executionTrace.clear();
-            if(fullSourceSnapshotsEnabled){
-                fullSourceSnapshotsEnabled=false;
-                lastDebugDiagnostic=null;
-                const input=document.querySelector('#verba-debug-full-source');
-                if(input)input.checked=false;
-            }
             automaticOutputLifecycle.reset();
             // Locks and bundles are one-shot editing state. Clear tracked
             // records before caches are discarded, and also clear any stale
@@ -13702,14 +13853,14 @@ function setupEvents() {
     }
     if (types.MESSAGE_EDITED) {
         source.on(types.MESSAGE_EDITED, payload => {
-            traceSourceForMessage(normalizedMessageId(payload),'message-edited');
+            traceSourceForMessage(normalizedMessageId(payload), 'message-edited');
             const id = normalizedMessageId(payload);
             scheduleAutomaticTranslation(id, 80);
         });
     }
     if (types.MESSAGE_UPDATED) {
         source.on(types.MESSAGE_UPDATED, payload => {
-            traceSourceForMessage(normalizedMessageId(payload),'message-updated');
+            traceSourceForMessage(normalizedMessageId(payload), 'message-updated');
             restoreTranslationAfterMessageUpdate(payload);
             schedulePotentialAssistantRevision(payload, 160, { allowUntranslated: true });
             setTimeout(
@@ -13728,8 +13879,8 @@ function setupObserver() {
     const observer = new MutationObserver(() => {
         if (uiRefreshTimer !== null) return;
         uiRefreshTimer = setTimeout(() => {
-            uiRefreshTimer = null;
             traceLatestAssistantSource('dom-updated');
+            uiRefreshTimer = null;
             injectSettingsPanel();
             injectInputAction();
             refreshTranslationClasses();
@@ -13743,8 +13894,6 @@ function setupObserver() {
 
 function initialize() {
     registerTranslationExtension(EXTENSION_KEY);
-    executionTrace.start();
-    traceLatestAssistantSource('startup');
     clearTransientTranslationSelections();
     registerVerbaSlashCommand();
     registerVerbaProfileSlashCommand();
@@ -13761,7 +13910,9 @@ function initialize() {
     setupMessageCopyHold();
     setupSelection();
     setupEvents();
+    traceLatestAssistantSource('startup');
     setupAutomaticOutputLifecycle();
+    verbaServer.install();
     setupObserver();
     setTimeout(() => {
         scheduleRecentInsteadRevisionTranslations(220);

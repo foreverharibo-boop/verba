@@ -1,0 +1,9 @@
+{
+  "name": "verba-server-repository",
+  "version": "0.1.6",
+  "private": true,
+  "main": "server-plugin/index.cjs",
+  "engines": {
+    "node": ">=20"
+  }
+}

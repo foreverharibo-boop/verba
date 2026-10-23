@@ -1,0 +1,12 @@
+{
+  "name": "verba-server-engine-builder",
+  "private": true,
+  "scripts": {
+    "build": "node build-server-engines.cjs .. ../../veereubaa-review"
+  },
+  "devDependencies": {
+    "acorn": "8.19.0",
+    "eslint-scope": "9.1.2",
+    "esbuild": "0.28.2"
+  }
+}

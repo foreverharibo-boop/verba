@@ -29,7 +29,7 @@ let requests=[];
 const requestSegments=async(prompt,segments,options)=>{
  requests.push({prompt,segments,options});return new Map(segments.map(s=>[s.id,translateSegment(s)]));
 };
-const env={settings,outputSplitCount,runOutputBatches,requestSegments,
+const env={reviewFinalEnglish: async () => {},settings,outputSplitCount,runOutputBatches,requestSegments,
  buildOutputPrompt:core.buildOutputPrompt,buildScopedOutputPrompt:core.buildScopedOutputPrompt,
  madKoreanExclusiveMode:()=>settings.developerMadKoreanOutputEnabled===true,
  isAbort:(error,signal)=>signal?.aborted||error.name==='AbortError',SCOPED_PARALLEL_REQUEST_LIMIT:2,console};

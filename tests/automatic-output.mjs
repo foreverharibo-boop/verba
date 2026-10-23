@@ -18,7 +18,8 @@ function fixture() {
     let next = 0;
     const env = {
         settings: { autoOutput: true }, EXTENSION_KEY: 'test', automaticOutputLifecycle: lifecycle,
-        executionTrace: { trace() {} },
+        executionTrace: { trace() {}, heartbeat() {}, page() {}, clear() {} },
+        traceSourceForMessage() {}, traceLatestAssistantSource() {},
         isTranslationExtensionActive: () => state.owner, liveContext: () => ({ chat: state.chat }),
         automaticTranslationTimers: new Map(), swipeTranslationJobs: new Map(), pendingOutputs: new Map(), failedOutputSignatures: new Map(),
         pendingFallbackAssistantIds: new Set(), assistantSourceObservation: new Map(), assistantObservedChatLength: 1, assistantObservationReady: true,
@@ -140,8 +141,8 @@ for (const [type, dry] of [['quiet', false], ['impersonate', false], ['normal', 
     for (let i = 0; i < 100; i++) f.lifecycle.trace('page-resumed');
     assert.equal(f.lifecycle.diagnostics().events.length, 60);
 }
-assert.match(source, /automaticOutput: automaticOutputLifecycle\.diagnostics\(\)/);
+assert.match(source, /automaticOutput:[^\n]*automaticOutputLifecycle\.diagnostics\(\)/);
 assert.match(source, /if \(options\.automatic\) automaticOutputLifecycle\.started\(id\)/);
 assert.match(source, /source\.on\(types\.GENERATION_STARTED, \(type, options, dryRun\) => automaticOutputLifecycle\.start/);
-assert.match(source, /source\.on\(types\.CHAT_CHANGED, \(\) => \{\s*automaticOutputLifecycle\.reset\(\)/);
+assert.match(source, /source\.on\(types\.CHAT_CHANGED,[\s\S]*?automaticOutputLifecycle\.reset\(\)/);
 console.log('PASS: hidden completion without timers/DOM, streaming guard, exact-version resume, dedup, OFF/owner/chat changes, instant proven swipe, no history replay and private bounded timing diagnostics.');

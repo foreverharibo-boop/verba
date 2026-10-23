@@ -92,10 +92,10 @@ const outputJobs = new Map([[8, {}]]);
 const retries = new Map([[1, { retryCount: 2, maxRetries: 20, delayMs: 5000, updatedAt: 10000 }]]);
 let lifecycleEvents = ['page-hidden'];
 const api = Function('settings', 'document', 'copyText', 'debugDiagnosticText',
-    'createDebugDiagnostic', 'pendingOutputs', 'automaticTranslationTimers', 'swipeTranslationJobs', 'serverRetryStates',
+    'verbaServer', 'createDebugDiagnostic', 'pendingOutputs', 'automaticTranslationTimers', 'swipeTranslationJobs', 'serverRetryStates',
     'let lastDebugDiagnostic = null;\n' + storeSource + copySource + '\nreturn { storeDebugDiagnostic, copyDebugDiagnostic, latest: () => lastDebugDiagnostic };')(
     settings, { querySelector: () => button }, async value => copies.push(JSON.parse(value)), JSON.stringify,
-    () => ({ automaticOutput: { events: [...lifecycleEvents] } }), outputJobs, new Map(), new Map(), retries);
+    { refreshDiagnostics: async () => {} }, () => ({ automaticOutput: { events: [...lifecycleEvents] } }), outputJobs, new Map(), new Map(), retries);
 settings.debugMode = true;
 await api.copyDebugDiagnostic();
 assert.deepEqual(copies.at(-1).activeWork.outputMessageIds, [8], 'capture running output without any error');

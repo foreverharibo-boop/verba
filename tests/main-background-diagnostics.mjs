@@ -50,7 +50,10 @@ test('full text needs explicit switch, never truncates first three entries, then
     assert.equal(first.insertedText.length,8000);
     tracer.compare(3,'old','new');
     for(let i=0;i<5;i++)msg.mes='changed '+i;
-    assert.equal(tracer.diagnostics().events.filter(row=>typeof row.beforeText==='string').length,3);
+    assert.equal(tracer.diagnostics().events.filter(row=>typeof row.beforeText==='string').length,7);
+    for(let i=5;i<10;i++)msg.mes='changed '+i;
+    assert.equal(tracer.diagnostics().events.filter(row=>typeof row.beforeText==='string').length,8);
+    assert.ok(tracer.diagnostics().events.some(row=>row.fullTextExpired===true));
     detailed=false;
     tracer.reset();
     assert.equal(tracer.diagnostics().events.length,0);

@@ -64,7 +64,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.66';
+const EXTENSION_VERSION = '0.6.67';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.65';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -262,6 +262,7 @@ const CUSTOM_TRANSLATOR_SIMPLE_MARKER = '[사용자 추가 지침]';
 
 const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'settingsSearch', label: '설정 검색', selector: '#verba-settings-search' },
+    { key: 'serverTranslation', label: '서버 번역', selector: '#verba-server-settings' },
     { key: 'profiles', label: '번역 엔진·연결 프로필', selector: '#verba-profile-settings-group' },
     { key: 'input', label: '자동번역 (답변·인풋)', selector: '#verba-input-settings-group' },
     { key: 'profileStats', label: '프로필 성능 기록', selector: '#verba-profile-stats' },
@@ -908,7 +909,7 @@ function applyServerTranslationProgress(state) {
 
 function serverTranslationSettingsMarkup() {
     return `
-                    <details class="verba-tool-details">
+                    <details id="verba-server-settings" class="verba-tool-details">
                         <summary>서버 번역 <small>선택 설치 · 기본 OFF</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row" for="verba-server-translation">
@@ -10738,7 +10739,6 @@ function developerSettingsMarkup() {
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
-                    ${serverTranslationSettingsMarkup()}
                     ${developerChuseokGalbwaeMarkup()}
                     
                     <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
@@ -10886,7 +10886,6 @@ function refreshSettingsPanelForDeveloperMode() {
 
     replacement.open = current.open;
     current.replaceWith(replacement);
-    bindServerTranslationSetting(panel);
     syncDeveloperQualityControls(panel);
     applySettingsVisibility(panel);
     renderQualityAuditStatus();
@@ -11280,6 +11279,8 @@ function injectSettingsPanel() {
 
 
 </section>
+
+                ${serverTranslationSettingsMarkup()}
 
                 <details id="verba-profile-settings-group" class="verba-tool-details">
                     <summary>번역 엔진·연결 프로필 <small>A/B/C · 재시도</small></summary>

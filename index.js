@@ -1,6 +1,6 @@
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
-import { reconcileCompletedResult, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.64';
+import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
+import { createServerClient } from './server-client.js?v=0.6.68';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -64,7 +64,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.67';
+const EXTENSION_VERSION = '0.6.68';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.65';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -5017,7 +5017,7 @@ async function planBilingualDialogueVerdicts(segmented, options = {}) {
 
 async function translateOutputText(source, options = {}) {
     /* SERVER_DISPATCH_BEGIN */
-    if (!options.browserLocal && (settings.serverTranslation === true || verbaServer.hasPendingGeneration())) { return verbaServer.output(source, options, () => translateOutputText(source, { ...options, browserLocal: true })); }
+    if (!options.browserLocal && (settings.serverTranslation === true || verbaServer.hasPendingGeneration())) { return verbaServer.output(source, options, (currentSource = source) => translateOutputText(currentSource, { ...options, browserLocal: true })); }
     /* SERVER_DISPATCH_END */
     const characterNameLocks = normalizedCharacterNameLocks();
     const segmentationOptions = {
@@ -6052,6 +6052,26 @@ async function translateMessage(messageId, options = {}) {
         try {
             executionTrace.trace('translation-requested', id);
             let translated = await translateOutputText(source, {
+                // Other receive handlers can remove metadata while the server
+                // status/result request is in flight. Refresh the source and its
+                // application snapshot together, only for verified cleanup in
+                // this same chat/swipe. Real edits keep the stale-result guard.
+                refreshSource: () => {
+                    const current = liveContext();
+                    const latest = current.chat?.[id];
+                    const swipe = currentSwipeId(latest);
+                    const sameSwipe = swipe === snapshot.swipeId
+                        || (snapshot.swipeId === null && swipe === 0);
+                    if (current.chat === snapshot.chatReference && latest && sameSwipe) {
+                        const latestSource = messageSource(latest);
+                        if (compatibleCompletedSource(source, latestSource)) {
+                            source = latestSource;
+                            snapshot.source = latestSource;
+                            snapshot.sourceHash = hashText(latestSource);
+                        }
+                    }
+                    return source;
+                },
                 automatic: options.automatic === true && options.force !== true,
                 previousUserSource: previousUserSource(chatReference, id, messageSource),
                 signal: controller.signal,

@@ -2,20 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { reconcileCompletedResult,describeSourceChange } from '../server-result-compat.js';
+import { reconcileCompletedResult,describeSourceChange,compatibleCompletedSource } from '../server-result-compat.js';
 const code=fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
 const body=code.slice(code.indexOf('async function translateMessage('),code.indexOf('function latestAssistantMessage('));
 const noop=()=>{};
-async function applyCase({before,after,oldSwipe=0,newSwipe=0,changeChat=false,translation='번역문'}) {
- let finish;const response=new Promise(r=>finish=r),applied=[],scheduled=[],diagnostics=[],errors=[];
+async function applyCase({before,after,oldSwipe=0,newSwipe=0,changeChat=false,translation='번역문',refreshBeforeResolve=false}) {
+ let finish,requestOptions;const response=new Promise(r=>finish=r),applied=[],scheduled=[],diagnostics=[],errors=[];
  const message={mes:before,swipe_id:oldSwipe};let chat=[message];
- const env={reconcileCompletedResult,EXTENSION_KEY:'verba',isTranslationExtensionActive:()=>true,activateTranslationExtension:noop,
+ const env={reconcileCompletedResult,compatibleCompletedSource,executionTrace:{trace:noop},traceSourceForMessage:noop,sourceChangeTracer:{compare:noop},EXTENSION_KEY:'verba',isTranslationExtensionActive:()=>true,activateTranslationExtension:noop,
   settings:{autoOutput:true,translationEngine:'google-free'},liveContext:()=>({chat}),isNameReplacementMessage:()=>true,
   messageSource:m=>m?.mes||'',currentSwipeId:m=>m?.swipe_id??null,isPredominantlyKorean:()=>false,hasForeignText:()=>true,currentRecord:()=>null,
   pendingOutputs:new Map(),failedOutputSignatures:new Map(),automaticOutputLifecycle:{started:noop},performance,AbortController,
   activeProfileSlot:()=> 'A',minimalOutputEnabled:()=>false,outputSplitCount:()=>1,hashText:x=>x,showProgress:noop,clearProgress:noop,
   outputTiming:{begin:()=>({}),applying:noop,finish:noop},previousUserSource:()=>'',recentDialogueEndingRepeatHints:()=>[],outputSpeakerIdentity:()=>({}),
-  translateOutputText:()=>response,translationWithLockedSegments:r=>r,normalizeBilingualMappedTranslation:(translation,sourceMap)=>({translation,sourceMap}),
+  translateOutputText:(_source,options)=>{requestOptions=options;return response;},translationWithLockedSegments:r=>r,normalizeBilingualMappedTranslation:(translation,sourceMap)=>({translation,sourceMap}),
   applyTranslation:(id,m,source,translated)=>{applied.push({id,source,translated});return{renderResult:{status:'applied'}};},
   clearTransientTranslationSelections:noop,notify:noop,refreshRetranslateButton:noop,renderOutputTiming:noop,recordOutputTranslation:noop,
   scheduleAutomaticTranslation:(...args)=>scheduled.push(args),verbaServer:{noteSourceChange:(...args)=>diagnostics.push(args)},
@@ -23,6 +23,7 @@ async function applyCase({before,after,oldSwipe=0,newSwipe=0,changeChat=false,tr
   isAbort:e=>e.name==='AbortError',reportError:(...args)=>errors.push(args),errorText:e=>e.message,console:{info:noop,error:noop,warn:noop}};
  vm.createContext(env);vm.runInContext(body,env);
  const pending=env.translateMessage(0,{automatic:true});message.mes=after;message.swipe_id=newSwipe;if(changeChat)chat=[{...message}];
+ if(refreshBeforeResolve)requestOptions.refreshSource();
  finish({translation,sourceMap:[]});const success=await pending;
  assert.equal(errors.length,0,JSON.stringify(errors));return{success,applied,scheduled,diagnostics};
 }
@@ -52,4 +53,22 @@ test('source difference diagnostics classify truncation without retaining messag
  const detail=describeSourceChange('private reply secret tail','private reply');
  assert.equal(detail.relation,'tail-removed');assert.equal(detail.beforeLength,25);assert.equal(detail.afterLength,13);
  assert(!JSON.stringify(detail).includes('private'));assert(!JSON.stringify(detail).includes('secret'));
+});
+
+test('refreshing the live message during server reuse updates the apply snapshot without a retry',async()=>{
+ const f=await applyCase({before:'Hello\n<sfw_scene>state</sfw_scene>\n<Info_panel>info</Info_panel>',
+  after:'Hello\n\n<Info_panel>info</Info_panel>',translation:'안녕\n\n<Info_panel>정보</Info_panel>',refreshBeforeResolve:true});
+ assert.equal(f.success,true);
+ assert.equal(f.applied[0].source,'Hello\n\n<Info_panel>info</Info_panel>');
+ assert.equal(f.applied[0].translated,'안녕\n\n<Info_panel>정보</Info_panel>');
+ assert.equal(f.scheduled.length,0);
+});
+test('live refresh never adopts a real rewrite, another chat or another swipe',async()=>{
+ for(const row of [{before:'Hello old',after:'Hello new'},
+  {before:'Hello<state>hidden</state>',after:'Hello',newSwipe:1},
+  {before:'Hello<state>hidden</state>',after:'Hello',changeChat:true}]) {
+  const f=await applyCase({...row,refreshBeforeResolve:true});
+  assert.equal(f.success,false);
+  assert.equal(f.applied.length,0);
+ }
 });

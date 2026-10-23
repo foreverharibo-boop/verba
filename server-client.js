@@ -244,16 +244,20 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             if(record.cancel || record.config!==fingerprint(configurationKey())){trace('reuse-skipped',{reason:record.cancel?'cancelled':'settings-changed'});continue;}
             let state;
             try{state=await reconnectStatus(record.id,options.signal);}catch(error){if(error.status===404){forget(record.id);continue;}throw error;}
+            source=options.refreshSource?.() ?? source;
             if(!state.generationDone||!compatibleCompletedSource(state.source,source)){trace('reuse-skipped',{reason:!state.generationDone?'generation-pending':'source-changed',...describeSourceChange(state.source,source)});continue;}
             if(['failed','cancelled'].includes(state.state))throw Error(state.error);
             const done=await waitResult(record.id,options.signal);
+            source=options.refreshSource?.() ?? source;
             const result=reconcileCompletedResult(done.source,source,done.result);
             if(!result){trace('reuse-skipped',{reason:'result-cleanup-unsafe',...describeSourceChange(done.source,source)});continue;}
             if(record.kind!=='output')record.kind='used';save();
             trace('automatic-result-reused',{...describeSourceChange(done.source,source)});
             return result;
         }
-        if(!await available())return local();
+        const serverAvailable=await available();
+        source=options.refreshSource?.() ?? source;
+        if(!serverAvailable)return local(source);
         trace('browser-output-submitted',{automaticJobKnown:!!recent});
         return run('output',source,options);
     }

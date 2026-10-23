@@ -5,7 +5,7 @@ import { createJobs } from '../jobs.cjs';
 const BRIDGE=Symbol.for('silly-pop.apk.notifications.v1');
 function fixture(t, prepareNotification) {
  const storage=new Map(),handlers={},submitted=[];
- let translations=0,reply='Original reply';
+ let translations=0,reply='Original reply',onStatus=()=>{};
  const settings={serverTranslation:true,autoOutput:true,translationEngine:'google-free'};
  const context={chatId:'one',characterId:0,name2:'Character',getRequestHeaders:()=>({}),
   eventTypes:{GENERATION_STARTED:'start',GENERATE_AFTER_DATA:'data',CHAT_COMPLETION_SETTINGS_READY:'settings',GENERATION_ENDED:'end'},
@@ -23,7 +23,7 @@ function fixture(t, prepareNotification) {
   if(u.pathname==='/api/plugins/verba-server/jobs'){
    const envelope=JSON.parse(init.body);submitted.push(envelope);const job=jobs.start('user',envelope,{});await job.done;return Response.json(jobs.status(job));
   }
-  if(u.pathname.startsWith('/api/plugins/verba-server/jobs/'))return Response.json(jobs.status(jobs.lookup('user',u.pathname.split('/').at(-1)),Number(u.searchParams.get('cursor'))));
+  if(u.pathname.startsWith('/api/plugins/verba-server/jobs/')){ await onStatus(); return Response.json(jobs.status(jobs.lookup('user',u.pathname.split('/').at(-1)),Number(u.searchParams.get('cursor')))); }
   throw Error('unexpected native generation');
  };
  const client=createServerClient({variant:'verba',version:'fixture',getSettings:()=>settings,getContext:()=>context,isActive:()=>true,getSnapshot:()=>({settings:{...settings}}),getGenerationOptions:()=>({options:{}})});
@@ -32,8 +32,8 @@ function fixture(t, prepareNotification) {
   reply=source;handlers.start('normal',{},false);const messages=[{role:'user',content:'Generate'}];handlers.data({prompt:messages});const payload={messages,type:'normal',stream:false};handlers.settings(payload);
   const response=await fetch('/api/backends/chat-completions/generate',{method:'POST',body:JSON.stringify(payload)});await response.text();handlers.end();
  };
- const output=(source=reply,stage='output-translation')=>client.output(source,{automatic:stage==='output-translation',stage},()=>{throw Error('unexpected fallback');});
- return{client,generate,output,settings,context,submitted,count:()=>translations};
+ const output=(source=reply,stage='output-translation',extra={})=>client.output(source,{automatic:stage==='output-translation',stage,...extra},()=>{throw Error('unexpected fallback');});
+ return{client,generate,output,settings,context,submitted,count:()=>translations,onStatus:fn=>{onStatus=fn;}};
 }
 test('completed generation remains reusable after a UI apply retry and foreground return',async t=>{
  const f=fixture(t);await f.generate();const first=await f.output();const second=await f.output();
@@ -117,4 +117,29 @@ test('unknown extension cleanup reuses one background translation and keeps visi
  assert.equal(f.client.diagnostics().events.some(e=>e.event==='browser-output-submitted'),false);
  await f.output(cleaned+' genuinely edited');
  assert.equal(f.count(),2,'real narrative changes must still retranslate');
+});
+
+for (const serverAlreadyClean of [true, false]) test(`source cleanup during status read reuses the background result (already clean=${serverAlreadyClean})`, async t => {
+ const f=fixture(t);
+ const original='Narration.\n\n<sfw_scene>{"scene":1}</sfw_scene>\n\n<Info_panel>Visible info</Info_panel>';
+ const cleaned=original.replace('<sfw_scene>{"scene":1}</sfw_scene>','');
+ await f.generate(serverAlreadyClean ? cleaned : original);
+ let current=original;
+ f.onStatus(()=>{current=cleaned;});
+ const result=await f.output(original,'output-translation',{refreshSource:()=>current});
+ assert.equal(result.translation,'Translated: '+cleaned);
+ assert.equal(f.count(),1,'must not start another AI translation');
+ assert.equal(f.submitted.length,1);
+ assert.equal(f.client.diagnostics().events.some(e=>e.event==='browser-output-submitted'),false);
+ assert.equal((await f.output(cleaned)).translation,result.translation);
+});
+
+test('cleanup while waiting for the completed result refreshes again and rebases translated markup',async t=>{
+ const f=fixture(t),original='Before<vendor_state>private</vendor_state>After';
+ await f.generate(original);
+ let reads=0;
+ const result=await f.output(original,'output-translation',{refreshSource:()=>++reads===1?original:'BeforeAfter'});
+ assert.equal(result.translation,'Translated: BeforeAfter');
+ assert.equal(f.count(),1);
+ assert.equal(reads,2);
 });

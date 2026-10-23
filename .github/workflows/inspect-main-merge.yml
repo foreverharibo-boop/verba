@@ -1,0 +1,32 @@
+name: Inspect main merge conflicts
+on:
+  push:
+    branches:
+      - codex/server-translation-experimental
+    paths:
+      - .github/workflows/inspect-main-merge.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/server-translation-experimental
+          fetch-depth: 0
+      - name: Inspect conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          set +e
+          git merge --no-commit --no-ff origin/main
+          status=$?
+          set -e
+          echo "merge_status=$status"
+          echo "--- conflicted files ---"
+          git diff --name-only --diff-filter=U || true
+          echo "--- status ---"
+          git status --short
+          git merge --abort || true

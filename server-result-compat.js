@@ -48,11 +48,8 @@ function deletionPlan(before,after) {
     }
     for(const list of starts.values())list.sort((a,b)=>b.end-a.end);
 
-    // The old recursive matcher consumed one JavaScript stack frame per source
-    // character. Long RP replies could therefore finish translating on the
-    // server, notify the phone, then crash while applying the result. Use an
-    // explicit DFS stack instead. If a pathological document creates too many
-    // states, fail closed and let the exact final source take the safe path.
+    // Use an explicit DFS stack so long RP replies never consume one JavaScript
+    // call frame per character. Pathological documents fail closed.
     const stateKey=(i,j)=>`${i}:${j}`;
     const stack=[{i:0,j:0,prev:null,removed:null}];
     const parents=new Map();
@@ -69,8 +66,13 @@ function deletionPlan(before,after) {
             if(state.j===target.length){endKey=key;break;}
             continue;
         }
+        // A removed final control block can leave only its separator newline.
+        // Permit that trailing whitespace, but never arbitrary tail text.
+        if(state.j===target.length&&/\s/u.test(source[state.i])) {
+            stack.push({i:state.i+1,j:state.j,prev:key,removed:null});
+        }
         // Push deletion choices first and the character match last so the LIFO
-        // traversal preserves the previous keep-first behavior.
+        // traversal preserves the keep-first behavior.
         const nodes=starts.get(state.i)||[];
         for(let index=nodes.length-1;index>=0;index--) {
             const node=nodes[index];
@@ -126,8 +128,6 @@ function reconcileMarkup(before,after,translation) {
 }
 
 export function hasVerifiedSceneReport() {
-    // Legacy import kept for older entrypoints. Generic reconciliation no longer
-    // waits for one named producer or one named report tag.
     return false;
 }
 export function describeSourceChange(before,after) {

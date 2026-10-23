@@ -57,6 +57,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     const frames=[]; let records=[]; let ready=false; let relayObserver=false; let installedFetch=null;
     const history=[];
     let serverVersion=null;
+    let notificationRouting=false;
     const jobDiagnostics=new Map();
     const pendingReads=new Set();
     const resumedRead=()=>Object.assign(Error('서버 결과 수신 연결 재개'),{code:'VERBA_SERVER_READ_RESUMED'});
@@ -64,7 +65,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         history.push({event,at:Date.now(),...detail});
         if(history.length>40)history.shift();
     }
-    function captureNotification(type='normal') {
+    function captureLegacyNotification(type='normal') {
         // APK has a dedicated bridge so other notification extensions cannot
         // replace its opt-in state through the shared legacy global.
         const dedicated=globalThis[Symbol.for('silly-pop.apk.notifications.v1')];
@@ -82,6 +83,18 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             trace('notification-capture',{bridge:owner,requested:false,reason:'capture-error'});
             return undefined;
         }
+    }
+    function captureNotification(type='normal') {
+        const candidates = {};
+        const apk = captureLegacyNotification(type);
+        if (apk) candidates.apk = apk;
+        for (const kind of ['ios', 'and']) {
+            try {
+                const marker = globalThis[Symbol.for('silly-pop.'+kind+'.notifications.v1')]?.captureTranslation?.(type);
+                if (marker?.translationEnabled === true) candidates[kind] = marker;
+            } catch { trace('notification-capture',{bridge:kind,requested:false,reason:'capture-error'}); }
+        }
+        return { routing:true, candidates, translationEnabled:Object.keys(candidates).length>0 };
     }
     const fetchBase=globalThis.fetch.bind(globalThis);
     const scopeKey=()=>{const c=getContext();return JSON.stringify([c.chatId??'',c.characterId??'',c.groupId??'',c.name2??'']);};
@@ -131,6 +144,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         if(caps.protocol!==1||caps.engines?.[variant]?.version!==version)throw Error('확장과 서버 플러그인의 버전이 다릅니다. 서버 플러그인도 업데이트해 주세요.');
         serverVersion=/^\d+\.\d+\.\d+$/.test(caps.version)?caps.version:null;
         relayObserver=caps.relayObserver===true;
+        notificationRouting=caps.notificationRouting===true;
         if(relayActive()&&!relayObserver)throw Error('실리릴레이 서버 1.0.6 이상이 필요합니다. 기존 답변 복구 기능을 유지하기 위한 연결입니다.');
         ready=true;return caps;
     }
@@ -153,6 +167,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         try{await api('/jobs/'+id+'/cancel',{method:'POST',body:'{}'});if(record){record.cancel=false;save();}}catch{onNotice('중지 요청을 아직 전달하지 못했습니다. 연결이 돌아오면 다시 전달합니다.');}
     }
     async function submit(envelope,signal){
+        envelope.clientConfig ||= fingerprint(configurationKey());
+        if (!notificationRouting && envelope.notification?.routing === true) envelope.notification = envelope.notification.candidates.apk;
         // Retain the ID before sending. An ambiguous timeout never falls back to
         // another translation request. Only the exact same ID/body is retried.
         remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),notificationRequested:envelope.notification?.translationEnabled===true,automaticOutput:envelope.kind==='output'&&envelope.options?.automatic===true&&envelope.options?.stage==='output-translation',at:Date.now()});
@@ -172,6 +188,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             kind:['generation','observed-generation','output','input','segments','request'].includes(state.kind)?state.kind:'unknown',
             state:['queued','generating','translating','completed','failed','cancelled'].includes(state.state)?state.state:'unknown',
             generationDone:state.generationDone===true,
+            notificationTarget:['legacy','none','apk','ios','and'].includes(state.notificationTarget)?state.notificationTarget:null,
             hasTranslation:typeof state.result?.translation==='string'&&!!state.result.translation.trim(),
             skipped:state.result?.skipped===true,
             notificationRequested:typeof record?.notificationRequested==='boolean'?record.notificationRequested:null,
@@ -239,6 +256,11 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // recent used generation, without searching older mismatching replies.
         // A later output is a barrier against older generations. Automatic output
         // results themselves are reusable; a manual output remains a barrier.
+        const binding = options.relayTranslation;
+        if (options.automatic === true && binding?.variant === variant && /^[a-f0-9]{32}$/.test(binding.id || '')
+            && binding.config === fingerprint(configurationKey()) && !records.some(row=>row.id===binding.id)) {
+            remember({id:binding.id,scope:scopeKey(),kind:'generation',config:binding.config,at:Date.now()});
+        }
         const recent=[...records].reverse().find(r=>r.scope===scopeKey()&&['generation','used','output'].includes(r.kind));
         for(const record of (recent && (recent.kind!=='output'||recent.automaticOutput&&options.automatic===true) && options.stage!=='output-retranslation' ? [recent] : [])){
             if(record.cancel || record.config!==fingerprint(configurationKey())){trace('reuse-skipped',{reason:record.cancel?'cancelled':'settings-changed'});continue;}
@@ -272,7 +294,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             // Keep one stable completion key for HTTP retries of this exact job,
             // independent of the APK's still-active generation frame. Reusing a
             // finished result never reaches this branch and cannot notify again.
-            if(marker)notification={...marker,generationId:`verba:${variant}:${id}`};
+            if(marker)notification={...marker,candidates:Object.fromEntries(Object.entries(marker.candidates).map(([key,value])=>[key,{...value,generationId:`verba:${variant}:${id}`}]))};
         }
         const envelope={id,kind,source,snapshot:await snapshot(),options:clean({...options,signal:undefined,timing:undefined}),...(notification?{notification}:{}),...(segments?{segments}: {})};
         if(options.signal?.aborted)throw abortError();

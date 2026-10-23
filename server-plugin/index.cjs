@@ -5,6 +5,7 @@ const {createJobs} = require('./jobs.cjs');
 const provider = require('./provider.cjs');
 const manifest = require('./engines/manifest.json');
 const packageInfo = require('./package.json');
+const { prepareSelected } = require('./notification-routing.cjs');
 let jobs;
 let observer;
 function owner(req) {
@@ -22,13 +23,13 @@ module.exports.init=async router=>{
             const labels={accepted:'작업 접수',translation_started:'번역 시작',completed:'번역 완료',skipped:'번역 생략',failed:'작업 실패',cancelled:'작업 취소'};
             console.info(`[Verba Server] ${new Date(event.at).toISOString()} ${event.id.slice(0,8)} ${event.kind} · ${labels[event.stage]} · ${event.elapsedMs}ms`);
         },
-        prepareNotification(owner, marker) {
-            const hook=globalThis[Symbol.for('silly-pop.translation-notifier')];
-            return hook?.apiVersion===1 ? hook.prepare(owner, marker) : null;
-        }});
-    observer={apiVersion:1,complete:(owner,id,response)=>jobs.observed(owner,id,response)};
+        prepareNotification(owner, marker, selected) { return prepareSelected(owner, selected); }});
+    observer={apiVersion:1,complete:(owner,id,response)=>jobs.observed(owner,id,response),
+        notificationTarget:(owner,id)=>jobs.lookup(owner,id).notificationTarget,
+        translationNotification:(owner,id)=>jobs.lookup(owner,id).translationNotification,
+        binding:(owner,id)=>{const job=jobs.lookup(owner,id);return {id:job.id,variant:job.variant,config:job.clientConfig};}};
     globalThis[Symbol.for('verba.relay-observer')]=observer;
-    router.get('/capabilities',route(req=>{owner(req);return{protocol:1,version:packageInfo.version,engines:manifest.engines,retentionSeconds:86400,relayObserver:globalThis[Symbol.for('verba.relay-capability')]===1};}));
+    router.get('/capabilities',route(req=>{owner(req);return{protocol:1,notificationRouting:true,version:packageInfo.version,engines:manifest.engines,retentionSeconds:86400,relayObserver:globalThis[Symbol.for('verba.relay-capability')]===1};}));
     router.post('/jobs',route(req=>jobs.status(jobs.start(owner(req),req.body,provider.ownConnection(req)))));
     router.get('/jobs/:id',route(req=>jobs.status(jobs.lookup(owner(req),req.params.id),req.query.cursor)));
     router.post('/jobs/:id/cancel',route(req=>jobs.status(jobs.cancel(owner(req),req.params.id))));

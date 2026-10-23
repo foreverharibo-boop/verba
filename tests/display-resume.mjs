@@ -11,7 +11,7 @@ const message={mes:'Original reply',extra:{verba:record,display_text:record.tran
 const chat=[{},message];let renders=0,saves=0,sourceView=false,editing=false,owner=true;
 const lifecycle=createAutomaticOutputLifecycle({getChat:()=>chat,signature:m=>m?.mes||''});
 lifecycle.reset();lifecycle.complete(1);lifecycle.started(1);
-const env={EXTENSION_KEY:'verba',STATE_KEY:'verba',SOURCE_VIEW_KEY:'sourceView',settings:{autoOutput:true},
+const env={executionTrace:{trace(){},heartbeat(){}},traceLatestAssistantSource(){},EXTENSION_KEY:'verba',STATE_KEY:'verba',SOURCE_VIEW_KEY:'sourceView',settings:{autoOutput:true},
  automaticOutputLifecycle:lifecycle,isTranslationExtensionActive:()=>owner,liveContext:()=>({chat}),
  currentRecord:m=>m?.extra?.verba,sourceViewRequested:()=>sourceView,showOriginalDisplay(){},
  sameTranslationRecord:(a,b)=>a===b,syncOwnedTranslationToCurrentSwipe:()=>false,

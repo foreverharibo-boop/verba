@@ -19,7 +19,7 @@ function fixture(t, prepareNotification) {
  globalThis.location={origin:'http://localhost',href:'http://localhost/'};
  globalThis.fetch=async(url,init={})=>{
   const u=new URL(url,'http://localhost');
-  if(u.pathname.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'fixture'}}});
+  if(u.pathname.endsWith('/capabilities'))return Response.json({protocol:1,notificationRouting:true,engines:{verba:{version:'fixture'}}});
   if(u.pathname==='/api/plugins/verba-server/jobs'){
    const envelope=JSON.parse(init.body);submitted.push(envelope);const job=jobs.start('user',envelope,{});await job.done;return Response.json(jobs.status(job));
   }
@@ -33,7 +33,7 @@ function fixture(t, prepareNotification) {
   const response=await fetch('/api/backends/chat-completions/generate',{method:'POST',body:JSON.stringify(payload)});await response.text();handlers.end();
  };
  const output=(source=reply,stage='output-translation',extra={})=>client.output(source,{automatic:stage==='output-translation',stage,...extra},()=>{throw Error('unexpected fallback');});
- return{client,generate,output,settings,context,submitted,count:()=>translations,onStatus:fn=>{onStatus=fn;}};
+ return{client,generate,output,settings,context,submitted,storage,count:()=>translations,onStatus:fn=>{onStatus=fn;}};
 }
 test('completed generation remains reusable after a UI apply retry and foreground return',async t=>{
  const f=fixture(t);await f.generate();const first=await f.output();const second=await f.output();
@@ -56,12 +56,12 @@ test('APK-specific bridge survives a different legacy bridge for both generation
  globalThis[BRIDGE]={apiVersion:1,captureTranslation:()=>marker};
  globalThis.sillyPopNotifications={apiVersion:1,captureTranslation:()=>null};
  await f.generate();await f.output('Different final source');
- assert.equal(f.submitted.length,2);assert.deepEqual(f.submitted[0].notification,marker);assert.deepEqual(f.submitted[1].notification,{...marker,generationId:`verba:verba:${f.submitted[1].id}`});
+ assert.equal(f.submitted.length,2);assert.deepEqual(f.submitted[0].notification.candidates.apk,marker);assert.deepEqual(f.submitted[1].notification.candidates.apk,{...marker,generationId:`verba:verba:${f.submitted[1].id}`});
 });
 test('disabled dedicated bridge does not fall through to a legacy opt-in',async t=>{
  const f=fixture(t);globalThis[BRIDGE]={apiVersion:1,captureTranslation:()=>null};
  globalThis.sillyPopNotifications={captureTranslation:()=>({translationEnabled:true})};
- await f.generate();assert.equal(f.submitted[0].notification,undefined);
+ await f.generate();assert.equal(f.submitted[0].notification.candidates.apk,undefined);
 });
 
 test('manual retranslation is a barrier against restoring an older automatic result',async t=>{
@@ -142,4 +142,12 @@ test('cleanup while waiting for the completed result refreshes again and rebases
  assert.equal(result.translation,'Translated: BeforeAfter');
  assert.equal(f.count(),1);
  assert.equal(reads,2);
+});
+
+test('recovered reply ticket reuses server result after browser job journal loss',async t=>{
+ const f=fixture(t);await f.generate();const input=f.submitted[0];
+ f.storage.clear();
+ const client=createServerClient({variant:'verba',version:'fixture',getSettings:()=>f.settings,getContext:()=>f.context,isActive:()=>true,getSnapshot:()=>({settings:{...f.settings}}),getGenerationOptions:()=>({options:{}})});
+ const result=await client.output('Original reply',{automatic:true,stage:'output-translation',relayTranslation:{id:input.id,variant:'verba',config:input.clientConfig}},()=>{throw Error('unexpected fallback');});
+ assert.equal(result.translation,'Translated: Original reply');assert.equal(f.count(),1);assert.equal(f.submitted.length,1);
 });

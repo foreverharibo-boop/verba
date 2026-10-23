@@ -2,6 +2,7 @@
 const { createHash } = require('node:crypto');
 const { failure, extractReply } = require('./provider.cjs');
 const { excludeVerifiedSceneReports } = require('./scene-report-compat.cjs');
+const { selectNotification, routeGeneration } = require('./notification-routing.cjs');
 const ID = /^[a-f0-9]{32}$/;
 const MAX_SNAPSHOT = 4 * 1024 * 1024;
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -30,7 +31,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         return { id:job.id,kind:job.kind,state:job.state,createdAt:job.createdAt,finishedAt:job.finishedAt,
             generationDone:job.generationDone,status:job.httpStatus,type:job.type,
             cursor:start,next,data:job.raw.subarray(start,next).toString('base64'),rawBytes:job.raw.length,
-            source:job.source,result:job.result,error:job.error,events:job.events };
+            source:job.source,result:job.result,error:job.error,events:job.events,notificationTarget:job.notificationTarget };
     }
     function start(owner,envelope,connection) {
         const { id, kind, snapshot, source, options = {}, generation }=envelope || {};
@@ -55,11 +56,16 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         jobs.set(key(owner,id),job);
         lifecycle(job, 'accepted');
         let notify = null;
+        const selected = selectNotification(owner, envelope.notification);
+        job.notificationTarget = selected.target;
+        job.variant = snapshot.variant;
+        job.clientConfig = typeof envelope.clientConfig === 'string' && envelope.clientConfig.length < 100 ? envelope.clientConfig : null;
         if (['generation','observed-generation'].includes(kind)
             || kind==='output' && options?.automatic===true && options?.stage==='output-translation') {
             try {
-                notify = prepareNotification(owner, envelope.notification);
-                if (envelope.notification?.translationEnabled === true && typeof notify !== 'function')
+                notify = prepareNotification(owner, selected.marker, selected);
+                job.translationNotification = typeof notify === 'function';
+                if ((selected.marker?.translationEnabled === true || ['ios','and','apk'].includes(selected.target)) && typeof notify !== 'function')
                     report(job, {kind:'notification', code:'notifier_unavailable'});
             }
             catch { report(job, {kind:'notification', code:'prepare_failed'}); }
@@ -75,7 +81,8 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
                     job.state='generating';
                     const timeout=setTimeout(()=>controller.abort(),20*60*1000);timeout.unref?.();
                     let response;
-                    try { response=kind==='observed-generation' ? await job.response : await request(connection,generation.path,generation.payload,{
+                    const routed = routeGeneration(connection, generation?.payload, selected.target, job.translationNotification);
+                    try { response=kind==='observed-generation' ? await job.response : await request(routed.connection,generation.path,routed.payload,{
                         signal:controller.signal,
                         onHeaders(status,type){job.httpStatus=status;job.type=type;},
                         onChunk(chunk){
@@ -120,6 +127,14 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
                 && typeof notify === 'function') {
                 job.notificationDone = Promise.resolve().then(() => notify()).then(
                     result => report(job, {kind:'notification', code:result?.reason || 'completed'}),
+                    () => report(job, {kind:'notification', code:'delivery_failed'}));
+            } else if (['generation','observed-generation'].includes(kind)
+                && ['ios','and'].includes(selected.target) && job.source.trim()
+                && job.state !== 'cancelled' && typeof notify?.replyReady === 'function') {
+                // The normal arrival notice was deferred. A skipped/failed translation
+                // must not silently discard an otherwise successful original reply.
+                job.notificationDone = Promise.resolve().then(() => notify.replyReady()).then(
+                    result => report(job, {kind:'notification', code:'reply_' + (result?.reason || 'completed')}),
                     () => report(job, {kind:'notification', code:'delivery_failed'}));
             }
         })();

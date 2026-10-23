@@ -21,7 +21,7 @@ for(const bodyStall of [false,true])test(`automatic output notifies and resumes 
  globalThis.document={hidden:false,addEventListener:(n,f)=>handlers[n]=f};
  globalThis.location={origin:'http://localhost',href:'http://localhost/'};
  globalThis.fetch=async(url,init={})=>{
-  if(url.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'fixture'}}});
+  if(url.endsWith('/capabilities'))return Response.json({protocol:1,notificationRouting:true,engines:{verba:{version:'fixture'}}});
   if(url.endsWith('/jobs')){submits++;job=jobs.start('alice',JSON.parse(init.body),{});await job.done;return Response.json(jobs.status(job));}
   reads++;
   if(reads===1){waiting.resolve();if(bodyStall)return{ok:true,json:()=>stale.promise};return stale.promise.then(Response.json);}

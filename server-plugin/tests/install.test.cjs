@@ -31,10 +31,10 @@ function legacyPlugin(dir,label='legacy-data'){
 test('verified Git install atomically migrates a copied plugin and later pulls updates',t=>{
   const {root,st,dest,backups}=fixture(t),repo=makeRepository(root);legacyPlugin(dest,'preserve me');
   const outside=path.join(root,'outside.txt');fs.writeFileSync(outside,'unchanged');fs.symlinkSync(outside,path.join(dest,'legacy-link'));
-  const first=install(st,repo);assert.equal(first.status,0,first.stderr||first.stdout);assert.match(first.stdout,/0\.1\.6/);
+  const first=install(st,repo);assert.equal(first.status,0,first.stderr||first.stdout);assert.match(first.stdout,/0\.1\.7/);
   assert.equal(git(dest,['rev-parse','--show-toplevel']),dest);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dest,'package.json'))).main,'server-plugin/index.cjs');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dest,'server-plugin/package.json'))).version,'0.1.6');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dest,'server-plugin/package.json'))).version,'0.1.7');
   assert.equal(fs.readFileSync(path.join(st,'config.yaml'),'utf8'),'keep: true');assert.equal(fs.readFileSync(outside,'utf8'),'unchanged');
   const saved=fs.readdirSync(backups).filter(name=>name.startsWith('legacy-verba-server-'));assert.equal(saved.length,1);
   assert.equal(fs.readFileSync(path.join(backups,saved[0],'legacy-note.txt'),'utf8'),'preserve me');

@@ -72,8 +72,8 @@ test('interrupted first result lookup reconnects to the completed job without an
  let nativeCalls=0,abortNextStatus=false,cancellations=0;
  environment(async(url,init={})=>{
   const path=new URL(url,'http://localhost').pathname;
-  if(path.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'0.6.51'}}});
-  if(path==='/api/plugins/verba-server/jobs'){const input=JSON.parse(init.body);assert.deepEqual(input.notification,input.kind==='generation'?notification:undefined);return Response.json(jobs.status(jobs.start('a',input,{})));}
+  if(path.endsWith('/capabilities'))return Response.json({protocol:1,notificationRouting:true,engines:{verba:{version:'0.6.51'}}});
+  if(path==='/api/plugins/verba-server/jobs'){const input=JSON.parse(init.body);assert.deepEqual(input.notification?.candidates?.apk,input.kind==='generation'?notification:undefined);return Response.json(jobs.status(jobs.start('a',input,{})));}
   if(path.endsWith('/cancel')){cancellations++;return Response.json({});}
   if(path.startsWith('/api/plugins/verba-server/jobs/')){
    if(abortNextStatus){abortNextStatus=false;throw new DOMException('signal is aborted without reason','AbortError');}
@@ -133,8 +133,8 @@ test('Relay keeps original request ownership while observer translates without a
  const jobs=createJobs({engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async()=>{translations++;return{translation:'안녕.',sourceMap:[]};}})}},request:()=>{throw Error('must not generate twice');}});
  const storage=environment(async(url,init={})=>{
   const parsed=new URL(url,'http://localhost');const path=parsed.pathname;
-  if(path.endsWith('/capabilities'))return Response.json({protocol:1,relayObserver:true,engines:{verba:{version:'0.6.51'}}});
-  if(path==='/api/plugins/verba-server/jobs'){const input=JSON.parse(init.body);assert.deepEqual(input.notification,notification);return Response.json(jobs.status(jobs.start('alice',input,{})));}
+  if(path.endsWith('/capabilities'))return Response.json({protocol:1,notificationRouting:true,relayObserver:true,engines:{verba:{version:'0.6.51'}}});
+  if(path==='/api/plugins/verba-server/jobs'){const input=JSON.parse(init.body);assert.deepEqual(input.notification?.candidates?.apk,notification);return Response.json(jobs.status(jobs.start('alice',input,{})));}
   if(path.startsWith('/api/plugins/verba-server/jobs/'))return Response.json(jobs.status(jobs.lookup('alice',path.split('/').at(-1))));
   delegated++;
   const payload=JSON.parse(init.body);
@@ -162,7 +162,7 @@ test('a dry-run preview without GENERATION_ENDED cannot hide the real reply from
  let nativeCalls=0;const accepted=[];
  environment(async(url,init={})=>{
   const path=new URL(url,'http://localhost').pathname;
-  if(path.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'0.6.51'}}});
+  if(path.endsWith('/capabilities'))return Response.json({protocol:1,notificationRouting:true,engines:{verba:{version:'0.6.51'}}});
   if(path==='/api/plugins/verba-server/jobs'){accepted.push(JSON.parse(init.body));return Response.json({state:'queued'});}
   if(path.startsWith('/api/plugins/verba-server/jobs/'))return Response.json({state:'completed',status:200,type:'application/json',cursor:0,next:0,generationDone:true});
   nativeCalls++;return Response.json({});
@@ -199,7 +199,7 @@ for(const ttottoFirst of [true,false])for(const relay of [false,true])test(`TTOT
  }});
  const storage=environment(async(url,init={})=>{
   const path=new URL(url,'http://localhost').pathname;
-  if(path.endsWith('/capabilities'))return Response.json({protocol:1,relayObserver:true,engines:{verba:{version:'0.6.51'}}});
+  if(path.endsWith('/capabilities'))return Response.json({protocol:1,notificationRouting:true,relayObserver:true,engines:{verba:{version:'0.6.51'}}});
   if(path==='/api/plugins/verba-server/jobs'){
    const envelope=JSON.parse(init.body);admitted.push(envelope);
    return Response.json(jobs.status(jobs.start('alice',envelope,{})));
@@ -252,4 +252,20 @@ for(const ttottoFirst of [true,false])for(const relay of [false,true])test(`TTOT
  assert.equal((await client.output('Hello.',{},()=>{throw Error('unexpected browser translation');})).translation,'안녕.');
  assert.equal(generations,1);assert.equal(translations,1);
  assert.equal(messages[0].content,'Hi','shared chat messages remain untouched');
+});
+
+test('new client preserves the legacy APK notification envelope with an older server',async t=>{
+ const marker={protocol:1,type:'normal',translationEnabled:true,clientId:'tab',generationId:'one'};
+ globalThis[Symbol.for('silly-pop.apk.notifications.v1')]={captureTranslation:()=>marker};
+ t.after(()=>delete globalThis[Symbol.for('silly-pop.apk.notifications.v1')]);
+ let sent;
+ environment(async(url,init={})=>{
+  if(url.endsWith('/capabilities'))return Response.json({protocol:1,engines:{verba:{version:'fixture'}}});
+  if(url.endsWith('/jobs')){sent=JSON.parse(init.body);return Response.json({id:sent.id,state:'completed'});}
+  return Response.json({state:'completed',result:{translation:'안녕'}});
+ });
+ const settings={serverTranslation:true,translationEngine:'google-free'};
+ const client=createServerClient({variant:'verba',version:'fixture',getSettings:()=>settings,getContext:()=>({chatId:'one',getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings}),getGenerationOptions:()=>({options:{}})});
+ await client.output('Hello',{automatic:true,stage:'output-translation'},()=>{throw Error('unexpected local');});
+ assert.equal(sent.notification.protocol,1);assert.equal(sent.notification.routing,undefined);assert.match(sent.notification.generationId,/^verba:verba:/);
 });

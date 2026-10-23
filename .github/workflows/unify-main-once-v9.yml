@@ -1,0 +1,89 @@
+name: Unify server translation into main v9
+on:
+  push:
+    branches:
+      - codex/server-translation-experimental
+    paths:
+      - .github/workflows/unify-main-once-v9.yml
+permissions:
+  contents: write
+jobs:
+  unify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/server-translation-experimental
+          fetch-depth: 0
+      - name: Apply verified base merge and swipe patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+          source = Path('.github/workflows/unify-main-once-v5.yml').read_text()
+          start_marker = '      - name: Merge and apply unified code\n'
+          start = source.index(start_marker)
+          run = source.index('        run: |\n', start) + len('        run: |\n')
+          end = source.index('      - name: Run unified regressions\n', run)
+          Path('/tmp/base-unify.sh').write_text(textwrap.dedent(source[run:end]))
+          PY
+          bash /tmp/base-unify.sh
+
+      - name: Apply verified diagnostic merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+          source=Path('.github/workflows/unify-main-once-v6.yml').read_text()
+          marker='      - name: Merge detailed and lightweight source diagnostics\n'
+          start=source.index(marker)
+          run=source.index('        run: |\n',start)+len('        run: |\n')
+          end=source.index('\n      - name: Run unified regressions\n',run)
+          Path('/tmp/diagnostics-unify.sh').write_text(textwrap.dedent(source[run:end]))
+          PY
+          bash /tmp/diagnostics-unify.sh
+
+      - name: Apply Git-managed installer migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+          source=Path('.github/workflows/unify-main-once-v7.yml').read_text()
+          marker='      - name: Convert installer tests to Git-managed migration\n'
+          start=source.index(marker)
+          run=source.index('        run: |\n',start)+len('        run: |\n')
+          end=source.index('\n      - name: Run unified regressions\n',run)
+          Path('/tmp/installer-unify.sh').write_text(textwrap.dedent(source[run:end]))
+          PY
+          bash /tmp/installer-unify.sh
+
+      - name: Run unified regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check source-change-tracer.js
+          node --check browser-execution-diagnostics.js
+          node --check server-plugin/index.cjs
+          node tests/automatic-output.mjs
+          node tests/main-background-diagnostics.mjs
+          node tests/full-source-preference.mjs
+          node tests/full-source-warning-once.mjs
+          node tests/bilingual-intent.mjs
+          node tests/bilingual-source-recovery-smoke.mjs
+          npm test --prefix server-plugin
+
+      - name: Commit unified branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git commit -m "Merge server translation into main-ready Verba (v0.6.66)"
+          git push origin HEAD:codex/server-translation-experimental

@@ -1,0 +1,85 @@
+name: Run one-time bilingual backport
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/run-bilingual-backport.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  backport:
+    if: contains(github.event.head_commit.message, 'Start one-time bilingual backport runner')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out server experiment
+        uses: actions/checkout@v4
+        with:
+          ref: codex/server-translation-experimental
+          fetch-depth: 0
+
+      - name: Fetch sources and peer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git clone --branch codex/server-translation-experimental --single-branch https://github.com/foreverharibo-boop/veereubaa.git ../peer
+          git -C ../peer fetch origin main
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Patch browser and server sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/backport-bilingual-once.cjs "$PWD" "$PWD/../peer"
+          npm install --prefix tools --no-audit --no-fund
+          node tools/build-server-engines.cjs "$PWD" "$PWD/../peer"
+
+      - name: Run regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/bilingual-intent.mjs
+          node tests/bilingual-source-recovery-smoke.mjs
+          node tests/bilingual-dialogue-local-format.mjs
+          node ../peer/tests/bilingual-intent.mjs
+          node ../peer/tests/bilingual-source-recovery-smoke.mjs
+          node ../peer/tests/bilingual-dialogue-local-format.mjs
+          node --test server-plugin/tests/engine.test.mjs server-plugin/tests/bilingual-backport.test.mjs
+          node --check index.js
+          node --check ../peer/index.js
+          git diff --check
+
+      - name: Commit experiment changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/backport-bilingual-once.yml tools/backport-bilingual-once.cjs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --stat
+          git commit -m "Backport strict bilingual handling to server experiment (v0.6.65)"
+          git push origin HEAD:codex/server-translation-experimental
+
+      - name: Remove one-time runner from main
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git worktree add ../main-clean origin/main
+          rm -f ../main-clean/.github/workflows/run-bilingual-backport.yml
+          git -C ../main-clean config user.name github-actions[bot]
+          git -C ../main-clean config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C ../main-clean add -A
+          if ! git -C ../main-clean diff --cached --quiet; then
+            git -C ../main-clean commit -m "Remove one-time bilingual backport runner"
+            git -C ../main-clean push origin HEAD:main
+          fi

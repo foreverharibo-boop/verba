@@ -8,9 +8,18 @@ const abortError = () => new DOMException('번역을 중지했습니다.','Abort
 const clean = value => JSON.parse(JSON.stringify(value));
 const fingerprint = value => { let h=14695981039346656037n; for(const c of value){h^=BigInt(c.codePointAt(0));h=BigInt.asUintN(64,h*1099511628211n);}return h.toString(16); };
 const hasMarker = (data,marker) => JSON.stringify(data).includes(marker);
-// TTOTTO consumes this browser-only marker in its fetch wrapper. Its removal
-// does not change the bound AI request; every other field must still match.
-const replyBody = data => { const body={...data};delete body.__ttotto_main_request;return JSON.stringify(body); };
+// Notification hooks can attach/replace transport metadata after another hook
+// has copied the bound payload. These top-level fields never change the AI
+// request. Keep messages (including same-named nested fields), model and every
+// other generation option in the identity check, as Relay's binding does.
+const REPLY_METADATA = ['__ttotto_main_request', 'silly_pop', 'silly_pop_ios', 'silly_pop_and'];
+const replyBody = data => { const body={...data};for(const key of REPLY_METADATA)delete body[key];return JSON.stringify(body); };
+function replyDifference(expected, actual) {
+    const known = new Set(['messages','model','type','stream','temperature','top_p','top_k','max_tokens','stop','chat_completion_source']);
+    const changed = [...new Set([...Object.keys(expected), ...Object.keys(actual)])]
+        .filter(key => !REPLY_METADATA.includes(key) && JSON.stringify(expected[key]) !== JSON.stringify(actual[key]));
+    return { changedFields: changed.filter(key => known.has(key)).slice(0,16), otherFieldCount: changed.filter(key => !known.has(key)).length };
+}
 // Both translator extensions share ST's service classes. Serialize only this
 // short, non-network capture so nested wrappers cannot restore each other in
 // the wrong order. Translation requests themselves still run concurrently.
@@ -90,8 +99,11 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         if (apk) candidates.apk = apk;
         for (const kind of ['ios', 'and']) {
             try {
-                const marker = globalThis[Symbol.for('silly-pop.'+kind+'.notifications.v1')]?.captureTranslation?.(type);
-                if (marker?.translationEnabled === true) candidates[kind] = marker;
+                const bridge = globalThis[Symbol.for('silly-pop.'+kind+'.notifications.v1')];
+                const marker = bridge?.captureTranslation?.(type);
+                const requested = marker?.translationEnabled === true;
+                trace('notification-capture',{bridge:kind,requested,reason:requested?'captured':bridge?'disabled-or-unsupported':'unavailable'});
+                if (requested) candidates[kind] = marker;
             } catch { trace('notification-capture',{bridge:kind,requested:false,reason:'capture-error'}); }
         }
         return { routing:true, candidates, translationEnabled:Object.keys(candidates).length>0 };
@@ -369,7 +381,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 ||String(init?.method||'GET').toUpperCase()!=='POST'||typeof init?.body!=='string')return previous.call(this,input,init);
             let wirePayload;
             try{wirePayload=JSON.parse(init.body);}catch{return previous.call(this,input,init);}
-            if(!wirePayload||Array.isArray(wirePayload)||typeof wirePayload!=='object'||replyBody(frame.request)!==replyBody(wirePayload)){trace('reply-not-bound',{reason:'wire-body-changed'});return previous.call(this,input,init);}
+            if(!wirePayload||Array.isArray(wirePayload)||typeof wirePayload!=='object')return previous.call(this,input,init);
+            if(replyBody(frame.request)!==replyBody(wirePayload)){trace('reply-not-bound',{reason:'wire-body-changed',...replyDifference(frame.request,wirePayload)});return previous.call(this,input,init);}
             const nativePayload=frame.request; frame.request=null;
             // Capture the initiating character before asynchronous profile preparation.
             // Only bound automatic reply jobs get this opt-in metadata, never helpers.
@@ -424,3 +437,4 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     }
     return {noteSourceChange:(id,before,after,flags)=>trace('application-source-changed',{messageId:Number.isInteger(id)?id:null,...describeSourceChange(before,after),chatChanged:flags.chatChanged===true,swipeChanged:flags.swipeChanged===true,reconciled:flags.reconciled===true}),check,available,output,input,run,install,status,cancel,refreshDiagnostics,diagnostics:()=>({serverVersion,jobs:records.filter(r=>r.scope===scopeKey()).map(r=>jobDiagnostics.get(r.id)).filter(Boolean).map(row=>({...row,notificationResults:[...row.notificationResults]})),events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
 }
+

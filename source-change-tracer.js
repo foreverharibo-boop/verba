@@ -87,8 +87,11 @@ function installPersistentFullTextPreferenceUi() {
         }
         if (!restoredCheckedState && input.dataset.verbaPersistentFullSourceApplied === '1') return;
         input.dataset.verbaPersistentFullSourceApplied = '1';
-        const EventClass = doc.defaultView?.Event || globalThis.Event;
-        if (typeof EventClass === 'function') input.dispatchEvent(new EventClass('change', { bubbles: true }));
+        // Restoring a saved preference is not a new user opt-in. Do not dispatch
+        // a synthetic change event: index.js would show the sensitive-content
+        // warning again on every reload. The persisted preference already feeds
+        // createSourceChangeTracer() directly, while a real click still bubbles
+        // through the normal change handler and shows the warning once.
     };
 
     doc.addEventListener('change', event => {
@@ -108,9 +111,8 @@ function installPersistentFullTextPreferenceUi() {
     doc.addEventListener('visibilitychange', scheduleSync);
     globalThis.addEventListener?.('pageshow', scheduleSync);
 
-    // The settings panel can be inserted before index.js attaches its local
-    // change handler. A few bounded retries make the persisted choice reach
-    // that handler without polling forever.
+    // The settings panel may be inserted after this module loads. A few bounded
+    // retries restore the visible checkbox without replaying the opt-in warning.
     for (const delay of [0, 50, 250, 1000]) globalThis.setTimeout?.(scheduleSync, delay);
 
     const root = doc.documentElement;

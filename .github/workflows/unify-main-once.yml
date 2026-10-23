@@ -1,0 +1,458 @@
+name: Unify server translation into main
+on:
+  push:
+    branches:
+      - codex/server-translation-experimental
+    paths:
+      - .github/workflows/unify-main-once.yml
+permissions:
+  contents: write
+jobs:
+  unify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/server-translation-experimental
+          fetch-depth: 0
+      - name: Merge main and resolve unified runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin main
+          set +e
+          git merge --no-commit --no-ff origin/main
+          merge_status=$?
+          set -e
+          if [ "$merge_status" -ne 0 ]; then
+            conflicts="$(git diff --name-only --diff-filter=U | sort)"
+            expected="README.md
+          index.js
+          manifest.json
+          source-change-tracer.js"
+            if [ "$conflicts" != "$expected" ]; then
+              echo "Unexpected conflicts:"
+              printf '%s\n' "$conflicts"
+              exit 1
+            fi
+          fi
+          git checkout --ours README.md index.js manifest.json source-change-tracer.js
+          git add README.md index.js manifest.json source-change-tracer.js
+
+          python3 <<'PY'
+          from pathlib import Path
+          import json
+          import re
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one anchor, found {count}')
+              return text.replace(old, new, 1)
+
+          root = Path('.')
+          index_path = root / 'index.js'
+          index = index_path.read_text()
+
+          index = replace_once(
+              index,
+              "import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.63';",
+              "import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';\nimport { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';",
+              'browser diagnostics import',
+          )
+          index = re.sub(r"const EXTENSION_VERSION = '[^']+';", "const EXTENSION_VERSION = '0.6.66';", index, count=1)
+          # Translation-engine code is unchanged by this packaging/diagnostic merge.
+          index = re.sub(r"const SERVER_ENGINE_VERSION = '[^']+';", "const SERVER_ENGINE_VERSION = '0.6.65';", index, count=1)
+
+          diagnostic_start = index.index('// Experimental diagnostics only: observe source writes without storing chat content.')
+          diagnostic_end = index.index('let lastPromptConflicts = [];', diagnostic_start)
+          diagnostic_block = """// Diagnostic-only runtime. It remains dormant unless debug mode is enabled.
+          // Full-text opt-in is persisted locally by source-change-tracer.js, while
+          // the actual RP text remains memory-only and bounded.
+          let fullSourceSnapshotsEnabled = false;
+          const executionTrace = createBrowserExecutionDiagnostics({
+              enabled: () => settings.debugMode === true,
+              visibility: () => document.visibilityState || 'unknown',
+          });
+          const sourceChangeTracer = createSourceChangeTracer({
+              enabled: () => settings.debugMode === true && isTranslationExtensionActive(EXTENSION_KEY),
+              fullTextEnabled: () => fullSourceSnapshotsEnabled,
+              readSource: messageSource,
+              onChange: meta => executionTrace.trace('source-write-observed', meta.messageId, {
+                  reason: meta.method,
+                  beforeLength: Math.max(0, meta.removedLength),
+                  afterLength: Math.max(0, meta.insertedLength),
+              }),
+          });
+          function traceSourceForMessage(messageId, phase) {
+              if (settings.debugMode !== true) return;
+              const id = Number(messageId);
+              if (Number.isInteger(id) && id >= 0) sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
+          }
+          function traceLatestAssistantSource(phase) {
+              if (settings.debugMode !== true) return;
+              const chat = liveContext().chat;
+              if (!Array.isArray(chat)) return;
+              for (let id = chat.length - 1; id >= Math.max(0, chat.length - 6); id -= 1) {
+                  const message = chat[id];
+                  if (message && !message.is_user && !message.is_system) {
+                      traceSourceForMessage(id, phase);
+                      break;
+                  }
+              }
+          }
+          """
+          index = index[:diagnostic_start] + diagnostic_block + index[diagnostic_end:]
+
+          if 'function recentDiagnosticEvents(' not in index:
+              anchor = 'function createDebugDiagnostic(stage = \'unknown\', error = null, displayMessage = \'\') {'
+              helper = """function recentDiagnosticEvents(snapshot, maxEvents = 20) {
+              return {
+                  ...snapshot,
+                  events: Array.isArray(snapshot?.events) ? snapshot.events.slice(-maxEvents) : [],
+                  ...(Array.isArray(snapshot?.jobs) ? { jobs: snapshot.jobs.slice(-6) } : {}),
+                  ...(Array.isArray(snapshot?.latestJobs) ? { latestJobs: snapshot.latestJobs.slice(-6) } : {}),
+              };
+          }
+
+          """
+              index = replace_once(index, anchor, helper + anchor, 'recent diagnostic helper')
+
+          index = replace_once(
+              index,
+              "        automaticOutput: automaticOutputLifecycle.diagnostics(),\n        serverTranslation: verbaServer.diagnostics(),\n        sourceChangeTrace: sourceChangeTracer.diagnostics(),",
+              "        automaticOutput: recentDiagnosticEvents(automaticOutputLifecycle.diagnostics(), 22),\n        browserExecution: recentDiagnosticEvents(executionTrace.diagnostics(), 24),\n        serverTranslation: verbaServer.diagnostics(),\n        sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(), 16),",
+              'combined diagnostics',
+          )
+          index = replace_once(
+              index,
+              "        ...(fullSourceSnapshotsEnabled && settings.debugMode === true && settings.serverTranslation === true\n            ? { fullSourceWarning: '원문 전체 비교 기록이 활성화되어 있습니다. sourceChangeTrace.events에는 변경 전후의 RP 본문 전체, 삭제/추가된 글이 포함됩니다. 외부 공유 전 반드시 내용을 검토하세요.' } : {}),\n        limitation: '터먹스·서버 터미널에만 출력되고 브라우저에 전달되지 않은 로그는 읽을 수 없음',",
+              "        ...(sourceChangeTracer.diagnostics().fullTextEnabled && settings.debugMode === true\n            ? { fullSourceWarning: '원문 전체 비교 기록이 활성화되어 있습니다. sourceChangeTrace.events에는 변경 전후의 RP 본문 전체, 삭제/추가된 글이 포함됩니다. 외부 공유 전 반드시 내용을 검토하세요.' } : {}),\n        limitation: '숨김은 브라우저 동결의 증거가 아닙니다. freeze 이벤트나 타이머 지연은 참고 정황이며, 실제 동결 중에는 브라우저 로그를 기록할 수 없습니다. 터먹스 로그는 별도입니다.',",
+              'diagnostic warning',
+          )
+          index = replace_once(
+              index,
+              "    traceLatestAssistantSource('log-copy');\n    await verbaServer.refreshDiagnostics();",
+              "    executionTrace.heartbeat();\n    traceLatestAssistantSource('log-copy');\n    await verbaServer.refreshDiagnostics();",
+              'diagnostic copy heartbeat',
+          )
+
+          index = index.replace('선택 설치 · 실험 기능', '선택 설치 · 기본 OFF')
+          index = replace_once(
+              index,
+              "            settings.serverTranslation = false;\n            fullSourceSnapshotsEnabled = false;\n            sourceChangeTracer.reset();\n            // A previous error snapshot can also contain opt-in full text.\n            lastDebugDiagnostic = null;\n            const detail = panel.querySelector('#verba-debug-full-source');\n            if (detail) { detail.checked = false; detail.disabled = true; }\n            saveSettings();",
+              "            settings.serverTranslation = false;\n            saveSettings();",
+              'server off remains browser-only',
+          )
+          index = replace_once(
+              index,
+              "            const detail = panel.querySelector('#verba-debug-full-source');\n            if (detail) detail.disabled = !settings.debugMode || settings.serverTranslation !== true;",
+              "            const detail = panel.querySelector('#verba-debug-full-source');\n            if (detail) detail.disabled = !settings.debugMode;",
+              'server toggle debug independence',
+          )
+
+          index = replace_once(
+              index,
+              "    let source = messageSource(message);\n    if (!source.trim()) return;\n    traceSourceForMessage(id, 'translation-started');",
+              "    let source = messageSource(message);\n    if (!source.trim()) {\n        executionTrace.trace('translation-skipped', id, { reason: 'empty-source' });\n        return;\n    }\n    traceSourceForMessage(id, 'translation-entered');",
+              'translation entry trace',
+          )
+          index = replace_once(
+              index,
+              "        try {\n            let translated = await translateOutputText(source, {",
+              "        try {\n            executionTrace.trace('translation-requested', id);\n            let translated = await translateOutputText(source, {",
+              'translation request trace',
+          )
+          index = replace_once(
+              index,
+              "            traceSourceForMessage(id, 'server-result-arrived');",
+              "            executionTrace.trace('translation-response-received', id);\n            traceSourceForMessage(id, 'before-result-apply');",
+              'translation result trace',
+          )
+          index = replace_once(
+              index,
+              "            outputJobSuccess = true;\n            notify(options.force ? '전체 재번역을 적용했어요.' : '번역을 적용했어요.', 'success');",
+              "            outputJobSuccess = true;\n            executionTrace.trace('translation-applied', id);\n            notify(options.force ? '전체 재번역을 적용했어요.' : '번역을 적용했어요.', 'success');",
+              'translation applied trace',
+          )
+
+          index = replace_once(
+              index,
+              "                            <input type=\"checkbox\" id=\"verba-debug-full-source\" ${fullSourceSnapshotsEnabled ? 'checked' : ''} ${settings.debugMode && settings.serverTranslation === true ? '' : 'disabled'}>\n                            <span>원문 변경 전·후 전체 기록 (실험용)</span>\n                        </label>\n                        <div class=\"verba-help\">디버그 + 서버 번역을 켠 뒤, 이 옵션까지 켜야 원문 전체를 기록합니다. 변경 전·후 본문과 삭제/추가된 문장이 로그에 그대로 포함됩니다. 최근 변경 8건만 원문 전체를 보관하며, 다른 정보는 기존처럼 기록합니다. 세션 전용으로 새로고침하면 꺼집니다. 외부 공유 전 RP 내용을 반드시 확인해 주세요.</div>",
+              "                            <input type=\"checkbox\" id=\"verba-debug-full-source\" ${sourceChangeTracer.diagnostics().fullTextEnabled ? 'checked' : ''} ${settings.debugMode ? '' : 'disabled'}>\n                            <span>원문 변경 전·후 전체 기록 (선택)</span>\n                        </label>\n                        <div class=\"verba-help\">디버그를 켠 뒤 이 옵션까지 켜면 변경 전·후 본문과 삭제/추가된 문장이 로그에 포함됩니다. 실제 본문은 최근 변경 8건만 메모리에 보관하며, 체크 상태만 기기에 저장됩니다. 한 번 켜면 직접 끌 때까지 새로고침 후에도 유지됩니다. 외부 공유 전 RP 내용을 반드시 확인해 주세요.</div>",
+              'full source UI',
+          )
+          index = replace_once(
+              index,
+              "            fullSourceInput.disabled = !settings.debugMode || settings.serverTranslation !== true;\n            fullSourceInput.checked = fullSourceSnapshotsEnabled && !fullSourceInput.disabled;",
+              "            fullSourceInput.disabled = !settings.debugMode;\n            fullSourceInput.checked = sourceChangeTracer.diagnostics().fullTextEnabled;",
+              'full source UI sync',
+          )
+          index = replace_once(
+              index,
+              "        if (!settings.debugMode) {\n            fullSourceSnapshotsEnabled = false;\n            sourceChangeTracer.reset();\n            lastDebugDiagnostic = null;\n        } else {\n            traceLatestAssistantSource('debug-enabled');\n        }",
+              "        if (!settings.debugMode) {\n            fullSourceSnapshotsEnabled = false;\n            sourceChangeTracer.reset();\n            executionTrace.clear({ dropTimer: true });\n            lastDebugDiagnostic = null;\n        } else {\n            executionTrace.start();\n            traceLatestAssistantSource('debug-enabled');\n        }",
+              'debug runtime lifecycle',
+          )
+          index = replace_once(
+              index,
+              "        fullSourceSnapshotsEnabled = Boolean(event.target.checked)\n            && settings.debugMode === true && settings.serverTranslation === true;",
+              "        fullSourceSnapshotsEnabled = Boolean(event.target.checked)\n            && settings.debugMode === true;",
+              'full source debug-only gate',
+          )
+
+          index = replace_once(
+              index,
+              "    traceSourceForMessage(id, 'message-received');\n    if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;",
+              "    traceSourceForMessage(id, 'message-received');\n    executionTrace.trace('assistant-message-received', id);\n    if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;",
+              'message received trace',
+          )
+          index = replace_once(
+              index,
+              "function handleGenerationEnded() {\n    const ready = automaticOutputLifecycle.end();",
+              "function handleGenerationEnded() {\n    executionTrace.trace('generation-ended');\n    const ready = automaticOutputLifecycle.end();",
+              'generation ended trace',
+          )
+          index = replace_once(
+              index,
+              "function resumeAutomaticOutputs() {\n    traceLatestAssistantSource('page-resumed');",
+              "function resumeAutomaticOutputs() {\n    executionTrace.heartbeat();\n    traceLatestAssistantSource('page-resumed');",
+              'resume heartbeat',
+          )
+          index = replace_once(
+              index,
+              "        traceLatestAssistantSource(document.hidden ? 'page-hidden' : 'page-visible');\n        automaticOutputLifecycle.trace(document.hidden ? 'page-hidden' : 'page-visible');",
+              "        executionTrace.page(document.hidden ? 'hidden' : 'visible');\n        traceLatestAssistantSource(document.hidden ? 'page-hidden' : 'page-visible');\n        automaticOutputLifecycle.trace(document.hidden ? 'page-hidden' : 'page-visible');",
+              'visibility trace',
+          )
+          index = replace_once(
+              index,
+              "            sourceChangeTracer.reset();\n            automaticOutputLifecycle.reset();",
+              "            sourceChangeTracer.reset();\n            executionTrace.clear();\n            automaticOutputLifecycle.reset();",
+              'chat reset trace',
+          )
+
+          index_path.write_text(index)
+
+          tracer_path = root / 'source-change-tracer.js'
+          tracer = tracer_path.read_text()
+          tracer = tracer.replace(
+              '// Active only while the experiment\'s server translation and debug modes are enabled.',
+              '// Active only while the owning extension enables diagnostics.',
+              1,
+          )
+          tracer = tracer.replace(
+              "const allowedTags = /(?:<|&lt;)\\s*\\/?\\s*(archive(?:[-_]now)?|charm(?:[-_]now)?|rp_plan|starter|thinking|analysis)\\b/giu;",
+              "const allowedTags = /(?:<|&lt;)\\s*\\/?\\s*(scene_state|sfw_scene|archive(?:[-_]now)?|charm(?:[-_]now)?|rp_plan|starter|thinking|analysis)\\b/giu;",
+              1,
+          )
+          tracer = replace_once(
+              tracer,
+              "    persistentFullTextEnabled = readPersistentFullTextPreference,\n    readSource,\n    now = Date.now,",
+              "    persistentFullTextEnabled = readPersistentFullTextPreference,\n    readSource,\n    onChange = () => {},\n    now = Date.now,",
+              'source tracer callback option',
+          )
+          tracer = replace_once(
+              tracer,
+              "            row.fullTextExpired = true;\n        }\n    };",
+              "            row.fullTextExpired = true;\n        }\n        const row = events.at(-1);\n        try {\n            onChange({\n                messageId: row?.messageId, method: row?.method, field: row?.field, relation: row?.relation,\n                removedLength: row?.removedLength, insertedLength: row?.insertedLength,\n            });\n        } catch { /* Diagnostics must never affect RP or translation. */ }\n    };",
+              'source tracer callback dispatch',
+          )
+          tracer_path.write_text(tracer)
+
+          manifest_path = root / 'manifest.json'
+          manifest = json.loads(manifest_path.read_text())
+          manifest['version'] = '0.6.66'
+          manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
+
+          server_package_path = root / 'server-plugin/package.json'
+          server_package = json.loads(server_package_path.read_text())
+          server_package['version'] = '0.1.6'
+          server_package_path.write_text(json.dumps(server_package, ensure_ascii=False, indent=2) + '\n')
+
+          server_index_path = root / 'server-plugin/index.cjs'
+          server_index = server_index_path.read_text()
+          if "const packageInfo = require('./package.json');" not in server_index:
+              server_index = replace_once(
+                  server_index,
+                  "const manifest = require('./engines/manifest.json');",
+                  "const manifest = require('./engines/manifest.json');\nconst packageInfo = require('./package.json');",
+                  'server package version import',
+              )
+          server_index = re.sub(r"version:'[^']+'", "version:packageInfo.version", server_index, count=1)
+          server_index_path.write_text(server_index)
+
+          root_package = {
+              'name': 'verba-server-repository',
+              'version': '0.1.6',
+              'private': True,
+              'main': 'server-plugin/index.cjs',
+              'engines': {'node': '>=20'},
+          }
+          (root / 'package.json').write_text(json.dumps(root_package, ensure_ascii=False, indent=2) + '\n')
+
+          installer = r'''#!/usr/bin/env bash
+          set -euo pipefail
+
+          ST_ROOT="${1:-$HOME/SillyTavern}"
+          PLUGINS_DIR="$ST_ROOT/plugins"
+          DEST="$PLUGINS_DIR/verba-server"
+          REPO_URL="https://github.com/foreverharibo-boop/verba.git"
+          BACKUP_ROOT="$ST_ROOT/.verba-server-backups"
+          STAMP="$(date +%Y%m%d-%H%M%S)"
+
+          if [ ! -d "$ST_ROOT" ] || [ ! -f "$ST_ROOT/server.js" ]; then
+            echo "SillyTavern 경로를 찾지 못했습니다: $ST_ROOT" >&2
+            echo "사용법: bash install-server.sh /실제/SillyTavern/경로" >&2
+            exit 1
+          fi
+          command -v git >/dev/null 2>&1 || { echo "git이 필요합니다." >&2; exit 1; }
+          mkdir -p "$PLUGINS_DIR" "$BACKUP_ROOT"
+
+          backup_dir() {
+            local source="$1"
+            local label="$2"
+            local target="$BACKUP_ROOT/${label}-${STAMP}"
+            local n=1
+            while [ -e "$target" ]; do target="$BACKUP_ROOT/${label}-${STAMP}-$n"; n=$((n+1)); done
+            mv "$source" "$target"
+            echo "기존 폴더를 보존했습니다: $target"
+          }
+
+          is_verba_server_dir() {
+            local dir="$1"
+            [ -d "$dir" ] || return 1
+            node - "$dir" <<'NODE' >/dev/null 2>&1
+          const fs=require('node:fs'),path=require('node:path');
+          const dir=process.argv[2];
+          const candidates=[];
+          const pkg=path.join(dir,'package.json');
+          if(fs.existsSync(pkg)){
+            try{const value=JSON.parse(fs.readFileSync(pkg,'utf8'));if(value.main)candidates.push(path.join(dir,value.main));}catch{}
+          }
+          for(const name of ['index.cjs','index.js','index.mjs','server-plugin/index.cjs'])candidates.push(path.join(dir,name));
+          const found=candidates.some(file=>fs.existsSync(file)&&/\bid\s*:\s*['"]verba-server['"]/.test(fs.readFileSync(file,'utf8')));
+          process.exit(found?0:1);
+          NODE
+          }
+
+          # Move accidental duplicate copies out of the active plugin directory.
+          for candidate in "$PLUGINS_DIR"/*; do
+            [ -e "$candidate" ] || continue
+            [ "$candidate" = "$DEST" ] && continue
+            if is_verba_server_dir "$candidate"; then
+              backup_dir "$candidate" "duplicate-$(basename "$candidate")"
+            fi
+          done
+
+          if [ -e "$DEST" ]; then
+            if git -C "$DEST" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+              && [ "$(git -C "$DEST" rev-parse --show-toplevel 2>/dev/null)" = "$DEST" ]; then
+              remote="$(git -C "$DEST" remote get-url origin 2>/dev/null || true)"
+              case "$remote" in
+                https://github.com/foreverharibo-boop/verba.git|https://github.com/foreverharibo-boop/verba|git@github.com:foreverharibo-boop/verba.git)
+                  git -C "$DEST" fetch origin main
+                  git -C "$DEST" checkout main
+                  git -C "$DEST" pull --ff-only origin main
+                  ;;
+                *)
+                  backup_dir "$DEST" "legacy-verba-server"
+                  ;;
+              esac
+            else
+              backup_dir "$DEST" "legacy-verba-server"
+            fi
+          fi
+
+          if [ ! -d "$DEST/.git" ]; then
+            git clone --depth 1 --single-branch --branch main "$REPO_URL" "$DEST"
+          fi
+
+          node - "$DEST" <<'NODE'
+          const fs=require('node:fs'),path=require('node:path');
+          const dir=process.argv[2];
+          const pkg=JSON.parse(fs.readFileSync(path.join(dir,'package.json'),'utf8'));
+          const entry=path.join(dir,pkg.main||'');
+          if(pkg.main!=='server-plugin/index.cjs'||!fs.existsSync(entry))throw Error('Verba Server 설치 검증 실패');
+          const server=JSON.parse(fs.readFileSync(path.join(dir,'server-plugin/package.json'),'utf8'));
+          console.log(`Verba Server ${server.version} Git 설치 완료`);
+          NODE
+
+          echo
+          echo "앞으로 새 폴더를 받을 필요가 없습니다."
+          echo "- SillyTavern 시작 시 enableServerPluginsAutoUpdate가 켜져 있으면 자동 업데이트"
+          echo "- 수동 업데이트: cd \"$ST_ROOT\" && node plugins.js update"
+          echo "SillyTavern 서버를 완전히 재시작해 주세요."
+          '''
+          # Remove YAML indentation from the embedded shell script.
+          installer = '\n'.join(line[10:] if line.startswith('          ') else line for line in installer.splitlines()) + '\n'
+          (root / 'install-server.sh').write_text(installer)
+
+          readme_path = root / 'README.md'
+          readme = readme_path.read_text()
+          unified_note = """## v0.6.66 · 메인 통합 및 Git 관리형 서버 플러그인
+
+          - 서버 번역·백그라운드 복구·릴레이 연동·외부 확장 태그 정리 기능을 메인에 통합했습니다. 서버 번역은 기본 OFF이며, 플러그인이 없거나 설정을 끄면 기존 브라우저 번역만 사용합니다.
+          - Verba Server는 이제 `plugins/verba-server`에 메인 저장소를 한 번만 Git 설치합니다. 이후 SillyTavern의 서버 플러그인 자동 업데이트 또는 `node plugins.js update`로 갱신됩니다.
+          - 예전 복사 설치본은 새 설치 스크립트가 `SillyTavern/.verba-server-backups`로 이동해 보존한 뒤 Git 설치본으로 교체합니다. 다른 서버 플러그인은 건드리지 않습니다.
+          - 메인의 브라우저 동결 진단과 실험판의 서버 진단·원문 비교·한영병기 안전 처리를 함께 유지합니다.
+
+          """
+          unified_note = '\n'.join(line[10:] if line.startswith('          ') else line for line in unified_note.splitlines())
+          if '## v0.6.66 · 메인 통합 및 Git 관리형 서버 플러그인' not in readme:
+              first_line_end = readme.find('\n') + 1
+              readme = readme[:first_line_end] + '\n' + unified_note + readme[first_line_end:]
+          readme_path.write_text(readme)
+
+          server_doc_path = root / 'SERVER.md'
+          server_doc = server_doc_path.read_text()
+          install_note = """## 권장 설치·업데이트 방식
+
+          Verba Server는 SillyTavern 구조상 `SillyTavern/plugins/verba-server` 폴더에 있어야 하지만, 이제 그 폴더 자체가 Git 저장소입니다. 최초 한 번만 아래 설치 스크립트를 실행하세요.
+
+          ```bash
+          bash "$HOME/SillyTavern/data/default-user/extensions/verba/install-server.sh" "$HOME/SillyTavern"
+          ```
+
+          기존의 복사 설치 폴더는 삭제하지 않고 `SillyTavern/.verba-server-backups`로 이동합니다. 이후에는 SillyTavern 시작 시 자동 업데이트되며, 수동으로는 SillyTavern 루트에서 `node plugins.js update`를 실행하면 됩니다. 서버 번역 설정이 OFF이면 플러그인이 설치되어 있어도 신규 서버 번역 작업을 만들지 않습니다.
+
+          """
+          install_note = '\n'.join(line[10:] if line.startswith('          ') else line for line in install_note.splitlines())
+          if '## 권장 설치·업데이트 방식' not in server_doc:
+              first_line_end = server_doc.find('\n') + 1
+              server_doc = server_doc[:first_line_end] + '\n' + install_note + server_doc[first_line_end:]
+          server_doc_path.write_text(server_doc)
+          PY
+
+          rm -rf tools/node_modules
+          rm -f .github/workflows/inspect-main-merge.yml .github/workflows/unify-main-once.yml
+          touch .gitignore
+          grep -qxF 'tools/node_modules/' .gitignore || printf '\ntools/node_modules/\n' >> .gitignore
+          chmod +x install-server.sh
+
+      - name: Run unified regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check source-change-tracer.js
+          node --check browser-execution-diagnostics.js
+          node --check server-plugin/index.cjs
+          node tests/automatic-output.mjs
+          node tests/main-background-diagnostics.mjs
+          node tests/full-source-preference.mjs
+          node tests/full-source-warning-once.mjs
+          node tests/bilingual-intent.mjs
+          node tests/bilingual-source-recovery-smoke.mjs
+          npm test --prefix server-plugin
+
+      - name: Commit unified branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git commit -m "Merge server translation into main-ready Verba (v0.6.66)"
+          git push origin HEAD:codex/server-translation-experimental

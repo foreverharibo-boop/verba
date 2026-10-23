@@ -1,0 +1,245 @@
+name: One-time bilingual backport
+
+on:
+  push:
+    branches:
+      - codex/server-translation-experimental
+    paths:
+      - .github/workflows/backport-bilingual-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  backport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out experimental branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/server-translation-experimental
+          fetch-depth: 0
+
+      - name: Fetch main and peer repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git clone --branch codex/server-translation-experimental --single-branch https://github.com/foreverharibo-boop/veereubaa.git ../peer
+          git -C ../peer fetch origin main
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Backport strict bilingual behavior into both local trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { execFileSync } = require('node:child_process');
+
+          const roots = [process.cwd(), path.resolve('../peer')];
+          const planImport = "import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';";
+          const planFunction = `/**
+           * Optional bilingual-intent check. Only uncertain direct-dialogue
+           * formatting requests reach the AI, with one provider attempt and a
+           * bounded 20-second / 512-token decision request.
+           */
+          async function planBilingualDialogueVerdicts(segmented, options = {}) {
+              if (settings.translationEngine === 'google-free') return;
+              if (!segmented?.segments?.some(item => item.type === 'dialogue_candidate')) return;
+              const pending = bilingualPromptsNeedingVerdict(settings);
+              if (!pending.length) return;
+              const profiles = configuredProfileCycle();
+              if (!profiles.active) return;
+              for (const prompt of pending) {
+                  if (options.signal?.aborted) throw abortError();
+                  await resolveBilingualIntent(prompt, async (text, sharedSignal) => {
+                      const expected = [{ id: 'bilingual_0000', type: 'bilingual_check', text }];
+                      const response = await sendProfileRequest(buildBilingualVerdictPrompt({ prompt: text }), {
+                          profileId: profiles.active,
+                          profileSlot: profiles.slot,
+                          signal: sharedSignal,
+                          stage: 'bilingual-check',
+                          timeoutSecondsOverride: 20,
+                          timing: options.timing,
+                      });
+                      const result = collectPartialSegmentTranslations(extractResponseText(response), expected);
+                      if (result.parseError || result.partial.size !== 1) return null;
+                      const verdict = String(result.partial.get('bilingual_0000') ?? '').trim().toLowerCase();
+                      return verdict === 'true' ? true : verdict === 'false' ? false : null;
+                  }, options.signal);
+              }
+          }
+          `;
+
+          function git(root, ...args) {
+              return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+          }
+          function fromMain(root, file) {
+              return git(root, 'show', `origin/main:${file}`);
+          }
+          function write(file, content) {
+              fs.mkdirSync(path.dirname(file), { recursive: true });
+              fs.writeFileSync(file, content);
+          }
+          function replaceOnce(text, before, after, label) {
+              const first = text.indexOf(before);
+              if (first < 0) throw new Error(`Missing patch anchor: ${label}`);
+              if (text.indexOf(before, first + before.length) >= 0) throw new Error(`Non-unique patch anchor: ${label}`);
+              return text.slice(0, first) + after + text.slice(first + before.length);
+          }
+          function functionSlice(text, name) {
+              const start = text.indexOf(`async function ${name}(`);
+              if (start < 0) throw new Error(`Missing function ${name}`);
+              const nextAsync = text.indexOf('\nasync function ', start + 20);
+              const nextPlain = text.indexOf('\nfunction ', start + 20);
+              const candidates = [nextAsync, nextPlain].filter(value => value > start);
+              const end = candidates.length ? Math.min(...candidates) : text.length;
+              return { start, end, body: text.slice(start, end) };
+          }
+          function replaceFunction(text, name, body) {
+              const current = functionSlice(text, name);
+              return text.slice(0, current.start) + body + text.slice(current.end);
+          }
+          function movePromptInsideTry(body, builder, prelude, label) {
+              const expression = new RegExp(`    const prompt = (${builder}\\(\\{[\\s\\S]*?\\n    \\}\\));\\n`);
+              const match = body.match(expression);
+              if (!match) {
+                  if (body.includes(prelude.trim())) return body;
+                  throw new Error(`Missing ${label} prompt block`);
+              }
+              const call = match[1];
+              body = body.replace(match[0], '    let prompt;\n');
+              const promptAt = body.indexOf('    let prompt;');
+              const tryAt = body.indexOf('    try {', promptAt);
+              if (tryAt < 0) throw new Error(`Missing ${label} try block`);
+              const insertion = `    try {\n${prelude}\n        prompt = ${call};`;
+              body = body.slice(0, tryAt) + insertion + body.slice(tryAt + '    try {'.length);
+              return body;
+          }
+
+          function patchRoot(root) {
+              const manifestPath = path.join(root, 'manifest.json');
+              const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+              const deep = manifest.name === 'verba-deep';
+              const version = deep ? '0.6.43' : '0.6.65';
+              const title = deep ? '긴르바' : '베르바';
+
+              write(path.join(root, 'bilingual-intent.js'), fromMain(root, 'bilingual-intent.js'));
+              write(path.join(root, 'core.js'), fromMain(root, 'core.js'));
+              for (const file of ['tests/bilingual-intent.mjs', 'tests/bilingual-source-recovery-smoke.mjs']) {
+                  write(path.join(root, file), fromMain(root, file));
+              }
+
+              let index = fs.readFileSync(path.join(root, 'index.js'), 'utf8');
+              if (!index.includes(planImport)) index = `${planImport}\n${index}`;
+              if (!index.includes('async function planBilingualDialogueVerdicts(')) {
+                  index = replaceOnce(
+                      index,
+                      '\nasync function translateOutputText(source, options = {}) {',
+                      `\n${planFunction}\nasync function translateOutputText(source, options = {}) {`,
+                      `${title} bilingual planner`,
+                  );
+              }
+              if (!index.includes('await planBilingualDialogueVerdicts(initialSegmented')) {
+                  index = replaceOnce(
+                      index,
+                      "    const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);\n    if (minimalOutputEnabled(settings)) {",
+                      "    const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);\n    await planBilingualDialogueVerdicts(initialSegmented, { signal: options.signal, timing: options.timing });\n    if (minimalOutputEnabled(settings)) {",
+                      `${title} output verdict call`,
+                  );
+              }
+              if (!index.includes("options.stage === 'bilingual-check' ? 512 : VERBA_MAX_TOKENS")) {
+                  index = replaceOnce(
+                      index,
+                      "                    VERBA_MAX_TOKENS,\n                    { signal: controller.signal },",
+                      "                    options.stage === 'bilingual-check' ? 512 : VERBA_MAX_TOKENS,\n                    { signal: controller.signal },",
+                      `${title} bilingual token cap`,
+                  );
+              }
+
+              let bundle = functionSlice(index, 'retranslateSelectionBundle').body;
+              bundle = movePromptInsideTry(
+                  bundle,
+                  'buildMultiSelectionPrompt',
+                  "        await planBilingualDialogueVerdicts({ segments: bundleHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });",
+                  `${title} bundle selection`,
+              );
+              index = replaceFunction(index, 'retranslateSelectionBundle', bundle);
+
+              let selection = functionSlice(index, 'retranslateSelection').body;
+              selection = movePromptInsideTry(
+                  selection,
+                  'buildSelectionPrompt',
+                  "        await planBilingualDialogueVerdicts({ segments: selectionHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });",
+                  `${title} selection`,
+              );
+              index = replaceFunction(index, 'retranslateSelection', selection);
+
+              index = index.replace(/const EXTENSION_VERSION = '[^']+';/, `const EXTENSION_VERSION = '${version}';`);
+              index = index.replace(/const SERVER_ENGINE_VERSION = '[^']+';/, `const SERVER_ENGINE_VERSION = '${version}';`);
+              fs.writeFileSync(path.join(root, 'index.js'), index);
+
+              manifest.version = version;
+              fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+              const serverPackagePath = path.join(root, 'server-plugin/package.json');
+              const serverPackage = JSON.parse(fs.readFileSync(serverPackagePath, 'utf8'));
+              serverPackage.version = '0.1.5';
+              fs.writeFileSync(serverPackagePath, `${JSON.stringify(serverPackage, null, 2)}\n`);
+
+              const readmePath = path.join(root, 'README.md');
+              let readme = fs.readFileSync(readmePath, 'utf8');
+              const note = `## v${version} · 서버 번역 실험판 한영병기 동기화\n\n- 메인의 엄격한 한영병기 의도 판정, 부정문·선택사항 오인 방지, 한영병기 OFF 시 영어 원문 비조립, 검증된 이름 보호토큰 복구를 서버 번역 실험판에도 적용했습니다.\n- 애매한 지시만 20초·512토큰 제한의 단일 판정 요청을 사용하며, 브라우저 번역과 서버 백그라운드 번역이 같은 규칙을 사용합니다.\n\n`;
+              if (!readme.includes(`## v${version} · 서버 번역 실험판 한영병기 동기화`)) {
+                  const headingEnd = readme.indexOf('\n') + 1;
+                  readme = readme.slice(0, headingEnd) + '\n' + note + readme.slice(headingEnd);
+                  fs.writeFileSync(readmePath, readme);
+              }
+
+              const serverTest = `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { createEngine as verba } from '../engines/verba.mjs';\nimport { createEngine as deep } from '../engines/verba-deep.mjs';\n\nconst snapshot = settings => ({\n  settings: { profileId: 'A', activeProfileSlot: 'A', autoProfileFallback: false, serverRetryLimit: 1, developerMinimalPromptEnabled: false, developerMode: false, dialogueEndingRepetitionReduction: false, ...settings },\n  profiles: { A: {} },\n  nameLocks: [{ source: 'Dana', target: '다나' }],\n  character: { name: 'Chris' },\n  context: { name1: 'Dana', name2: 'Chris' },\n});\n\nfunction transportFor({ verdict = null } = {}) {\n  const calls = [];\n  const transport = async (_id, messages, maxTokens) => {\n    const prompt = String(messages?.[0]?.content || '');\n    calls.push({ prompt, maxTokens });\n    if (prompt.includes('bilingual_0000')) {\n      assert.equal(maxTokens, 512);\n      return { content: JSON.stringify({ segments: [{ id: 'bilingual_0000', translation: verdict === true ? 'true' : 'false' }] }) };\n    }\n    const ids = [...new Set([...prompt.matchAll(/\"id\"\\s*:\\s*\"(seg_\\d+)\"/g)].map(match => match[1]))];\n    const name = prompt.match(/@@VERBA_(?:DEEP_)?NAME_\\d+@@/)?.[0] || '다나';\n    return { content: JSON.stringify({ segments: ids.map(id => ({ id, translation: \`안녕, \${name}.\` })) }) };\n  };\n  return { calls, transport };\n}\n\nfor (const [name, createEngine] of [['verba', verba], ['deep', deep]]) {\n  test(name + ' keeps explicit bilingual denial Korean-only', async () => {\n    const { calls, transport } = transportFor();\n    const engine = createEngine(snapshot({ allDialoguePromptEnabled: true, allDialoguePrompt: 'Bilingual dialogue should not be used. Korean translation only.' }), transport);\n    const result = await engine.output('\"Hi, Dana.\"', { speakerIdentity: { sourceUserName: 'Dana', userName: '다나', characterName: 'Chris' } });\n    assert.equal(result.translation.includes('Hi, Dana'), false);\n    assert.equal(calls.some(call => call.maxTokens === 512), false);\n  });\n\n  test(name + ' preserves explicit bilingual output', async () => {\n    const { transport } = transportFor();\n    const engine = createEngine(snapshot({ allDialoguePromptEnabled: true, allDialoguePrompt: 'For dialogue, always output both the original English and its Korean translation.' }), transport);\n    const result = await engine.output('\"Hi, Dana.\"', { speakerIdentity: { sourceUserName: 'Dana', userName: '다나', characterName: 'Chris' } });\n    assert.equal(result.translation.includes('Hi, Dana'), true);\n    assert.equal(result.translation.includes('다나'), true);\n  });\n\n  test(name + 'uses one bounded verdict request for uncertain bilingual wording', async () => {\n    const { calls, transport } = transportFor({ verdict: true });\n    const engine = createEngine(snapshot({ allDialoguePromptEnabled: true, allDialoguePrompt: 'Bilingual.' }), transport);\n    const result = await engine.output('\"Hi, Dana.\"', { speakerIdentity: { sourceUserName: 'Dana', userName: '다나', characterName: 'Chris' } });\n    assert.equal(result.translation.includes('Hi, Dana'), true);\n    assert.equal(calls.filter(call => call.maxTokens === 512).length, 1);\n  });\n}\n`;
+              write(path.join(root, 'server-plugin/tests/bilingual-backport.test.mjs'), serverTest);
+          }
+
+          roots.forEach(patchRoot);
+          NODE
+
+      - name: Build both server translation engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix tools --no-audit --no-fund
+          node tools/build-server-engines.cjs "$PWD" "$PWD/../peer"
+
+      - name: Run bilingual and server-engine regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tests/bilingual-intent.mjs
+          node tests/bilingual-source-recovery-smoke.mjs
+          node tests/bilingual-dialogue-local-format.mjs
+          node ../peer/tests/bilingual-intent.mjs
+          node ../peer/tests/bilingual-source-recovery-smoke.mjs
+          node ../peer/tests/bilingual-dialogue-local-format.mjs
+          node --test server-plugin/tests/engine.test.mjs server-plugin/tests/bilingual-backport.test.mjs
+          node --check index.js
+          node --check ../peer/index.js
+          git diff --check
+
+      - name: Commit generated backport and remove one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/backport-bilingual-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --stat
+          git commit -m "Backport strict bilingual handling to server experiment (v0.6.65)"
+          git push origin HEAD:codex/server-translation-experimental

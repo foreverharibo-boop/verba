@@ -29,6 +29,16 @@ jobs:
           echo "merge_status=$status"
           echo "--- conflicted files ---"
           git diff --name-only --diff-filter=U || true
+          for file in README.md index.js manifest.json source-change-tracer.js; do
+            echo "===== CONFLICT MARKERS: $file ====="
+            awk '
+              /<<<<<<< / { show=1; before=6 }
+              show { print NR ":" $0 }
+              />>>>>>> / { after=6; show=0; tail=1; next }
+              tail && after-- > 0 { print NR ":" $0 }
+              tail && after <= 0 { tail=0 }
+            ' "$file" || true
+          done
           echo "--- status ---"
           git status --short
           git merge --abort || true

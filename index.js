@@ -1,3 +1,4 @@
+import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
 import { createServerClient } from './server-client.js?v=0.6.64';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
@@ -62,9 +63,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.64';
+const EXTENSION_VERSION = '0.6.65';
 // This client-only fix uses the existing server translation engine unchanged.
-const SERVER_ENGINE_VERSION = '0.6.51';
+const SERVER_ENGINE_VERSION = '0.6.65';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -3272,7 +3273,7 @@ async function sendProfileRequest(prompt, options = {}) {
                 return service.sendRequest(
                     profileId,
                     [{ role: 'user', content: prompt }],
-                    VERBA_MAX_TOKENS,
+                    options.stage === 'bilingual-check' ? 512 : VERBA_MAX_TOKENS,
                     { signal: controller.signal },
                 );
             });
@@ -4965,6 +4966,38 @@ async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {
     return result;
 }
 
+/**
+ * Optional bilingual-intent check. Only uncertain direct-dialogue formatting
+ * requests reach the AI, with one provider attempt and a bounded
+ * 20-second / 512-token decision request.
+ */
+async function planBilingualDialogueVerdicts(segmented, options = {}) {
+    if (settings.translationEngine === 'google-free') return;
+    if (!segmented?.segments?.some(item => item.type === 'dialogue_candidate')) return;
+    const pending = bilingualPromptsNeedingVerdict(settings);
+    if (!pending.length) return;
+    const profiles = configuredProfileCycle();
+    if (!profiles.active) return;
+    for (const prompt of pending) {
+        if (options.signal?.aborted) throw abortError();
+        await resolveBilingualIntent(prompt, async (text, sharedSignal) => {
+            const expected = [{ id: 'bilingual_0000', type: 'bilingual_check', text }];
+            const response = await sendProfileRequest(buildBilingualVerdictPrompt({ prompt: text }), {
+                profileId: profiles.active,
+                profileSlot: profiles.slot,
+                signal: sharedSignal,
+                stage: 'bilingual-check',
+                timeoutSecondsOverride: 20,
+                timing: options.timing,
+            });
+            const result = collectPartialSegmentTranslations(extractResponseText(response), expected);
+            if (result.parseError || result.partial.size !== 1) return null;
+            const verdict = String(result.partial.get('bilingual_0000') ?? '').trim().toLowerCase();
+            return verdict === 'true' ? true : verdict === 'false' ? false : null;
+        }, options.signal);
+    }
+}
+
 async function translateOutputText(source, options = {}) {
     /* SERVER_DISPATCH_BEGIN */
     if (!options.browserLocal && (settings.serverTranslation === true || verbaServer.hasPendingGeneration())) { return verbaServer.output(source, options, () => translateOutputText(source, { ...options, browserLocal: true })); }
@@ -4975,6 +5008,7 @@ async function translateOutputText(source, options = {}) {
         speakerIdentity: options.speakerIdentity || {},
     };
     const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);
+    await planBilingualDialogueVerdicts(initialSegmented, { signal: options.signal, timing: options.timing });
     if (minimalOutputEnabled(settings)) {
         return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap, reviewEnglish: reviewFinalEnglish });
     }
@@ -9206,7 +9240,13 @@ async function retranslateSelectionBundle() {
         sourceContext: selectionSourceContext({ ...state, ...range }, contextMode),
     }));
     const expected = selections.map(row => ({ id: row.id, type: 'multi_selection', text: row.selected, ellipsisSource: selectionEllipsisReference({ ...state, ...row }) }));
-    const prompt = buildMultiSelectionPrompt({
+    let prompt;
+    const controller = new AbortController();
+    trackSelectionTranslation(controller);
+    let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
+    try {
+        await planBilingualDialogueVerdicts({ segments: bundleHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });
+        prompt = buildMultiSelectionPrompt({
         source: state.source,
         translation: state.translation,
         selections,
@@ -9216,10 +9256,6 @@ async function retranslateSelectionBundle() {
         contextMode,
         tuning,
     });
-    const controller = new AbortController();
-    trackSelectionTranslation(controller);
-    let toast = showProgress(`선택한 ${selections.length}개 구간을 한꺼번에 다시 번역 중입니다…`);
-    try {
         const result = await requestSegments(prompt, expected, {
             signal: controller.signal,
             previousUserSource: previousUserSourceText,
@@ -9478,7 +9514,14 @@ async function retranslateSelection(snapshot) {
     const controller = new AbortController();
     trackSelectionTranslation(controller);
     const candidateMode = Boolean(settings.selectionCandidates);
-    const prompt = buildSelectionPrompt({
+    let prompt;
+    const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected, ellipsisSource: selectionEllipsisReference(snapshot) }];
+    let toast = showProgress(candidateMode
+        ? '선택한 부분의 번역 후보 3개를 만드는 중입니다…'
+        : '선택한 부분만 다시 번역 중입니다…');
+    try {
+        await planBilingualDialogueVerdicts({ segments: selectionHasDialogue ? [{ type: 'dialogue_candidate' }] : [] }, { signal: controller.signal });
+        prompt = buildSelectionPrompt({
         source: snapshot.source,
         translation: snapshot.translation,
         selected: snapshot.selected,
@@ -9492,11 +9535,6 @@ async function retranslateSelection(snapshot) {
         sourceContext: selectionSourceContext(snapshot, contextMode),
         tuning,
     });
-    const expected = [{ id: 'seg_0000', type: 'selection', text: snapshot.selected, ellipsisSource: selectionEllipsisReference(snapshot) }];
-    let toast = showProgress(candidateMode
-        ? '선택한 부분의 번역 후보 3개를 만드는 중입니다…'
-        : '선택한 부분만 다시 번역 중입니다…');
-    try {
         let replacement = '';
         if (candidateMode) {
             const received = (await requestSelectionCandidates(prompt, {

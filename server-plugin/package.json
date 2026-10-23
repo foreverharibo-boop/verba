@@ -1,8 +1,12 @@
 {
   "name": "verba-server",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "main": "index.cjs",
-  "engines": { "node": ">=20" },
-  "scripts": { "test": "node --test tests/*.test.cjs tests/*.test.mjs" }
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.cjs tests/*.test.mjs"
+  }
 }

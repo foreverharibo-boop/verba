@@ -1,3 +1,4 @@
+import { bilingualPromptRequestsOutput } from './bilingual-intent.js';
 import { createPromptBuilders } from './prompt-builders.js';
 import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, canonicalizeProtectedTokenVariants } from './response-parser.js';
 
@@ -216,13 +217,6 @@ export function findBannedWords(text, configuredWordsOrSettings) {
     return [...new Set(found)];
 }
 
-const BILINGUAL_PROMPT_PATTERN = /bilingual|dual[-\s]?language|both\s+(?:english|korean)\s+and\s+(?:english|korean)|(?:retain|preserve|include|show|keep)[^\n]{0,50}(?:english|original)|(?:english|original)[^\n]{0,50}(?:retain|preserve|include|show|keep)|(?:english|original)[^\n]{0,80}(?:first|followed|then|alongside|together|parenthes)|(?:first|followed|then|alongside|together|parenthes)[^\n]{0,80}(?:english|original)|한\s*영\s*병기|영\s*한\s*병기|(?:영어|영문|원문)[^\n]{0,30}병기|병기[^\n]{0,30}(?:영어|영문|원문)|영어와\s*한국어|한국어와\s*영어|(?:영어|영문|원문)[^\n]{0,50}(?:먼저|뒤에|괄호|함께)|(?:먼저|뒤에|괄호|함께)[^\n]{0,50}(?:영어|영문|원문)/i;
-const NO_BILINGUAL_PROMPT_PATTERN = /(?:do\s+not|don't|never|without|avoid)[^\n]{0,35}(?:bilingual|english|original)|(?:bilingual|english|original)[^\n]{0,35}(?:forbidden|prohibited)|(?:병기|영어|영문|원문)[^\n]{0,25}(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)|(?:금지|하지\s*마|하지\s*않|쓰지\s*마|제외)[^\n]{0,25}(?:병기|영어|영문|원문)/i;
-const REQUIRED_BILINGUAL_PROMPT_PATTERN = /(?:always|must|required|without\s+exception|all\s+spoken\s+dialogue)[^\n]{0,180}(?:bilingual|both\s+(?:the\s+)?(?:original\s+)?english[^\n]{0,80}korean|english[^\n]{0,80}(?:translation|korean|parenthes))|(?:반드시|항상|예외\s*없이|모든\s+대사)[^\n]{0,120}(?:한\s*영\s*병기|영\s*한\s*병기|영어[^\n]{0,50}한국어|원문[^\n]{0,50}(?:번역|괄호))/i;
-// A dialogue-only format command often also says that narration must not be
-// bilingual. That scope boundary must not cancel the affirmative dialogue rule.
-const EXPLICIT_DIALOGUE_BILINGUAL_PROMPT_PATTERN = /(?:for\s+(?:direct|spoken)\s+dialogue(?:\s+only)?\s*,?\s*(?:always\s+)?(?:output|show|include|keep|preserve)[^\n]{0,180}(?:both[^\n]{0,120})?(?:english|original)[^\n]{0,120}(?:korean|translation)|(?:직접\s*대사|모든\s*대사)(?:에만|만)?[^\n]{0,80}(?:출력|병기|표기)[^\n]{0,100}(?:영어|영문|원문)[^\n]{0,100}(?:한국어|한글|번역))/i;
-
 function validationText(value) {
     return String(value || '')
         .replace(PROTECTED_PATTERN, ' ')
@@ -263,15 +257,7 @@ export function englishReviewWindow(segment, translation, nameTokens = [], prote
 }
 
 function promptRequestsBilingual(value) {
-    const prompt = String(value || '');
-    if (!BILINGUAL_PROMPT_PATTERN.test(prompt)) return false;
-    // A dialogue-only instruction often excludes narration explicitly. That
-    // scope boundary must not cancel the positive dialogue requirement.
-    if (
-        REQUIRED_BILINGUAL_PROMPT_PATTERN.test(prompt)
-        || EXPLICIT_DIALOGUE_BILINGUAL_PROMPT_PATTERN.test(prompt)
-    ) return true;
-    return !NO_BILINGUAL_PROMPT_PATTERN.test(prompt);
+    return bilingualPromptRequestsOutput(value);
 }
 
 export function bilingualDialogueRequested(settings = {}) {
@@ -755,21 +741,105 @@ function lockedNameOnlyKoreanHalf(segment, korean, nameTokens = []) {
     return body;
 }
 
+/**
+ * Restore leaked name markers in an ALREADY bilingual AI response without
+ * enabling bilingual assembly. The English half must match the actual source;
+ * the Korean half remains untouched, and unrelated formatting is preserved.
+ *
+ * Known NAME markers have an explicit source spelling. Unknown numeric markers
+ * are restored only when full literal context proves one name from the source.
+ * An unrelated/unverifiable marker is never mapped by its numeric suffix.
+ */
+function restoreVerifiedBilingualEnglishNames(segment, translation, nameTokens = [], protectedTokens = []) {
+    const result = String(translation || '');
+    if (segment?.type !== 'dialogue_candidate') return result;
+    const envelope = dialogueEnvelope(result);
+    const pair = trailingParentheticalParts(envelope.body);
+    const koreanNameTokenPresent = (nameTokens || []).some(entry =>
+        pair?.right?.includes(String(entry?.token || '')) && /[가-힣]/u.test(String(entry?.value || ''))
+    );
+    if (!pair || (!/[가-힣]/u.test(validationText(pair.right)) && !koreanNameTokenPresent)) return result;
+    const rawEnglish = stripLooseDialogueQuotes(pair.left);
+    const english = canonicalizeProtectedTokenVariants(rawEnglish);
+    const markerPattern = new RegExp(PROTECTED_TOKEN_PATTERN.source, 'gu');
+    if (!markerPattern.test(english)) return result;
+    markerPattern.lastIndex = 0;
+
+    const original = restoreBilingualDetectionTokens(
+        dialogueEnvelope(segment.text).body, nameTokens, protectedTokens, 'source',
+    );
+    // Refuse ambiguous source templates rather than guessing from a marker ID.
+    if (!original || new RegExp(PROTECTED_TOKEN_PATTERN.source, 'u').test(original)) return result;
+    const nameSource = new Map((nameTokens || [])
+        .map(entry => [String(entry?.token || ''), String(entry?.original || entry?.source || '')])
+        .filter(([token, name]) => token && name));
+    const knownRestored = english.replace(markerPattern, token => nameSource.get(token) || token);
+    let recovered = knownRestored;
+    const unknownTokens = [...knownRestored.matchAll(markerPattern)];
+    if (!unknownTokens.length) {
+        // Source punctuation may vary only cosmetically (e.g. ellipsis glyph).
+        // Preserve the literal English source only when it is a proven match.
+        if (normalizedDialogueSurface(recovered) !== normalizedDialogueSurface(original)) return result;
+        recovered = original;
+    } else {
+        if (unknownTokens.length > 4 || original.length > 1500 || recovered.length > 1500) return result;
+        const literals = recovered.split(markerPattern);
+        // No bare marker or adjacent markers: those lack independent evidence.
+        if (literals.join('').replace(/[^\p{L}]/gu, '').length < 2
+            || literals.slice(1, -1).some(part => !part.trim())) return result;
+        if (!original.startsWith(literals[0])) return result;
+        const values = [];
+        const seen = new Map();
+        let cursor = literals[0].length;
+        for (let i = 0; i < unknownTokens.length; i++) {
+            const nextLiteral = literals[i + 1];
+            const end = nextLiteral ? original.indexOf(nextLiteral, cursor) : original.length;
+            if (end < cursor || end < 0) return result;
+            // Multiple candidate boundaries mean that the inferred name is not
+            // unique. Never choose one arbitrarily.
+            if (nextLiteral && original.indexOf(nextLiteral, end + 1) !== -1) return result;
+            const value = original.slice(cursor, end);
+            if (!/^[\p{Script=Latin}][\p{Script=Latin}\p{M}.'’ \-]{0,79}$/u.test(value)
+                || !/[\p{Script=Latin}]{2}/u.test(value)) return result;
+            const marker = unknownTokens[i][0];
+            if (seen.has(marker) && seen.get(marker) !== value) return result;
+            seen.set(marker, value);
+            values.push(value);
+            cursor = end + nextLiteral.length;
+        }
+        if (cursor !== original.length) return result;
+        let number = 0;
+        recovered = recovered.replace(markerPattern, () => values[number++]);
+        if (recovered !== original) return result;
+    }
+    if (!pair.left.includes(rawEnglish)) return result;
+    const openAt = envelope.body.lastIndexOf(pair.open);
+    if (openAt < 0) return result;
+    const prefix = envelope.body.slice(0, openAt);
+    if (!prefix.includes(pair.left)) return result;
+    // A model may close the English quote before opening the Korean wrapper.
+    // Only after an exact source match, remove that redundant inner quote pair.
+    const innerQuote = [['"', '"'], ['“', '”'], ['「', '」'], ['『', '』']]
+        .some(([open, close]) => pair.left === open + rawEnglish + close);
+    const correctedPrefix = prefix.replace(pair.left,
+        innerQuote ? recovered : pair.left.replace(rawEnglish, recovered));
+    return envelope.leading + envelope.open + correctedPrefix + envelope.body.slice(openAt)
+        + envelope.close + envelope.trailing;
+}
+
 /** Locally rebuilds the configured bilingual dialogue display without an AI request. */
 export function ensureBilingualDialogueFormat(segment, translation, settings = {}, speakerScopes = null, nameTokens = [], protectedTokens = []) {
     const result = String(translation || '');
     if (segment?.type !== 'dialogue_candidate') return result;
 
-    // A fully custom prompt can request bilingual dialogue without placing the
-    // instruction in the legacy global/all-dialogue fields inspected by
-    // bilingualDialogueRequested(). In that case the model may already return
-    // Source (Korean), but both halves still contain the same opaque NAME token.
-    // If we skip this local rebuild, assembleTranslation() restores that token
-    // globally and turns the copied English name into its Korean locked spelling.
-    // Detect an already-bilingual result from its actual structure as well as
-    // from settings, so the English half is always rebuilt from the source.
+    // Source+Korean assembly requires an enabled, authorized GLOBAL or
+    // ALL-DIALOGUE prompt. A bilingual-looking AI reply alone is not permission
+    // to reconstruct/append source English. With no authorization, preserve the
+    // received translation byte-for-byte (no deletion or format changes).
+    if (!bilingualDialogueRequested(settings)) return restoreVerifiedBilingualEnglishNames(
+        segment, result, nameTokens, protectedTokens,
+    );
     const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
-    if (!bilingualDialogueRequested(settings) && !existingBilingual) return result;
     const translatedEnvelope = dialogueEnvelope(result);
     const existingParts = existingBilingual
         ? trailingParentheticalParts(translatedEnvelope.body)

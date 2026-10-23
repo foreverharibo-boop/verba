@@ -18,6 +18,8 @@ function fixture() {
     let next = 0;
     const env = {
         settings: { autoOutput: true }, EXTENSION_KEY: 'test', automaticOutputLifecycle: lifecycle,
+        executionTrace: { trace() {}, heartbeat() {}, page() {}, clear() {} },
+        traceSourceForMessage() {}, traceLatestAssistantSource() {},
         isTranslationExtensionActive: () => state.owner, liveContext: () => ({ chat: state.chat }),
         automaticTranslationTimers: new Map(), swipeTranslationJobs: new Map(), pendingOutputs: new Map(), failedOutputSignatures: new Map(),
         pendingFallbackAssistantIds: new Set(), assistantSourceObservation: new Map(), assistantObservedChatLength: 1, assistantObservationReady: true,
@@ -101,14 +103,34 @@ for (const change of [f => f.env.settings.autoOutput = false, f => f.state.owner
     f.env.scheduleFreshMountedAssistantTranslations(); f.tick(); assert.equal(f.calls.length, 0);
     f.lifecycle.complete(1); f.env.scheduleFreshMountedAssistantTranslations(); f.tick(); assert.equal(f.calls.length, 1);
 }
-// Swipe switching retains stability checks, and generation cannot translate a partial swipe.
+// Streaming swipes still wait, but a proven final swipe dispatches without any
+// hidden-page setTimeout callback (which Android may defer until foreground).
 {
     const f = fixture(); f.lifecycle.start('swipe');
     f.state.chat[0].swipe_id = 1; f.state.chat[0].mes = 'Partial';
     f.env.scheduleSwipeTranslation(0, '0:An old English reply.'); f.tick(); assert.equal(f.calls.length, 0);
     f.state.chat[0].mes = 'Final swipe.'; f.env.handleCompletedAssistantMessage(0);
-    assert.equal(f.calls.length, 0, 'must still check stable swipe');
-    f.tick(); assert.equal(f.calls.length, 1); assert.equal(f.calls[0].source, 'Final swipe.');
+    assert.equal(f.calls.length, 0, 'finish the event turn before dispatch');
+    assert.equal(f.timers.size, 0, 'proven swipe must not wait for throttled timers');
+    f.flush(); assert.equal(f.calls.length, 1); assert.equal(f.calls[0].source, 'Final swipe.');
+}
+// Duplicate completion signals cannot launch the same swipe twice.
+{
+    const f = fixture(); f.lifecycle.start('swipe');
+    f.state.chat[0].swipe_id = 1; f.state.chat[0].mes = 'Final swipe.';
+    f.env.scheduleSwipeTranslation(0, '0:An old English reply.');
+    f.env.handleCompletedAssistantMessage(0); f.env.handleCompletedAssistantMessage(0);
+    f.flush(); assert.equal(f.calls.length, 1);
+}
+// If the source changes before the microtask, reject the stale proof, not
+// the latest unconfirmed streaming text.
+{
+    const f = fixture(); f.lifecycle.start('swipe');
+    f.state.chat[0].swipe_id = 1; f.state.chat[0].mes = 'First final signal.';
+    f.env.scheduleSwipeTranslation(0, '0:An old English reply.');
+    f.env.handleCompletedAssistantMessage(0);
+    f.state.chat[0].mes = 'Later unconfirmed revision.';
+    f.flush(); assert.equal(f.calls.length, 0);
 }
 // Quiet/dry/impersonation must not create completion evidence for an old reply.
 for (const [type, dry] of [['quiet', false], ['impersonate', false], ['normal', true]]) {
@@ -119,8 +141,8 @@ for (const [type, dry] of [['quiet', false], ['impersonate', false], ['normal', 
     for (let i = 0; i < 100; i++) f.lifecycle.trace('page-resumed');
     assert.equal(f.lifecycle.diagnostics().events.length, 60);
 }
-assert.match(source, /automaticOutput: automaticOutputLifecycle\.diagnostics\(\)/);
+assert.match(source, /automaticOutput:[^\n]*automaticOutputLifecycle\.diagnostics\(\)/);
 assert.match(source, /if \(options\.automatic\) automaticOutputLifecycle\.started\(id\)/);
 assert.match(source, /source\.on\(types\.GENERATION_STARTED, \(type, options, dryRun\) => automaticOutputLifecycle\.start/);
-assert.match(source, /source\.on\(types\.CHAT_CHANGED, \(\) => \{\s*automaticOutputLifecycle\.reset\(\)/);
-console.log('PASS: hidden completion without timers/DOM, streaming guard, exact-version resume, dedup, OFF/owner/chat changes, swipe settling, no history replay and private bounded timing diagnostics.');
+assert.match(source, /source\.on\(types\.CHAT_CHANGED,[\s\S]*?automaticOutputLifecycle\.reset\(\)/);
+console.log('PASS: hidden completion without timers/DOM, streaming guard, exact-version resume, dedup, OFF/owner/chat changes, instant proven swipe, no history replay and private bounded timing diagnostics.');

@@ -1,5 +1,5 @@
 // Diagnostic-only, bounded source mutation tracker. Never modifies translation text.
-// Active only while the experiment's server translation and debug modes are enabled.
+// Active only while the owning extension enables diagnostics.
 const MAX_EVENTS = 48;
 const MAX_FULL_TEXT_EVENTS = 8;
 const MAX_TRACKED = 6;
@@ -134,7 +134,7 @@ function describeChange(before, after) {
     while (prefix < min && before[prefix] === after[prefix]) prefix += 1;
     while (suffix < min - prefix && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1;
     const removed = before.slice(prefix, before.length - suffix);
-    const allowedTags = /(?:<|&lt;)\s*\/?\s*(archive(?:[-_]now)?|charm(?:[-_]now)?|rp_plan|starter|thinking|analysis)\b/giu;
+    const allowedTags = /(?:<|&lt;)\s*\/?\s*(scene_state|sfw_scene|archive(?:[-_]now)?|charm(?:[-_]now)?|rp_plan|starter|thinking|analysis)\b/giu;
     return {
         beforeLength: before.length,
         afterLength: after.length,
@@ -177,6 +177,7 @@ export function createSourceChangeTracer({
     fullTextEnabled,
     persistentFullTextEnabled = readPersistentFullTextPreference,
     readSource,
+    onChange = () => {},
     now = Date.now,
 } = {}) {
     const tracked = new Map();
@@ -207,13 +208,21 @@ export function createSourceChangeTracer({
             delete row.insertedText;
             row.fullTextExpired = true;
         }
+        const row = events.at(-1);
+        try {
+            onChange({
+                messageId: row?.messageId, method: row?.method, field: row?.field, relation: row?.relation,
+                removedLength: row?.removedLength, insertedLength: row?.insertedLength,
+            });
+        } catch { /* Diagnostics must never affect RP or translation. */ }
     };
-    const logChange = (entry, before, after, method, field, phase, writer = null) => {
-        if (before === after) return;
+    const logChange = (entry, before, after, method, field, phase, writer = null, effective = true) => {
+        if (!isEnabled() || before === after) return;
         const change = describeChange(before, after);
         push({
             event: 'source-changed', messageId: entry.id, method, field, phase,
             ...change, ...textSnapshot(before, after, change),
+            effectiveSourceChanged: effective,
             ...(writer || { possibleWriter: null, frames: [] }),
         });
     };
@@ -239,12 +248,18 @@ export function createSourceChangeTracer({
         const get = () => value;
         const set = next => {
             const active = isEnabled();
-            const before = active ? safeRead(entry.message) : null;
+            const beforeEffective = active ? safeRead(entry.message) : '';
+            const old = value;
             value = next;
             if (active) {
-                const after = safeRead(entry.message);
-                logChange(entry, before, after, 'property-write', path, entry.phase, callingCode());
-                entry.lastSource = after;
+                const afterEffective = safeRead(entry.message);
+                const ownText = typeof old === 'string' && typeof next === 'string';
+                const before = ownText ? old : beforeEffective;
+                const after = ownText ? next : afterEffective;
+                logChange(entry, before, after, 'property-write', path, entry.phase,
+                    callingCode(), beforeEffective !== afterEffective);
+                entry.lastSource = afterEffective;
+                entry.lastMes = typeof entry.message?.mes === 'string' ? entry.message.mes : '';
             }
             try { changed?.(); } catch { /* Diagnostics must never block source writes. */ }
         };
@@ -289,6 +304,7 @@ export function createSourceChangeTracer({
     function observe(id, message, phase = 'checkpoint') {
         if (!isEnabled() || !Number.isInteger(id) || id < 0 || !message || message.is_user || message.is_system) return;
         const source = safeRead(message);
+        const mes = typeof message.mes === 'string' ? message.mes : '';
         let entry = tracked.get(id);
         if (entry?.message !== message) {
             if (entry) {
@@ -296,7 +312,7 @@ export function createSourceChangeTracer({
                 unhook(entry);
                 tracked.delete(id);
             }
-            entry = { id, message, lastSource: source, phase, restores: [], swipeStop: null, swipeNestedStops: [] };
+            entry = { id, message, lastSource: source, lastMes: mes, phase, restores: [], swipeStop: null, swipeNestedStops: [] };
             tracked.set(id, entry);
             hook(entry);
             if (tracked.size > MAX_TRACKED) {
@@ -306,16 +322,21 @@ export function createSourceChangeTracer({
             }
             return;
         }
-        logChange(entry, entry.lastSource, source, 'checkpoint-difference', 'effective-source', phase);
+        logChange(entry, entry.lastSource, source, 'checkpoint-difference', 'effective-source', phase, null, true);
+        if (entry.lastSource === source) {
+            logChange(entry, entry.lastMes, mes, 'checkpoint-difference', 'message.mes', phase, null, false);
+        }
         entry.lastSource = source;
+        entry.lastMes = mes;
         entry.phase = phase;
     }
     function compare(id, before, after, phase = 'before-apply') {
         if (!isEnabled() || before === after) return;
         const change = describeChange(before, after);
         push({
-            event: 'server-versus-live', messageId: id, phase, ...change, ...textSnapshot(before, after, change),
-            possibleWriter: null,
+            event: 'server-versus-live', messageId: id, method: 'output-snapshot-compare',
+            field: 'effective-source', phase, ...change, ...textSnapshot(before, after, change),
+            effectiveSourceChanged: true, possibleWriter: null,
             interpretation: 'Compare earlier source-changed events for attribution; this difference alone does not prove the writer.',
         });
     }

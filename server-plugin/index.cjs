@@ -4,6 +4,7 @@ const {pathToFileURL} = require('node:url');
 const {createJobs} = require('./jobs.cjs');
 const provider = require('./provider.cjs');
 const manifest = require('./engines/manifest.json');
+const packageInfo = require('./package.json');
 let jobs;
 let observer;
 function owner(req) {
@@ -27,7 +28,7 @@ module.exports.init=async router=>{
         }});
     observer={apiVersion:1,complete:(owner,id,response)=>jobs.observed(owner,id,response)};
     globalThis[Symbol.for('verba.relay-observer')]=observer;
-    router.get('/capabilities',route(req=>{owner(req);return{protocol:1,version:'0.1.4',engines:manifest.engines,retentionSeconds:86400,relayObserver:globalThis[Symbol.for('verba.relay-capability')]===1};}));
+    router.get('/capabilities',route(req=>{owner(req);return{protocol:1,version:packageInfo.version,engines:manifest.engines,retentionSeconds:86400,relayObserver:globalThis[Symbol.for('verba.relay-capability')]===1};}));
     router.post('/jobs',route(req=>jobs.status(jobs.start(owner(req),req.body,provider.ownConnection(req)))));
     router.get('/jobs/:id',route(req=>jobs.status(jobs.lookup(owner(req),req.params.id),req.query.cursor)));
     router.post('/jobs/:id/cancel',route(req=>jobs.status(jobs.cancel(owner(req),req.params.id))));

@@ -2,7 +2,8 @@ import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBil
 import { reconcileCompletedResult, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
 import { createServerClient } from './server-client.js?v=0.6.64';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
-import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.63';
+import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
+import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
 import { reviewEnglishLeftovers } from './english-review.js';
 import { nameLockEntryMarkup, bindNameLockEntry } from './name-lock-entry.js';
 import { createNoticeUI, createNoticePreview } from './notice-ui.js';
@@ -63,7 +64,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.65';
+const EXTENSION_VERSION = '0.6.66';
 // This client-only fix uses the existing server translation engine unchanged.
 const SERVER_ENGINE_VERSION = '0.6.65';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -818,29 +819,39 @@ let lastDesktopSelectionAt = 0;
 let lastDebugDiagnostic = null;
 const outputTiming = createOutputTiming();
 outputTiming.setEnabled(settings.debugMode);
-// Experimental diagnostics only: observe source writes without storing chat content.
-let fullSourceSnapshotsEnabled = false; // Opt-in only for this page session; not persisted.
+// Diagnostic-only runtime. It remains dormant unless debug mode is enabled.
+// Full-text opt-in is persisted locally by source-change-tracer.js, while
+// the actual RP text remains memory-only and bounded.
+let fullSourceSnapshotsEnabled = false;
+const executionTrace = createBrowserExecutionDiagnostics({
+    enabled: () => settings.debugMode === true,
+    visibility: () => document.visibilityState || 'unknown',
+});
 const sourceChangeTracer = createSourceChangeTracer({
+    enabled: () => settings.debugMode === true && isTranslationExtensionActive(EXTENSION_KEY),
     fullTextEnabled: () => fullSourceSnapshotsEnabled,
-    enabled: () => settings.debugMode === true && settings.serverTranslation === true
-        && isTranslationExtensionActive(EXTENSION_KEY),
     readSource: messageSource,
+    onChange: meta => executionTrace.trace('source-write-observed', meta.messageId, {
+        reason: meta.method,
+        beforeLength: Math.max(0, meta.removedLength),
+        afterLength: Math.max(0, meta.insertedLength),
+    }),
 });
 function traceSourceForMessage(messageId, phase) {
-    if (settings.debugMode !== true || settings.serverTranslation !== true) return;
+    if (settings.debugMode !== true) return;
     const id = Number(messageId);
-    if (!Number.isInteger(id) || id < 0) return;
-    sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
+    if (Number.isInteger(id) && id >= 0) sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
 }
 function traceLatestAssistantSource(phase) {
-    if (settings.debugMode !== true || settings.serverTranslation !== true) return;
+    if (settings.debugMode !== true) return;
     const chat = liveContext().chat;
     if (!Array.isArray(chat)) return;
-    for (let id = chat.length - 1; id >= Math.max(0, chat.length - 4); id -= 1) {
+    for (let id = chat.length - 1; id >= Math.max(0, chat.length - 6); id -= 1) {
         const message = chat[id];
-        if (!message || message.is_user || message.is_system) continue;
-        traceSourceForMessage(id, phase);
-        break;
+        if (message && !message.is_user && !message.is_system) {
+            traceSourceForMessage(id, phase);
+            break;
+        }
     }
 }
 let lastPromptConflicts = [];
@@ -898,7 +909,7 @@ function applyServerTranslationProgress(state) {
 function serverTranslationSettingsMarkup() {
     return `
                     <details class="verba-tool-details">
-                        <summary>서버 번역 <small>선택 설치 · 실험 기능</small></summary>
+                        <summary>서버 번역 <small>선택 설치 · 기본 OFF</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row" for="verba-server-translation">
                                 <input type="checkbox" id="verba-server-translation" ${settings.serverTranslation === true ? 'checked' : ''}>
@@ -920,12 +931,6 @@ function bindServerTranslationSetting(panel) {
     input.addEventListener('change', async () => {
         if (!input.checked) {
             settings.serverTranslation = false;
-            fullSourceSnapshotsEnabled = false;
-            sourceChangeTracer.reset();
-            // A previous error snapshot can also contain opt-in full text.
-            lastDebugDiagnostic = null;
-            const detail = panel.querySelector('#verba-debug-full-source');
-            if (detail) { detail.checked = false; detail.disabled = true; }
             saveSettings();
             status.textContent = '기존 브라우저 번역 · 진행 중인 서버 작업은 계속됩니다.';
             return;
@@ -938,7 +943,7 @@ function bindServerTranslationSetting(panel) {
         finally {
             input.disabled = false;
             const detail = panel.querySelector('#verba-debug-full-source');
-            if (detail) detail.disabled = !settings.debugMode || settings.serverTranslation !== true;
+            if (detail) detail.disabled = !settings.debugMode;
         }
     });
     check.addEventListener('click', async () => {
@@ -1052,6 +1057,15 @@ function finishProtectedRecovery(diagnostic, status, started, attempts, remainin
     }
 }
 
+function recentDiagnosticEvents(snapshot, maxEvents = 20) {
+    return {
+        ...snapshot,
+        events: Array.isArray(snapshot?.events) ? snapshot.events.slice(-maxEvents) : [],
+        ...(Array.isArray(snapshot?.jobs) ? { jobs: snapshot.jobs.slice(-6) } : {}),
+        ...(Array.isArray(snapshot?.latestJobs) ? { latestJobs: snapshot.latestJobs.slice(-6) } : {}),
+    };
+}
+
 function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage = '') {
     const context = liveContext();
     const latest = (() => {
@@ -1101,9 +1115,10 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             sourceViewRequested: Boolean(sourceViewRequested(latest.message, currentRecord(latest.message, latest.id))),
             mounted: Boolean(document.querySelector(`.mes[mesid="${latest.id}"] .mes_text`)),
         } : null,
-        automaticOutput: automaticOutputLifecycle.diagnostics(),
+        automaticOutput: recentDiagnosticEvents(automaticOutputLifecycle.diagnostics(), 22),
+        browserExecution: recentDiagnosticEvents(executionTrace.diagnostics(), 24),
         serverTranslation: verbaServer.diagnostics(),
-        sourceChangeTrace: sourceChangeTracer.diagnostics(),
+        sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(), 16),
         settingsState: {
             autoInput: Boolean(settings.autoInput),
             autoOutput: settings.autoOutput !== false,
@@ -1117,9 +1132,9 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
         privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
-        ...(fullSourceSnapshotsEnabled && settings.debugMode === true && settings.serverTranslation === true
+        ...(sourceChangeTracer.diagnostics().fullTextEnabled && settings.debugMode === true
             ? { fullSourceWarning: '원문 전체 비교 기록이 활성화되어 있습니다. sourceChangeTrace.events에는 변경 전후의 RP 본문 전체, 삭제/추가된 글이 포함됩니다. 외부 공유 전 반드시 내용을 검토하세요.' } : {}),
-        limitation: '터먹스·서버 터미널에만 출력되고 브라우저에 전달되지 않은 로그는 읽을 수 없음',
+        limitation: '숨김은 브라우저 동결의 증거가 아닙니다. freeze 이벤트나 타이머 지연은 참고 정황이며, 실제 동결 중에는 브라우저 로그를 기록할 수 없습니다. 터먹스 로그는 별도입니다.',
     };
 }
 
@@ -1130,6 +1145,7 @@ function debugDiagnosticText(diagnostic) {
 
 async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic) {
     if (!settings.debugMode) throw new Error('복사하려면 디버그 모드를 켜 주세요.');
+    executionTrace.heartbeat();
     traceLatestAssistantSource('log-copy');
     await verbaServer.refreshDiagnostics();
     const snapshot = createDebugDiagnostic('manual-status', null, '복사 시점의 번역 상태');
@@ -5972,8 +5988,11 @@ async function translateMessage(messageId, options = {}) {
     const message = chatReference?.[id];
     if (!message || message.is_user || !isNameReplacementMessage(message)) return;
     let source = messageSource(message);
-    if (!source.trim()) return;
-    traceSourceForMessage(id, 'translation-started');
+    if (!source.trim()) {
+        executionTrace.trace('translation-skipped', id, { reason: 'empty-source' });
+        return;
+    }
+    traceSourceForMessage(id, 'translation-entered');
 
     if (options.automatic && isPredominantlyKorean(source)) {
         console.log(`[베르바] 한국어 중심 출력 자동 제외 #${id}`);
@@ -6030,6 +6049,7 @@ async function translateMessage(messageId, options = {}) {
     let toast = showProgress(options.force ? '아웃풋 전체를 다시 번역 중입니다…' : '아웃풋을 번역 중입니다…');
     const work = (async () => {
         try {
+            executionTrace.trace('translation-requested', id);
             let translated = await translateOutputText(source, {
                 automatic: options.automatic === true && options.force !== true,
                 previousUserSource: previousUserSource(chatReference, id, messageSource),
@@ -6047,7 +6067,8 @@ async function translateMessage(messageId, options = {}) {
             outputTiming.applying(timing);
             const latestContext = liveContext();
             const latest = latestContext.chat?.[id];
-            traceSourceForMessage(id, 'server-result-arrived');
+            executionTrace.trace('translation-response-received', id);
+            traceSourceForMessage(id, 'before-result-apply');
             const latestSource = messageSource(latest);
             const chatChanged = latestContext.chat !== snapshot.chatReference;
             const latestSwipeId = currentSwipeId(latest);
@@ -6142,6 +6163,7 @@ async function translateMessage(messageId, options = {}) {
 
             failedOutputSignatures.delete(id);
             outputJobSuccess = true;
+            executionTrace.trace('translation-applied', id);
             notify(options.force ? '전체 재번역을 적용했어요.' : '번역을 적용했어요.', 'success');
         } catch (error) {
             if (isAbort(error, controller.signal)) {
@@ -11846,10 +11868,10 @@ function injectSettingsPanel() {
                         </label>
                         <div class="verba-help">오류가 없어도 로그 복사로 현재 번역 대기·재시도 상태와 백그라운드 전환 기록을 확인할 수 있어요. 마지막 오류·응답 형식·보호 표식 복구 1건도 함께 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 끄거나 새로고침하면 지워집니다. 문제 구간의 원문·번역 일부가 포함됩니다. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
                         <label class="verba-check-row">
-                            <input type="checkbox" id="verba-debug-full-source" ${fullSourceSnapshotsEnabled ? 'checked' : ''} ${settings.debugMode && settings.serverTranslation === true ? '' : 'disabled'}>
-                            <span>원문 변경 전·후 전체 기록 (실험용)</span>
+                            <input type="checkbox" id="verba-debug-full-source" ${sourceChangeTracer.diagnostics().fullTextEnabled ? 'checked' : ''} ${settings.debugMode ? '' : 'disabled'}>
+                            <span>원문 변경 전·후 전체 기록 (선택)</span>
                         </label>
-                        <div class="verba-help">디버그 + 서버 번역을 켠 뒤, 이 옵션까지 켜야 원문 전체를 기록합니다. 변경 전·후 본문과 삭제/추가된 문장이 로그에 그대로 포함됩니다. 최근 변경 8건만 원문 전체를 보관하며, 다른 정보는 기존처럼 기록합니다. 세션 전용으로 새로고침하면 꺼집니다. 외부 공유 전 RP 내용을 반드시 확인해 주세요.</div>
+                        <div class="verba-help">디버그를 켠 뒤 이 옵션까지 켜면 변경 전·후 본문과 삭제/추가된 문장이 로그에 포함됩니다. 실제 본문은 최근 변경 8건만 메모리에 보관하며, 체크 상태만 기기에 저장됩니다. 한 번 켜면 직접 끌 때까지 새로고침 후에도 유지됩니다. 외부 공유 전 RP 내용을 반드시 확인해 주세요.</div>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode ? '' : 'disabled'}>로그 복사</button>
                         <details class="verba-tool-details">
                             <summary>마지막 출력 번역 소요 시간</summary>
@@ -12516,8 +12538,8 @@ function injectSettingsPanel() {
     const syncDebugCopyButton = () => {
         if (debugCopyButton) debugCopyButton.disabled = !settings.debugMode;
         if (fullSourceInput) {
-            fullSourceInput.disabled = !settings.debugMode || settings.serverTranslation !== true;
-            fullSourceInput.checked = fullSourceSnapshotsEnabled && !fullSourceInput.disabled;
+            fullSourceInput.disabled = !settings.debugMode;
+            fullSourceInput.checked = sourceChangeTracer.diagnostics().fullTextEnabled;
         }
     };
     debugModeInput?.addEventListener('change', event => {
@@ -12525,8 +12547,10 @@ function injectSettingsPanel() {
         if (!settings.debugMode) {
             fullSourceSnapshotsEnabled = false;
             sourceChangeTracer.reset();
+            executionTrace.clear({ dropTimer: true });
             lastDebugDiagnostic = null;
         } else {
+            executionTrace.start();
             traceLatestAssistantSource('debug-enabled');
         }
         outputTiming.setEnabled(settings.debugMode);
@@ -12537,7 +12561,7 @@ function injectSettingsPanel() {
     });
     fullSourceInput?.addEventListener('change', event => {
         fullSourceSnapshotsEnabled = Boolean(event.target.checked)
-            && settings.debugMode === true && settings.serverTranslation === true;
+            && settings.debugMode === true;
         sourceChangeTracer.reset();
         // Do not leave a previous error report holding full snapshots after opt-out.
         if (!fullSourceSnapshotsEnabled) lastDebugDiagnostic = null;
@@ -13088,12 +13112,13 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
         stableChecks: 0,
         timer: null,
         check: null,
+        dispatchStarted: false,
     };
     swipeTranslationJobs.set(id, job);
     renderSwipeHold(id, job);
 
     const check = () => {
-        if (swipeTranslationJobs.get(id) !== job) return;
+        if (swipeTranslationJobs.get(id) !== job || job.dispatchStarted) return;
         if (automaticOutputLifecycle.busy() && !automaticOutputLifecycle.isComplete(id)) {
             job.timer = setTimeout(check, 180);
             return;
@@ -13148,7 +13173,16 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
         if (signature !== job.candidateSignature) {
             job.candidateSignature = signature;
             job.stableChecks = 0;
-            job.timer = setTimeout(check, 120);
+            // A real completion signal proves this exact active swipe/source.
+            // Recheck in a microtask so Android background timer throttling
+            // cannot postpone an already completed swipe translation.
+            if (job.rendered && automaticOutputLifecycle.isComplete(id)) {
+                automaticOutputLifecycle.trace('swipe-final-microtask', id);
+                executionTrace.trace('swipe-final-microtask', id);
+                queueMicrotask(check);
+            } else {
+                job.timer = setTimeout(check, 120);
+            }
             return;
         }
 
@@ -13166,6 +13200,7 @@ function scheduleSwipeTranslation(messageId, previousSignature = '', hold = null
             finishSwipeTranslationJob(id, job);
             return;
         }
+        job.dispatchStarted = true;
         Promise.resolve(translateMessage(id, { automatic: true })).finally(() => {
             finishSwipeTranslationJob(id, job);
             refreshRetranslateButton();
@@ -13551,12 +13586,14 @@ function handleCompletedAssistantMessage(payload) {
     if (id < 0) id = latestAssistantMessage()?.id ?? -1;
     if (id < 0) return;
     traceSourceForMessage(id, 'message-received');
+    executionTrace.trace('assistant-message-received', id);
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;
     automaticOutputLifecycle.complete(id);
     startCompletedAutomaticOutput(id);
 }
 
 function handleGenerationEnded() {
+    executionTrace.trace('generation-ended');
     traceLatestAssistantSource('generation-ended');
     const ready = automaticOutputLifecycle.end();
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) {
@@ -13571,6 +13608,7 @@ function handleGenerationEnded() {
 }
 
 function resumeAutomaticOutputs() {
+    executionTrace.heartbeat();
     traceLatestAssistantSource('page-resumed');
     automaticOutputLifecycle.trace('page-resumed');
     if (!isTranslationExtensionActive(EXTENSION_KEY) || settings.autoOutput === false) return;
@@ -13588,6 +13626,7 @@ function resumeAutomaticOutputs() {
 
 function setupAutomaticOutputLifecycle() {
     document.addEventListener('visibilitychange', () => {
+        executionTrace.page(document.hidden ? 'hidden' : 'visible');
         traceLatestAssistantSource(document.hidden ? 'page-hidden' : 'page-visible');
         automaticOutputLifecycle.trace(document.hidden ? 'page-hidden' : 'page-visible');
         if (!document.hidden) resumeAutomaticOutputs();
@@ -13752,6 +13791,7 @@ function setupEvents() {
                 if (fullInput) fullInput.checked = false;
             }
             sourceChangeTracer.reset();
+            executionTrace.clear();
             automaticOutputLifecycle.reset();
             // Locks and bundles are one-shot editing state. Clear tracked
             // records before caches are discarded, and also clear any stale

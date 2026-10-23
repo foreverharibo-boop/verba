@@ -1,0 +1,70 @@
+name: Unify server translation into main v8
+on:
+  push:
+    branches:
+      - codex/server-translation-experimental
+    paths:
+      - .github/workflows/unify-main-once-v8.yml
+permissions:
+  contents: write
+jobs:
+  unify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/server-translation-experimental
+          fetch-depth: 0
+      - name: Run corrected verified merge and migration patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import textwrap
+          source=Path('.github/workflows/unify-main-once-v7.yml').read_text()
+          names=[
+              'Reuse verified merge, swipe and diagnostic patches',
+              'Convert installer tests to Git-managed migration',
+          ]
+          chunks=[]
+          for name in names:
+              marker=f'      - name: {name}\n'
+              start=source.index(marker)
+              run=source.index('        run: |\n',start)+len('        run: |\n')
+              boundary=source.find('\n      - name: ',run)
+              if boundary<0: boundary=len(source)
+              chunks.append(textwrap.dedent(source[run:boundary+1]))
+          script='\n'.join(chunks)
+          script=script.replace(
+              "next_step=source.find('      - name: ',run)",
+              "next_step=source.find('\\n      - name: ',run)+1",
+          )
+          Path('/tmp/unify-v8.sh').write_text(script)
+          PY
+          bash /tmp/unify-v8.sh
+
+      - name: Run unified regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check index.js
+          node --check source-change-tracer.js
+          node --check browser-execution-diagnostics.js
+          node --check server-plugin/index.cjs
+          node tests/automatic-output.mjs
+          node tests/main-background-diagnostics.mjs
+          node tests/full-source-preference.mjs
+          node tests/full-source-warning-once.mjs
+          node tests/bilingual-intent.mjs
+          node tests/bilingual-source-recovery-smoke.mjs
+          npm test --prefix server-plugin
+
+      - name: Commit unified branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git commit -m "Merge server translation into main-ready Verba (v0.6.66)"
+          git push origin HEAD:codex/server-translation-experimental

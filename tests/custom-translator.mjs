@@ -1,3 +1,4 @@
+import { deepseekKoreanEnabled } from '../deepseek-korean.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as core from '../core.js';
@@ -74,7 +75,7 @@ for(const scope of ['all','dialogueInner']) {
 const minimal=buildMinimalOutputPrompt(segmented.segments,settings,segmented.nameTokens,'ONCE');
 assert.match(minimal,/CUSTOM_OUTPUT/);assert.match(minimal,/Name tokens/);assert.match(minimal,/JSON only/);assert.match(minimal,/ONCE/);
 let sentMinimal='';await translateMinimalOutput(segmented,{...settings,developerOutputSplitCount:1},{signal:new AbortController().signal},{requestSegments:async(p,rows)=>{sentMinimal=p;return new Map(rows.map(x=>[x.id,'번역']));},buildSourceMap:()=>[]});assert.match(sentMinimal,/CUSTOM_OUTPUT/);
-const transport=Function('settings','normalizedChuseokGalbwaeScope',slice('function customTranslatorPromptKey(','function sendProfileRaceAttempt(')+'\nreturn applyCustomTranslatorPrompt;')(settings,api.normalizeGalbwae);
+const transport=Function('deepseekKoreanEnabled','settings','normalizedChuseokGalbwaeScope',slice('function customTranslatorPromptKey(','function sendProfileRaceAttempt(')+'\nreturn applyCustomTranslatorPrompt;')(deepseekKoreanEnabled,settings,api.normalizeGalbwae);
 for(const stage of ['output-translation','input-translation','selection-candidates','connection-test']) assert.equal(transport(prompt,{stage}),prompt,'transport must retain full composition');
 settings.customTranslatorTemplates.repair='LEGACY_REPAIR';settings.customTranslatorModified.repair=true;
 const repair=transport('CURRENT_TRANSLATION\nDETECTED_PROBLEM\nRESPONSE_SCHEMA',{stage:'banned-word-repair'});for(const text of ['LEGACY_REPAIR','CURRENT_TRANSLATION','DETECTED_PROBLEM','RESPONSE_SCHEMA'])assert.ok(repair.includes(text));
@@ -87,3 +88,4 @@ for(const key of ['name','consistency','repair','quality','flavor','other'])asse
 for(const label of ['채팅 번역','내가 보내는 글','선택한 부분 다시 번역','미친 한출의 맛','김홍진의 맛'])assert.ok(html.includes(label));
 assert.match(html,/자동으로 조립/);assert.doesNotMatch(html,/프롬프트를 완전히 대체/);
 console.log('PASS: five editors, original prose, exact migration/reload, separate scoped tastes, live rules/data, candidates, minimal pipeline and transport.');
+

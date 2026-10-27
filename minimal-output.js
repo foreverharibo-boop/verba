@@ -1,3 +1,4 @@
+import { deepseekKoreanEnabled, buildDeepseekKoreanPrompt } from './deepseek-korean.js';
 import { translationProse, withTranslationComposition } from './translation-composer.js';
 import { outputSplitCount, runOutputBatches } from './output-splitting.js';
 import { assembleTranslation, findProtectedTokenIntegrityProblems, findUntranslatedSegments, findUntranslatedTaggedContentSegments, normalizeLocallyRecoverableProtectedTokens, normalizeStructuredMetadataTranslation } from './core.js';
@@ -10,7 +11,7 @@ import { assembleTranslation, findProtectedTokenIntegrityProblems, findUntransla
 export const POST_TRANSLATION_AI_REPAIR_ENABLED = false;
 
 export function minimalOutputEnabled(settings = {}) {
-    return settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
+    return deepseekKoreanEnabled(settings) || settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
 }
 
 function buildMinimalOutputPromptInternal(segments, settings = {}, nameTokens = [], oneTimeInstruction = '') {
@@ -43,6 +44,7 @@ ${JSON.stringify(payload)}`;
 }
 
 export function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [], oneTimeInstruction = '') {
+    if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens);
     return withTranslationComposition(settings, 'output', current => buildMinimalOutputPromptInternal(segments, current, nameTokens, oneTimeInstruction));
 }
 
@@ -53,6 +55,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
         customTranslatorTemplates: settings.customTranslatorTemplates,
         customTranslatorModified: settings.customTranslatorModified,
         developerMode: settings.developerMode === true,
+        developerDeepseekKoreanEnabled: settings.developerDeepseekKoreanEnabled === true,
         developerMinimalPrompt: settings.developerMinimalPrompt,
         chuseokGalbwaeScope: settings.developerMode === true && ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
             ? settings.chuseokGalbwaeScope
@@ -136,7 +139,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     // Keep minimal-prompt mode under the same tag-only safety net. A complete
     // first translation adds no request; all failed tag rows share one retry.
     // Free Google mode is kept strictly free and never wakes an AI profile.
-    const untranslatedTagged = settings.translationEngine === 'google-free'
+    const untranslatedTagged = deepseekKoreanEnabled(settings) || settings.translationEngine === 'google-free'
         ? []
         : findUntranslatedTaggedContentSegments(segmented.segments, translations, config, {});
     if (untranslatedTagged.length) {
@@ -183,7 +186,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
         }
     }
 
-    await reviewEnglish?.({ segmented, translations, speakerIdentity: options.speakerIdentity || {}, options });
+    if (!deepseekKoreanEnabled(settings)) await reviewEnglish?.({ segmented, translations, speakerIdentity: options.speakerIdentity || {}, options });
 
     const translation = assembleTranslation(segmented, translations, {
         allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback,
@@ -191,3 +194,4 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     if (!translation.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
     return { translation, sourceMap: buildSourceMap(segmented, translations, translation) };
 }
+

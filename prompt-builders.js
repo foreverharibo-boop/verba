@@ -1,3 +1,4 @@
+import { deepseekKoreanEnabled, buildDeepseekKoreanPrompt, buildDeepseekSelectionPrompt } from './deepseek-korean.js';
 import { translationProse, withTranslationComposition, collectTranslationProse } from './translation-composer.js';
 // v0.5.61: user-approved concise flavors; disabled oppa sends no instruction.
 // Helpers are injected by core.js so parsing/identity/selection behavior stays shared.
@@ -169,11 +170,13 @@ export function createPromptBuilders(h) {
         ]);
     }
     function buildOutputPrompt(segmented,s,oneTimeInstruction='',speakerIdentity={},tuning=null,speakerScopes={}) {
+        if (deepseekKoreanEnabled(s)) return buildDeepseekKoreanPrompt(segmented.segments, segmented.nameTokens || []);
         const routing='SPEAKER ROUTING: speaker_scope="target_dialogue" is already confirmed as TARGET CHARACTER speech; apply TARGET-only voice/rules there. Never apply that voice to speaker_scope="other_dialogue". For speaker_scope="unknown_dialogue", identify the actual speaker from the supplied segment sequence, then apply TARGET rules only when clearly TARGET; otherwise use OTHER rules. Narration/tagged content never receives dialogue voice.';
         const rows=segmented.segments.map(({id,type,text,tagContext})=>({id,type,...(type==='dialogue_candidate'?{speaker_scope:speakerScopes[id]||'unknown_dialogue'}:{}),...(tagContext?.length?{tag_context:tagContext}:{}),text}));
         return lines([policy(s,{oneTimeInstruction,speakerIdentity,nameTokens:segmented.nameTokens,tuning}),routing,`Return ${schema}`,'SEGMENTS',j(rows)]);
     }
     function buildScopedOutputPrompt({segments,sourceContext,settings,oneTimeInstruction='',nameTokens=[],tuning=null,scope='narration',speakerIdentity={}}) {
+        if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens);
         return lines([policy(settings,{scope,oneTimeInstruction,nameTokens,tuning,speakerIdentity}),'Translate only TARGETS; SOURCE CONTEXT is reference only.',`Return ${schema}`,'SOURCE CONTEXT',j(h.boundReference(sourceContext,30000)),'TARGETS',j(segments.map(({id,type,text,tagContext})=>({id,type,...(tagContext?.length?{tag_context:tagContext}:{}),text})))]);
     }
     function buildInputPrompt(source,s={},targetGender='unknown',i={}) {
@@ -247,6 +250,7 @@ export function createPromptBuilders(h) {
     const selectionTask='Rephrase SELECTED only, beyond whitespace changes. Preserve source meaning, grammar/referents, force, consistent terms/tokens/format; fit LEFT/RIGHT when supplied, omit context from output. Apply dialogue voice only to its actual speaker, never narration.';
     function buildSelectionPrompt({source,sourceContext,translation,selected,start,end,settings,oneTimeInstruction,speakerIdentity={},candidateCount=1,contextMode='standard',tuning=null}) {
         const {left,right}=selectionContext(translation,start,end,contextMode);
+        if (deepseekKoreanEnabled(settings)) return buildDeepseekSelectionPrompt([{id:'seg_0000', selected_korean:selected, source_context:['selection','narrow'].includes(contextMode) ? str(sourceContext) : str(sourceContext || source), left_context:left, right_context:right}], candidateCount);
         const inDialogue=h.selectionTouchesDialogue(translation,start,end);
         const inInnerInfo=selectionTouchesInnerInfo(translation,start,end);
         const inTaggedContent=selectionTouchesTaggedContent(translation,start,end);
@@ -255,6 +259,10 @@ export function createPromptBuilders(h) {
         return lines([policy(settings,{scope:inDialogue?'dialogue_mixed':inInnerInfo?'inner_info':inTaggedContent?'tagged_content':'narration',oneTimeInstruction,speakerIdentity,tuning}),translationProse(settings,'primary',selectionTask,['Rephrase SELECTED only, beyond whitespace changes. ', ['/tokens/format', 'Preserve tokens and formatting.'], ['; fit LEFT/RIGHT when supplied, omit context from output.', 'Fit LEFT/RIGHT when supplied; omit context from output.'], ' Apply dialogue voice only to its actual speaker, never narration.']),Number(candidateCount)>1?'Return exactly 3 meaning-equivalent distinct candidates: {"candidates":[{"id":"candidate_1","translation":"..."},{"id":"candidate_2","translation":"..."},{"id":"candidate_3","translation":"..."}]}':`Return ${schema}`,'ORIGINAL SOURCE',j(h.boundReference(original)),'EXISTING KOREAN',j(reference),'LEFT',j(left),'SELECTED',j(selected),'RIGHT',j(right)]);
     }
     function buildMultiSelectionPrompt({source,translation,selections,settings,oneTimeInstruction,speakerIdentity={},contextMode='paragraph',tuning=null}) {
+        if (deepseekKoreanEnabled(settings)) return buildDeepseekSelectionPrompt((selections || []).map((row,index) => {
+            const {left,right}=selectionContext(translation,Number(row.start),Number(row.end),contextMode,true);
+            return {id:row.id || `multi_${String(index).padStart(4,'0')}`,selected_korean:row.selected,source_context:['selection','narrow'].includes(contextMode) ? str(row.sourceContext) : str(row.sourceContext || source),left_context:left,right_context:right};
+        }));
         const shared=contextMode==='message';
         const selectionOnly=contextMode==='selection'||contextMode==='narrow';
         const rows=(selections||[]).map((x,index)=>{const {left,right}=selectionContext(translation,Number(x.start),Number(x.end),contextMode,true);return {id:str(x.id||`multi_${String(index).padStart(4,'0')}`),selected_korean:str(x.selected),source_context:shared?'(use SHARED ORIGINAL SOURCE)':h.boundReference(selectionOnly?str(x.sourceContext):str(x.sourceContext||source),6000),left_context:left,right_context:right,in_dialogue:h.selectionTouchesDialogue(translation,Number(x.start),Number(x.end)),in_inner_info:selectionTouchesInnerInfo(translation,Number(x.start),Number(x.end)),in_tagged_content:selectionTouchesTaggedContent(translation,Number(x.start),Number(x.end))};});
@@ -283,3 +291,4 @@ export function createPromptBuilders(h) {
         buildMultiSelectionPrompt: options => withTranslationComposition(options.settings,'selection',settings => buildMultiSelectionPrompt({...options,settings})),
         buildSpeakerAttributionPrompt,buildBannedRepairPrompt,buildProtectedTokenRepairPrompt,buildUntranslatedRepairPrompt,buildQualityAuditPrompt,buildTermConsistencyRepairPrompt,buildRoleTermPlanPrompt,buildNameMatchPrompt,buildNameHistoryFormsPrompt};
 }
+

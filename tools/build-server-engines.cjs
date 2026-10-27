@@ -6,8 +6,9 @@ const crypto = require('node:crypto');
 const acorn = require('acorn');
 const scope = require('eslint-scope');
 const esbuild = require('esbuild');
-const roots = process.argv.slice(2);
-if (roots.length !== 2) throw Error('Usage: build-server-engines.cjs VERBA_DIRECTORY DEEP_DIRECTORY');
+const verbaOnly = process.argv[2] === '--verba-only';
+const roots = process.argv.slice(verbaOnly ? 3 : 2);
+if (roots.length !== (verbaOnly ? 1 : 2)) throw Error('Usage: build-server-engines.cjs VERBA_DIRECTORY DEEP_DIRECTORY | --verba-only VERBA_DIRECTORY');
 const overrides = {
     settings: 'const settings = structuredClone(snapshot.settings);',
     liveContext: 'function liveContext() { return { ...snapshot.context, ConnectionManagerRequestService: { sendRequest: transport } }; }',
@@ -70,6 +71,15 @@ async function build(root, variant) {
     return {hash,version:JSON.parse(fs.readFileSync(path.join(root,'manifest.json'))).version};
 }
 (async()=>{
+ if (verbaOnly) {
+  const root = path.resolve(roots[0]);
+  const file = path.join(root,'server-plugin/engines/manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(file,'utf8'));
+  manifest.engines.verba = await build(root,'verba');
+  fs.writeFileSync(file,JSON.stringify(manifest,null,2)+'\n');
+  return;
+ }
  const engines={verba:await build(path.resolve(roots[0]),'verba'),'verba-deep':await build(path.resolve(roots[1]),'verba-deep')};
  for(const root of roots) fs.writeFileSync(path.join(root,'server-plugin/engines/manifest.json'),JSON.stringify({protocol:1,engines},null,2)+'\n');
 })().catch(e=>{console.error(e);process.exitCode=1});
+

@@ -2,8 +2,8 @@
   "protocol": 1,
   "engines": {
     "verba": {
-      "hash": "9662e4ade51730e014bad05d8d8840ff230ebcbc3e9b26acb0968d968fd3a8c8",
-      "version": "0.6.65"
+      "hash": "9cfc15244d6ca3580f0e02ea9099452a766d0d11722e4508f495b98070bf6cae",
+      "version": "0.6.71"
     },
     "verba-deep": {
       "hash": "aff99ed6c04707579a1a8a5133dc96fc2ff62857105c8c3a038d030c3eedbb52",

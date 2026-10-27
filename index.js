@@ -1,6 +1,7 @@
+import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.70';
+import { createServerClient } from './server-client.js?v=0.6.71';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -64,9 +65,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.70';
-// This client-only fix uses the existing server translation engine unchanged.
-const SERVER_ENGINE_VERSION = '0.6.65';
+const EXTENSION_VERSION = '0.6.71';
+// Browser and server must use the same isolated translation prompt pipeline.
+const SERVER_ENGINE_VERSION = '0.6.71';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -366,6 +367,7 @@ const DEFAULT_SETTINGS = {
     developerAccessFingerprint: '',
     developerOutputSplitCount: 1,
     developerMinimalPromptEnabled: false,
+    developerDeepseekKoreanEnabled: false,
     developerMinimalPrompt: '자연스럽게 한국어로 번역하라.',
     developerCompressedPromptEnabled: false,
     developerExtremeCompressedPromptEnabled: false,
@@ -515,6 +517,7 @@ if (
 settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
 settings.developerOutputSplitCount = [2, 3].includes(Number(settings.developerOutputSplitCount)) ? Number(settings.developerOutputSplitCount) : 1;
 settings.developerMinimalPromptEnabled = settings.developerMinimalPromptEnabled === true;
+settings.developerDeepseekKoreanEnabled = settings.developerDeepseekKoreanEnabled === true;
 settings.developerMinimalPrompt = typeof settings.developerMinimalPrompt === 'string' ? settings.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt;
 settings.developerExtremeCompressedPromptEnabled = settings.developerExtremeCompressedPromptEnabled === true;
 if (settings.developerExtremeCompressedPromptEnabled) settings.developerCompressedPromptEnabled = false;
@@ -1235,6 +1238,11 @@ function warnTranslationPromptConflicts({
     includeDialogue = true,
     includeCharacterDialogue = true,
 } = {}) {
+    if (deepseekKoreanEnabled(settings)) {
+        lastPromptConflicts = [];
+        renderPromptConflictInspector([]);
+        return [];
+    }
     const conflicts = findTranslationPromptConflicts({
         settings,
         oneTimeInstruction,
@@ -1391,6 +1399,7 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
     return {
         developerOutputSplitCount: [2, 3].includes(Number(raw.developerOutputSplitCount)) ? Number(raw.developerOutputSplitCount) : 1,
         developerMinimalPromptEnabled: raw.developerMinimalPromptEnabled === true,
+        developerDeepseekKoreanEnabled: raw.developerDeepseekKoreanEnabled === true,
         developerMinimalPrompt: typeof raw.developerMinimalPrompt === 'string' ? raw.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt,
         developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true && !extremeCompressed,
         developerExtremeCompressedPromptEnabled: extremeCompressed,
@@ -1436,6 +1445,7 @@ function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
     return normalizedPromptPresetDeveloperSettings({
         developerOutputSplitCount: source.developerOutputSplitCount,
         developerMinimalPromptEnabled: source.developerMinimalPromptEnabled,
+        developerDeepseekKoreanEnabled: source.developerDeepseekKoreanEnabled,
         developerMinimalPrompt: source.developerMinimalPrompt,
         developerCompressedPromptEnabled: source.developerCompressedPromptEnabled,
         developerExtremeCompressedPromptEnabled: source.developerExtremeCompressedPromptEnabled,
@@ -2033,6 +2043,7 @@ function applyPromptPresetDeveloperSettings(value) {
 
     settings.developerOutputSplitCount = next.developerOutputSplitCount;
     settings.developerMinimalPromptEnabled = next.developerMinimalPromptEnabled;
+    settings.developerDeepseekKoreanEnabled = next.developerDeepseekKoreanEnabled;
     settings.developerMinimalPrompt = next.developerMinimalPrompt;
     settings.qualityAuditEnabled = next.qualityAuditEnabled;
     settings.developerCompressedPromptEnabled = next.developerCompressedPromptEnabled;
@@ -2417,6 +2428,16 @@ function currentRulesSimpleCard(title, rows = []) {
 function renderCurrentAppliedRules() {
     const host = document.querySelector('#verba-current-rules-content');
     if (!host) return;
+
+    if (deepseekKoreanEnabled(settings)) {
+        host.innerHTML = currentRulesSimpleCard('딥식플한출 · 한국어 출력/재번역', [
+            ['번역 지침', DEEPSEEK_KOREAN_PROMPT],
+            ['함께 전송', '원문·선택 구간과 문맥, 이름 토큰 대응표, JSON·보호 요소 규칙'],
+            ['일시 제외', '다른 기본·커스텀·한출·홍진·갈봬·미세조정 프롬프트, 일회성 요구사항, 한영병기 판정·AI 검수'],
+            ['연결', '현재 선택한 AI 연결 프로필 사용 · 모델 자동 변경 없음'],
+        ]);
+        return;
+    }
 
     if (minimalOutputEnabled(settings)) {
         host.innerHTML = currentRulesSimpleCard('최소 프롬프트 실험 · 출력/전체 재번역', [
@@ -3470,6 +3491,7 @@ function customTranslatorPromptKey(stage = '') {
 }
 
 function applyCustomTranslatorPrompt(prompt, options = {}) {
+    if (deepseekKoreanEnabled(settings) && customTranslatorPromptKey(options.stage) !== 'input') return String(prompt || '');
     // Public translation builders already replace just the registered prose.
     // Never rebuild from targets here: doing so loses live names/settings,
     // selection context, repair diagnostics and candidate response schemas.
@@ -3653,7 +3675,7 @@ async function sendWithRetry(prompt, options = {}) {
 
     const requestOptions = { ...options, signal: controller.signal };
     const customPrompt = applyCustomTranslatorPrompt(prompt, options);
-    const outgoingPrompt = options.previousUserSource
+    const outgoingPrompt = options.previousUserSource && !(deepseekKoreanEnabled(settings) && customTranslatorPromptKey(options.stage) !== 'input')
         ? appendPreviousUserContext(customPrompt, options.previousUserSource)
         : customPrompt;
     let lastError;
@@ -4989,6 +5011,7 @@ async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {
  * 20-second / 512-token decision request.
  */
 async function planBilingualDialogueVerdicts(segmented, options = {}) {
+    if (deepseekKoreanEnabled(settings)) return;
     if (settings.translationEngine === 'google-free') return;
     if (!segmented?.segments?.some(item => item.type === 'dialogue_candidate')) return;
     const pending = bilingualPromptsNeedingVerdict(settings);
@@ -6028,7 +6051,7 @@ async function translateMessage(messageId, options = {}) {
     const outputJobSlot = activeProfileSlot();
     const timing = outputTiming.begin({
         retranslation: options.force === true, slot: outputJobSlot, splitCount: outputSplitCount(settings),
-        mode: minimalOutputEnabled(settings) ? '최소 프롬프트'
+        mode: deepseekKoreanEnabled(settings) ? '딥식플한출' : minimalOutputEnabled(settings) ? '최소 프롬프트'
             : settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? '미친압축'
             : settings.developerMode && settings.developerCompressedPromptEnabled ? '압축' : '일반',
     });
@@ -9314,7 +9337,7 @@ async function retranslateSelectionBundle() {
         const unchangedIds = selections
             .filter(row => sameRetranslationWording(result.get(row.id), row.selected))
             .map(row => row.id);
-        if (unchangedIds.length) {
+        if (unchangedIds.length && !deepseekKoreanEnabled(settings)) {
             const changedPrompt = `${prompt}\n\nMANDATORY BUNDLE RETRANSLATION CORRECTION
 Your previous response echoed the existing Korean wording for these ids: ${JSON.stringify(unchangedIds)}.
 Return all required ids in the same schema. For listed ids, rephrase beyond Unicode/spacing/punctuation changes; retain meaning, referents, tense, force, explicitness and grammar role. Apply the one-time instruction.`;
@@ -9331,10 +9354,10 @@ Return all required ids in the same schema. For listed ids, rephrase beyond Unic
         const replacements = selections.map(row => {
             const replacement = String(result.get(row.id) || '').trim();
             if (!replacement) throw new Error('묶음 재번역 결과 중 비어 있는 구간이 있습니다.');
-            if (sameRetranslationWording(replacement, row.selected)) {
+            if (!deepseekKoreanEnabled(settings) && sameRetranslationWording(replacement, row.selected)) {
                 throw new Error(`AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
             }
-            const banned = findBannedWords(replacement, settings);
+            const banned = deepseekKoreanEnabled(settings) ? [] : findBannedWords(replacement, settings);
             if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
             if (replacement.length > Math.max(300, row.selected.length * 7)) {
                 throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
@@ -9596,7 +9619,7 @@ async function retranslateSelection(snapshot) {
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
-                if (findBannedWords(text, settings).length) return false;
+                if (!deepseekKoreanEnabled(settings) && findBannedWords(text, settings).length) return false;
                 return text.length <= Math.max(300, snapshot.selected.length * 7);
             });
             if (candidates.length < 2) {
@@ -9615,7 +9638,7 @@ async function retranslateSelection(snapshot) {
                 stage: 'selection-retranslation',
             });
             replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
-            if (!replacement || sameRetranslationWording(replacement, snapshot.selected)) {
+            if (!deepseekKoreanEnabled(settings) && (!replacement || sameRetranslationWording(replacement, snapshot.selected))) {
                 const changedPrompt = `${prompt}\n\nMANDATORY RETRANSLATION CORRECTION
 Your previous replacement was empty or unchanged. Return a genuinely different Korean wording for the selected fragment now.
 - Do not repeat the existing selected fragment verbatim or with whitespace-only changes.
@@ -9629,12 +9652,12 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
                 });
                 replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
             }
-            if (sameRetranslationWording(replacement, snapshot.selected)) {
+            if (!deepseekKoreanEnabled(settings) && sameRetranslationWording(replacement, snapshot.selected)) {
                 throw new Error('AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');
             }
         }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
-        const banned = findBannedWords(replacement, settings);
+        const banned = deepseekKoreanEnabled(settings) ? [] : findBannedWords(replacement, settings);
         if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
         if (replacement.length > Math.max(300, snapshot.selected.length * 7)) {
             throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
@@ -10760,6 +10783,19 @@ function developerSettingsMarkup() {
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
+                    <details id="verba-developer-deepseek-korean-lab" class="verba-tool-details verba-developer-lab">
+                        <summary>딥식플한출 <small>영어 프롬프트 단독 테스트</small></summary>
+                        <div class="verba-tool-details-content">
+                            <label class="verba-check-row">
+                                <input type="checkbox" id="verba-developer-deepseek-korean-enabled" ${settings.developerDeepseekKoreanEnabled ? 'checked' : ''}>
+                                <span>딥식플한출 사용</span>
+                            </label>
+                            <div class="verba-help">한국어 출력·전체/선택 재번역에 전용 영어 프롬프트만 사용합니다. 다른 기본·커스텀·한출·홍진·갈봬·미세조정 지침과 일회성 요구사항은 보내지 않으며, 한영병기 판정·번역 후 AI 검수도 생략합니다.</div>
+                            <div class="verba-help">원문, 선택 구간의 문맥, 이름 고정 정보, JSON·보호 요소 규칙만 함께 보냅니다. AI 연결 프로필에서 테스트할 모델을 직접 선택해 주세요. 모델은 자동 변경되지 않으며 무료 구글 번역에는 적용되지 않습니다.</div>
+                            <div class="verba-help">끄면 저장된 기존 설정으로 돌아갑니다. 한국어→영어 인풋 번역은 기존 설정을 사용합니다. 서버 번역 사용자는 베르바 서버 플러그인도 업데이트해 주세요.</div>
+                            <details><summary>영어 프롬프트 보기</summary><pre class="verba-help" style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(DEEPSEEK_KOREAN_PROMPT)}</pre></details>
+                        </div>
+                    </details>
                     ${developerChuseokGalbwaeMarkup()}
                     
                     <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
@@ -11995,6 +12031,7 @@ function injectSettingsPanel() {
         if (target.closest('#verba-developer-mode-off')) {
             settings.developerMode = false;
             settings.developerMinimalPromptEnabled = false;
+            settings.developerDeepseekKoreanEnabled = false;
             settings.developerCompressedPromptEnabled = false;
             settings.developerExtremeCompressedPromptEnabled = false;
             settings.qualityAuditEnabled = false;
@@ -12045,6 +12082,13 @@ function injectSettingsPanel() {
 
         if (target.id === 'verba-developer-output-split-count' && target instanceof HTMLSelectElement) {
             settings.developerOutputSplitCount = [2, 3].includes(Number(target.value)) ? Number(target.value) : 1;
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-developer-deepseek-korean-enabled' && target instanceof HTMLInputElement) {
+            settings.developerDeepseekKoreanEnabled = target.checked;
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
@@ -13950,3 +13994,4 @@ if (document.readyState === 'loading') {
 } else {
     setTimeout(initialize, 0);
 }
+

@@ -1,3 +1,4 @@
+import { deepseekKoreanEnabled } from './deepseek-korean.js';
 import { bilingualPromptRequestsOutput } from './bilingual-intent.js';
 import { createPromptBuilders } from './prompt-builders.js';
 import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, canonicalizeProtectedTokenVariants } from './response-parser.js';
@@ -874,6 +875,7 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
  * never wrapped a second time.
  */
 export function normalizeBilingualMappedTranslation(translation, sourceMap = [], settings = {}, source = '') {
+    if (deepseekKoreanEnabled(settings)) return { translation: String(translation || ''), sourceMap };
     let text = String(translation || '');
     const rows = (Array.isArray(sourceMap) ? sourceMap : []).flatMap((entry, index) => {
         const source = String(entry?.source || '').trim();
@@ -4779,3 +4781,4 @@ const promptBuilders = createPromptBuilders({
 });
 
 export function customTranslationDefaults() { return promptBuilders.customTranslationDefaults(); }
+

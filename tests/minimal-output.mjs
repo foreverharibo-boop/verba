@@ -77,8 +77,8 @@ assert.match(fs.readFileSync(new URL('../minimal-output.js', import.meta.url),'u
 
 // Actual entry point must branch before any optional planning, classification,
 // banned-word repair or quality audit, even when all those options are enabled.
-const route=Function('settings','normalizedCharacterNameLocks','segmentSource','minimalOutputEnabled','translateMinimalOutput','requestSegments','buildSourceMap','planRepeatedRoleTermLocks','reviewFinalEnglish',between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;');
-const run=route(settings,()=>[],segmentSource,minimalOutputEnabled,translateMinimalOutput,requestSegments,buildSourceMap,()=>{throw Error('NORMAL_PATH');},async ({translations})=>{assert.ok(translations instanceof Map);});
+const route=Function('planBilingualDialogueVerdicts','settings','normalizedCharacterNameLocks','segmentSource','minimalOutputEnabled','translateMinimalOutput','requestSegments','buildSourceMap','planRepeatedRoleTermLocks','reviewFinalEnglish',between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;');
+const run=route(async()=>{},settings,()=>[],segmentSource,minimalOutputEnabled,translateMinimalOutput,requestSegments,buildSourceMap,()=>{throw Error('NORMAL_PATH');},async ({translations})=>{assert.ok(translations instanceof Map);});
 calls=[];await run('He waited.');assert.equal(calls.length,1);
 settings.developerMode=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMode=true;
 settings.developerMinimalPromptEnabled=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMinimalPromptEnabled=true;
@@ -168,3 +168,4 @@ assert.equal(settings.developerMode,false);assert.equal(settings.developerMinima
 assert.equal(settings.developerMinimalPrompt,preserved.developerMinimalPrompt);
 assert.equal(settings.developerMadKoreanOutputEnabled,true);assert.equal(settings.developerHongjinFlavorEnabled,true);
 console.log('PASS: developer-only escaped UI, toggle restores saved settings, developer shutdown disables experiment but retains text/flavors.');
+

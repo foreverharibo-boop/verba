@@ -1208,33 +1208,6 @@ export function normalizeNameLocks(value) {
     return normalized.sort((left, right) => right.source.length - left.source.length);
 }
 
-/**
- * SillyTavern already knows the current USER and character display names, but
- * those names are not necessarily present in the character's manually saved
- * name-lock list.  A Hangul display name must still be treated as one
- * indivisible proper noun during mixed-language translation.  Otherwise a
- * model can reinterpret its final syllable as a Korean particle (for example,
- * a full name ending in 은) and silently shorten the name.
- *
- * Only identities whose resolved spelling is already Korean are added
- * automatically.  An unmapped Latin display name must remain translatable
- * rather than being frozen in Latin script.  Explicit saved locks come first
- * and therefore keep priority over these automatic identity locks.
- */
-export function mergeIdentityNameLocks(nameLocks = [], identity = {}) {
-    const automatic = [];
-    const add = (sourceValue, targetValue) => {
-        const source = String(sourceValue || '').trim();
-        const target = String(targetValue || '').trim();
-        if (!source || !target || !/[가-힣]/u.test(target) || /[A-Za-z]/u.test(target)) return;
-        automatic.push({ source, target });
-        if (source !== target) automatic.push({ source: target, target });
-    };
-    add(identity.sourceCharacterName || identity.characterName, identity.characterName);
-    add(identity.sourceUserName || identity.userName, identity.userName);
-    return normalizeNameLocks([...normalizeNameLocks(nameLocks), ...automatic]);
-}
-
 export function resolveOutputSpeakerIdentity(identity = {}, nameLocks = []) {
     const locks = normalizeNameLocks(nameLocks);
     // Display-name punctuation is not part of a Hangul person's name. Do not

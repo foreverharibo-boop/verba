@@ -1,6 +1,6 @@
 {
   "name": "verba-server",
-  "version": "0.1.11",
+  "version": "0.1.10",
   "private": true,
   "main": "index.cjs",
   "engines": {

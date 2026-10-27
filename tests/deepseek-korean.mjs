@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from '../deepseek-korean.js';
 import { buildMinimalOutputPrompt, translateMinimalOutput } from '../minimal-output.js';
-import { assembleTranslation, segmentSource, buildOutputPrompt, buildSelectionPrompt, buildMultiSelectionPrompt, buildInputPrompt, mergeIdentityNameLocks, normalizeBilingualMappedTranslation } from '../core.js';
+import { segmentSource, buildOutputPrompt, buildSelectionPrompt, buildMultiSelectionPrompt, buildInputPrompt, normalizeBilingualMappedTranslation } from '../core.js';
 import { createEngine } from '../server-plugin/engines/verba.mjs';
 
 const settings = {
@@ -68,22 +68,6 @@ test('bundled server engine sends the isolated prompt, preserves structure and s
     assert.equal(calls,1);assert.match(out.translation,/다나/);assert.match(out.translation,/KEEP_CODE/);assert.match(out.translation,/<Info_panel>맑음<\/Info_panel>/);assert.doesNotMatch(out.translation,/@@VERBA/);
     assert.deepEqual(original.settings,settings);
 });
-test('bundled server engine cannot split a Hangul USER name ending like a particle',async()=>{
-    const original={...snapshot(),nameLocks:[]};
-    const engine=createEngine(original,async(_id,messages)=>{
-        const prompt=messages[0].content;
-        const rows=JSON.parse(prompt.split('\nTARGETS\n').at(-1));
-        const token=rows.flatMap(row=>row.text.match(/@@VERBA_NAME_\d{4}@@/g)||[])[0];
-        assert.ok(token);
-        assert.doesNotMatch(JSON.stringify(rows),/혜담은/u);
-        return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:`${token}이 노트북을 열었다.`}))})};
-    });
-    const out=await engine.output('Mincheol watched 혜담은 open her laptop.',{
-        speakerIdentity:{sourceUserName:'혜담은',userName:'혜담은',sourceCharacterName:'Mincheol',characterName:'Mincheol'},
-    });
-    assert.match(out.translation,/혜담은이 노트북을 열었다\./u);
-    assert.doesNotMatch(out.translation,/(?:^|[^\p{L}])혜담이/u);
-});
 test('switching off restores existing prompt and input translation remains unchanged',()=>{
     const off={...settings,developerDeepseekKoreanEnabled:false,chuseokGalbwaeScope:'off',customTranslatorEnabled:false};
     assert.match(buildMinimalOutputPrompt(segmented.segments,off),/^MINIMAL_SENTINEL/);
@@ -92,20 +76,6 @@ test('switching off restores existing prompt and input translation remains uncha
 test('Korean-only output is not rewrapped by the saved bilingual setting',()=>{
     const map=[{id:'seg_0000',source:'"Come here."',start:0,end:6}];
     assert.deepEqual(normalizeBilingualMappedTranslation('"이리 와."',map,settings,'"Come here."'),{translation:'"이리 와."',sourceMap:map});
-});
-test('a Hangul USER name is protected as one indivisible proper noun',()=>{
-    const locks=mergeIdentityNameLocks([],{
-        sourceUserName:'혜담은',userName:'혜담은',
-        sourceCharacterName:'Mincheol',characterName:'Mincheol',
-    });
-    assert.deepEqual(locks,[{source:'혜담은',target:'혜담은'}]);
-    const named=segmentSource('Mincheol watched 혜담은 open her laptop.',locks);
-    assert.equal(named.nameTokens.length,1);
-    assert.equal(named.nameTokens[0].value,'혜담은');
-    assert.doesNotMatch(named.protectedText,/혜담/u);
-    const token=named.nameTokens[0].token;
-    const translations=new Map(named.segments.map(row=>[row.id,`민철은 ${token}이 노트북을 여는 모습을 봤다.`]));
-    assert.equal(assembleTranslation(named,translations).includes('혜담은이 노트북을'),true);
 });
 test('selection-only mode never falls back to the entire source',()=>{
     const options={source:'FULL_SOURCE_SENTINEL',sourceContext:'',translation:'선택문',selected:'선택문',start:0,end:3,settings,contextMode:'selection'};

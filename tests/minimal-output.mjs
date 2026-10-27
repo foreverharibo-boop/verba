@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { minimalOutputEnabled, buildMinimalOutputPrompt, POST_TRANSLATION_AI_REPAIR_ENABLED, translateMinimalOutput } from '../minimal-output.js';
 import { splitOutputSegments } from '../output-splitting.js';
 const splitMinimalOutputSegments = segmented => splitOutputSegments(segmented, 2);
-import { segmentSource, restoreProtected, assembleTranslation, buildOutputPrompt } from '../core.js';
+import { segmentSource, restoreProtected, assembleTranslation, buildOutputPrompt, mergeIdentityNameLocks } from '../core.js';
 import { collectSegmentResponse } from '../response-parser.js';
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const between=(a,b)=>index.slice(index.indexOf(a),index.indexOf(b,index.indexOf(a)));
@@ -77,8 +77,8 @@ assert.match(fs.readFileSync(new URL('../minimal-output.js', import.meta.url),'u
 
 // Actual entry point must branch before any optional planning, classification,
 // banned-word repair or quality audit, even when all those options are enabled.
-const route=Function('planBilingualDialogueVerdicts','settings','normalizedCharacterNameLocks','segmentSource','minimalOutputEnabled','translateMinimalOutput','requestSegments','buildSourceMap','planRepeatedRoleTermLocks','reviewFinalEnglish',between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;');
-const run=route(async()=>{},settings,()=>[],segmentSource,minimalOutputEnabled,translateMinimalOutput,requestSegments,buildSourceMap,()=>{throw Error('NORMAL_PATH');},async ({translations})=>{assert.ok(translations instanceof Map);});
+const route=Function('planBilingualDialogueVerdicts','settings','normalizedCharacterNameLocks','mergeIdentityNameLocks','segmentSource','minimalOutputEnabled','translateMinimalOutput','requestSegments','buildSourceMap','planRepeatedRoleTermLocks','reviewFinalEnglish',between('async function translateOutputText(', 'function inputIdentitySpellingContext(')+'\nreturn translateOutputText;');
+const run=route(async()=>{},settings,()=>[],mergeIdentityNameLocks,segmentSource,minimalOutputEnabled,translateMinimalOutput,requestSegments,buildSourceMap,()=>{throw Error('NORMAL_PATH');},async ({translations})=>{assert.ok(translations instanceof Map);});
 calls=[];await run('He waited.');assert.equal(calls.length,1);
 settings.developerMode=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMode=true;
 settings.developerMinimalPromptEnabled=false;await assert.rejects(run('He waited.'),/NORMAL_PATH/);settings.developerMinimalPromptEnabled=true;

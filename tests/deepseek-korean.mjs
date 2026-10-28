@@ -39,6 +39,14 @@ test('requires both developer access and the dedicated switch',()=>{
         assert.equal(deepseekKoreanEnabled({...settings,developerMode:dev,developerDeepseekKoreanEnabled:toggle}),dev&&toggle);
     }
 });
+test('experiment prompt requests native Korean prose, full-name particles and contextual family ownership',()=>{
+    assert.match(DEEPSEEK_KOREAN_PROMPT,/처음부터 한국어로 집필된 글/);
+    assert.match(DEEPSEEK_KOREAN_PROMPT,/혜담은 전체가 이름/);
+    assert.match(DEEPSEEK_KOREAN_PROMPT,/혜담은이 노트북을 열었다/);
+    assert.match(DEEPSEEK_KOREAN_PROMPT,/부엌에서는 남은 찌개를 데우는 냄새가 났다/);
+    assert.match(DEEPSEEK_KOREAN_PROMPT,/민철네 부엌에서는 남은 찌개를 데우는 냄새가 났다/);
+    assert.match(DEEPSEEK_KOREAN_PROMPT,/김씨네, 김가네, 김씨 가족, 김씨 자택 같은 표현을 자동으로 만들지 않는다/);
+});
 test('all output and selection prompt builders exclude saved and one-time prompts',()=>{
     const before=structuredClone(settings);
     checkPrompt(buildMinimalOutputPrompt(segmented.segments,settings,segmented.nameTokens,'ONETIME_SENTINEL'));

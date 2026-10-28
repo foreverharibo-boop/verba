@@ -75,7 +75,8 @@ for (const [enabled, repeat] of [
         ok(scoped({ [enabled]: true, [repeat]: true }, scope) !== scoped({ [enabled]: true, [repeat]: false }, scope), `${repeat}/${scope} ON/OFF affects request`);
         ok(scoped({ [enabled]: false, [repeat]: true }, scope) === scoped({ [enabled]: false, [repeat]: false }, scope), `${repeat}/${scope} disabled parent excludes rule`);
     }
-    ok(scoped({ [enabled]: true, [repeat]: true, developerMadKoreanOutputEnabled: true }) === scoped({ [enabled]: true, [repeat]: false, developerMadKoreanOutputEnabled: true }), `${repeat} Mad exclusion`);
+    const sameInMad = scoped({ [enabled]: true, [repeat]: true, developerMadKoreanOutputEnabled: true }) === scoped({ [enabled]: true, [repeat]: false, developerMadKoreanOutputEnabled: true });
+    ok(sameInMad === (enabled !== 'koreanFlavorEnabled'), `${repeat} MAD allows Korean taste only`);
 }
 for (const [enabled, keys] of [
     [null, ['expressionDisfluencyTaste']],
@@ -115,3 +116,4 @@ for (const mad of [false, true]) {
 }
 
 console.log(`PASS: ${checks} assertions; API calls: 0; live browser testing: not performed.`);
+

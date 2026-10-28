@@ -97,5 +97,5 @@ test('server manifest and UI advertise the new mode and compatible engine versio
     assert.match(index,/developerDeepseekKoreanEnabled: raw.developerDeepseekKoreanEnabled === true/);
     const manifest=JSON.parse(fs.readFileSync(new URL('../server-plugin/engines/manifest.json',import.meta.url)));
     assert.ok(index.includes(`const SERVER_ENGINE_VERSION = '${manifest.engines.verba.version}'`));
-    assert.equal(manifest.engines['verba-deep'].version,'0.6.43');
+    assert.equal(manifest.engines['verba-deep'].version,'0.6.44');
 });

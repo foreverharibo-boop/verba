@@ -524,6 +524,23 @@ function createPromptBuilders(h) {
       translationProse(s, "mad", "Approximate yard distances\u2192same-number meters (50 yards\u219250\uBBF8\uD130); other imperial units\u2192metric, context-needed precision. Overrides number fidelity; exempt codes/durations/evidence/product/customary units/metadata layout.")
     ]);
   }
+  function flavorRows(s, scope, koreanOnly = false) {
+    const d = dialogueScope(scope), rows = [];
+    for (const [flag, prefix, label] of [["koreanFlavorEnabled", "koreanFlavor", "Korean-character"], ["englishFlavorEnabled", "englishFlavor", "English-character"]]) {
+      if (!s[flag] || koreanOnly && flag !== "koreanFlavorEnabled") continue;
+      const keys = ["ProfanityTone", "MemeDensity", ...flag === "koreanFlavorEnabled" ? ["PronounOmission"] : [], ...d ? ["DialogueRhythm", "InterjectionTone", ...flag === "englishFlavorEnabled" ? ["SlangDensity", "ConversationNaturalization"] : []] : []];
+      rows.push(`${label} taste${d ? " (rhythm/interjection/slang/conversation: dialogue only)" : ""}: ${keys.filter((k) => s[prefix + k] != null).map((k) => k + "=" + s[prefix + k]).join(", ")}. ${koreanOnly ? "Korean taste favors native rhythm." : "Korean taste favors native rhythm; English taste retains source-cultural conversational identity."} Do not invent nationality, jokes or stronger force; explicit source/user rules win conflicts.`);
+      if (s[prefix + "ReduceReferentRepetition"] !== false) rows.push(`${label}: reduce only redundant references; preserve clarity and meaningful I/you contrast, never invent labels`);
+    }
+    return rows;
+  }
+  function madKoreanTaste(s, scope) {
+    if (s.koreanFlavorEnabled !== true) return "";
+    return lines([
+      "KOREAN CHARACTER ADD-ON: apply the selected Korean taste alongside MAD recomposition. Rhythm/interjection controls apply only to dialogue. Keep MAD pair speech locks and the enabled TARGET-only Hongjin voice override.",
+      ...flavorRows(s, scope, true)
+    ]);
+  }
   function tuning(s, override, scope) {
     const o = override || {}, get = (k, d2) => o[k] ?? s[k] ?? d2;
     const d = dialogueScope(scope), t = targetScope(scope), n = narrationScope(scope), rows = [];
@@ -539,12 +556,7 @@ function createPromptBuilders(h) {
     }
     const expr = { expressionEmphasisTaste: ["emphasis", { source: "retain visible source stress", natural: "adapt stress to Korean rhythm", active: "actively retain marked stress without amplifying" }], expressionIdiomMetaphorTaste: ["idiom/metaphor", { meaning: "paraphrase intended meaning", balanced: "keep image when natural, otherwise meaning", koreanized: "use equivalent native idiom, else paraphrase; preserve factual culture", sourceCulture: "retain source image/culture without literal calques" }], ...d ? { expressionDisfluencyTaste: ["dialogue disfluency", { clean: "smooth surface stutters, keep semantic hesitation/interruption", natural: "naturally retain meaningful stutters and false starts", active: "actively retain source disruption, never add" }] } : {} };
     for (const [key, [label, map]] of Object.entries(expr)) if (s[key] && s[key] !== "default") rows.push(`${label}=${s[key]}: ${map[s[key]] || s[key]}; source expressions only, never add force`);
-    for (const [flag, prefix, label] of [["koreanFlavorEnabled", "koreanFlavor", "Korean-character"], ["englishFlavorEnabled", "englishFlavor", "English-character"]]) {
-      if (!s[flag]) continue;
-      const keys = ["ProfanityTone", "MemeDensity", ...flag === "koreanFlavorEnabled" ? ["PronounOmission"] : [], ...d ? ["DialogueRhythm", "InterjectionTone", ...flag === "englishFlavorEnabled" ? ["SlangDensity", "ConversationNaturalization"] : []] : []];
-      rows.push(`${label} taste${d ? " (rhythm/interjection/slang/conversation: dialogue only)" : ""}: ${keys.filter((k) => s[prefix + k] != null).map((k) => k + "=" + s[prefix + k]).join(", ")}. Korean taste favors native rhythm; English taste retains source-cultural conversational identity. Do not invent nationality, jokes or stronger force; explicit source/user rules win conflicts.`);
-      if (s[prefix + "ReduceReferentRepetition"] !== false) rows.push(`${label}: reduce only redundant references; preserve clarity and meaningful I/you contrast, never invent labels`);
-    }
+    rows.push(...flavorRows(s, scope));
     if (t && s.developerRelationshipExperimentEnabled === true) {
       rows.push(`TARGET relationship delivery: distance=${s.developerSpeechDistance || "source"} (formal=respectful, polite=\uD574\uC694\uCCB4, casual/veryCasual=\uBC18\uB9D0); TARGET\u2192USER=${s.developerTargetToUserRegister || "unset"}; TARGET\u2192OTHER=${s.developerTargetToOtherRegister || "unset"}. Audience-specific speech levels override distance only for identified listeners; ambiguous/mixed/quoted audiences use base rules.`);
       const address = str(s.developerTargetToUserAddress).trim().slice(0, 40);
@@ -585,7 +597,7 @@ ${values[k]}`).join("\n");
     const [bilingualOpen, bilingualClose] = bilingual ? h.bilingualDialogueBracketPair(s) : ["(", ")"];
     return lines([
       exclusive ? translationProse(s, "mad", "TOP PRIORITY \u2014 NO MISOGYNY: ban misogyny/gender degradation over all voice settings; source profanity keeps its force in non-gendered wording.") : hongjinEnabled(s) ? targetScope(scope) ? translationProse(s, "hongjin", noMisogyny) : noMisogyny : "",
-      exclusive ? lines([translationProse(s, "mad", madFidelity), names, madRules(s), hongjin(s, scope, true)]) : custom ? translationProse(s, "primary", str(s.baseTranslationCustom.prompt)) : lines([translationProse(s, "primary", mode(s) === 2 ? "E\u2192K: idiomatic Korean; preserve intentional fragments, roughness and ambiguity." : basic), translationProse(s, "primary", fidelity), names, translationProse(s, "primary", nameParticles)]),
+      exclusive ? lines([translationProse(s, "mad", madFidelity), names, madRules(s), madKoreanTaste(s, scope), hongjin(s, scope, true)]) : custom ? translationProse(s, "primary", str(s.baseTranslationCustom.prompt)) : lines([translationProse(s, "primary", mode(s) === 2 ? "E\u2192K: idiomatic Korean; preserve intentional fragments, roughness and ambiguity." : basic), translationProse(s, "primary", fidelity), names, translationProse(s, "primary", nameParticles)]),
       exclusive ? madFormat : format,
       galbwae2(s, scope),
       exclusive ? "Korean only." : userRules(s, oneTimeInstruction, over, scope),

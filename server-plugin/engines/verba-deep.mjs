@@ -1,3 +1,140 @@
+// code-content.js
+const PROGRAM_LANGUAGES = /^(?:js|javascript|ts|typescript|jsx|tsx|css|scss|less|json|jsonc|python|py|sh|bash|shell|powershell|ps1|sql|java|c|cpp|csharp|cs|go|rust|ruby|rb|php|yaml|yml|toml|ini)$/i;
+const MACHINE_VALUE = /^(?:[\w]+[_./\\][\w./\\-]*|[a-z]+[A-Z][\w]*|https?:\/\/\S+|#[\da-f]{3,8}|\d+(?:\.\d+)?(?:px|em|rem|%|s|ms)?|true|false|null|undefined)$/;
+const CODE_LINE = /^\s*(?:(?:(?:const|let|var)\s+[\w$]+\s*=|(?:function|def|class)\s+[\w$]+\s*[(:{]|(?:if|while|for|switch|catch)\s*\(|(?:import|from)\s+[^\n]*\b(?:from|import)\b)|[\w.$]+\s*(?:\([^\n]*\)\s*[;{]?\s*$|(?:[+*/-]?=|=>))|[{}\[\]]\s*[,;]?\s*$|["'][^"']+["']\s*:|[.#][\w-]+\s*\{|[\w-]+\s*:\s*[^\n]*;)/;
+function readable(value) {
+  const text = String(value).trim();
+  return new RegExp("\\p{L}", "u").test(text) && !MACHINE_VALUE.test(text);
+}
+function escaped(text, index) {
+  let count = 0;
+  while (index > 0 && text[--index] === "\\") count++;
+  return count % 2 === 1;
+}
+function nextMarkdown(text, from) {
+  const runs = /`+|~{3,}/g;
+  runs.lastIndex = from;
+  let match;
+  while (match = runs.exec(text)) {
+    const start = match.index;
+    if (escaped(text, start)) continue;
+    const run = match[0];
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    const fenced = run.length >= 3 && /^ {0,3}$/.test(text.slice(lineStart, start));
+    if (fenced) {
+      const lineEnd = text.indexOf("\n", runs.lastIndex);
+      if (lineEnd < 0) continue;
+      const info = text.slice(runs.lastIndex, lineEnd).trim();
+      if (run[0] === "`" && info.includes("`")) continue;
+      const close = new RegExp("^ {0,3}" + (run[0] === "`" ? "`" : "~") + "{" + run.length + ",}[ \\t]*(?=\\r?$)", "gm");
+      close.lastIndex = lineEnd + 1;
+      const end2 = close.exec(text);
+      return {
+        start,
+        end: end2 ? close.lastIndex : text.length,
+        open: text.slice(start, lineEnd + 1),
+        body: text.slice(lineEnd + 1, end2 ? end2.index : text.length),
+        close: end2?.[0] || "",
+        language: info.split(/\s/)[0]
+      };
+    }
+    if (run[0] !== "`") continue;
+    const closing = /`+/g;
+    closing.lastIndex = runs.lastIndex;
+    let end;
+    while (end = closing.exec(text)) {
+      if (end[0].length !== run.length) continue;
+      return { start, end: closing.lastIndex, open: run, body: text.slice(runs.lastIndex, end.index), close: run, language: "" };
+    }
+  }
+  return null;
+}
+function replaceProtectedSource(value, opaquePattern, replacement, { opaqueCode = false } = {}) {
+  const text = String(value || "");
+  const protect = (raw, meta) => typeof replacement === "function" ? replacement(raw, meta) : replacement;
+  const opaque = new RegExp(opaquePattern.source, opaquePattern.flags);
+  const ordinary = (body) => body.replace(opaquePattern, (raw) => protect(raw));
+  const boundary = (raw, direction, quote = "") => protect(raw, { codeBoundary: direction, codeQuote: quote });
+  const prose = (body, quote = "") => {
+    if (quote) return body.split(/(\\(?:u[\da-fA-F]{4}|x[\da-fA-F]{2}|[^]))/u).map((part, i) => i % 2 ? protect(part) : ordinary(part)).join("");
+    return ordinary(body);
+  };
+  const program = (body, language) => {
+    const json = /^(?:json|jsonc)$/i.test(language) || /^\s*[{[]/.test(body);
+    const conventionalStrings = json || /^(?:|js|javascript|ts|typescript|css|scss|less|python|py|java|c|cpp|csharp|cs|go|rust|ruby|rb|php)$/i.test(language);
+    const syntax = /"""[\s\S]*?"""|'''[\s\S]*?'''|`(?:\\[\s\S]|[^`\\])*`|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|\/(?:\\[^\r\n]|\[(?:\\[^\r\n]|[^\]\\])*\]|[^/\\\r\n])+\/[a-z]*|#[^\r\n]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g;
+    let result2 = "", cursor2 = 0, match;
+    while (match = syntax.exec(body)) {
+      result2 += protect(body.slice(cursor2, match.index));
+      const raw = match[0], quote = raw[0];
+      const stringLiteral = (quote === '"' || quote === "'") && !raw.startsWith(quote.repeat(3));
+      const comment = raw.startsWith("//") || raw.startsWith("/*") || raw.startsWith("#");
+      const commentAllowed = comment && (!json || /jsonc/i.test(language)) && (quote !== "#" || /^(?:py|python|sh|bash|shell|ruby|rb|yaml|yml|toml|ini|powershell|ps1)$/i.test(language));
+      const isKey = !comment && /^\s*:/.test(body.slice(syntax.lastIndex));
+      const inner = comment ? raw.slice(raw.startsWith("#") ? 1 : 2, raw.startsWith("/*") ? -2 : void 0) : raw.slice(1, -1);
+      if (stringLiteral && conventionalStrings && !/[\w$]/.test(body[match.index - 1] || "") && !(quote === "'" && /^(?:java|c|cpp|csharp|cs|go|rust)$/i.test(language)) && !isKey && !/[`]|\$\{|%[\w(]|\{[^}]*\}/.test(inner) && readable(inner) && (json || /\s|[^\x00-\x7F]/.test(inner) || /^[A-Z][a-z]/.test(inner)) || commentAllowed && readable(inner)) {
+        const open = comment ? raw.slice(0, raw.startsWith("#") ? 1 : 2) : quote;
+        const close = comment ? raw.startsWith("/*") ? "*/" : "" : quote;
+        result2 += boundary(open, "open", comment ? "" : quote) + prose(inner, comment ? "" : quote) + boundary(close, "close");
+      } else result2 += protect(raw);
+      cursor2 = syntax.lastIndex;
+    }
+    return result2 + protect(body.slice(cursor2));
+  };
+  let result = "", cursor = 0;
+  while (cursor < text.length) {
+    opaque.lastIndex = cursor;
+    const opaqueMatch = opaque.exec(text);
+    const code = nextMarkdown(text, cursor);
+    if (opaqueMatch && (!code || opaqueMatch.index <= code.start)) {
+      result += text.slice(cursor, opaqueMatch.index) + protect(opaqueMatch[0]);
+      cursor = opaque.lastIndex;
+    } else if (code) {
+      result += text.slice(cursor, code.start);
+      if (opaqueCode) {
+        result += protect(text.slice(code.start, code.end));
+        cursor = code.end;
+        continue;
+      }
+      const markup = /^(?:html|xml|svg)$/i.test(code.language) || /^\s*</.test(code.body);
+      const isProgram = !markup && (PROGRAM_LANGUAGES.test(code.language) || code.body.split(/\r?\n/).some((line) => CODE_LINE.test(line)));
+      const machineOnly = !code.body.includes("\n") && MACHINE_VALUE.test(code.body.trim());
+      if (machineOnly) result += protect(text.slice(code.start, code.end));
+      else if (isProgram) result += protect(code.open) + program(code.body, code.language) + protect(code.close);
+      else result += boundary(code.open, "open") + prose(code.body) + boundary(code.close, "close");
+      cursor = code.end;
+    } else {
+      result += text.slice(cursor);
+      break;
+    }
+  }
+  return result;
+}
+function codeAwareRegions(text, tokens, taggedRanges) {
+  const codeRanges = [], stack = [];
+  for (const token of tokens) {
+    if (!token.codeBoundary) continue;
+    const start = text.indexOf(token.token);
+    if (start < 0) continue;
+    if (token.codeBoundary === "open") stack.push({ start: start + token.token.length, quote: token.codeQuote || "" });
+    else {
+      const open = stack.pop();
+      if (open) codeRanges.push({ ...open, end: start });
+    }
+  }
+  const points = [.../* @__PURE__ */ new Set([0, text.length, ...taggedRanges.flatMap((r) => [r.start, r.end]), ...codeRanges.flatMap((r) => [r.start, r.end])])].sort((a, b) => a - b);
+  return points.slice(0, -1).map((start, i) => {
+    const end = points[i + 1];
+    const tag = taggedRanges.find((r) => r.start <= start && r.end >= end);
+    const code = codeRanges.find((r) => r.start <= start && r.end >= end);
+    return { text: text.slice(start, end), insideTaggedContent: !!tag, tagContext: tag?.tags || [], insideCode: !!code, codeQuote: code?.quote || "" };
+  }).filter((r) => r.text);
+}
+function escapeCodeTranslation(text, quote) {
+  if (!quote) return text;
+  return text.replace(/\\/g, "\\\\").replace(new RegExp(quote, "g"), "\\" + quote);
+}
+
 // ../peer/bilingual-intent.js
 var positiveCommands = [
   /(?:한\s*영|영\s*한)\s*병기(?:\s*(?:해|하라|해주세요|해줘|로\s*(?:출력|표기|번역)|적용|필수|요청|해야|하되))?/iu,
@@ -472,7 +609,7 @@ function collectSegmentResponse(raw, expectedSegments = []) {
 }
 
 // ../peer/core.js
-var PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
+var PROTECTED_PATTERN = /<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 var PROTECTED_TOKEN_PATTERN = /@@VERBA_DEEP_(?:NAME_)?\d{4}@@/g;
 var PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 var VOID_HTML_TAGS = /* @__PURE__ */ new Set([
@@ -664,10 +801,10 @@ function findBannedWords(text, configuredWordsOrSettings) {
   return [...new Set(found)];
 }
 function validationText(value) {
-  return String(value || "").replace(PROTECTED_PATTERN, " ").replace(PROTECTED_TOKEN_PATTERN, " ").replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, " ");
+  return replaceProtectedSource(value, PROTECTED_PATTERN, " ").replace(PROTECTED_TOKEN_PATTERN, " ").replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, " ");
 }
 function maskProtectedForEnglishReview(value) {
-  return String(value || "").replace(PROTECTED_PATTERN, (match) => " ".repeat(match.length)).replace(PROTECTED_TOKEN_PATTERN, (match) => " ".repeat(match.length)).replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, (match) => " ".repeat(match.length));
+  return replaceProtectedSource(value, PROTECTED_PATTERN, (match) => " ".repeat(match.length)).replace(PROTECTED_TOKEN_PATTERN, (match) => " ".repeat(match.length)).replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, (match) => " ".repeat(match.length));
 }
 function englishReviewWindow(segment, translation, nameTokens = [], protectedTokens = []) {
   const text = String(translation || "");
@@ -1437,7 +1574,7 @@ function stripForLanguageDetection(value, {
   ignoreStructuredBlocks = false
 } = {}) {
   const source = ignorePairedTagBlocks || ignoreStructuredBlocks ? withoutPairedTagBlocks(value) : String(value || "");
-  return source.replace(PROTECTED_PATTERN, "").replace(PROTECTED_TOKEN_PATTERN, "").replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, "").replace(/[\d\s\p{P}\p{S}_]+/gu, "");
+  return replaceProtectedSource(source, PROTECTED_PATTERN, "").replace(PROTECTED_TOKEN_PATTERN, "").replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, "").replace(/[\d\s\p{P}\p{S}_]+/gu, "");
 }
 function analyzeLanguage(value, options = {}) {
   const text = stripForLanguageDetection(value, options);
@@ -1522,12 +1659,12 @@ function replaceOutsideTokens(value, source, createToken) {
 }
 function protectSource(value, configuredNameLocks = []) {
   const tokens = [];
-  const protectValue = (match) => {
+  const protectValue = (match, metadata) => {
     const token = tokenName(tokens.length);
-    tokens.push({ token, value: match });
+    tokens.push({ token, value: match, ...metadata });
     return token;
   };
-  let protectedText = String(value || "").replace(PROTECTED_PATTERN, protectValue);
+  let protectedText = replaceProtectedSource(value, PROTECTED_PATTERN, protectValue);
   const nameTokens = [];
   for (const lock of normalizeNameLocks(configuredNameLocks)) {
     protectedText = replaceOutsideTokens(protectedText, lock.source, (match) => {
@@ -1706,11 +1843,11 @@ function resolveTranslationNameMacros(value, identity = {}) {
     user: String(identity.sourceUserName || identity.userName || "").trim(),
     char: String(identity.sourceCharacterName || identity.characterName || "").trim()
   };
-  return String(value || "").replace(PROTECTED_PATTERN, (match) => {
+  return replaceProtectedSource(value, PROTECTED_PATTERN, (match) => {
     const role = /^\{\{\s*(user|char)\s*\}\}$/iu.exec(match)?.[1]?.toLowerCase();
     const name = names[role];
     return name && name.length <= 120 && !/[{}<>\r\n`]/u.test(name) ? name : match;
-  });
+  }, { opaqueCode: true });
 }
 function segmentSource(value, nameLocks = [], {
   translateTaggedContent = true,
@@ -1719,10 +1856,10 @@ function segmentSource(value, nameLocks = [], {
   const source = resolveTranslationNameMacros(value, speakerIdentity);
   const { protectedText, tokens, nameTokens } = protectSource(source, nameLocks);
   const taggedRanges = taggedInnerRangesInProtectedText(protectedText, tokens);
-  const regions = splitByTaggedRanges(protectedText, taggedRanges);
+  const regions = codeAwareRegions(protectedText, tokens, taggedRanges);
   const parts = [];
   let translatableIndex = 0;
-  const appendPiece = (piece, insideTaggedContent = false, tagContext = []) => {
+  const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = "") => {
     const leading = piece.text.match(/^\s+/u)?.[0] || "";
     const afterLeading = piece.text.slice(leading.length);
     const trailing = afterLeading.match(/\s+$/u)?.[0] || "";
@@ -1742,7 +1879,8 @@ function segmentSource(value, nameLocks = [], {
         id: `seg_${String(translatableIndex).padStart(4, "0")}`,
         type: insideTaggedContent ? "tagged_content" : piece.type,
         ...insideTaggedContent && tagContext.length ? { tagContext: [...tagContext] } : {},
-        text: content
+        text: content,
+        ...codeQuote ? { codeQuote } : {}
       });
       translatableIndex += 1;
     }
@@ -1756,8 +1894,12 @@ function segmentSource(value, nameLocks = [], {
         parts.push({ type: "passthrough", text: block });
         continue;
       }
-      if (region.insideTaggedContent && !translateTaggedContent) {
+      if (region.insideTaggedContent && !region.insideCode && !translateTaggedContent) {
         parts.push({ type: "passthrough", text: block });
+        continue;
+      }
+      if (region.insideCode) {
+        appendPiece({ type: "tagged_content", text: block }, true, ["code", ...region.tagContext], region.codeQuote);
         continue;
       }
       if (region.insideTaggedContent) {
@@ -1788,7 +1930,7 @@ function assembleTranslation(segmented, translations, options = {}) {
     }
     const repaired = repairSourceEllipses(repairUnexpectedProseBreaks(translated, part), part);
     map.set(part.id, repaired);
-    return repaired;
+    return escapeCodeTranslation(repaired, part.codeQuote);
   }).join("");
   const particlesRepaired = repairLockedTokenParticles(canonicalizeProtectedTokenVariants(joined), segmented.nameTokens);
   const namesRestored = stripLeakedNameTokens(restoreProtected(particlesRepaired, segmented.nameTokens, {
@@ -2373,7 +2515,7 @@ NAME HANDLING ORDER \u2014 ABSOLUTE
 - Attach Korean particles and vocatives grammatically after the complete Korean name. Never corrupt, split or partially decline a name. Brand names, codes, URLs, handles and product identifiers keep ordinary rules.
 
 FORMATTING AND EXEMPTIONS
-- MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION: preserve delimiters/nesting/placement, but eligible visible text inside **...** must receive GALBWAE. Example: **Do you know me?**\u2192**\uB098\uB97C \uC544\uB295\uB7B4!!**. Backtick and fenced code stays unchanged.
+- MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION: preserve delimiters/nesting/placement, but eligible visible text inside **...** must receive GALBWAE. Example: **Do you know me?**\u2192**\uB098\uB97C \uC544\uB295\uB7B4!!**. Translate readable backtick/fenced text in normal Korean; preserve code syntax and delimiters.
 - PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION: keep visible text between ANY paired tags normally spelled after translation; do not apply GALBWAE there, including Inner_Info, Info_panel, small, div and custom tags. There are no tag-name exceptions.
 - Never alter dates/weather/locations, Korean-rendered proper names or their particles, numbers, tokens, code, tags or facts. Ellipses stay exact; ? and ! may be exaggerated only when the speech act remains clear.
 - Preserve every @@VERBA_DEEP_0000@@ and @@VERBA_DEEP_NAME_0000@@ token exactly once. Return valid JSON only with every requested id exactly once; no commentary or code fence.
@@ -3525,7 +3667,7 @@ ${taggedContent ? `TAGGED-CONTENT FORMAT OVERRIDE \u2014 ABSOLUTE
 - Do not repeat or preserve the source text merely for bilingual display.
 - This exception changes ONLY bilingual/parallel-language formatting. Continue obeying every other compatible GLOBAL, ONE-TIME, fine-tuning, terminology, banned-word, and fidelity rule.
 - Preserve all existing tag tokens, tag structure, attributes, code tokens, macros, placeholders, and URLs exactly.
-- Code fences, inline code, style/script blocks, and already-protected opaque content remain untouched and must not be translated.` : ""}`;
+- Translate supplied readable text inside inline backticks and fenced blocks; preserve delimiters, executable syntax and protected tokens. Style/script blocks remain untouched.` : ""}`;
 }
 function scopedOutputRules(settings, oneTimeInstruction = "", nameTokens = [], tuning = null, scope = "narration", speakerIdentity = {}) {
   if (galbwaeMode(settings) !== "off") {
@@ -3678,7 +3820,7 @@ function buildScopedOutputPromptInternal({
 - Treat it as structured narration-like text, not as character dialogue even if quotation marks appear.
 - Apply the GLOBAL prompt and other compatible rules, EXCEPT bilingual/parallel-language formatting is forbidden here by the TAGGED-CONTENT FORMAT OVERRIDE.
 - Return Korean-only visible text while preserving all protected tag/code tokens exactly.
-- Do not translate code fences, inline code, style/script blocks, or other opaque protected content.` : `- Every target in this request is narration. No dialogue prompt exists in this request and no dialogue-only style may affect it.
+- Translate supplied readable text inside inline backticks and fenced blocks; preserve delimiters, executable syntax and protected tokens. Style/script blocks remain untouched.` : `- Every target in this request is narration. No dialogue prompt exists in this request and no dialogue-only style may affect it.
 - If the GLOBAL TRANSLATION PROMPT explicitly requests bilingual narration or full-response bilingual formatting, obey that format inside each narration target. Otherwise return Korean-only narration.`;
     const speakerRule = madExclusive ? "" : targetDialogue ? "- Every target in this request has already been independently classified as dialogue spoken by TARGET CHARACTER. Apply the TARGET-CHARACTER DIALOGUE PROMPT if configured; the USER/NPC/OTHER prompt is absent." : dialogue ? "- Every target in this request has already been independently classified as USER/NPC/other dialogue. Apply the USER/NPC/OTHER DIALOGUE PROMPT if configured; the TARGET-CHARACTER prompt is absent." : "";
     taskRules = `${madExclusive ? "Re-author every TRANSLATION TARGET directly as final Korean-original prose/dialogue under MAD KOREAN EXCLUSIVE ENGINE. Do not perform a conventional translation stage." : "Produce exactly one translation output for every TRANSLATION TARGET. Korean is the required translated language; preserve/include source text only when an applicable user prompt explicitly requests bilingual or parallel-language output for this scope."}
@@ -5061,7 +5203,7 @@ function buildMinimalOutputPromptInternal(segments, settings = {}, nameTokens = 
   const names = nameTokens.filter((row) => segments.some((segment) => String(segment.text).includes(row.token))).map(({ token, value }) => ({ token, korean: value }));
   const galbwaeMode2 = settings.developerMode === true && ["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) ? settings.chuseokGalbwaeScope : settings.developerMode === true && settings.chuseokGalbwaeEnabled === true ? "dialogueInner" : "off";
   const galbwae2 = galbwaeMode2 !== "off" ? `
-EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE: ACTIVE MODE=${galbwaeMode2}. Ignore every other optional/user style prompt, taste, voice, custom base instruction and one-time instruction. MODE=all applies \uAC08\uBD2C\uCCB4 to narration, direct dialogue and eligible visible text enclosed by Markdown **...**, but never to paired-tag interiors. MODE=dialogueInner applies it only to direct dialogue and eligible visible text enclosed by **...** while other narration stays normally spelled; paired-tag interiors remain exempt. Understand the meaning first, then rewrite every eligible sentence as chaotic \uC8E0\uCE8E-style Korean internet-post language: strangely earnest, overexcited, clumsily typed, and sometimes awkwardly polite. Mix in a LIGHT, intermittent internet-grandpa flavor, as if a slightly confused old man is typing online, but do not turn everything into historical-drama speech or repeat ~\uB290\uB0D0/~\uAC70\uB77C/~\uB85C\uB2E4 mechanically. Visibly wreck spelling and spacing using varied phonetic misspellings, swapped vowels/consonants, wrong-but-readable particles/endings, fused words, odd spaces and community-post punctuation. Sprinkle \u3137\u3137, ;; and \u3160\u3160 where emotion permits, but not on every sentence. Patterns: \uB098 \uC54C\uC544?\u2192\uB098\uB97C \uC544\uB295\uB7B4!!; \uC54C\uACA0\uC5B4\uC694.\u2192\uC54C\uAC30\uC5B4\uB8CC \u3160\u3160; \uB124, \uADF8\uB807\uAC8C \uD560\uAC8C\uC694.\u2192\uB840.. \uADF8\uB7EC\uCE90\uD560\uAC1C\uB8CC; \uC751, \uC54C\uACA0\uC5B4.\u2192\uB840 \uC54C\uAC2F\uB2E4\uB0B4\uB8CC;;. REQUIRED PROFANITY MUTATION: whenever an eligible Korean rendering would naturally use \uC528\uBC1C, never output clean \uC528\uBC1C; choose and vary among \uC528\uD564, \uC528\uD567, \uC0E4\uAC08, \uC331\uC550, \uC330\uAC08, \uC2DC\uD563 while preserving target/function/intensity. Do not add profanity where it is not licensed. OCCASIONAL ENDING/REPLY MUTATION: irregularly change some sentence-final \uC694\u2192\uB8CC and occasionally standalone \uB124/\uC751\u2192\uB840, only for a minority of opportunities (roughly one out of three, unevenly), never every occurrence and never inside paired tags. NAME HANDLING ORDER \u2014 ABSOLUTE: first render every source-language human or fictional character name in natural Hangul, then exempt only that Korean rendering from GALBWAE corruption. A supplied fixed name mapping wins; otherwise transliterate by established Korean pronunciation. Never leave a Latin-script character name unchanged merely because proper names are style-exempt. Examples: Aila\u2192\uC544\uC77C\uB77C, Calix\u2192\uCE7C\uB9AD\uC2A4, Atlas\u2192\uC544\uD2C0\uB77C\uC2A4. Brand names, codes, URLs, account handles and product identifiers keep ordinary rules. Do not merely corrupt one word or repeat one ending. Never invent actions, body parts, sexual content, incidents, objects or claims. MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION: preserve delimiters/nesting/placement, but eligible visible text inside **...** must receive GALBWAE; **Do you know me?**\u2192**\uB098\uB97C \uC544\uB295\uB7B4!!**. Backtick and fenced code stays unchanged. PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION: keep visible text between ANY paired tags normally spelled after translation; do not apply GALBWAE there, including Inner_Info/Info_panel/small/div/custom tags. There are no tag-name exceptions. Never alter dates/weather/locations, Korean-rendered proper names or their particles, numbers, tokens, code, tags or facts. Ellipses stay exact; ? and ! may be exaggerated when the speech act remains clear.` : "";
+EXCLUSIVE TEMPORARY CHUSEOK GALBWAE STYLE: ACTIVE MODE=${galbwaeMode2}. Ignore every other optional/user style prompt, taste, voice, custom base instruction and one-time instruction. MODE=all applies \uAC08\uBD2C\uCCB4 to narration, direct dialogue and eligible visible text enclosed by Markdown **...**, but never to paired-tag interiors. MODE=dialogueInner applies it only to direct dialogue and eligible visible text enclosed by **...** while other narration stays normally spelled; paired-tag interiors remain exempt. Understand the meaning first, then rewrite every eligible sentence as chaotic \uC8E0\uCE8E-style Korean internet-post language: strangely earnest, overexcited, clumsily typed, and sometimes awkwardly polite. Mix in a LIGHT, intermittent internet-grandpa flavor, as if a slightly confused old man is typing online, but do not turn everything into historical-drama speech or repeat ~\uB290\uB0D0/~\uAC70\uB77C/~\uB85C\uB2E4 mechanically. Visibly wreck spelling and spacing using varied phonetic misspellings, swapped vowels/consonants, wrong-but-readable particles/endings, fused words, odd spaces and community-post punctuation. Sprinkle \u3137\u3137, ;; and \u3160\u3160 where emotion permits, but not on every sentence. Patterns: \uB098 \uC54C\uC544?\u2192\uB098\uB97C \uC544\uB295\uB7B4!!; \uC54C\uACA0\uC5B4\uC694.\u2192\uC54C\uAC30\uC5B4\uB8CC \u3160\u3160; \uB124, \uADF8\uB807\uAC8C \uD560\uAC8C\uC694.\u2192\uB840.. \uADF8\uB7EC\uCE90\uD560\uAC1C\uB8CC; \uC751, \uC54C\uACA0\uC5B4.\u2192\uB840 \uC54C\uAC2F\uB2E4\uB0B4\uB8CC;;. REQUIRED PROFANITY MUTATION: whenever an eligible Korean rendering would naturally use \uC528\uBC1C, never output clean \uC528\uBC1C; choose and vary among \uC528\uD564, \uC528\uD567, \uC0E4\uAC08, \uC331\uC550, \uC330\uAC08, \uC2DC\uD563 while preserving target/function/intensity. Do not add profanity where it is not licensed. OCCASIONAL ENDING/REPLY MUTATION: irregularly change some sentence-final \uC694\u2192\uB8CC and occasionally standalone \uB124/\uC751\u2192\uB840, only for a minority of opportunities (roughly one out of three, unevenly), never every occurrence and never inside paired tags. NAME HANDLING ORDER \u2014 ABSOLUTE: first render every source-language human or fictional character name in natural Hangul, then exempt only that Korean rendering from GALBWAE corruption. A supplied fixed name mapping wins; otherwise transliterate by established Korean pronunciation. Never leave a Latin-script character name unchanged merely because proper names are style-exempt. Examples: Aila\u2192\uC544\uC77C\uB77C, Calix\u2192\uCE7C\uB9AD\uC2A4, Atlas\u2192\uC544\uD2C0\uB77C\uC2A4. Brand names, codes, URLs, account handles and product identifiers keep ordinary rules. Do not merely corrupt one word or repeat one ending. Never invent actions, body parts, sexual content, incidents, objects or claims. MARKDOWN IS FORMATTING, NOT A TEXT EXEMPTION: preserve delimiters/nesting/placement, but eligible visible text inside **...** must receive GALBWAE; **Do you know me?**\u2192**\uB098\uB97C \uC544\uB295\uB7B4!!**. Translate readable backtick/fenced text in normal Korean; preserve code syntax and delimiters. PAIRED TAGS ARE AN ABSOLUTE GALBWAE EXEMPTION: keep visible text between ANY paired tags normally spelled after translation; do not apply GALBWAE there, including Inner_Info/Info_panel/small/div/custom tags. There are no tag-name exceptions. Never alter dates/weather/locations, Korean-rendered proper names or their particles, numbers, tokens, code, tags or facts. Ellipses stay exact; ? and ! may be exaggerated when the speech act remains clear.` : "";
   const activeInstruction = galbwaeMode2 !== "off" ? "Translate the supplied source targets into Korean. Preserve facts, speakers, intent, relationships and protected structure." : `${translationProse(settings, "primary", instruction)}${String(oneTimeInstruction || "").trim() ? `
 \uC774\uBC88 \uC694\uCCAD: ${String(oneTimeInstruction).trim()}` : ""}`;
   return `${activeInstruction}${galbwae2}
@@ -6339,7 +6481,7 @@ Do not add markdown fences, commentary, explanations, or extra ids.` : "";
     const entries = [];
     let cursor = 0;
     for (const segment of segmented.segments || []) {
-      const translated = restoredSegmentText(String(translations.get(segment.id) || ""), segmented, false);
+      const translated = restoredSegmentText(escapeCodeTranslation(String(translations.get(segment.id) || ""), segment.codeQuote), segmented, false);
       const source = restoredSegmentText(segment.text, segmented, true);
       if (!translated.trim() || !source.trim()) continue;
       let start = completeTranslation.indexOf(translated, cursor);

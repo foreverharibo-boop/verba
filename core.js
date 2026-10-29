@@ -1,9 +1,10 @@
+import { replaceProtectedSource, codeAwareRegions, escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled } from './deepseek-korean.js';
 import { bilingualPromptRequestsOutput } from './bilingual-intent.js';
 import { createPromptBuilders } from './prompt-builders.js';
 import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, canonicalizeProtectedTokenVariants } from './response-parser.js';
 
-const PROTECTED_PATTERN = /```[\s\S]*?```|~~~[\s\S]*?~~~|<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|`[^`\n]+`|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
+const PROTECTED_PATTERN = /<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
 const PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 const VOID_HTML_TAGS = new Set([
@@ -219,16 +220,14 @@ export function findBannedWords(text, configuredWordsOrSettings) {
 }
 
 function validationText(value) {
-    return String(value || '')
-        .replace(PROTECTED_PATTERN, ' ')
+    return replaceProtectedSource(value, PROTECTED_PATTERN, ' ')
         .replace(PROTECTED_TOKEN_PATTERN, ' ')
         .replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, ' ');
 }
 
 // Preserve offsets while excluding code, URLs, macros, tags and opaque tokens.
 export function maskProtectedForEnglishReview(value) {
-    return String(value || '')
-        .replace(PROTECTED_PATTERN, match => ' '.repeat(match.length))
+    return replaceProtectedSource(value, PROTECTED_PATTERN, match => ' '.repeat(match.length))
         .replace(PROTECTED_TOKEN_PATTERN, match => ' '.repeat(match.length))
         .replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, match => ' '.repeat(match.length));
 }
@@ -1131,8 +1130,7 @@ export function stripForLanguageDetection(value, {
     const source = ignorePairedTagBlocks || ignoreStructuredBlocks
         ? withoutPairedTagBlocks(value)
         : String(value || '');
-    return source
-        .replace(PROTECTED_PATTERN, '')
+    return replaceProtectedSource(source, PROTECTED_PATTERN, '')
         .replace(PROTECTED_TOKEN_PATTERN, '')
         .replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, '')
         .replace(/[\d\s\p{P}\p{S}_]+/gu, '');
@@ -1400,15 +1398,14 @@ function replaceOutsideTokens(value, source, createToken) {
 
 export function protectSource(value, configuredNameLocks = []) {
     const tokens = [];
-    const protectValue = match => {
+    const protectValue = (match, metadata) => {
         const token = tokenName(tokens.length);
-        tokens.push({ token, value: match });
+        tokens.push({ token, value: match, ...metadata });
         return token;
     };
-    // Hidden reasoning/control blocks and actual code are opaque, while normal
-    // HTML/custom tags are tokenized by themselves so their visible inner text
-    // can still be translated regardless of the tag name.
-    let protectedText = String(value || '').replace(PROTECTED_PATTERN, protectValue);
+    // Preserve executable syntax and hidden blocks; expose readable text in
+    // Markdown code containers and normal HTML/custom tags for translation.
+    let protectedText = replaceProtectedSource(value, PROTECTED_PATTERN, protectValue);
 
     const nameTokens = [];
     for (const lock of normalizeNameLocks(configuredNameLocks)) {
@@ -1662,12 +1659,12 @@ export function resolveTranslationNameMacros(value, identity = {}) {
         user: String(identity.sourceUserName || identity.userName || '').trim(),
         char: String(identity.sourceCharacterName || identity.characterName || '').trim(),
     };
-    return String(value || '').replace(PROTECTED_PATTERN, match => {
+    return replaceProtectedSource(value, PROTECTED_PATTERN, match => {
         const role = /^\{\{\s*(user|char)\s*\}\}$/iu.exec(match)?.[1]?.toLowerCase();
         const name = names[role];
         // Missing/unsafe identity data must not erase or execute the macro.
         return name && name.length <= 120 && !/[{}<>\r\n`]/u.test(name) ? name : match;
-    });
+    }, { opaqueCode: true });
 }
 
 export function segmentSource(value, nameLocks = [], {
@@ -1677,11 +1674,11 @@ export function segmentSource(value, nameLocks = [], {
     const source = resolveTranslationNameMacros(value, speakerIdentity);
     const { protectedText, tokens, nameTokens } = protectSource(source, nameLocks);
     const taggedRanges = taggedInnerRangesInProtectedText(protectedText, tokens);
-    const regions = splitByTaggedRanges(protectedText, taggedRanges);
+    const regions = codeAwareRegions(protectedText, tokens, taggedRanges);
     const parts = [];
     let translatableIndex = 0;
 
-    const appendPiece = (piece, insideTaggedContent = false, tagContext = []) => {
+    const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = '') => {
         const leading = piece.text.match(/^\s+/u)?.[0] || '';
         const afterLeading = piece.text.slice(leading.length);
         const trailing = afterLeading.match(/\s+$/u)?.[0] || '';
@@ -1712,6 +1709,7 @@ export function segmentSource(value, nameLocks = [], {
                 id: `seg_${String(translatableIndex).padStart(4, '0')}`,
                 type: insideTaggedContent ? 'tagged_content' : piece.type,
                 text: content,
+                ...(codeQuote ? { codeQuote } : {}),
                 ...(insideTaggedContent && tagContext.length
                     ? { tagContext: [...new Set(tagContext.map(tag => String(tag).toLocaleLowerCase()))] }
                     : {}),
@@ -1732,6 +1730,11 @@ export function segmentSource(value, nameLocks = [], {
             if (!block) continue;
             if (/^(?:(?:\r\n)|[\r\n\u0085\u2028\u2029])+$/u.test(block)) {
                 parts.push({ type: 'passthrough', text: block });
+                continue;
+            }
+
+            if (region.insideCode) {
+                appendPiece({ type: 'tagged_content', text: block }, true, ['code', ...region.tagContext], region.codeQuote);
                 continue;
             }
 
@@ -1801,7 +1804,7 @@ export function assembleTranslation(segmented, translations, options = {}) {
         // Also cover later repair passes; keep the same map for source mapping.
         const repaired = repairSourceEllipses(repairUnexpectedProseBreaks(translated, part), part);
         map.set(part.id, repaired);
-        return repaired;
+        return escapeCodeTranslation(repaired, part.codeQuote);
     }).join('');
     const particlesRepaired = repairLockedTokenParticles(canonicalizeProtectedTokenVariants(joined), segmented.nameTokens);
     // Korean may naturally omit a repeated subject/name. A missing NAME token
@@ -4046,7 +4049,7 @@ ${taggedContent ? `TAGGED-CONTENT FORMAT OVERRIDE — ABSOLUTE
 - Do not repeat or preserve the English source text merely for bilingual display.
 - This exception changes ONLY bilingual/parallel-language formatting. Continue obeying every other compatible GLOBAL, ONE-TIME, fine-tuning, terminology, banned-word, and fidelity rule.
 - Preserve all existing tag tokens, tag structure, attributes, code tokens, macros, placeholders, and URLs exactly.
-- Code fences, inline code, style/script blocks, and already-protected opaque content remain untouched and must not be translated.` : ''}`;
+- Translate supplied readable text inside inline backticks and fenced blocks; preserve delimiters, executable syntax and protected tokens. Style/script blocks remain untouched.` : ''}`;
 }
 
 function scopedOutputRules(settings, oneTimeInstruction = '', nameTokens = [], tuning = null, scope = 'narration', speakerIdentity = {}) {

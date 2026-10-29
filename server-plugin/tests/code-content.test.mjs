@@ -14,15 +14,15 @@ for (const [name, create] of [['verba', createVerba], ['verba-deep', createDeep]
         ['minimal', { developerMode: true, developerMinimalPromptEnabled: true }],
         ['split', { developerMode: true, developerOutputSplitCount: 2 }],
     ]) test(`${name}/${mode}: code-only text reaches transport and restores syntax/source mapping`, async () => {
-        const settings = { profileId: 'A', activeProfileSlot: 'A', autoProfileFallback: false, serverRetryLimit: 1, translateTaggedContent: false, ...extra };
+        const settings = { profileId: 'A', activeProfileSlot: 'A', autoProfileFallback: false, serverRetryLimit: 1, translateTaggedContent: true, ...extra };
         let calls = 0, translatedRows = 0;
         const engine = create({ settings, profiles: { A: {} }, nameLocks: [], character: {}, context: {} }, async (_id, messages) => {
-            assert.ok(++calls <= 2, 'unexpected extra API calls');
+            assert.ok(++calls <= 4, 'unexpected extra API calls');
             const prompt = messages.map(m => m.content).join('\n');
             const marker = ['\nTARGETS\n', '\nSEGMENTS\n', '\nTRANSLATION TARGETS\n'].find(m => prompt.includes(m));
             assert.ok(marker, 'expected translation targets');
             const rows = JSON.parse(prompt.slice(prompt.lastIndexOf(marker) + marker.length));
-            assert.ok(rows.every(row => row.type === 'tagged_content'));
+            assert.ok(rows.every(row => ['tagged_content','code_content'].includes(row.type)));
             assert.doesNotMatch(JSON.stringify(rows), /KEEP_CODE|class=|```/);
             translatedRows += rows.length;
             return { content: JSON.stringify({ segments: rows.map(row => ({

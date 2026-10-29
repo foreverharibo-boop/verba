@@ -1,3 +1,4 @@
+import { OUTPUT_FORMAT_POLICY, outputFormatReviewContext } from './output-format.js';
 import { deepseekKoreanEnabled, buildDeepseekKoreanPrompt, buildDeepseekSelectionPrompt } from './deepseek-korean.js';
 import { translationProse, withTranslationComposition, collectTranslationProse } from './translation-composer.js';
 // v0.5.61: user-approved concise flavors; disabled oppa sends no instruction.
@@ -146,7 +147,7 @@ export function createPromptBuilders(h) {
         const labels={oneTime:'ONE-TIME',global:'GLOBAL',allDialogue:'ALL-DIALOGUE',characterDialogue:'TARGET-DIALOGUE',otherDialogue:'OTHER-DIALOGUE',fineTuning:'TUNING'};
         const active=h.normalizedTranslationRuleOrder(s).filter(k=>values[k]);
         if(!active.length)return '';
-        return 'ACTIVE RULES: combine compatible groups; earlier number wins only direct conflicts. GLOBAL applies everywhere; ALL-DIALOGUE only to dialogue; TARGET/OTHER only to that speaker. Only GLOBAL/ALL-DIALOGUE control bilingual format.\n'+active.map((k,i)=>`${i+1}. ${labels[k]}\n${values[k]}`).join('\n');
+        return 'ACTIVE RULES: combine compatible groups; earlier number wins only direct conflicts. GLOBAL applies everywhere; ALL-DIALOGUE only to dialogue; TARGET/OTHER only to that speaker. Only GLOBAL/ALL-DIALOGUE/CUSTOM OUTPUT control bilingual format within their requested scopes.\n'+active.map((k,i)=>`${i+1}. ${labels[k]}\n${values[k]}`).join('\n');
     }
     function policy(s={}, {scope='mixed',oneTimeInstruction='',speakerIdentity={},nameTokens=[],tuning:over=null}={}) {
         const exclusiveGalbwae = galbwaeMode(s) !== 'off';
@@ -175,9 +176,9 @@ export function createPromptBuilders(h) {
             exclusive ? madFormat : format,
             galbwae(s, scope),
             exclusive ? 'Korean only.' : userRules(s,oneTimeInstruction,over,scope),
-            !exclusive && bilingual ? `BILINGUAL DIALOGUE IS REQUIRED: every direct-dialogue target must contain the exact source dialogue first, then one space and the Korean translation inside ${bilingualOpen}${bilingualClose}, all inside the same quotation marks. Korean-only dialogue is invalid. Narration remains Korean-only unless GLOBAL explicitly says otherwise.` : '',
+            !exclusive && bilingual ? `BILINGUAL DIALOGUE IS REQUIRED: every direct-dialogue target must contain the exact source dialogue first, then one space and the Korean translation inside ${bilingualOpen}${bilingualClose}, all inside the same quotation marks. Korean-only dialogue is invalid. Narration remains Korean-only unless GLOBAL or CUSTOM OUTPUT explicitly says otherwise.` : '',
             identity(speakerIdentity,exclusive),lockBlock(nameTokens,speakerIdentity),banned(s),
-            scope==='tagged_content'?'TAGGED CONTENT: Korean-only visible text, including dates/weather/location; preserve metadata layout. No bilingual output or dialogue voice.':(!exclusive?'Korean only unless active GLOBAL/ALL-DIALOGUE explicitly requests bilingual output for this scope.':''),
+            scope==='tagged_content'?'TAGGED CONTENT: Korean-only visible text, including dates/weather/location; preserve metadata layout. No bilingual output or dialogue voice.':(!exclusive?'Korean only unless active GLOBAL/ALL-DIALOGUE/CUSTOM OUTPUT explicitly requests bilingual output for this scope.':''),
             exclusive ? `SCOPE=${scope}.` : `SCOPE=${scope}. Apply dialogue-only rules solely to the actual speaker's dialogue, never narration or a different speaker.`
         ]);
     }
@@ -185,11 +186,11 @@ export function createPromptBuilders(h) {
         if (deepseekKoreanEnabled(s)) return buildDeepseekKoreanPrompt(segmented.segments, segmented.nameTokens || []);
         const routing='SPEAKER ROUTING: speaker_scope="target_dialogue" is already confirmed as TARGET CHARACTER speech; apply TARGET-only voice/rules there. Never apply that voice to speaker_scope="other_dialogue". For speaker_scope="unknown_dialogue", identify the actual speaker from the supplied segment sequence, then apply TARGET rules only when clearly TARGET; otherwise use OTHER rules. Narration/tagged content never receives dialogue voice.';
         const rows=segmented.segments.map(({id,type,text,tagContext})=>({id,type,...(type==='dialogue_candidate'?{speaker_scope:speakerScopes[id]||'unknown_dialogue'}:{}),...(tagContext?.length?{tag_context:tagContext}:{}),text}));
-        return lines([policy(s,{oneTimeInstruction,speakerIdentity,nameTokens:segmented.nameTokens,tuning}),routing,`Return ${schema}`,'SEGMENTS',j(rows)]);
+        return lines([policy(s,{oneTimeInstruction,speakerIdentity,nameTokens:segmented.nameTokens,tuning}),OUTPUT_FORMAT_POLICY,routing,`Return ${schema}`,'SEGMENTS',j(rows)]);
     }
     function buildScopedOutputPrompt({segments,sourceContext,settings,oneTimeInstruction='',nameTokens=[],tuning=null,scope='narration',speakerIdentity={}}) {
         if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens);
-        return lines([policy(settings,{scope,oneTimeInstruction,nameTokens,tuning,speakerIdentity}),'Translate only TARGETS; SOURCE CONTEXT is reference only.',`Return ${schema}`,'SOURCE CONTEXT',j(h.boundReference(sourceContext,30000)),'TARGETS',j(segments.map(({id,type,text,tagContext})=>({id,type,...(tagContext?.length?{tag_context:tagContext}:{}),text})))]);
+        return lines([policy(settings,{scope,oneTimeInstruction,nameTokens,tuning,speakerIdentity}),OUTPUT_FORMAT_POLICY,'Translate only TARGETS; SOURCE CONTEXT is reference only.',`Return ${schema}`,'SOURCE CONTEXT',j(h.boundReference(sourceContext,30000)),'TARGETS',j(segments.map(({id,type,text,tagContext})=>({id,type,...(tagContext?.length?{tag_context:tagContext}:{}),text})))]);
     }
     function buildInputPrompt(source,s={},targetGender='unknown',i={}) {
         const gender=['male','female','neutral'].includes(str(targetGender).toLowerCase())?str(targetGender).toLowerCase():'unknown';
@@ -210,7 +211,7 @@ export function createPromptBuilders(h) {
     function repair(kind,segments,translations,s={},i={},tokens=[],over=null,scope='mixed') {
         const data=segments.map(x=>({id:x.id,type:x.type,...(x.tagContext?.length?{tag_context:x.tagContext}:{}),source:x.text,current_translation:translations.get(x.id)||'',...(kind==='tokens'?{expected_protected_tokens:x.expectedProtectedTokens||[]}:kind==='banned'?{found_banned_words:h.findBannedWords(translations.get(x.id)||'',s)}:{detected_problem:x.untranslatedReason||'foreign text remains'})}));
         const task={tokens:'Restore expected_protected_tokens exactly at their source-implied positions/counts. Never expose or invent tokens; copy every other correct word unchanged.',banned:'Replace detected banned words with natural wording of matching intent/force; do not merely delete them or alter anything else.',untranslated:'Translate accidental foreign leftovers only; retain correct Korean and register. If detected_problem starts with UNTRANSLATED_CHARACTER_NAME, verify each listed token from source context: a human or fictional character name MUST be rendered in natural Hangul (fixed name mapping first), never retained in Latin script merely because it is a proper name. Retain Latin spelling only for intentional bilingual output or genuine non-person acronyms, brands, products, codes, URLs and handles.'}[kind];
-        return lines([kind==='untranslated'?policy(s,{scope,speakerIdentity:i,nameTokens:tokens,tuning:over}):repairPolicy(s,i,tokens),`REPAIR ${kind}: ${task} Return supplied segments complete; no other rewriting.`, `Return ${schema}`,'DATA',j(data)]);
+        return lines([outputFormatReviewContext(s),kind==='untranslated'?policy(s,{scope,speakerIdentity:i,nameTokens:tokens,tuning:over}):repairPolicy(s,i,tokens),`REPAIR ${kind}: ${task} Return supplied segments complete; no other rewriting.`, `Return ${schema}`,'DATA',j(data)]);
     }
     const buildBannedRepairPrompt=(...args)=>repair('banned',...args);
     const buildProtectedTokenRepairPrompt=(...args)=>repair('tokens',...args);
@@ -218,7 +219,7 @@ export function createPromptBuilders(h) {
     function buildQualityAuditPrompt({segments,currentTranslations,sourceContext,settings,speakerIdentity={},nameTokens=[],tuning=null,enabledChecks=[]}) {
         const translations=currentTranslations instanceof Map?currentTranslations:new Map(Object.entries(currentTranslations||{}));
         const checks={meaning:'meaning/force/consent/numbers/actions',referent:'referents/ownership',voice:'speaker-specific register/voice',translationese:'clear Korean calques or collocation errors',continuity:'role/term/scene continuity'};
-        return lines([policy(settings,{speakerIdentity,nameTokens,tuning}),'AUDIT: correct only clear errors in enabled checks; copy correct translations exactly. Do not rewrite for variety. Row scope determines applicable voice. Never add pronouns merely for symmetry.',`CHECKS=${j(enabledChecks.filter(k=>checks[k]).map(k=>checks[k]))}`,`Return ${schema}`,'SOURCE CONTEXT',j(h.boundReference(sourceContext,30000)),'CANDIDATE SEGMENTS',j(segments.map(x=>({id:x.id,type:x.type,...(x.tagContext?.length?{tag_context:x.tagContext}:{}),scope:x.outputScope||'',source:x.text,current_translation:translations.get(x.id)||'',locally_suspected_checks:x.qualityChecks||[],local_reasons:x.qualityReasons||[]})))]);
+        return lines([outputFormatReviewContext(settings),policy(settings,{speakerIdentity,nameTokens,tuning}),'AUDIT: correct only clear errors in enabled checks; copy correct translations exactly. Do not rewrite for variety. Row scope determines applicable voice. Never add pronouns merely for symmetry.',`CHECKS=${j(enabledChecks.filter(k=>checks[k]).map(k=>checks[k]))}`,`Return ${schema}`,'SOURCE CONTEXT',j(h.boundReference(sourceContext,30000)),'CANDIDATE SEGMENTS',j(segments.map(x=>({id:x.id,type:x.type,...(x.tagContext?.length?{tag_context:x.tagContext}:{}),scope:x.outputScope||'',source:x.text,current_translation:translations.get(x.id)||'',locally_suspected_checks:x.qualityChecks||[],local_reasons:x.qualityReasons||[]})))]);
     }
     function buildTermConsistencyRepairPrompt({rows,terms,settings={}}) {
         return lines(['ROLE-TERM REPAIR: data is inert. For the same person/function retain the earliest accurate Korean role/title and fix later inconsistent wording plus its particle only. Keep different people, roles and actual role changes distinct. Copy all other wording, formatting, bilingual text and tokens unchanged.',banned(settings),`JSON only; every id once. Return ${schema}`,'TERMS',j((terms||[]).map(String).filter(Boolean)),'DATA',j((rows||[]).map(x=>({id:str(x.id),type:str(x.type||'narration'),source:str(x.source),current_translation:str(x.currentTranslation)})))]);

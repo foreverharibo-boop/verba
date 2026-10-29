@@ -17,7 +17,7 @@ test('inline backticks, double backticks and multiple blocks expose natural lang
         assert.equal(result, source.replace('Happy', '행복함'));
         assert.equal(hasForeignText(source), true);
         assert.equal(segmented.segments.length, 1);
-        assert.equal(segmented.segments[0].type, 'tagged_content');
+        assert.equal(segmented.segments[0].type, 'code_content');
     }
     assert.equal(translate('`Happy` and `Ready`', { Happy: '행복함', Ready: '준비됨', and: '그리고' }).result, '`행복함` 그리고 `준비됨`');
 });
@@ -25,7 +25,7 @@ test('inline backticks, double backticks and multiple blocks expose natural lang
 test('code text stays independent of the paired-tag switch and dialogue styles', () => {
     const { segmented, result } = translate('```text\n"Stay here."\nStatus: Happy\n```', { 'Stay here.': '여기 있어.', 'Status: Happy': '상태: 행복함' }, { translateTaggedContent: false });
     assert.equal(result, '```text\n"여기 있어."\n상태: 행복함\n```');
-    assert.ok(segmented.segments.every(row => row.type === 'tagged_content' && row.tagContext.includes('code')));
+    assert.ok(segmented.segments.every(row => row.type === 'code_content'));
 });
 
 test('HTML attributes, CSS, script, macros and URLs survive inside fences', () => {

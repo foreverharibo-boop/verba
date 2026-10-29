@@ -3,7 +3,7 @@ import { englishReviewWindow, maskProtectedForEnglishReview } from './core.js';
 const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const blank = value => ' '.repeat(value.length);
 
-export function englishReviewTargets(segmented, translations, identity = {}) {
+export function englishReviewTargets(segmented, translations, identity = {}, settings = {}) {
     const targets = [];
     const locked = [
         ...(segmented.nameTokens || []).map(row => row.value),
@@ -11,7 +11,7 @@ export function englishReviewTargets(segmented, translations, identity = {}) {
     ].filter(value => /[A-Za-z]/.test(String(value || '')));
     for (const segment of segmented.segments || []) {
         const translation = String(translations.get(segment.id) || '');
-        const window = englishReviewWindow(segment, translation, segmented.nameTokens, segmented.tokens);
+        const window = englishReviewWindow(segment, translation, segmented.nameTokens, segmented.tokens, settings);
         if (!window) continue;
         let masked = maskProtectedForEnglishReview(window.text)
             .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, blank)
@@ -53,7 +53,7 @@ TARGETS ${JSON.stringify(targets.map(row => ({ id: row.id, TEXT: row.text, LEFT:
 // Exceptions or malformed rows leave the successful initial translation intact.
 export async function reviewEnglishLeftovers({ segmented, translations, settings = {}, identity = {}, options = {}, request }) {
     if (settings.translationEngine === 'google-free') return { checked: 0, changed: 0 };
-    const targets = englishReviewTargets(segmented, translations, identity);
+    const targets = englishReviewTargets(segmented, translations, identity, settings);
     if (!targets.length) return { checked: 0, changed: 0 };
     try {
         const reviewed = await request(buildEnglishReviewPrompt(targets, identity), targets, options);
@@ -84,3 +84,4 @@ export async function reviewEnglishLeftovers({ segmented, translations, settings
         return { checked: targets.length, changed: 0, error };
     }
 }
+

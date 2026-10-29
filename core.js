@@ -1,3 +1,4 @@
+import { activeCustomOutput, promptRequestsScope, bilingualScopeRequested, maskRequestedBilingualSource, OUTPUT_FORMAT_POLICY } from './output-format.js';
 import { replaceProtectedSource, codeAwareRegions, escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled } from './deepseek-korean.js';
 import { bilingualPromptRequestsOutput } from './bilingual-intent.js';
@@ -234,8 +235,9 @@ export function maskProtectedForEnglishReview(value) {
 
 // Only a recognized source+translation pair may exempt its English half.
 // A bilingual instruction alone must not exempt untranslated narration.
-export function englishReviewWindow(segment, translation, nameTokens = [], protectedTokens = []) {
-    const text = String(translation || '');
+export function englishReviewWindow(segment, translation, nameTokens = [], protectedTokens = [], settings = {}) {
+    const text = maskRequestedBilingualSource(segment, translation, settings, value => restoreBilingualDetectionTokens(value, nameTokens, protectedTokens, 'source'));
+    if (segment?.type === 'tagged_content') return { text, start: 0 };
     const dialogue = { ...segment, type: 'dialogue_candidate' };
     const body = dialogueEnvelope(text).body;
     const pair = trailingParentheticalParts(body);
@@ -261,8 +263,7 @@ function promptRequestsBilingual(value) {
 }
 
 export function bilingualDialogueRequested(settings = {}) {
-    return promptRequestsBilingual(enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled'))
-        || promptRequestsBilingual(enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled'));
+    return bilingualScopeRequested(settings, 'dialogue');
 }
 
 const BILINGUAL_BRACKET_PAIRS = [
@@ -309,6 +310,7 @@ export function bilingualDialogueBracketPair(settings = {}) {
     const prompts = [
         enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled'),
         enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled'),
+        promptRequestsScope(activeCustomOutput(settings), 'dialogue') ? activeCustomOutput(settings) : '',
     ].filter(prompt => promptRequestsBilingual(prompt));
     for (const prompt of prompts) {
         const pair = bracketPairFromBilingualExample(prompt);
@@ -328,23 +330,9 @@ function allowsIntentionalForeignText(segment, settings = {}, speakerScopes = nu
     // validation here either.
     if (galbwaeTranslationActive(settings)) return false;
 
-    // Visible text inside any existing paired tag is always Korean-only.
-    // A global bilingual-format prompt must not relax validation for this scope.
     if (segment?.type === 'tagged_content') return false;
-
-    if (promptRequestsBilingual(enabledPromptValue(settings, 'globalPrompt', 'globalPromptEnabled'))) return true;
-    if (segment?.type !== 'dialogue_candidate') return false;
-    if (promptRequestsBilingual(enabledPromptValue(settings, 'allDialoguePrompt', 'allDialoguePromptEnabled'))) return true;
-
-    const scoped = speakerScopes && typeof speakerScopes === 'object'
-        ? speakerScopes[segment.id]
-        : null;
-    if (scoped === 'target_dialogue') return promptRequestsBilingual(enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled'));
-    if (scoped === 'other_dialogue') return promptRequestsBilingual(enabledPromptValue(settings, 'otherDialoguePrompt', 'otherDialoguePromptEnabled'));
-
-    // Without attribution, do not let a speaker-specific prompt relax foreign-
-    // text validation for every dialogue segment.
-    return false;
+    return bilingualScopeRequested(settings, segment?.type === 'dialogue_candidate' ? 'dialogue'
+        : segment?.type === 'code_content' ? 'code' : 'narration');
 }
 
 function normalizedLatinWords(value) {
@@ -1013,11 +1001,10 @@ export function findUntranslatedSegments(segments, translations, settings = {}, 
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
     const invalid = [];
     for (const segment of segments || []) {
-        const translation = String(map.get(segment.id) || '');
+        const translation = maskRequestedBilingualSource(segment, String(map.get(segment.id) || ''), settings);
         if (
             !translation.trim()
-            || allowsIntentionalForeignText(segment, settings, speakerScopes)
-            || looksLikeBilingualDialogue(segment, translation)
+            || (allowsIntentionalForeignText(segment, settings, speakerScopes) && looksLikeBilingualDialogue(segment, translation))
         ) continue;
 
         const leftoverCharacterNames = unchangedLatinCharacterNames(segment.text, translation, settings);
@@ -1733,8 +1720,12 @@ export function segmentSource(value, nameLocks = [], {
                 continue;
             }
 
+            if (region.insideTaggedContent && !translateTaggedContent) {
+                parts.push({ type: 'passthrough', text: block });
+                continue;
+            }
             if (region.insideCode) {
-                appendPiece({ type: 'tagged_content', text: block }, true, ['code', ...region.tagContext], region.codeQuote);
+                appendPiece({ type: 'code_content', text: block }, region.insideTaggedContent, region.tagContext, region.codeQuote);
                 continue;
             }
 

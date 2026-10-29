@@ -17,6 +17,7 @@ export function englishReviewTargets(segmented, translations, identity = {}, set
             .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, blank)
             .replace(/(?:www\.)[^\s<>]+/gi, blank)
             .replace(/(?:^|(?<=\s))@[A-Za-z0-9_]+/g, blank)
+            .replace(/°[CF]\b/gu, blank)
             .replace(/\b\d+(?:\.\d+)?\s*(?:mm|cm|km|kg|mg|ml|mL|kHz|MHz|GHz|GB|MB|KB|Hz|ms|m|g|L)\b/g, blank);
         for (const name of locked) {
             masked = masked.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegex(name)}(?![A-Za-z0-9_])`, 'giu'), blank);

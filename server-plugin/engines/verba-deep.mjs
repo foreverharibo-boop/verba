@@ -1,4 +1,4 @@
-// ../veereubaa/translation-composer.js
+// hankae-patch/veereubaa/translation-composer.js
 var COMPOSITION = /* @__PURE__ */ Symbol("translation composition");
 var GENERAL_KEYS = /* @__PURE__ */ new Set(["output", "input", "selection", "mad", "hongjin"]);
 var INTERNAL_SENTENCE = /@@VERBA|\b(?:JSON|NAME LOCK|TARGET CHARACTER|TARGET-CHARACTER|TARGET ADDRESSEE GENDER|USER\/NPC|CURRENT USER|PRIMARY CAST REFERENCES|K→E input|segment id|editable id|between ids|protected (?:layout|structure|tokens)|required output format|identity spelling context|inert data)\b|Ignore every saved\/custom base instruction|This is the only E→K writing engine|Never apply this block to|Translation direction is always|User prompts may affect|LEFT CONTEXT|RIGHT CONTEXT|EXISTING KOREAN CONTEXT|Return exactly three distinct|Return a new Korean replacement for only|Preserve (?:Markdown|macros)|tags, attributes, code|Metadata keeps its existing number\/layout rules|^Handle /iu;
@@ -59,7 +59,7 @@ ${custom}
 The current engine context, active setting scopes, protected structure and response contract supplied by this request remain authoritative; this block replaces translation prose only. A CUSTOM MAD or CUSTOM HONGJIN block is the active writing instruction for that enabled taste, not an excluded ordinary base prompt. CUSTOM HONGJIN applies only to confirmed TARGET dialogue; CUSTOM MAD follows the enabled MAD scope. Apply it only within the enabled taste and speaker scope.` : "", parts.internal].filter(Boolean).join("\n");
 }
 
-// ../veereubaa/bilingual-intent.js
+// hankae-patch/veereubaa/bilingual-intent.js
 var positiveCommands = [
   /(?:한\s*영|영\s*한)\s*병기(?:\s*(?:해|하라|해주세요|해줘|로\s*(?:출력|표기|번역)|적용|필수|요청|해야|하되))?/iu,
   /(?:원문|영어|영문)(?:\s*대사)?\s*[(/+·및과와]\s*(?:한국어|한글|번역)/iu,
@@ -237,7 +237,7 @@ async function resolveBilingualIntent(prompt, askOnce, signal = null) {
   return await awaitShared(job, signal);
 }
 
-// ../veereubaa/output-format.js
+// hankae-patch/veereubaa/output-format.js
 function activeCustomOutput(settings = {}) {
   const exclusive = settings.developerMadKoreanOutputEnabled === true || settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== "off");
   return exclusive ? "" : customTranslationInstruction(settings, "output") || "";
@@ -279,7 +279,7 @@ function bilingualScopeRequested(settings = {}, kind = "narration") {
 }
 var OUTPUT_FORMAT_POLICY = `OUTPUT FORMAT AUTHORITY \u2014 applies to assistant-output translation only:
 Only active GLOBAL, ALL-DIALOGUE and CUSTOM OUTPUT TRANSLATION RULES can request bilingual formatting. CUSTOM OUTPUT is the user's chat-translation instruction, not a lower-priority suggestion. Respect each instruction's exact scope; ALL-DIALOGUE is limited to direct dialogue. A request for marked spans does not enable bilingual text elsewhere. No explicit applicable request means Korean-only. Speaker-specific and one-time rules cannot enable bilingual formatting.
-Preserve Markdown emphasis delimiters, nesting and links. For requested marked-span bilingual output, keep the original marker around both languages, using the user's requested inner separator. Do not duplicate whole source paragraphs or metadata entries.
+Preserve Markdown emphasis delimiters, nesting and links. For requested marked-span bilingual output, keep the original marker around both languages, using the user's requested inner separator. Respect the requested language order: English followed by Korean or Korean followed by English. Preserve the exact source English in either order. Do not duplicate whole source paragraphs or metadata entries.
 Rows with type=code_content are readable inline-backtick/fenced text, NOT paired-tag interiors. Each row carries code_kind=inline or code_kind=fenced. A single-backtick/inline-code bilingual request applies ONLY to inline rows. Fenced rows require an explicit request for fenced/triple-backtick/code-block bilingual output or an unqualified request for all text. Never extend inline-backtick, italic or square-bracket requests into fenced rows; those characters inside a fence are literal content unless the user explicitly requests formatting there. Their delimiters and executable syntax are stored locally: return inner text only; never add wrapper backticks. Apply GLOBAL/CUSTOM OUTPUT bilingual requests to this natural language only, without applying dialogue-only rules or modifying code syntax.
 ABSOLUTE TAG EXCEPTION: rows with type=tagged_content are actual paired-tag interiors, including code nested inside tags. Translate their readable text into Korean ONLY even when any prompt requests bilingual text. Preserve tags, attributes, field count/order, brackets, separators, numbers/units, protected tokens and metadata layout. Never duplicate fields. Style/script remain protected.`;
 function maskRequestedBilingualSource(segment, translation, settings = {}, restore = (value) => value) {
@@ -290,8 +290,12 @@ function maskRequestedBilingualSource(segment, translation, settings = {}, resto
   const add = (value, kind) => {
     if (bilingualScopeRequested(settings, kind) && /[A-Za-z]/u.test(value)) units.push(value);
   };
-  if (segment?.type === "code_content") add(source, segment.codeKind === "fenced" ? "fenced" : "code");
-  else {
+  if (segment?.type === "code_content") {
+    const kind = segment.codeKind === "fenced" ? "fenced" : "code";
+    add(source, kind);
+    const bracketed = source.match(/^\[([^\[\]\n]+)\]$/u);
+    if (bracketed) add(bracketed[1], kind);
+  } else {
     add(source.replace(/^["“‘']|["”’']$/gu, ""), segment?.type === "dialogue_candidate" ? "dialogue" : "narration");
     for (const m of source.matchAll(/(\*\*|\*|__|_)([^\n]+?)\1|\[([^\]\n]+)\](?!\()/gu)) {
       add(m[2] ?? m[3], m[3] !== void 0 ? "bracket" : m[1].length === 2 ? "bold" : "italic");
@@ -302,8 +306,14 @@ function maskRequestedBilingualSource(segment, translation, settings = {}, resto
     let pos = 0;
     while ((pos = text.indexOf(unit, pos)) >= 0) {
       const tail = text.slice(pos + unit.length);
-      const paired = /^\s*(?:[\[（(【]\s*[^\]）)】\n]*[가-힣][^\]）)】\n]*[\]）)】]|[가-힣][^\]\n]*\])/u.test(tail);
-      if (paired) masked = masked.slice(0, pos) + " ".repeat(unit.length) + masked.slice(pos + unit.length);
+      const forward = /^\s*(?:[\[（(【]\s*[^\]）)】\n]*[가-힣][^\]）)】\n]*[\]）)】]|[가-힣][^\]\n]*\])/u.test(tail);
+      const head = text.slice(text.lastIndexOf("\n", pos - 1) + 1, pos);
+      const sharedSquare = /^\]/u.test(tail) && /\[[^\[\]\n]*[가-힣][^\[\]\n]*\s$/u.test(head);
+      const reverse = sharedSquare || /^[\]）)】]/u.test(tail) && /[가-힣]/u.test(head) && (/[가-힣][^\[\]（）()【】\n]*[\[（(【]\s*$/u.test(head) || /[\[（(【][^\[\]（）()【】\n]*[가-힣][^\[\]（）()【】\n]*\s$/u.test(head));
+      const before = text[pos - 1] || "";
+      const after = text[pos + unit.length] || "";
+      const boundary = !(/[\p{L}\p{N}_]/u.test(unit[0]) && /[\p{L}\p{N}_]/u.test(before)) && !(/[\p{L}\p{N}_]/u.test(unit.at(-1)) && /[\p{L}\p{N}_]/u.test(after));
+      if (boundary && (forward || reverse)) masked = masked.slice(0, pos) + " ".repeat(unit.length) + masked.slice(pos + unit.length);
       pos += unit.length;
     }
   }
@@ -317,7 +327,7 @@ function outputFormatReviewContext(settings = {}) {
   });
 }
 
-// ../veereubaa/code-content.js
+// hankae-patch/veereubaa/code-content.js
 var PROGRAM_LANGUAGES = /^(?:js|javascript|ts|typescript|jsx|tsx|css|scss|less|json|jsonc|python|py|sh|bash|shell|powershell|ps1|sql|java|c|cpp|csharp|cs|go|rust|ruby|rb|php|yaml|yml|toml|ini)$/i;
 var MACHINE_VALUE = /^(?:[\w]+[_./\\][\w./\\-]*|[a-z]+[A-Z][\w]*|https?:\/\/\S+|#[\da-f]{3,8}|\d+(?:\.\d+)?(?:px|em|rem|%|s|ms)?|true|false|null|undefined)$/;
 var CODE_LINE = /^\s*(?:(?:(?:const|let|var)\s+[\w$]+\s*=|(?:function|def|class)\s+[\w$]+\s*[(:{]|(?:if|while|for|switch|catch)\s*\(|(?:import|from)\s+[^\n]*\b(?:from|import)\b)|[\w.$]+\s*(?:\([^\n]*\)\s*[;{]?\s*$|(?:[+*/-]?=|=>))|[{}\[\]]\s*[,;]?\s*$|["'][^"']+["']\s*:|[.#][\w-]+\s*\{|[\w-]+\s*:\s*[^\n]*;)/;
@@ -456,7 +466,7 @@ function escapeCodeTranslation(text, quote) {
   return text.replace(/\\/g, "\\\\").replace(new RegExp(quote, "g"), "\\" + quote);
 }
 
-// ../veereubaa/response-parser.js
+// hankae-patch/veereubaa/response-parser.js
 function segmentNumberKey(id) {
   const match = typeof id === "string" && /^seg_([0-9]+)$/.exec(id);
   return match ? match[1].replace(/^0+(?=\d)/, "") : null;
@@ -690,7 +700,7 @@ function collectSegmentResponse(raw, expectedSegments = []) {
   return { partial, parseError, missingIds, repairs: [...new Set(repairs)], issues: [...new Set(issues)] };
 }
 
-// ../veereubaa/core.js
+// hankae-patch/veereubaa/core.js
 var PROTECTED_PATTERN = /<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 var PROTECTED_TOKEN_PATTERN = /@@VERBA_DEEP_(?:NAME_)?\d{4}@@/g;
 var PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
@@ -1402,6 +1412,9 @@ function ensureBilingualDialogueFormat(segment, translation, settings = {}, spea
     nameTokens,
     protectedTokens
   );
+  const reversePair = trailingParentheticalParts(dialogueEnvelope(result).body);
+  const expectedSource = restoreBilingualDetectionTokens(dialogueEnvelope(segment.text).body, nameTokens, protectedTokens, "source");
+  if (reversePair && /[가-힣]/u.test(reversePair.left) && bilingualSourceMatches(restoreBilingualDetectionTokens(stripLooseDialogueQuotes(reversePair.right), nameTokens, protectedTokens, "source"), expectedSource)) return result;
   const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
   const translatedEnvelope = dialogueEnvelope(result);
   const existingParts = existingBilingual ? trailingParentheticalParts(translatedEnvelope.body) : null;
@@ -4954,7 +4967,7 @@ function inferLocalTargetDialogueScopes(segmented, identity = {}) {
   return scopes;
 }
 
-// ../veereubaa/timing.js
+// hankae-patch/veereubaa/timing.js
 var PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 var LABELS = [
   ["banned", "\uAE08\uC9C0\uC5B4 \uBCF5\uAD6C"],
@@ -5109,7 +5122,7 @@ function summarize(job, status) {
   };
 }
 
-// ../veereubaa/output-splitting.js
+// hankae-patch/veereubaa/output-splitting.js
 function outputSplitCount(settings = {}) {
   const count = Number(settings.developerOutputSplitCount);
   return [2, 3].includes(count) ? count : 1;
@@ -5203,7 +5216,7 @@ function createSplitRequestQueue(limit = 3) {
   });
 }
 
-// ../veereubaa/diagnostics.js
+// hankae-patch/veereubaa/diagnostics.js
 var requestEvidence = /* @__PURE__ */ new WeakMap();
 var LIMIT = 1e4;
 function sanitizeDebugValue(value, limit = 6e3) {
@@ -5330,7 +5343,7 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
   return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
 }
 
-// ../veereubaa/minimal-output.js
+// hankae-patch/veereubaa/minimal-output.js
 var POST_TRANSLATION_AI_REPAIR_ENABLED = false;
 function minimalOutputEnabled(settings = {}) {
   return settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
@@ -5461,7 +5474,7 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
   return { translation, sourceMap: buildSourceMap(segmented, translations, translation) };
 }
 
-// ../veereubaa/google-free.js
+// hankae-patch/veereubaa/google-free.js
 var GOOGLE_FREE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 var DEFAULT_MAX_ENCODED_CHARS = 4200;
 var PROTECTED_TOKEN_PATTERN2 = /@@VERBA_DEEP_(?:NAME_)?[A-Z0-9_]*\d{4}@@|@@VERBA_DEEP_[A-Z0-9_]+@@/gu;
@@ -5624,7 +5637,7 @@ var GOOGLE_FREE_LIMITS = Object.freeze({
   concurrency: 2
 });
 
-// ../veereubaa/retry-policy.js
+// hankae-patch/veereubaa/retry-policy.js
 function normalizedServerRetryLimit(value = 5) {
   if (value === null || String(value).trim() === "") return 5;
   const number = Number(value);
@@ -5650,7 +5663,7 @@ function googleRetryHintSeconds(error) {
   return null;
 }
 
-// ../veereubaa/previous-user-context.js
+// hankae-patch/veereubaa/previous-user-context.js
 function appendPreviousUserContext(prompt, source) {
   if (typeof source !== "string" || !source.trim()) return prompt;
   return `${prompt}
@@ -5662,7 +5675,7 @@ ${JSON.stringify(source)}
 END PREVIOUS USER REFERENCE`;
 }
 
-// ../veereubaa/english-review.js
+// hankae-patch/veereubaa/english-review.js
 var escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var blank = (value) => " ".repeat(value.length);
 function englishReviewTargets(segmented, translations, identity = {}, settings = {}) {
@@ -5675,7 +5688,7 @@ function englishReviewTargets(segmented, translations, identity = {}, settings =
     const translation = String(translations.get(segment.id) || "");
     const window = englishReviewWindow(segment, translation, segmented.nameTokens, segmented.tokens, settings);
     if (!window) continue;
-    let masked = maskProtectedForEnglishReview(window.text).replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, blank).replace(/(?:www\.)[^\s<>]+/gi, blank).replace(/(?:^|(?<=\s))@[A-Za-z0-9_]+/g, blank).replace(/\b\d+(?:\.\d+)?\s*(?:mm|cm|km|kg|mg|ml|mL|kHz|MHz|GHz|GB|MB|KB|Hz|ms|m|g|L)\b/g, blank);
+    let masked = maskProtectedForEnglishReview(window.text).replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, blank).replace(/(?:www\.)[^\s<>]+/gi, blank).replace(/(?:^|(?<=\s))@[A-Za-z0-9_]+/g, blank).replace(/°[CF]\b/gu, blank).replace(/\b\d+(?:\.\d+)?\s*(?:mm|cm|km|kg|mg|ml|mL|kHz|MHz|GHz|GB|MB|KB|Hz|ms|m|g|L)\b/g, blank);
     for (const name of locked) {
       masked = masked.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegex(name)}(?![A-Za-z0-9_])`, "giu"), blank);
     }
@@ -5736,7 +5749,7 @@ async function reviewEnglishLeftovers({ segmented, translations, settings = {}, 
   }
 }
 
-// ../veereubaa/taste-audit.js
+// hankae-patch/veereubaa/taste-audit.js
 var galbwae = (settings) => settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && !["off", "all", "dialogueInner"].includes(settings.chuseokGalbwaeScope));
 function tasteAuditScope(segment, speakerScopes = {}) {
   if (segment.type === "tagged_content") return "tagged_content";
@@ -5818,7 +5831,7 @@ async function runTasteQualityAudit({ enabled = false, segmented, translations, 
   }
 }
 
-// ../veereubaa/engine-entry.js
+// hankae-patch/veereubaa/engine-entry.js
 var variant = "verba-deep";
 function createEngine(snapshot, transport, report = () => {
 }) {

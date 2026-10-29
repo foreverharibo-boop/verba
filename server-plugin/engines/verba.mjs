@@ -1,4 +1,4 @@
-// translation-composer.js
+// hankae-patch/verba/translation-composer.js
 var COMPOSITION = /* @__PURE__ */ Symbol("verba translation composition");
 function customTranslationInstruction(settings = {}, key) {
   const value = settings.customTranslatorTemplates?.[key];
@@ -35,7 +35,7 @@ function collectTranslationProse(settings, key, build) {
   return [...new Set(context.collected)].join("\n\n");
 }
 
-// bilingual-intent.js
+// hankae-patch/verba/bilingual-intent.js
 var positiveCommands = [
   /(?:한\s*영|영\s*한)\s*병기(?:\s*(?:해|하라|해주세요|해줘|로\s*(?:출력|표기|번역)|적용|필수|요청|해야|하되))?/iu,
   /(?:원문|영어|영문)(?:\s*대사)?\s*[(/+·및과와]\s*(?:한국어|한글|번역)/iu,
@@ -213,7 +213,7 @@ async function resolveBilingualIntent(prompt, askOnce, signal = null) {
   return await awaitShared(job, signal);
 }
 
-// output-format.js
+// hankae-patch/verba/output-format.js
 function activeCustomOutput(settings = {}) {
   const exclusive = settings.developerMadKoreanOutputEnabled === true || settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== "off");
   return exclusive ? "" : customTranslationInstruction(settings, "output") || "";
@@ -255,7 +255,7 @@ function bilingualScopeRequested(settings = {}, kind = "narration") {
 }
 var OUTPUT_FORMAT_POLICY = `OUTPUT FORMAT AUTHORITY \u2014 applies to assistant-output translation only:
 Only active GLOBAL, ALL-DIALOGUE and CUSTOM OUTPUT TRANSLATION RULES can request bilingual formatting. CUSTOM OUTPUT is the user's chat-translation instruction, not a lower-priority suggestion. Respect each instruction's exact scope; ALL-DIALOGUE is limited to direct dialogue. A request for marked spans does not enable bilingual text elsewhere. No explicit applicable request means Korean-only. Speaker-specific and one-time rules cannot enable bilingual formatting.
-Preserve Markdown emphasis delimiters, nesting and links. For requested marked-span bilingual output, keep the original marker around both languages, using the user's requested inner separator. Do not duplicate whole source paragraphs or metadata entries.
+Preserve Markdown emphasis delimiters, nesting and links. For requested marked-span bilingual output, keep the original marker around both languages, using the user's requested inner separator. Respect the requested language order: English followed by Korean or Korean followed by English. Preserve the exact source English in either order. Do not duplicate whole source paragraphs or metadata entries.
 Rows with type=code_content are readable inline-backtick/fenced text, NOT paired-tag interiors. Each row carries code_kind=inline or code_kind=fenced. A single-backtick/inline-code bilingual request applies ONLY to inline rows. Fenced rows require an explicit request for fenced/triple-backtick/code-block bilingual output or an unqualified request for all text. Never extend inline-backtick, italic or square-bracket requests into fenced rows; those characters inside a fence are literal content unless the user explicitly requests formatting there. Their delimiters and executable syntax are stored locally: return inner text only; never add wrapper backticks. Apply GLOBAL/CUSTOM OUTPUT bilingual requests to this natural language only, without applying dialogue-only rules or modifying code syntax.
 ABSOLUTE TAG EXCEPTION: rows with type=tagged_content are actual paired-tag interiors, including code nested inside tags. Translate their readable text into Korean ONLY even when any prompt requests bilingual text. Preserve tags, attributes, field count/order, brackets, separators, numbers/units, protected tokens and metadata layout. Never duplicate fields. Style/script remain protected.`;
 function maskRequestedBilingualSource(segment, translation, settings = {}, restore = (value) => value) {
@@ -266,8 +266,12 @@ function maskRequestedBilingualSource(segment, translation, settings = {}, resto
   const add = (value, kind) => {
     if (bilingualScopeRequested(settings, kind) && /[A-Za-z]/u.test(value)) units.push(value);
   };
-  if (segment?.type === "code_content") add(source, segment.codeKind === "fenced" ? "fenced" : "code");
-  else {
+  if (segment?.type === "code_content") {
+    const kind = segment.codeKind === "fenced" ? "fenced" : "code";
+    add(source, kind);
+    const bracketed = source.match(/^\[([^\[\]\n]+)\]$/u);
+    if (bracketed) add(bracketed[1], kind);
+  } else {
     add(source.replace(/^["“‘']|["”’']$/gu, ""), segment?.type === "dialogue_candidate" ? "dialogue" : "narration");
     for (const m of source.matchAll(/(\*\*|\*|__|_)([^\n]+?)\1|\[([^\]\n]+)\](?!\()/gu)) {
       add(m[2] ?? m[3], m[3] !== void 0 ? "bracket" : m[1].length === 2 ? "bold" : "italic");
@@ -278,8 +282,14 @@ function maskRequestedBilingualSource(segment, translation, settings = {}, resto
     let pos = 0;
     while ((pos = text.indexOf(unit, pos)) >= 0) {
       const tail = text.slice(pos + unit.length);
-      const paired = /^\s*(?:[\[（(【]\s*[^\]）)】\n]*[가-힣][^\]）)】\n]*[\]）)】]|[가-힣][^\]\n]*\])/u.test(tail);
-      if (paired) masked = masked.slice(0, pos) + " ".repeat(unit.length) + masked.slice(pos + unit.length);
+      const forward = /^\s*(?:[\[（(【]\s*[^\]）)】\n]*[가-힣][^\]）)】\n]*[\]）)】]|[가-힣][^\]\n]*\])/u.test(tail);
+      const head = text.slice(text.lastIndexOf("\n", pos - 1) + 1, pos);
+      const sharedSquare = /^\]/u.test(tail) && /\[[^\[\]\n]*[가-힣][^\[\]\n]*\s$/u.test(head);
+      const reverse = sharedSquare || /^[\]）)】]/u.test(tail) && /[가-힣]/u.test(head) && (/[가-힣][^\[\]（）()【】\n]*[\[（(【]\s*$/u.test(head) || /[\[（(【][^\[\]（）()【】\n]*[가-힣][^\[\]（）()【】\n]*\s$/u.test(head));
+      const before = text[pos - 1] || "";
+      const after = text[pos + unit.length] || "";
+      const boundary = !(/[\p{L}\p{N}_]/u.test(unit[0]) && /[\p{L}\p{N}_]/u.test(before)) && !(/[\p{L}\p{N}_]/u.test(unit.at(-1)) && /[\p{L}\p{N}_]/u.test(after));
+      if (boundary && (forward || reverse)) masked = masked.slice(0, pos) + " ".repeat(unit.length) + masked.slice(pos + unit.length);
       pos += unit.length;
     }
   }
@@ -293,7 +303,7 @@ function outputFormatReviewContext(settings = {}) {
   });
 }
 
-// code-content.js
+// hankae-patch/verba/code-content.js
 var PROGRAM_LANGUAGES = /^(?:js|javascript|ts|typescript|jsx|tsx|css|scss|less|json|jsonc|python|py|sh|bash|shell|powershell|ps1|sql|java|c|cpp|csharp|cs|go|rust|ruby|rb|php|yaml|yml|toml|ini)$/i;
 var MACHINE_VALUE = /^(?:[\w]+[_./\\][\w./\\-]*|[a-z]+[A-Z][\w]*|https?:\/\/\S+|#[\da-f]{3,8}|\d+(?:\.\d+)?(?:px|em|rem|%|s|ms)?|true|false|null|undefined)$/;
 var CODE_LINE = /^\s*(?:(?:(?:const|let|var)\s+[\w$]+\s*=|(?:function|def|class)\s+[\w$]+\s*[(:{]|(?:if|while|for|switch|catch)\s*\(|(?:import|from)\s+[^\n]*\b(?:from|import)\b)|[\w.$]+\s*(?:\([^\n]*\)\s*[;{]?\s*$|(?:[+*/-]?=|=>))|[{}\[\]]\s*[,;]?\s*$|["'][^"']+["']\s*:|[.#][\w-]+\s*\{|[\w-]+\s*:\s*[^\n]*;)/;
@@ -432,7 +442,7 @@ function escapeCodeTranslation(text, quote) {
   return text.replace(/\\/g, "\\\\").replace(new RegExp(quote, "g"), "\\" + quote);
 }
 
-// deepseek-korean.js
+// hankae-patch/verba/deepseek-korean.js
 function deepseekKoreanEnabled(settings = {}) {
   return settings.developerMode === true && settings.developerDeepseekKoreanEnabled === true;
 }
@@ -653,7 +663,7 @@ SELECTIONS
 ${JSON.stringify(rows)}`;
 }
 
-// prompt-builders.js
+// hankae-patch/verba/prompt-builders.js
 function createPromptBuilders(h) {
   const j = JSON.stringify;
   const lines = (xs) => xs.filter(Boolean).join("\n");
@@ -971,7 +981,7 @@ ${values[k]}`).join("\n");
   };
 }
 
-// response-parser.js
+// hankae-patch/verba/response-parser.js
 function segmentNumberKey(id) {
   const match = typeof id === "string" && /^seg_([0-9]+)$/.exec(id);
   return match ? match[1].replace(/^0+(?=\d)/, "") : null;
@@ -1205,7 +1215,7 @@ function collectSegmentResponse(raw, expectedSegments = []) {
   return { partial, parseError, missingIds, repairs: [...new Set(repairs)], issues: [...new Set(issues)] };
 }
 
-// core.js
+// hankae-patch/verba/core.js
 var PROTECTED_PATTERN = /<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 var PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
 var PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
@@ -1917,6 +1927,9 @@ function ensureBilingualDialogueFormat(segment, translation, settings = {}, spea
     nameTokens,
     protectedTokens
   );
+  const reversePair = trailingParentheticalParts(dialogueEnvelope(result).body);
+  const expectedSource = restoreBilingualDetectionTokens(dialogueEnvelope(segment.text).body, nameTokens, protectedTokens, "source");
+  if (reversePair && /[가-힣]/u.test(reversePair.left) && bilingualSourceMatches(restoreBilingualDetectionTokens(stripLooseDialogueQuotes(reversePair.right), nameTokens, protectedTokens, "source"), expectedSource)) return result;
   const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
   const translatedEnvelope = dialogueEnvelope(result);
   const existingParts = existingBilingual ? trailingParentheticalParts(translatedEnvelope.body) : null;
@@ -2902,7 +2915,7 @@ var promptBuilders = createPromptBuilders({
   bilingualDialogueBracketPair
 });
 
-// timing.js
+// hankae-patch/verba/timing.js
 var PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 var LABELS = [
   ["banned", "\uAE08\uC9C0\uC5B4 \uBCF5\uAD6C"],
@@ -3056,7 +3069,7 @@ function summarize(job, status) {
   };
 }
 
-// output-splitting.js
+// hankae-patch/verba/output-splitting.js
 function outputSplitCount(settings = {}) {
   const count = Number(settings.developerOutputSplitCount);
   return [2, 3].includes(count) ? count : 1;
@@ -3150,7 +3163,7 @@ function createSplitRequestQueue(limit = 3) {
   });
 }
 
-// diagnostics.js
+// hankae-patch/verba/diagnostics.js
 var requestEvidence = /* @__PURE__ */ new WeakMap();
 var LIMIT = 1e4;
 function sanitizeDebugValue(value, limit = 6e3) {
@@ -3277,7 +3290,7 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
   return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
 }
 
-// minimal-output.js
+// hankae-patch/verba/minimal-output.js
 var POST_TRANSLATION_AI_REPAIR_ENABLED = false;
 function minimalOutputEnabled(settings = {}) {
   return deepseekKoreanEnabled(settings) || settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
@@ -3435,7 +3448,7 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
   return { translation, sourceMap: buildSourceMap(segmented, translations, translation) };
 }
 
-// google-free.js
+// hankae-patch/verba/google-free.js
 var GOOGLE_FREE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 var DEFAULT_MAX_ENCODED_CHARS = 4200;
 var PROTECTED_TOKEN_PATTERN2 = /@@VERBA_(?:NAME_)?[A-Z0-9_]*\d{4}@@|@@VERBA_[A-Z0-9_]+@@/gu;
@@ -3598,7 +3611,7 @@ var GOOGLE_FREE_LIMITS = Object.freeze({
   concurrency: 2
 });
 
-// retry-policy.js
+// hankae-patch/verba/retry-policy.js
 function normalizedServerRetryLimit(value = 5) {
   if (value === null || String(value).trim() === "") return 5;
   const number = Number(value);
@@ -3624,7 +3637,7 @@ function googleRetryHintSeconds(error) {
   return null;
 }
 
-// previous-user-context.js
+// hankae-patch/verba/previous-user-context.js
 function appendPreviousUserContext(prompt, source) {
   if (typeof source !== "string" || !source.trim()) return prompt;
   return `${prompt}
@@ -3636,7 +3649,7 @@ ${JSON.stringify(source)}
 END PREVIOUS USER REFERENCE`;
 }
 
-// english-review.js
+// hankae-patch/verba/english-review.js
 var escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var blank = (value) => " ".repeat(value.length);
 function englishReviewTargets(segmented, translations, identity = {}, settings = {}) {
@@ -3649,7 +3662,7 @@ function englishReviewTargets(segmented, translations, identity = {}, settings =
     const translation = String(translations.get(segment.id) || "");
     const window = englishReviewWindow(segment, translation, segmented.nameTokens, segmented.tokens, settings);
     if (!window) continue;
-    let masked = maskProtectedForEnglishReview(window.text).replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, blank).replace(/(?:www\.)[^\s<>]+/gi, blank).replace(/(?:^|(?<=\s))@[A-Za-z0-9_]+/g, blank).replace(/\b\d+(?:\.\d+)?\s*(?:mm|cm|km|kg|mg|ml|mL|kHz|MHz|GHz|GB|MB|KB|Hz|ms|m|g|L)\b/g, blank);
+    let masked = maskProtectedForEnglishReview(window.text).replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, blank).replace(/(?:www\.)[^\s<>]+/gi, blank).replace(/(?:^|(?<=\s))@[A-Za-z0-9_]+/g, blank).replace(/°[CF]\b/gu, blank).replace(/\b\d+(?:\.\d+)?\s*(?:mm|cm|km|kg|mg|ml|mL|kHz|MHz|GHz|GB|MB|KB|Hz|ms|m|g|L)\b/g, blank);
     for (const name of locked) {
       masked = masked.replace(new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRegex(name)}(?![A-Za-z0-9_])`, "giu"), blank);
     }
@@ -3710,7 +3723,7 @@ async function reviewEnglishLeftovers({ segmented, translations, settings = {}, 
   }
 }
 
-// taste-audit.js
+// hankae-patch/verba/taste-audit.js
 var galbwae = (settings) => settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && !["off", "all", "dialogueInner"].includes(settings.chuseokGalbwaeScope));
 function tasteAuditScope(segment, speakerScopes = {}) {
   if (segment.type === "tagged_content") return "tagged_content";
@@ -3792,7 +3805,7 @@ async function runTasteQualityAudit({ enabled = false, segmented, translations, 
   }
 }
 
-// engine-entry.js
+// hankae-patch/verba/engine-entry.js
 var variant = "verba";
 function createEngine(snapshot, transport, report = () => {
 }) {

@@ -111,3 +111,48 @@ test('inline instructions never authorize fences; explicit fence requests do',()
   assert.match(buildOutputPrompt(d,settings),new RegExp('"code_kind"\\s*:\\s*"'+kind+'"'));
  }
 });
+
+test('code metadata and reverse-order bilingual originals survive review', async()=>{
+ const settings=custom('Inside italics, inline backticks, fenced code blocks and square brackets, always output both English and Korean text.');
+ const examples=[
+  ['`[Thought: Stay quiet.]`','[Thought: Stay quiet. 생각: 조용히 있어.]'],
+  ['```\n[Thought: Stay quiet.]\n```','[생각: 조용히 있어. Thought: Stay quiet.]'],
+  ['```text\n[Thought: Stay quiet.]\n```','[Thought: Stay quiet. 생각: 조용히 있어.]'],
+  ['```\nStay quiet.\n```','조용히 있어. [Stay quiet.]'],
+  ['*Stay quiet.*','*조용히 있어. [Stay quiet.]*'],
+  ['[Stay quiet.]','[조용히 있어. Stay quiet.]'],
+ ];
+ for(const [source,translation] of examples){
+  const data=seg(source), row=data.segments[0], map=new Map([[row.id,translation]]);
+  assert.equal(englishReviewTargets(data,map,{},settings).length,0,source);
+  let calls=0;await reviewEnglishLeftovers({segmented:data,translations:map,settings,request:async()=>{calls++;throw Error('valid original must not be retranslated');}});
+  assert.equal(calls,0);assert.equal(map.get(row.id),translation);
+  const mixed=translation.replace('조용히 있어.','조용히 quietly 있어.');
+  assert.deepEqual(englishReviewTargets(data,new Map([[row.id,mixed]]),{},settings).map(x=>x.text),['quietly']);
+  assert.ok(englishReviewTargets(data,map,{},{}).length,'permission required');
+ }
+ const data=seg('"Stay quiet."'),map=new Map([[data.segments[0].id,'"조용히 있어. [Stay quiet.]"']]);
+ assert.equal(englishReviewTargets(data,map,{},custom('For dialogue, always output both English and Korean text.')).length,0);
+ assert.equal(ensureBilingualDialogueFormat(data.segments[0],map.get(data.segments[0].id),custom('For dialogue, always output both English and Korean text.')),map.get(data.segments[0].id));
+});
+test('metadata protection requires exact source, scope and paired Korean',()=>{
+ const settings=custom('Inside fenced code blocks, always output both English and Korean text.');
+ for(const [source,tr,s] of [
+  ['```\n[Thought: Stay quiet.]\n```','[Thought: Stay quiet.]',settings],
+  ['```\n[Thought: Stay quiet.]\n```','[생각: 조용히 있어. Thought: Stay here.]',settings],
+  ['```\n[Thought: Stay quiet.]\n```','[Thought: Stay quiet. 생각: 조용히 있어.]',custom()],
+  ['<Info_panel>[Thought: Stay quiet.]</Info_panel>','[Thought: Stay quiet. 생각: 조용히 있어.]',settings],
+ ]){const d=seg(source);assert.ok(englishReviewTargets(d,new Map([[d.segments[0].id,tr]]),{},s).length);}
+});
+
+test('status fields in labelled and unlabelled fences preserve both orders',()=>{
+ const settings=custom('Inside fenced code blocks, always output both English and Korean text.');
+ const rows=[['Date: 2024.10.15. (Tuesday)','날짜: 2024.10.15. (화요일)'],['Time: 06:58 PM','시간: 오후 06:58'],['Weather: Clear | 13°C','날씨: 맑음 | 13°C'],['Location: Sanho Apartments, Unit 809','위치: 산호 아파트 809호'],['Thought: Something is coming up the stairs. Stay quiet and keep the door locked.','생각: 무언가 계단을 올라온다. 조용히 하고 문을 잠가 둬.']];
+ for(const label of ['','text'])for(const reverse of [false,true]){
+ const d=seg('```'+label+'\n'+rows.map(([en])=>'['+en+']').join('\n')+'\n```');
+ const map=new Map(d.segments.map((s,i)=>[s.id,'['+(reverse?rows[i][1]+' '+rows[i][0]:rows[i][0]+' '+rows[i][1])+']']));
+ assert.deepEqual(englishReviewTargets(d,map,{},settings),[]);
+ const output=assembleTranslation(d,map);for(const [en] of rows)assert.ok(output.includes(en));
+ assert.ok(output.startsWith('```'+label+'\n'));
+ }
+});

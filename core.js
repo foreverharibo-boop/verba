@@ -827,6 +827,12 @@ export function ensureBilingualDialogueFormat(segment, translation, settings = {
     if (!bilingualDialogueRequested(settings)) return restoreVerifiedBilingualEnglishNames(
         segment, result, nameTokens, protectedTokens,
     );
+    // A verified Korean-first pair is already assembled. Do not reorder it
+    // into the legacy English-first template or append the Korean a second time.
+    const reversePair = trailingParentheticalParts(dialogueEnvelope(result).body);
+    const expectedSource = restoreBilingualDetectionTokens(dialogueEnvelope(segment.text).body, nameTokens, protectedTokens, 'source');
+    if (reversePair && /[가-힣]/u.test(reversePair.left)
+        && bilingualSourceMatches(restoreBilingualDetectionTokens(stripLooseDialogueQuotes(reversePair.right), nameTokens, protectedTokens, 'source'), expectedSource)) return result;
     const existingBilingual = looksLikeBilingualDialogue(segment, result, nameTokens, protectedTokens);
     const translatedEnvelope = dialogueEnvelope(result);
     const existingParts = existingBilingual

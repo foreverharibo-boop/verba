@@ -237,7 +237,7 @@ export function maskProtectedForEnglishReview(value) {
 // A bilingual instruction alone must not exempt untranslated narration.
 export function englishReviewWindow(segment, translation, nameTokens = [], protectedTokens = [], settings = {}) {
     const text = maskRequestedBilingualSource(segment, translation, settings, value => restoreBilingualDetectionTokens(value, nameTokens, protectedTokens, 'source'));
-    if (segment?.type === 'tagged_content') return { text, start: 0 };
+    if (segment?.type === 'tagged_content' || segment?.type === 'code_content') return { text, start: 0 };
     const dialogue = { ...segment, type: 'dialogue_candidate' };
     const body = dialogueEnvelope(text).body;
     const pair = trailingParentheticalParts(body);
@@ -332,7 +332,7 @@ function allowsIntentionalForeignText(segment, settings = {}, speakerScopes = nu
 
     if (segment?.type === 'tagged_content') return false;
     return bilingualScopeRequested(settings, segment?.type === 'dialogue_candidate' ? 'dialogue'
-        : segment?.type === 'code_content' ? 'code' : 'narration');
+        : segment?.type === 'code_content' ? (segment.codeKind === 'fenced' ? 'fenced' : 'code') : 'narration');
 }
 
 function normalizedLatinWords(value) {
@@ -1665,7 +1665,7 @@ export function segmentSource(value, nameLocks = [], {
     const parts = [];
     let translatableIndex = 0;
 
-    const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = '') => {
+    const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = '', codeKind = '') => {
         const leading = piece.text.match(/^\s+/u)?.[0] || '';
         const afterLeading = piece.text.slice(leading.length);
         const trailing = afterLeading.match(/\s+$/u)?.[0] || '';
@@ -1697,6 +1697,7 @@ export function segmentSource(value, nameLocks = [], {
                 type: insideTaggedContent ? 'tagged_content' : piece.type,
                 text: content,
                 ...(codeQuote ? { codeQuote } : {}),
+                ...(codeKind ? { codeKind } : {}),
                 ...(insideTaggedContent && tagContext.length
                     ? { tagContext: [...new Set(tagContext.map(tag => String(tag).toLocaleLowerCase()))] }
                     : {}),
@@ -1725,7 +1726,7 @@ export function segmentSource(value, nameLocks = [], {
                 continue;
             }
             if (region.insideCode) {
-                appendPiece({ type: 'code_content', text: block }, region.insideTaggedContent, region.tagContext, region.codeQuote);
+                appendPiece({ type: 'code_content', text: block }, region.insideTaggedContent, region.tagContext, region.codeQuote, region.codeKind);
                 continue;
             }
 

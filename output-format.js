@@ -10,7 +10,8 @@ export function activeCustomOutput(settings = {}) {
 const markers = {
     italic: /italics?|이탤릭|기울임|\(\*\.\.\.\*\)/iu,
     bold: /bold|굵게|굵은|\*\*\.\.\.\*\*/iu,
-    code: /backticks?|code\s*(?:blocks?|spans?|fences?)|백틱|코드\s*블록|`/iu,
+    fenced: /fenced|triple[ -]*(?:backticks?|ticks?)|code\s*blocks?|코드\s*블록|백틱\s*(?:세|3)\s*개|`{3}|~{3}/iu,
+    code: /backticks?|(?:inline\s*code|code\s*spans?)|백틱|(?<!`)`(?!`)/iu,
     bracket: /square\s*brackets?|대괄호|\[\.\.\.\]/iu,
 };
 // This is a conservative local permission check, not a rewrite of the user's
@@ -18,12 +19,17 @@ const markers = {
 export function promptRequestsScope(prompt, kind) {
     for (const line of String(prompt || '').split(/\r?\n/u)) {
         const scopedMarkers = Object.entries(markers).filter(([, re]) => re.test(line)).map(([key]) => key);
+        if (scopedMarkers.includes('fenced') && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(line)) {
+            const i = scopedMarkers.indexOf('code'); if (i >= 0) scopedMarkers.splice(i, 1);
+        }
         const clauses = line.split(/;|(?<=[.!?])\s+(?=[A-Z가-힣])|\bbut\b|하지만/iu);
         const affirmative = clauses.some(clause => bilingualPromptRequestsOutput(clause)
             || (!/(?:never|do not|금지|하지)/iu.test(clause) && /(?:output|show|display).*both.*English.*(?:and|with).*Korean/iu.test(clause))
             || (!/(?:do not|never|금지|하지\s*마)/iu.test(clause)
                 && /(?:copy|keep|preserve|retain)\b.*\b(?:english|source|original)\b.*\b(?:add|append)\b.*\bkorean\b/iu.test(clause)));
         if (!affirmative) continue;
+        if (kind === 'fenced' && scopedMarkers.length && !scopedMarkers.includes('fenced')) continue;
+        if (kind === 'code' && scopedMarkers.includes('fenced') && !scopedMarkers.includes('code')) continue;
         if (scopedMarkers.length) {
             // Brackets used only as the output separator are not source scopes.
             const sourceScoped = /(?:marked|enclosed|inside|between|spans?|구간|사이|안에|안의|속의|속)/iu.test(line);
@@ -48,7 +54,7 @@ export function bilingualScopeRequested(settings = {}, kind = 'narration') {
 export const OUTPUT_FORMAT_POLICY = `OUTPUT FORMAT AUTHORITY — applies to assistant-output translation only:
 Only active GLOBAL, ALL-DIALOGUE and CUSTOM OUTPUT TRANSLATION RULES can request bilingual formatting. CUSTOM OUTPUT is the user's chat-translation instruction, not a lower-priority suggestion. Respect each instruction's exact scope; ALL-DIALOGUE is limited to direct dialogue. A request for marked spans does not enable bilingual text elsewhere. No explicit applicable request means Korean-only. Speaker-specific and one-time rules cannot enable bilingual formatting.
 Preserve Markdown emphasis delimiters, nesting and links. For requested marked-span bilingual output, keep the original marker around both languages, using the user's requested inner separator. Do not duplicate whole source paragraphs or metadata entries.
-Rows with type=code_content are readable inline-backtick/fenced text, NOT paired-tag interiors. Their delimiters and executable syntax are stored locally: return inner text only; never add wrapper backticks. Apply GLOBAL/CUSTOM OUTPUT bilingual requests to this natural language only, without applying dialogue-only rules or modifying code syntax.
+Rows with type=code_content are readable inline-backtick/fenced text, NOT paired-tag interiors. Each row carries code_kind=inline or code_kind=fenced. A single-backtick/inline-code bilingual request applies ONLY to inline rows. Fenced rows require an explicit request for fenced/triple-backtick/code-block bilingual output or an unqualified request for all text. Never extend inline-backtick, italic or square-bracket requests into fenced rows; those characters inside a fence are literal content unless the user explicitly requests formatting there. Their delimiters and executable syntax are stored locally: return inner text only; never add wrapper backticks. Apply GLOBAL/CUSTOM OUTPUT bilingual requests to this natural language only, without applying dialogue-only rules or modifying code syntax.
 ABSOLUTE TAG EXCEPTION: rows with type=tagged_content are actual paired-tag interiors, including code nested inside tags. Translate their readable text into Korean ONLY even when any prompt requests bilingual text. Preserve tags, attributes, field count/order, brackets, separators, numbers/units, protected tokens and metadata layout. Never duplicate fields. Style/script remain protected.`;
 
 // Mask only source text actually paired with Korean; keep offsets and review
@@ -61,7 +67,7 @@ export function maskRequestedBilingualSource(segment, translation, settings = {}
     const add = (value, kind) => {
         if (bilingualScopeRequested(settings, kind) && /[A-Za-z]/u.test(value)) units.push(value);
     };
-    if (segment?.type === 'code_content') add(source, 'code');
+    if (segment?.type === 'code_content') add(source, segment.codeKind === 'fenced' ? 'fenced' : 'code');
     else {
         add(source.replace(/^["“‘']|["”’']$/gu, ''), segment?.type === 'dialogue_candidate' ? 'dialogue' : 'narration');
         for (const m of source.matchAll(/(\*\*|\*|__|_)([^\n]+?)\1|\[([^\]\n]+)\](?!\()/gu)) {

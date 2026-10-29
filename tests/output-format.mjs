@@ -94,3 +94,20 @@ test('output, scoped output and repair carry custom authority; input is isolated
  }
  assert.equal(buildInputPrompt('여기 있어.',s),buildInputPrompt('여기 있어.',{}));
 });
+
+test('inline instructions never authorize fences; explicit fence requests do',()=>{
+ const settings=custom();
+ assert.equal(bilingualScopeRequested(settings,'code'),true);
+ assert.equal(bilingualScopeRequested(settings,'fenced'),false);
+ const onlyFence=custom('Inside triple backticks, always output both English and Korean text.');
+ assert.equal(bilingualScopeRequested(onlyFence,'fenced'),true);
+ assert.equal(bilingualScopeRequested(onlyFence,'code'),false);
+ assert.equal(bilingualScopeRequested(custom('For all text, always output both English and Korean text.'),'fenced'),true);
+ for(const [source,kind] of [['`Stay quiet.`','inline'],['```\nStay quiet.\n```','fenced'],['~~~text\nStay quiet.\n~~~','fenced'],['```json\n{"message":"Stay quiet."}\n```','fenced']]){
+  const d=seg(source), row=d.segments[0];assert.equal(row.codeKind,kind);
+  const map=new Map([[row.id,'Stay quiet. [조용히 있어.]']]);
+  assert.equal(englishReviewTargets(d,map,{},settings).some(x=>x.text.includes('Stay quiet')),kind==='fenced');
+  if(kind==='fenced')assert.equal(englishReviewTargets(d,map,{},onlyFence).length,0);
+  assert.match(buildOutputPrompt(d,settings),new RegExp('"code_kind"\\s*:\\s*"'+kind+'"'));
+ }
+});

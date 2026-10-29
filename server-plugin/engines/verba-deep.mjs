@@ -245,15 +245,22 @@ function activeCustomOutput(settings = {}) {
 var markers = {
   italic: /italics?|이탤릭|기울임|\(\*\.\.\.\*\)/iu,
   bold: /bold|굵게|굵은|\*\*\.\.\.\*\*/iu,
-  code: /backticks?|code\s*(?:blocks?|spans?|fences?)|백틱|코드\s*블록|`/iu,
+  fenced: /fenced|triple[ -]*(?:backticks?|ticks?)|code\s*blocks?|코드\s*블록|백틱\s*(?:세|3)\s*개|`{3}|~{3}/iu,
+  code: /backticks?|(?:inline\s*code|code\s*spans?)|백틱|(?<!`)`(?!`)/iu,
   bracket: /square\s*brackets?|대괄호|\[\.\.\.\]/iu
 };
 function promptRequestsScope(prompt, kind) {
   for (const line of String(prompt || "").split(/\r?\n/u)) {
     const scopedMarkers = Object.entries(markers).filter(([, re]) => re.test(line)).map(([key]) => key);
+    if (scopedMarkers.includes("fenced") && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(line)) {
+      const i = scopedMarkers.indexOf("code");
+      if (i >= 0) scopedMarkers.splice(i, 1);
+    }
     const clauses = line.split(/;|(?<=[.!?])\s+(?=[A-Z가-힣])|\bbut\b|하지만/iu);
     const affirmative = clauses.some((clause) => bilingualPromptRequestsOutput(clause) || !/(?:never|do not|금지|하지)/iu.test(clause) && /(?:output|show|display).*both.*English.*(?:and|with).*Korean/iu.test(clause) || !/(?:do not|never|금지|하지\s*마)/iu.test(clause) && /(?:copy|keep|preserve|retain)\b.*\b(?:english|source|original)\b.*\b(?:add|append)\b.*\bkorean\b/iu.test(clause));
     if (!affirmative) continue;
+    if (kind === "fenced" && scopedMarkers.length && !scopedMarkers.includes("fenced")) continue;
+    if (kind === "code" && scopedMarkers.includes("fenced") && !scopedMarkers.includes("code")) continue;
     if (scopedMarkers.length) {
       const sourceScoped = /(?:marked|enclosed|inside|between|spans?|구간|사이|안에|안의|속의|속)/iu.test(line);
       if (sourceScoped && !scopedMarkers.includes(kind)) continue;
@@ -273,7 +280,7 @@ function bilingualScopeRequested(settings = {}, kind = "narration") {
 var OUTPUT_FORMAT_POLICY = `OUTPUT FORMAT AUTHORITY \u2014 applies to assistant-output translation only:
 Only active GLOBAL, ALL-DIALOGUE and CUSTOM OUTPUT TRANSLATION RULES can request bilingual formatting. CUSTOM OUTPUT is the user's chat-translation instruction, not a lower-priority suggestion. Respect each instruction's exact scope; ALL-DIALOGUE is limited to direct dialogue. A request for marked spans does not enable bilingual text elsewhere. No explicit applicable request means Korean-only. Speaker-specific and one-time rules cannot enable bilingual formatting.
 Preserve Markdown emphasis delimiters, nesting and links. For requested marked-span bilingual output, keep the original marker around both languages, using the user's requested inner separator. Do not duplicate whole source paragraphs or metadata entries.
-Rows with type=code_content are readable inline-backtick/fenced text, NOT paired-tag interiors. Their delimiters and executable syntax are stored locally: return inner text only; never add wrapper backticks. Apply GLOBAL/CUSTOM OUTPUT bilingual requests to this natural language only, without applying dialogue-only rules or modifying code syntax.
+Rows with type=code_content are readable inline-backtick/fenced text, NOT paired-tag interiors. Each row carries code_kind=inline or code_kind=fenced. A single-backtick/inline-code bilingual request applies ONLY to inline rows. Fenced rows require an explicit request for fenced/triple-backtick/code-block bilingual output or an unqualified request for all text. Never extend inline-backtick, italic or square-bracket requests into fenced rows; those characters inside a fence are literal content unless the user explicitly requests formatting there. Their delimiters and executable syntax are stored locally: return inner text only; never add wrapper backticks. Apply GLOBAL/CUSTOM OUTPUT bilingual requests to this natural language only, without applying dialogue-only rules or modifying code syntax.
 ABSOLUTE TAG EXCEPTION: rows with type=tagged_content are actual paired-tag interiors, including code nested inside tags. Translate their readable text into Korean ONLY even when any prompt requests bilingual text. Preserve tags, attributes, field count/order, brackets, separators, numbers/units, protected tokens and metadata layout. Never duplicate fields. Style/script remain protected.`;
 function maskRequestedBilingualSource(segment, translation, settings = {}, restore = (value) => value) {
   const text = String(translation || "");
@@ -283,7 +290,7 @@ function maskRequestedBilingualSource(segment, translation, settings = {}, resto
   const add = (value, kind) => {
     if (bilingualScopeRequested(settings, kind) && /[A-Za-z]/u.test(value)) units.push(value);
   };
-  if (segment?.type === "code_content") add(source, "code");
+  if (segment?.type === "code_content") add(source, segment.codeKind === "fenced" ? "fenced" : "code");
   else {
     add(source.replace(/^["“‘']|["”’']$/gu, ""), segment?.type === "dialogue_candidate" ? "dialogue" : "narration");
     for (const m of source.matchAll(/(\*\*|\*|__|_)([^\n]+?)\1|\[([^\]\n]+)\](?!\()/gu)) {
@@ -366,7 +373,8 @@ function replaceProtectedSource(value, opaquePattern, replacement, { opaqueCode 
   const protect = (raw, meta) => typeof replacement === "function" ? replacement(raw, meta) : replacement;
   const opaque = new RegExp(opaquePattern.source, opaquePattern.flags);
   const ordinary = (body) => body.replace(opaquePattern, (raw) => protect(raw));
-  const boundary = (raw, direction, quote = "") => protect(raw, { codeBoundary: direction, codeQuote: quote });
+  let codeKind = "inline";
+  const boundary = (raw, direction, quote = "") => protect(raw, { codeBoundary: direction, codeQuote: quote, codeKind });
   const prose = (body, quote = "") => {
     if (quote) return body.split(/(\\(?:u[\da-fA-F]{4}|x[\da-fA-F]{2}|[^]))/u).map((part, i) => i % 2 ? protect(part) : ordinary(part)).join("");
     return ordinary(body);
@@ -408,6 +416,7 @@ function replaceProtectedSource(value, opaquePattern, replacement, { opaqueCode 
         cursor = code.end;
         continue;
       }
+      codeKind = code.open.includes("\n") ? "fenced" : "inline";
       const markup = /^(?:html|xml|svg)$/i.test(code.language) || /^\s*</.test(code.body);
       const isProgram = !markup && (PROGRAM_LANGUAGES.test(code.language) || code.body.split(/\r?\n/).some((line) => CODE_LINE.test(line)));
       const machineOnly = !code.body.includes("\n") && MACHINE_VALUE.test(code.body.trim());
@@ -428,7 +437,7 @@ function codeAwareRegions(text, tokens, taggedRanges) {
     if (!token.codeBoundary) continue;
     const start = text.indexOf(token.token);
     if (start < 0) continue;
-    if (token.codeBoundary === "open") stack.push({ start: start + token.token.length, quote: token.codeQuote || "" });
+    if (token.codeBoundary === "open") stack.push({ start: start + token.token.length, quote: token.codeQuote || "", kind: token.codeKind || "inline" });
     else {
       const open = stack.pop();
       if (open) codeRanges.push({ ...open, end: start });
@@ -439,7 +448,7 @@ function codeAwareRegions(text, tokens, taggedRanges) {
     const end = points[i + 1];
     const tag = taggedRanges.find((r) => r.start <= start && r.end >= end);
     const code = codeRanges.find((r) => r.start <= start && r.end >= end);
-    return { text: text.slice(start, end), insideTaggedContent: !!tag, tagContext: tag?.tags || [], insideCode: !!code, codeQuote: code?.quote || "" };
+    return { text: text.slice(start, end), insideTaggedContent: !!tag, tagContext: tag?.tags || [], insideCode: !!code, codeQuote: code?.quote || "", codeKind: code?.kind || "" };
   }).filter((r) => r.text);
 }
 function escapeCodeTranslation(text, quote) {
@@ -862,7 +871,7 @@ function maskProtectedForEnglishReview(value) {
 }
 function englishReviewWindow(segment, translation, nameTokens = [], protectedTokens = [], settings = {}) {
   const text = maskRequestedBilingualSource(segment, translation, settings, (value) => restoreBilingualDetectionTokens(value, nameTokens, protectedTokens, "source"));
-  if (segment?.type === "tagged_content") return { text, start: 0 };
+  if (segment?.type === "tagged_content" || segment?.type === "code_content") return { text, start: 0 };
   const dialogue = { ...segment, type: "dialogue_candidate" };
   const body = dialogueEnvelope(text).body;
   const pair = trailingParentheticalParts(body);
@@ -940,7 +949,7 @@ function bilingualDialogueBracketPair(settings = {}) {
 function allowsIntentionalForeignText(segment, settings = {}, speakerScopes = null) {
   if (galbwaeTranslationActive(settings)) return false;
   if (segment?.type === "tagged_content") return false;
-  return bilingualScopeRequested(settings, segment?.type === "dialogue_candidate" ? "dialogue" : segment?.type === "code_content" ? "code" : "narration");
+  return bilingualScopeRequested(settings, segment?.type === "dialogue_candidate" ? "dialogue" : segment?.type === "code_content" ? segment.codeKind === "fenced" ? "fenced" : "code" : "narration");
 }
 function normalizedLatinWords(value) {
   return validationText(value).toLocaleLowerCase().replace(/[’‘]/g, "'").match(/[a-z]+(?:'[a-z]+)*/g) || [];
@@ -1909,7 +1918,7 @@ function segmentSource(value, nameLocks = [], {
   const regions = codeAwareRegions(protectedText, tokens, taggedRanges);
   const parts = [];
   let translatableIndex = 0;
-  const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = "") => {
+  const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = "", codeKind = "") => {
     const leading = piece.text.match(/^\s+/u)?.[0] || "";
     const afterLeading = piece.text.slice(leading.length);
     const trailing = afterLeading.match(/\s+$/u)?.[0] || "";
@@ -1930,7 +1939,8 @@ function segmentSource(value, nameLocks = [], {
         type: insideTaggedContent ? "tagged_content" : piece.type,
         ...insideTaggedContent && tagContext.length ? { tagContext: [...tagContext] } : {},
         text: content,
-        ...codeQuote ? { codeQuote } : {}
+        ...codeQuote ? { codeQuote } : {},
+        ...codeKind ? { codeKind } : {}
       });
       translatableIndex += 1;
     }
@@ -1949,7 +1959,7 @@ function segmentSource(value, nameLocks = [], {
         continue;
       }
       if (region.insideCode) {
-        appendPiece({ type: "code_content", text: block }, region.insideTaggedContent, region.tagContext, region.codeQuote);
+        appendPiece({ type: "code_content", text: block }, region.insideTaggedContent, region.tagContext, region.codeQuote, region.codeKind);
         continue;
       }
       if (region.insideTaggedContent) {
@@ -3798,10 +3808,11 @@ function buildScopedOutputPromptInternal({
   scope = "narration",
   speakerIdentity = {}
 }) {
-  const payload = (segments || []).map(({ id, type, text, tagContext }) => ({
+  const payload = (segments || []).map(({ id, type, text, tagContext, codeKind }) => ({
     id,
     type,
     ...tagContext?.length ? { tag_context: tagContext } : {},
+    ...codeKind ? { code_kind: codeKind } : {},
     text
   }));
   const dialogue = scope === "target_dialogue" || scope === "other_dialogue";
@@ -4044,11 +4055,12 @@ function buildOutputPrompt(segmented, settings = {}, ...rest) {
   return withTranslationComposition(settings, "output", (current) => buildOutputPromptInternal(segmented, current, ...rest).replace("\nSEGMENTS\n", "\n" + OUTPUT_FORMAT_POLICY + "\nSEGMENTS\n"));
 }
 function buildOutputPromptInternal(segmented, settings, oneTimeInstruction = "", speakerIdentity = {}, tuning = null, speakerScopes = {}) {
-  const payload = segmented.segments.map(({ id, type, text, tagContext }) => ({
+  const payload = segmented.segments.map(({ id, type, text, tagContext, codeKind }) => ({
     id,
     type,
     ...type === "dialogue_candidate" ? { speaker_scope: speakerScopes[id] || "unknown_dialogue" } : {},
     ...tagContext?.length ? { tag_context: tagContext } : {},
+    ...codeKind ? { code_kind: codeKind } : {},
     text
   }));
   const galbwaeExclusive = galbwaeMode(settings) !== "off";
@@ -5328,9 +5340,10 @@ function buildMinimalOutputPrompt(segments, settings = {}, ...rest) {
 }
 function buildMinimalOutputPromptInternal(segments, settings = {}, nameTokens = [], oneTimeInstruction = "") {
   const instruction = String(settings.developerMinimalPrompt || "").trim() || "\uC790\uC5F0\uC2A4\uB7FD\uAC8C \uD55C\uAD6D\uC5B4\uB85C \uBC88\uC5ED\uD558\uB77C.";
-  const payload = segments.map(({ id, type, text, tagContext }) => ({
+  const payload = segments.map(({ id, type, text, tagContext, codeKind }) => ({
     id,
     type,
+    ...codeKind ? { code_kind: codeKind } : {},
     ...tagContext?.length ? { tag_context: tagContext } : {},
     text
   }));

@@ -58,7 +58,8 @@ export function replaceProtectedSource(value, opaquePattern, replacement, { opaq
     const protect = (raw, meta) => typeof replacement === 'function' ? replacement(raw, meta) : replacement;
     const opaque = new RegExp(opaquePattern.source, opaquePattern.flags);
     const ordinary = body => body.replace(opaquePattern, raw => protect(raw));
-    const boundary = (raw, direction, quote = '') => protect(raw, { codeBoundary: direction, codeQuote: quote });
+    let codeKind = 'inline';
+    const boundary = (raw, direction, quote = '') => protect(raw, { codeBoundary: direction, codeQuote: quote, codeKind });
     const prose = (body, quote = '') => {
         // Preserve existing escapes verbatim; introduced quotes are escaped at assembly.
         if (quote) return body.split(/(\\(?:u[\da-fA-F]{4}|x[\da-fA-F]{2}|[^]))/u)
@@ -104,6 +105,7 @@ export function replaceProtectedSource(value, opaquePattern, replacement, { opaq
                 cursor = code.end;
                 continue;
             }
+            codeKind = code.open.includes('\n') ? 'fenced' : 'inline';
             const markup = /^(?:html|xml|svg)$/i.test(code.language) || /^\s*</.test(code.body);
             const isProgram = !markup && (PROGRAM_LANGUAGES.test(code.language) || code.body.split(/\r?\n/).some(line => CODE_LINE.test(line)));
             const machineOnly = !code.body.includes('\n') && MACHINE_VALUE.test(code.body.trim());
@@ -127,7 +129,7 @@ export function codeAwareRegions(text, tokens, taggedRanges) {
         if (!token.codeBoundary) continue;
         const start = text.indexOf(token.token);
         if (start < 0) continue;
-        if (token.codeBoundary === 'open') stack.push({ start: start + token.token.length, quote: token.codeQuote || '' });
+        if (token.codeBoundary === 'open') stack.push({ start: start + token.token.length, quote: token.codeQuote || '', kind: token.codeKind || 'inline' });
         else {
             const open = stack.pop();
             if (open) codeRanges.push({ ...open, end: start });
@@ -138,7 +140,7 @@ export function codeAwareRegions(text, tokens, taggedRanges) {
         const end = points[i + 1];
         const tag = taggedRanges.find(r => r.start <= start && r.end >= end);
         const code = codeRanges.find(r => r.start <= start && r.end >= end);
-        return { text: text.slice(start, end), insideTaggedContent: !!tag, tagContext: tag?.tags || [], insideCode: !!code, codeQuote: code?.quote || '' };
+        return { text: text.slice(start, end), insideTaggedContent: !!tag, tagContext: tag?.tags || [], insideCode: !!code, codeQuote: code?.quote || '', codeKind: code?.kind || '' };
     }).filter(r => r.text);
 }
 

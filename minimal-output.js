@@ -16,9 +16,10 @@ export function minimalOutputEnabled(settings = {}) {
 
 function buildMinimalOutputPromptInternal(segments, settings = {}, nameTokens = [], oneTimeInstruction = '') {
     const instruction = String(settings.developerMinimalPrompt || '').trim() || '자연스럽게 한국어로 번역하라.';
-    const payload = segments.map(({ id, type, text, tagContext }) => ({
+    const payload = segments.map(({ id, type, text, tagContext, codeKind }) => ({
         id,
         type,
+        ...(codeKind ? { code_kind: codeKind } : {}),
         ...(tagContext?.length ? { tag_context: tagContext } : {}),
         text,
     }));

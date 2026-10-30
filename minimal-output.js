@@ -1,3 +1,4 @@
+import { createOutputComparison } from './output-comparison.js';
 import { deepseekKoreanEnabled, buildDeepseekKoreanPrompt } from './deepseek-korean.js';
 import { translationProse, withTranslationComposition } from './translation-composer.js';
 import { outputSplitCount, runOutputBatches } from './output-splitting.js';
@@ -66,6 +67,8 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     };
     const oneTime = String(options.oneTimeInstruction || '');
     let usedInitialFallback = false;
+    const comparison = createOutputComparison(segmented, settings.debugMode === true);
+    const firstTranslations = new Map();
     const effectiveSplitCount = settings.translationEngine === 'google-free' ? 1 : outputSplitCount(settings);
     const translations = await runOutputBatches(segmented, effectiveSplitCount, options, async (segments, batchOptions) => {
         const request = (targets, repair = '') => {
@@ -75,6 +78,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
             if (repair === 'names') prompt += '\nPrevious result left one or more source-language character names in Latin script. Retranslate these targets. Every clear human or fictional character name must use natural Hangul (fixed mapping first); never keep a character name in Latin script merely because it is a proper name. Keep genuine brands, acronyms, products, codes, URLs and handles unchanged.';
             return requestSegments(prompt, targets, {
                 ...batchOptions,
+                ...(repair ? {} : { onOutputResponse: comparison.response }),
                 stage: repair === 'tokens'
                     ? 'protected-token-repair'
                     : repair === 'names'
@@ -83,6 +87,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
             });
         };
         const translated = await request(segments);
+        for (const [id, value] of translated) firstTranslations.set(id, value);
         const initialSuccessfulTranslations = new Map(translated);
         let useInitialSuccessfulTranslation = false;
         const restoreInitial = (stage, error = null) => {
@@ -132,6 +137,8 @@ export async function translateMinimalOutput(segmented, settings, options, { req
         return translated;
     });
     options.signal?.throwIfAborted();
+    comparison.initial(firstTranslations);
+    comparison.capture('repairs', translations);
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, config, {});
     for (const segment of segmented.segments) {
         if (segment.type === 'tagged_content') translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
@@ -187,12 +194,15 @@ export async function translateMinimalOutput(segmented, settings, options, { req
         }
     }
 
+    comparison.capture('tag-normalization', translations);
     if (!deepseekKoreanEnabled(settings)) await reviewEnglish?.({ segmented, translations, speakerIdentity: options.speakerIdentity || {}, options });
+    comparison.capture('english-review', translations);
 
     const translation = assembleTranslation(segmented, translations, {
         allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback,
     });
     if (!translation.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
-    return { translation, sourceMap: buildSourceMap(segmented, translations, translation) };
+    return { translation, sourceMap: buildSourceMap(segmented, translations, translation),
+        ...(settings.debugMode === true ? { outputComparison: comparison.finish(translation) } : {}) };
 }
 

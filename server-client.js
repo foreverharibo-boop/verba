@@ -1,3 +1,4 @@
+import { sanitizeOutputComparison } from './output-comparison.js';
 import { compatibleCompletedSource, reconcileCompletedResult, describeSourceChange } from './server-result-compat.js?v=2';
 // Optional server transport. Disabled installations do not contact the plugin.
 import { installVertexModelCompatibility } from './model-compat.js';
@@ -203,6 +204,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             notificationTarget:['legacy','none','apk','ios','and'].includes(state.notificationTarget)?state.notificationTarget:null,
             hasTranslation:typeof state.result?.translation==='string'&&!!state.result.translation.trim(),
             skipped:state.result?.skipped===true,
+            ...(getSettings().debugMode === true && sanitizeOutputComparison(state.result?.outputComparison, { summaryOnly: true })
+                ? { outputComparison: sanitizeOutputComparison(state.result.outputComparison, { summaryOnly: true }) } : {}),
             notificationRequested:typeof record?.notificationRequested==='boolean'?record.notificationRequested:null,
             notificationResults:(state.events||[]).filter(e=>e.kind==='notification').map(e=>notificationCodes.has(e.code)?e.code:'unknown').slice(-8),
         });

@@ -1,4 +1,4 @@
-// hankae-patch/verba/translation-composer.js
+// translation-composer.js
 var COMPOSITION = /* @__PURE__ */ Symbol("verba translation composition");
 function customTranslationInstruction(settings = {}, key) {
   const value = settings.customTranslatorTemplates?.[key];
@@ -35,7 +35,7 @@ function collectTranslationProse(settings, key, build) {
   return [...new Set(context.collected)].join("\n\n");
 }
 
-// hankae-patch/verba/bilingual-intent.js
+// bilingual-intent.js
 var positiveCommands = [
   /(?:한\s*영|영\s*한)\s*병기(?:\s*(?:해|하라|해주세요|해줘|로\s*(?:출력|표기|번역)|적용|필수|요청|해야|하되))?/iu,
   /(?:원문|영어|영문)(?:\s*대사)?\s*[(/+·및과와]\s*(?:한국어|한글|번역)/iu,
@@ -213,7 +213,7 @@ async function resolveBilingualIntent(prompt, askOnce, signal = null) {
   return await awaitShared(job, signal);
 }
 
-// hankae-patch/verba/output-format.js
+// output-format.js
 function activeCustomOutput(settings = {}) {
   const exclusive = settings.developerMadKoreanOutputEnabled === true || settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== "off");
   return exclusive ? "" : customTranslationInstruction(settings, "output") || "";
@@ -303,7 +303,7 @@ function outputFormatReviewContext(settings = {}) {
   });
 }
 
-// hankae-patch/verba/code-content.js
+// code-content.js
 var PROGRAM_LANGUAGES = /^(?:js|javascript|ts|typescript|jsx|tsx|css|scss|less|json|jsonc|python|py|sh|bash|shell|powershell|ps1|sql|java|c|cpp|csharp|cs|go|rust|ruby|rb|php|yaml|yml|toml|ini)$/i;
 var MACHINE_VALUE = /^(?:[\w]+[_./\\][\w./\\-]*|[a-z]+[A-Z][\w]*|https?:\/\/\S+|#[\da-f]{3,8}|\d+(?:\.\d+)?(?:px|em|rem|%|s|ms)?|true|false|null|undefined)$/;
 var CODE_LINE = /^\s*(?:(?:(?:const|let|var)\s+[\w$]+\s*=|(?:function|def|class)\s+[\w$]+\s*[(:{]|(?:if|while|for|switch|catch)\s*\(|(?:import|from)\s+[^\n]*\b(?:from|import)\b)|[\w.$]+\s*(?:\([^\n]*\)\s*[;{]?\s*$|(?:[+*/-]?=|=>))|[{}\[\]]\s*[,;]?\s*$|["'][^"']+["']\s*:|[.#][\w-]+\s*\{|[\w-]+\s*:\s*[^\n]*;)/;
@@ -442,7 +442,7 @@ function escapeCodeTranslation(text, quote) {
   return text.replace(/\\/g, "\\\\").replace(new RegExp(quote, "g"), "\\" + quote);
 }
 
-// hankae-patch/verba/deepseek-korean.js
+// deepseek-korean.js
 function deepseekKoreanEnabled(settings = {}) {
   return settings.developerMode === true && settings.developerDeepseekKoreanEnabled === true;
 }
@@ -663,7 +663,7 @@ SELECTIONS
 ${JSON.stringify(rows)}`;
 }
 
-// hankae-patch/verba/prompt-builders.js
+// prompt-builders.js
 function createPromptBuilders(h) {
   const j = JSON.stringify;
   const lines = (xs) => xs.filter(Boolean).join("\n");
@@ -981,7 +981,7 @@ ${values[k]}`).join("\n");
   };
 }
 
-// hankae-patch/verba/response-parser.js
+// response-parser.js
 function segmentNumberKey(id) {
   const match = typeof id === "string" && /^seg_([0-9]+)$/.exec(id);
   return match ? match[1].replace(/^0+(?=\d)/, "") : null;
@@ -1215,7 +1215,7 @@ function collectSegmentResponse(raw, expectedSegments = []) {
   return { partial, parseError, missingIds, repairs: [...new Set(repairs)], issues: [...new Set(issues)] };
 }
 
-// hankae-patch/verba/core.js
+// core.js
 var PROTECTED_PATTERN = /<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 var PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
 var PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
@@ -1902,8 +1902,8 @@ function restoreVerifiedBilingualEnglishNames(segment, translation, nameTokens =
       cursor = end + nextLiteral.length;
     }
     if (cursor !== original.length) return result;
-    let number = 0;
-    recovered = recovered.replace(markerPattern, () => values[number++]);
+    let number2 = 0;
+    recovered = recovered.replace(markerPattern, () => values[number2++]);
     if (recovered !== original) return result;
   }
   if (!pair.left.includes(rawEnglish)) return result;
@@ -2915,7 +2915,7 @@ var promptBuilders = createPromptBuilders({
   bilingualDialogueBracketPair
 });
 
-// hankae-patch/verba/timing.js
+// timing.js
 var PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 var LABELS = [
   ["banned", "\uAE08\uC9C0\uC5B4 \uBCF5\uAD6C"],
@@ -3069,7 +3069,7 @@ function summarize(job, status) {
   };
 }
 
-// hankae-patch/verba/output-splitting.js
+// output-splitting.js
 function outputSplitCount(settings = {}) {
   const count = Number(settings.developerOutputSplitCount);
   return [2, 3].includes(count) ? count : 1;
@@ -3163,7 +3163,7 @@ function createSplitRequestQueue(limit = 3) {
   });
 }
 
-// hankae-patch/verba/diagnostics.js
+// diagnostics.js
 var requestEvidence = /* @__PURE__ */ new WeakMap();
 var LIMIT = 1e4;
 function sanitizeDebugValue(value, limit = 6e3) {
@@ -3290,7 +3290,148 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
   return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
 }
 
-// hankae-patch/verba/minimal-output.js
+// output-comparison.js
+var STAGES = /* @__PURE__ */ new Set(["initial-parsed", "tag-normalization", "repairs", "dialogue-format", "english-review", "assembled", "received", "locked-segments", "display-normalization"]);
+var TYPES = /* @__PURE__ */ new Set(["narration", "dialogue_candidate", "tagged_content", "code_content"]);
+var METRICS = ["length", "latinLetters", "hangulLetters", "mixedLines", "koreanBracketPairs", "duplicateKoreanPairs"];
+var MAX_ROWS = 32;
+var number = (value) => Number.isFinite(value) ? Math.min(1e7, Math.max(0, Math.floor(value))) : 0;
+var withoutTokens = (value) => String(value ?? "").replace(/@@VERBA_(?:[A-Z]+_)*\d+@@/gu, "");
+var koreanKey = (value) => value.replace(/[^가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9]/gu, "");
+function summarizeOutputText(value) {
+  const text = withoutTokens(value);
+  let koreanBracketPairs = 0, duplicateKoreanPairs = 0;
+  for (const line of text.split(/\r?\n/u)) {
+    for (const match of line.matchAll(/([^\[\]\n]+)\[([^\[\]\n]+)\]/gu)) {
+      const left = koreanKey(match[1]), right = koreanKey(match[2]);
+      if (/[가-힣]/u.test(left) && /[가-힣]/u.test(right) && !/[A-Za-z]/u.test(left + right)) {
+        koreanBracketPairs++;
+        if (left === right) duplicateKoreanPairs++;
+      }
+    }
+  }
+  return {
+    length: text.length,
+    latinLetters: (text.match(/[A-Za-z]/gu) || []).length,
+    hangulLetters: (text.match(/[가-힣ㄱ-ㅎㅏ-ㅣ]/gu) || []).length,
+    mixedLines: text.split(/\r?\n/u).filter((line) => /[A-Za-z]/u.test(line) && /[가-힣]/u.test(line)).length,
+    koreanBracketPairs,
+    duplicateKoreanPairs
+  };
+}
+function cleanMetrics(value) {
+  return Object.fromEntries(METRICS.map((key) => [key, number(value?.[key])]));
+}
+function cleanStage(value) {
+  return {
+    stage: value.stage,
+    totals: cleanMetrics(value.totals),
+    comparedRows: number(value.comparedRows),
+    changedRows: number(value.changedRows),
+    lostLatinRows: number(value.lostLatinRows),
+    newDuplicateRows: number(value.newDuplicateRows),
+    rowsOmitted: number(value.rowsOmitted),
+    rows: (Array.isArray(value.rows) ? value.rows : []).slice(0, MAX_ROWS).map((row) => ({
+      index: number(row.index),
+      type: TYPES.has(row.type) ? row.type : "unknown",
+      codeKind: ["inline", "fenced"].includes(row.codeKind) ? row.codeKind : "",
+      changed: row.changed === true,
+      sourceHasLatin: row.sourceHasLatin === true,
+      exactSourcePresent: row.exactSourcePresent === true,
+      ...cleanMetrics(row)
+    }))
+  };
+}
+function sanitizeOutputComparison(value, { summaryOnly = false } = {}) {
+  if (value?.version !== 1) return null;
+  const stages = (Array.isArray(value.stages) ? value.stages : []).filter((row) => STAGES.has(row?.stage)).slice(0, 12).map(cleanStage);
+  if (summaryOnly) for (const stage of stages) {
+    stage.rowsOmitted += stage.rows.length;
+    stage.rows = [];
+  }
+  return {
+    version: 1,
+    contentIncluded: false,
+    firstResponseMeaning: "first-successfully-parsed-value-per-segment",
+    limitation: "Counts are hints, not proof of bilingual correctness. First means first parsed value per segment, possibly after a parse retry. Assembled totals include restored markup/code. Rendering and user regex are not inspected.",
+    segmentCount: number(value.segmentCount),
+    initialResponseBatches: number(value.initialResponseBatches),
+    parseRetryResponses: number(value.parseRetryResponses),
+    firstDuplicateHintStage: stages.find((stage) => stage.totals.duplicateKoreanPairs > 0)?.stage || null,
+    firstLatinLossStage: stages.find((stage) => stage.lostLatinRows > 0)?.stage || null,
+    stages
+  };
+}
+function createOutputComparison(segmented, enabled) {
+  const segments = segmented?.segments || [];
+  const initial = /* @__PURE__ */ new Map();
+  let previous = /* @__PURE__ */ new Map();
+  const report = { version: 1, segmentCount: segments.length, initialResponseBatches: 0, parseRetryResponses: 0, stages: [] };
+  function capture(stage, values) {
+    if (!enabled || !STAGES.has(stage)) return;
+    const totals = cleanMetrics({});
+    let comparedRows = 0, changedRows = 0, lostLatinRows = 0, newDuplicateRows = 0;
+    const rows = [];
+    for (const [index, segment] of segments.entries()) {
+      if (!values.has(segment.id)) continue;
+      const text = String(values.get(segment.id) ?? "");
+      const metrics = summarizeOutputText(text);
+      const hadPrevious = previous.has(segment.id);
+      const before = hadPrevious ? summarizeOutputText(previous.get(segment.id)) : null;
+      const changed = hadPrevious && text !== previous.get(segment.id);
+      comparedRows += Number(hadPrevious);
+      changedRows += Number(changed);
+      lostLatinRows += Number(!!before?.latinLetters && !metrics.latinLetters);
+      newDuplicateRows += Number(!!before && metrics.duplicateKoreanPairs > before.duplicateKoreanPairs);
+      for (const key of METRICS) totals[key] += metrics[key];
+      const source = withoutTokens(segment.text).trim();
+      rows.push({
+        index,
+        type: segment.type,
+        codeKind: segment.codeKind || "",
+        changed,
+        sourceHasLatin: /[A-Za-z]/u.test(source),
+        exactSourcePresent: !!source && withoutTokens(text).includes(source),
+        ...metrics
+      });
+    }
+    rows.sort((a, b) => Number(b.duplicateKoreanPairs > 0) - Number(a.duplicateKoreanPairs > 0) || Number(b.changed) - Number(a.changed) || a.index - b.index);
+    report.stages.push({
+      stage,
+      totals,
+      comparedRows,
+      changedRows,
+      lostLatinRows,
+      newDuplicateRows,
+      rowsOmitted: Math.max(0, rows.length - MAX_ROWS),
+      rows: rows.slice(0, MAX_ROWS)
+    });
+    previous = new Map(values);
+  }
+  return {
+    // Called only by the initial translation requests, never a repair request.
+    response(partial, attempt = 0) {
+      if (!enabled) return;
+      report.initialResponseBatches++;
+      report.parseRetryResponses += Number(attempt > 0);
+      for (const [id, text] of partial) if (!initial.has(id)) initial.set(id, text);
+    },
+    initial(values) {
+      if (!enabled) return;
+      for (const [id, text] of values) if (!initial.has(id)) initial.set(id, text);
+      capture("initial-parsed", initial);
+    },
+    capture,
+    finish(translation) {
+      if (!enabled) return null;
+      const safe = sanitizeOutputComparison(report);
+      safe.stages.push(cleanStage({ stage: "assembled", totals: summarizeOutputText(translation), rows: [] }));
+      return sanitizeOutputComparison(safe);
+    }
+  };
+}
+
+// minimal-output.js
 var POST_TRANSLATION_AI_REPAIR_ENABLED = false;
 function minimalOutputEnabled(settings = {}) {
   return deepseekKoreanEnabled(settings) || settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
@@ -3334,6 +3475,8 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
   };
   const oneTime = String(options.oneTimeInstruction || "");
   let usedInitialFallback = false;
+  const comparison = createOutputComparison(segmented, settings.debugMode === true);
+  const firstTranslations = /* @__PURE__ */ new Map();
   const effectiveSplitCount = settings.translationEngine === "google-free" ? 1 : outputSplitCount(settings);
   const translations = await runOutputBatches(segmented, effectiveSplitCount, options, async (segments, batchOptions) => {
     const request = (targets, repair = "") => {
@@ -3343,10 +3486,12 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
       if (repair === "names") prompt += "\nPrevious result left one or more source-language character names in Latin script. Retranslate these targets. Every clear human or fictional character name must use natural Hangul (fixed mapping first); never keep a character name in Latin script merely because it is a proper name. Keep genuine brands, acronyms, products, codes, URLs and handles unchanged.";
       return requestSegments(prompt, targets, {
         ...batchOptions,
+        ...repair ? {} : { onOutputResponse: comparison.response },
         stage: repair === "tokens" ? "protected-token-repair" : repair === "names" ? "untranslated-name-repair" : options.stage || "output-translation"
       });
     };
     const translated = await request(segments);
+    for (const [id, value] of translated) firstTranslations.set(id, value);
     const initialSuccessfulTranslations = new Map(translated);
     let useInitialSuccessfulTranslation = false;
     const restoreInitial = (stage, error = null) => {
@@ -3392,6 +3537,8 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
     return translated;
   });
   options.signal?.throwIfAborted();
+  comparison.initial(firstTranslations);
+  comparison.capture("repairs", translations);
   normalizeLocallyRecoverableProtectedTokens(segmented, translations, config, {});
   for (const segment of segmented.segments) {
     if (segment.type === "tagged_content") translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
@@ -3440,15 +3587,21 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
       console.warn("[\uBCA0\uB974\uBC14] \uD0DC\uADF8 \uBBF8\uBC88\uC5ED 1\uD68C \uBCF5\uAD6C \uC2E4\uD328(\uCD5C\uC18C \uD504\uB86C\uD504\uD2B8) \u2014 \uCD5C\uCD08 \uBC88\uC5ED\uC744 \uC720\uC9C0\uD569\uB2C8\uB2E4.", error);
     }
   }
+  comparison.capture("tag-normalization", translations);
   if (!deepseekKoreanEnabled(settings)) await reviewEnglish?.({ segmented, translations, speakerIdentity: options.speakerIdentity || {}, options });
+  comparison.capture("english-review", translations);
   const translation = assembleTranslation(segmented, translations, {
     allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback
   });
   if (!translation.trim()) throw new Error("\uC644\uC131\uB41C \uBC88\uC5ED\uBB38\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
-  return { translation, sourceMap: buildSourceMap(segmented, translations, translation) };
+  return {
+    translation,
+    sourceMap: buildSourceMap(segmented, translations, translation),
+    ...settings.debugMode === true ? { outputComparison: comparison.finish(translation) } : {}
+  };
 }
 
-// hankae-patch/verba/google-free.js
+// google-free.js
 var GOOGLE_FREE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 var DEFAULT_MAX_ENCODED_CHARS = 4200;
 var PROTECTED_TOKEN_PATTERN2 = /@@VERBA_(?:NAME_)?[A-Z0-9_]*\d{4}@@|@@VERBA_[A-Z0-9_]+@@/gu;
@@ -3611,12 +3764,12 @@ var GOOGLE_FREE_LIMITS = Object.freeze({
   concurrency: 2
 });
 
-// hankae-patch/verba/retry-policy.js
+// retry-policy.js
 function normalizedServerRetryLimit(value = 5) {
   if (value === null || String(value).trim() === "") return 5;
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) return 5;
-  const integer = number === 0 ? 0 : Math.max(1, Math.floor(number));
+  const number2 = Number(value);
+  if (!Number.isFinite(number2) || number2 < 0) return 5;
+  const integer = number2 === 0 ? 0 : Math.max(1, Math.floor(number2));
   return Number.isSafeInteger(integer) ? integer : 5;
 }
 function serverRetryBackoffMs(attempt, random = Math.random) {
@@ -3637,7 +3790,7 @@ function googleRetryHintSeconds(error) {
   return null;
 }
 
-// hankae-patch/verba/previous-user-context.js
+// previous-user-context.js
 function appendPreviousUserContext(prompt, source) {
   if (typeof source !== "string" || !source.trim()) return prompt;
   return `${prompt}
@@ -3649,7 +3802,7 @@ ${JSON.stringify(source)}
 END PREVIOUS USER REFERENCE`;
 }
 
-// hankae-patch/verba/english-review.js
+// english-review.js
 var escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var blank = (value) => " ".repeat(value.length);
 function englishReviewTargets(segmented, translations, identity = {}, settings = {}) {
@@ -3723,7 +3876,7 @@ async function reviewEnglishLeftovers({ segmented, translations, settings = {}, 
   }
 }
 
-// hankae-patch/verba/taste-audit.js
+// taste-audit.js
 var galbwae = (settings) => settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && !["off", "all", "dialogueInner"].includes(settings.chuseokGalbwaeScope));
 function tasteAuditScope(segment, speakerScopes = {}) {
   if (segment.type === "tagged_content") return "tagged_content";
@@ -3805,7 +3958,7 @@ async function runTasteQualityAudit({ enabled = false, segmented, translations, 
   }
 }
 
-// hankae-patch/verba/engine-entry.js
+// engine-entry.js
 var variant = "verba";
 function createEngine(snapshot, transport, report = () => {
 }) {
@@ -4561,6 +4714,7 @@ STILL-MISSING IDS: ${JSON.stringify(missingIds)}` : "";
         const raw = extractResponseText(response);
         const result = collectPartialSegmentTranslations(raw, pending);
         const { partial, parseError } = result;
+        options.onOutputResponse?.(partial, attempt);
         recoveryDiagnostic = recordSegmentRecovery(result, response, options, attempt) || recoveryDiagnostic;
         for (const [id, value] of partial) completed.set(id, value);
         pending = pending.filter((segment) => !completed.has(segment.id));
@@ -5409,11 +5563,16 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     }
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = inferLocalTargetDialogueScopes(segmented, speakerIdentity);
-    const translations = normalizeTaggedOutputTranslations(segmented, await requestScopedOutputTranslations(segmented, speakerScopes, {
+    const comparison = createOutputComparison(segmented, settings.debugMode === true);
+    const translations = await requestScopedOutputTranslations(segmented, speakerScopes, {
       ...options,
       speakerIdentity,
-      stage: options.stage || "output-translation"
-    }));
+      stage: options.stage || "output-translation",
+      onOutputResponse: comparison.response
+    });
+    comparison.initial(translations);
+    normalizeTaggedOutputTranslations(segmented, translations);
+    comparison.capture("tag-normalization", translations);
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
     await repairUntranslatedTaggedContentOnce({
       segmented,
@@ -5517,6 +5676,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
       });
     }
     normalizeTaggedOutputTranslations(segmented, translations);
+    comparison.capture("repairs", translations);
     for (const segment of segmented.segments) {
       if (segment.type !== "dialogue_candidate") continue;
       const current = String(translations.get(segment.id) || "");
@@ -5529,7 +5689,9 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
         segmented.tokens || []
       ));
     }
+    comparison.capture("dialogue-format", translations);
     await reviewFinalEnglish({ segmented, translations, speakerIdentity, options });
+    comparison.capture("english-review", translations);
     const remaining = [...translations.values()].flatMap((text) => findBannedWords(text, settings));
     if (remaining.length) {
       console2.warn(`[\uBCA0\uB974\uBC14] \uAE08\uC9C0\uC5B4 \uC758\uC2EC\uC774 \uB0A8\uC558\uC9C0\uB9CC \uCD5C\uCD08 \uBC88\uC5ED \uACB0\uACFC\uB97C \uC6B0\uC120 \uC801\uC6A9\uD569\uB2C8\uB2E4: ${[...new Set(remaining)].join(", ")}`);
@@ -5545,7 +5707,8 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     if (!result.trim()) throw new Error("\uC644\uC131\uB41C \uBC88\uC5ED\uBB38\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
     return {
       translation: result,
-      sourceMap: buildSourceMap(segmented, translations, result)
+      sourceMap: buildSourceMap(segmented, translations, result),
+      ...settings.debugMode === true ? { outputComparison: comparison.finish(result) } : {}
     };
   }
   function inputIdentitySpellingContext() {

@@ -7,7 +7,7 @@ const positiveCommands = [
     /\b(?:output|show|display|include|write|render|format|use|must|require|always)\b[^\n.;]{0,80}\b(?:bilingual(?:ly)?|dual[-\s]?language|english\s+(?:and|&|plus|with)\s+korean)\b/iu,
     /\b(?:bilingual|dual[-\s]?language)\s+(?:dialogue|format|formatting|output|translation|rendering)\b/iu,
     /\b(?:bilingual|dual[-\s]?language)\b[^\n.;]{0,50}\b(?:required|mandatory|must|always|for\s+dialogue)\b/iu,
-    /\b(?:english|source|original)\b[^\n.;]{0,80}\b(?:korean|translation)\b[^\n.;]{0,55}\b(?:side[-\s]?by[-\s]?side|alongside|together|paired|in\s+parentheses|in\s+brackets)\b/iu,
+    /\b(?:english|source|original)\b[^\n.;]{0,80}\b(?:korean|translation)\b[^\n.;]{0,55}\b(?:side[-\s]?by[-\s]?side|alongside|together|paired|in\s+parentheses|in\s+(?:square\s+)?brackets)\b/iu,
     /\b(?:english|original|source)\b[^\n.;]{0,60}\b(?:followed\s+by|and\s+then|then|next\s+to)\b[^\n.;]{0,60}\b(?:korean|translation)\b/iu,
     /\b(?:both\s+(?:the\s+)?(?:original\s+)?english\s+and\s+(?:its\s+)?korean|english\s+(?:and|&)\s+korean\s+(?:text|dialogue|translation))\b/iu,
     /(?:영어|영문|원문)[^\n.;]{0,60}(?:한국어|한글|번역문|번역)[^\n.;]{0,55}(?:병기|함께\s*(?:출력|표기|보여|제시|표시)|나란히\s*(?:출력|표기|표시|제시)|같이\s*(?:보여|출력|표기|제시)|둘\s*다\s*(?:출력|표기|표시)|괄호\s*(?:안에|로|에)\s*(?:붙|넣|써|적))/iu,
@@ -16,7 +16,7 @@ const positiveCommands = [
     /(?:원문|영어|영문)[^\n.;]{0,20}먼저[^\n.;]{0,55}괄호\s*(?:안에|속에|로)[^\n.;]{0,25}(?:한국어|한글|번역문|번역)/iu,
     /\b(?:keep|preserve|retain|show|display|include)\b[^\n.;]{0,45}\b(?:original\s+)?english\b[^\n.;]{0,30}\b(?:with|beside|alongside)\b[^\n.;]{0,30}\bkorean\s+translation\b/iu,
     /\b(?:keep|show|display|include|output|write|render)\b[^\n.;]{0,75}\boriginal\s+(?:dialogue|text|speech|words)\b[^\n.;]{0,40}\b(?:beside|alongside|with|next\s+to)\b[^\n.;]{0,35}\b(?:its|the|a)?\s*korean\s+translation\b/iu,
-    /\b(?:put|place|show|render|write)\b[^\n.;]{0,50}\bkorean\s+translation\b[^\n.;]{0,30}\b(?:parenthesi[sz]ed|in\s+parentheses|in\s+brackets)\b[^\n.;]{0,30}\bafter\b[^\n.;]{0,40}\boriginal\b/iu,
+    /\b(?:put|place|show|render|write)\b[^\n.;]{0,50}\bkorean\s+translation\b[^\n.;]{0,30}\b(?:parenthesi[sz]ed|in\s+parentheses|in\s+(?:square\s+)?brackets)\b[^\n.;]{0,30}\bafter\b[^\n.;]{0,40}\boriginal\b/iu,
     /(?:한국어|한글)(?:\s*번역)?[^\n.;]{0,45}(?:와|과|및|그리고|\/|\+)[^\n.;]{0,25}(?:영어|영문|원문)[^\n.;]{0,45}(?:함께|나란히|병기)[^\n.;]{0,30}(?:출력|표시|표기|보여|제시)/iu,
     /\b(?:show|keep|include|display|output)\b[^\n.;]{0,50}\b(?:the\s+)?(?:original\s+)?english\s+(?:source|dialogue|text)\b[^\n.;]{0,40}\b(?:alongside|beside|with|followed\s+by)\b[^\n.;]{0,30}\b(?:its\s+)?korean\s+translation\b/iu,
 ];
@@ -54,10 +54,22 @@ const formatHint = /\b(?:bilingual(?:ly)?|dual[-\s]?language|parallel[-\s]?langu
 const positiveFormatAction = /\b(?:output|show|display|write|render|include|format|translate|produce|keep)\b|(?:출력|표시|표기|보여|제시|붙여|써|적어|병기|형식)/iu;
 const splitClauses = prompt => String(prompt || '').split(/\r?\n|;|(?<=[.!?])\s+(?=[A-Z가-힣])|,\s*(?=(?:narration|korean\s+only|only\s+korean|bilingual|dialogue|서술|대사))|\b(?:but|however|instead)\b|(?:하지만|다만|반면)/iu).map(x => x.trim()).filter(Boolean);
 
+// A section title names the topic; it does not grant permission to duplicate
+// source text. Keep headings out of both local positives and optional AI checks.
+export function isBilingualFormatHeading(value) {
+    const text = String(value || '').trim().replace(/^[#*\[\s]+|[\]*:\s]+$/gu, '');
+    return /^(?:(?:bilingual|dual[- ]language)(?:\s+(?:output|dialogue|translation|format|formatting|rules?|instructions?))+|(?:한\s*영|영\s*한)\s*병기(?:\s*(?:출력|대사|번역|형식|양식|규칙|지침))*)$/iu.test(text);
+}
+
+export function hasBilingualInstructionExclusion(clause) {
+    return exclusion.some(pattern => pattern.test(String(clause).replace(/\bbilingually\b/giu, 'bilingual')));
+}
+
 export function classifyBilingualIntent(prompt) {
     let uncertain = false;
     for (const clause of splitClauses(prompt)) {
-        if (exclusion.some(pattern => pattern.test(clause))) continue;
+        if (isBilingualFormatHeading(clause)) continue;
+        if (hasBilingualInstructionExclusion(clause)) continue;
         // Bilingual narration alone cannot authorize bilingual *dialogue*.
         if ((/\b(?:bilingual(?:ly)?|dual[-\s]?language)\b[^\n.;]{0,55}\b(?:only\s+(?:for\s+)?narration|for\s+narration\s+only)\b/iu.test(clause)
             || /\b(?:narration\s+only|only\s+narration)\b[^\n.;]{0,55}\bbilingual\b/iu.test(clause)
@@ -173,3 +185,4 @@ export async function resolveBilingualIntent(prompt, askOnce, signal = null) {
     }
     return await awaitShared(job, signal);
 }
+

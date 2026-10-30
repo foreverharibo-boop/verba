@@ -1,4 +1,4 @@
-// translation-composer.js
+// hankae-patch/verba/translation-composer.js
 var COMPOSITION = /* @__PURE__ */ Symbol("verba translation composition");
 function customTranslationInstruction(settings = {}, key) {
   const value = settings.customTranslatorTemplates?.[key];
@@ -35,7 +35,7 @@ function collectTranslationProse(settings, key, build) {
   return [...new Set(context.collected)].join("\n\n");
 }
 
-// bilingual-intent.js
+// hankae-patch/verba/bilingual-intent.js
 var positiveCommands = [
   /(?:한\s*영|영\s*한)\s*병기(?:\s*(?:해|하라|해주세요|해줘|로\s*(?:출력|표기|번역)|적용|필수|요청|해야|하되))?/iu,
   /(?:원문|영어|영문)(?:\s*대사)?\s*[(/+·및과와]\s*(?:한국어|한글|번역)/iu,
@@ -43,7 +43,7 @@ var positiveCommands = [
   /\b(?:output|show|display|include|write|render|format|use|must|require|always)\b[^\n.;]{0,80}\b(?:bilingual(?:ly)?|dual[-\s]?language|english\s+(?:and|&|plus|with)\s+korean)\b/iu,
   /\b(?:bilingual|dual[-\s]?language)\s+(?:dialogue|format|formatting|output|translation|rendering)\b/iu,
   /\b(?:bilingual|dual[-\s]?language)\b[^\n.;]{0,50}\b(?:required|mandatory|must|always|for\s+dialogue)\b/iu,
-  /\b(?:english|source|original)\b[^\n.;]{0,80}\b(?:korean|translation)\b[^\n.;]{0,55}\b(?:side[-\s]?by[-\s]?side|alongside|together|paired|in\s+parentheses|in\s+brackets)\b/iu,
+  /\b(?:english|source|original)\b[^\n.;]{0,80}\b(?:korean|translation)\b[^\n.;]{0,55}\b(?:side[-\s]?by[-\s]?side|alongside|together|paired|in\s+parentheses|in\s+(?:square\s+)?brackets)\b/iu,
   /\b(?:english|original|source)\b[^\n.;]{0,60}\b(?:followed\s+by|and\s+then|then|next\s+to)\b[^\n.;]{0,60}\b(?:korean|translation)\b/iu,
   /\b(?:both\s+(?:the\s+)?(?:original\s+)?english\s+and\s+(?:its\s+)?korean|english\s+(?:and|&)\s+korean\s+(?:text|dialogue|translation))\b/iu,
   /(?:영어|영문|원문)[^\n.;]{0,60}(?:한국어|한글|번역문|번역)[^\n.;]{0,55}(?:병기|함께\s*(?:출력|표기|보여|제시|표시)|나란히\s*(?:출력|표기|표시|제시)|같이\s*(?:보여|출력|표기|제시)|둘\s*다\s*(?:출력|표기|표시)|괄호\s*(?:안에|로|에)\s*(?:붙|넣|써|적))/iu,
@@ -52,7 +52,7 @@ var positiveCommands = [
   /(?:원문|영어|영문)[^\n.;]{0,20}먼저[^\n.;]{0,55}괄호\s*(?:안에|속에|로)[^\n.;]{0,25}(?:한국어|한글|번역문|번역)/iu,
   /\b(?:keep|preserve|retain|show|display|include)\b[^\n.;]{0,45}\b(?:original\s+)?english\b[^\n.;]{0,30}\b(?:with|beside|alongside)\b[^\n.;]{0,30}\bkorean\s+translation\b/iu,
   /\b(?:keep|show|display|include|output|write|render)\b[^\n.;]{0,75}\boriginal\s+(?:dialogue|text|speech|words)\b[^\n.;]{0,40}\b(?:beside|alongside|with|next\s+to)\b[^\n.;]{0,35}\b(?:its|the|a)?\s*korean\s+translation\b/iu,
-  /\b(?:put|place|show|render|write)\b[^\n.;]{0,50}\bkorean\s+translation\b[^\n.;]{0,30}\b(?:parenthesi[sz]ed|in\s+parentheses|in\s+brackets)\b[^\n.;]{0,30}\bafter\b[^\n.;]{0,40}\boriginal\b/iu,
+  /\b(?:put|place|show|render|write)\b[^\n.;]{0,50}\bkorean\s+translation\b[^\n.;]{0,30}\b(?:parenthesi[sz]ed|in\s+parentheses|in\s+(?:square\s+)?brackets)\b[^\n.;]{0,30}\bafter\b[^\n.;]{0,40}\boriginal\b/iu,
   /(?:한국어|한글)(?:\s*번역)?[^\n.;]{0,45}(?:와|과|및|그리고|\/|\+)[^\n.;]{0,25}(?:영어|영문|원문)[^\n.;]{0,45}(?:함께|나란히|병기)[^\n.;]{0,30}(?:출력|표시|표기|보여|제시)/iu,
   /\b(?:show|keep|include|display|output)\b[^\n.;]{0,50}\b(?:the\s+)?(?:original\s+)?english\s+(?:source|dialogue|text)\b[^\n.;]{0,40}\b(?:alongside|beside|with|followed\s+by)\b[^\n.;]{0,30}\b(?:its\s+)?korean\s+translation\b/iu
 ];
@@ -86,10 +86,18 @@ var characterTraits = [
 var formatHint = /\b(?:bilingual(?:ly)?|dual[-\s]?language|parallel[-\s]?language)\b|(?:한\s*영|영\s*한)\s*병기|\benglish\b[^\n.;]{0,85}\bkorean\b|(?:영어|영문)[^\n.;]{0,85}(?:한국어|한글)|\b(?:original|source)\s+(?:text|dialogue|english)\b[^\n.;]{0,85}\bkorean\s+translation\b|(?:원문)[^\n.;]{0,80}(?:한국어|한글)\s*번역/iu;
 var positiveFormatAction = /\b(?:output|show|display|write|render|include|format|translate|produce|keep)\b|(?:출력|표시|표기|보여|제시|붙여|써|적어|병기|형식)/iu;
 var splitClauses = (prompt) => String(prompt || "").split(/\r?\n|;|(?<=[.!?])\s+(?=[A-Z가-힣])|,\s*(?=(?:narration|korean\s+only|only\s+korean|bilingual|dialogue|서술|대사))|\b(?:but|however|instead)\b|(?:하지만|다만|반면)/iu).map((x) => x.trim()).filter(Boolean);
+function isBilingualFormatHeading(value) {
+  const text = String(value || "").trim().replace(/^[#*\[\s]+|[\]*:\s]+$/gu, "");
+  return /^(?:(?:bilingual|dual[- ]language)(?:\s+(?:output|dialogue|translation|format|formatting|rules?|instructions?))+|(?:한\s*영|영\s*한)\s*병기(?:\s*(?:출력|대사|번역|형식|양식|규칙|지침))*)$/iu.test(text);
+}
+function hasBilingualInstructionExclusion(clause) {
+  return exclusion.some((pattern) => pattern.test(String(clause).replace(/\bbilingually\b/giu, "bilingual")));
+}
 function classifyBilingualIntent(prompt) {
   let uncertain = false;
   for (const clause of splitClauses(prompt)) {
-    if (exclusion.some((pattern) => pattern.test(clause))) continue;
+    if (isBilingualFormatHeading(clause)) continue;
+    if (hasBilingualInstructionExclusion(clause)) continue;
     if ((/\b(?:bilingual(?:ly)?|dual[-\s]?language)\b[^\n.;]{0,55}\b(?:only\s+(?:for\s+)?narration|for\s+narration\s+only)\b/iu.test(clause) || /\b(?:narration\s+only|only\s+narration)\b[^\n.;]{0,55}\bbilingual\b/iu.test(clause) || /(?:서술|나레이션)(?:에|만|에서)?\s*만?[^\n.;]{0,25}(?:한\s*영|영\s*한)\s*병기/iu.test(clause)) && !/(?:dialogue|대사)[^\n.;]{0,40}(?:bilingual|한\s*영\s*병기)/iu.test(clause)) continue;
     if (characterTraits.some((pattern) => pattern.test(clause)) && !positiveFormatAction.test(clause)) continue;
     if (/\b(?:template|system|interface|model|character)\b[^\n.;]{0,35}\b(?:supports|allows|can\s+use)\b[^\n.;]{0,35}\bbilingual\b/iu.test(clause)) {
@@ -213,7 +221,7 @@ async function resolveBilingualIntent(prompt, askOnce, signal = null) {
   return await awaitShared(job, signal);
 }
 
-// output-format.js
+// hankae-patch/verba/output-format.js
 function activeCustomOutput(settings = {}) {
   const exclusive = settings.developerMadKoreanOutputEnabled === true || settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== "off");
   return exclusive ? "" : customTranslationInstruction(settings, "output") || "";
@@ -225,29 +233,71 @@ var markers = {
   code: /backticks?|(?:inline\s*code|code\s*spans?)|백틱|(?<!`)`(?!`)/iu,
   bracket: /square\s*brackets?|대괄호|\[\.\.\.\]/iu
 };
-function promptRequestsScope(prompt, kind) {
-  for (const line of String(prompt || "").split(/\r?\n/u)) {
-    const scopedMarkers = Object.entries(markers).filter(([, re]) => re.test(line)).map(([key]) => key);
-    if (scopedMarkers.includes("fenced") && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(line)) {
-      const i = scopedMarkers.indexOf("code");
-      if (i >= 0) scopedMarkers.splice(i, 1);
-    }
-    const clauses = line.split(/;|(?<=[.!?])\s+(?=[A-Z가-힣])|\bbut\b|하지만/iu);
-    const affirmative = clauses.some((clause) => bilingualPromptRequestsOutput(clause) || !/(?:never|do not|금지|하지)/iu.test(clause) && /(?:output|show|display).*both.*English.*(?:and|with).*Korean/iu.test(clause) || !/(?:do not|never|금지|하지\s*마)/iu.test(clause) && /(?:copy|keep|preserve|retain)\b.*\b(?:english|source|original)\b.*\b(?:add|append)\b.*\bkorean\b/iu.test(clause));
-    if (!affirmative) continue;
-    if (kind === "fenced" && scopedMarkers.length && !scopedMarkers.includes("fenced")) continue;
-    if (kind === "code" && scopedMarkers.includes("fenced") && !scopedMarkers.includes("code")) continue;
-    if (scopedMarkers.length) {
-      const sourceScoped = /(?:marked|enclosed|inside|between|spans?|구간|사이|안에|안의|속의|속)/iu.test(line);
-      if (sourceScoped && !scopedMarkers.includes(kind)) continue;
-      if (sourceScoped) return true;
-    }
-    const dialogueOnly = /(?:dialogue|대사)/iu.test(line) && !/(?:narration|서술|all\s+text|전체)/iu.test(line);
-    const narrationOnly = /(?:narration|서술)/iu.test(line) && !/(?:dialogue|대사)/iu.test(line);
-    if (dialogueOnly && kind !== "dialogue" || narrationOnly && kind === "dialogue") continue;
-    return true;
+var scopeKinds = ["italic", "bold", "code", "fenced", "bracket", "dialogue", "narration"];
+function namedScopes(value) {
+  const scopes = Object.entries(markers).filter(([, re]) => re.test(value)).map(([key]) => key);
+  if (scopes.includes("fenced") && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(value)) {
+    const index = scopes.indexOf("code");
+    if (index >= 0) scopes.splice(index, 1);
   }
-  return false;
+  if (/\bdialogue\b|대사/iu.test(value)) scopes.push("dialogue");
+  if (/\bnarration\b|서술|나레이션/iu.test(value)) scopes.push("narration");
+  return scopes;
+}
+function sourceScopes(clause) {
+  const source = clause.match(/(?:source\s+text|(?:any|each|all)\s+spans?|text)\s+(?:in\s+the\s+source\s+)?(?:enclosed|marked|wrapped|inside|between)[\s\S]*?(?=\s+(?:is|are)\s|,\s*(?:preserve|keep|copy|retain|output|show)|$)/iu);
+  if (source) return namedScopes(source[0]);
+  const action = clause.search(/\b(?:copy|keep|preserve|retain|place|put|add|append|output|show|display|translate|render|write|include)\b/iu);
+  const beforeAction = action > 0 ? namedScopes(clause.slice(0, action)) : [];
+  if (beforeAction.length) return beforeAction;
+  const target = clause.match(/\b(?:for|inside|within|between|in)\s+(.+?)(?=\s+(?:as|using|with|followed)\b|$)/iu);
+  if (target && !/\b(?:korean|translation|english)\b/iu.test(target[1])) return namedScopes(target[1]);
+  const label = clause.match(/^\s*[-*]?\s*([^:]+):/u);
+  if (label) return namedScopes(label[1]);
+  if (/\b(?:dialogue|narration)\b|대사|서술|나레이션/iu.test(clause)) {
+    return namedScopes(clause).filter((kind) => kind === "dialogue" || kind === "narration");
+  }
+  if (/(?:안의|안에|사이|속|구간|만|에는|은|는).*(?:병기|원문|영어|한국어)/u.test(clause)) return namedScopes(clause);
+  return namedScopes(clause).filter((kind) => ["italic", "bold", "code", "fenced"].includes(kind));
+}
+var wholeSource = /\b(?:all|every|entire|whole)\s+(?:source\s+)?(?:text|sentences?|paragraphs?|message|content)\b|(?:모든|전체)\s*(?:문장|본문|텍스트|글|내용)/iu;
+var outsideScope = /\b(?:outside|unmarked|everything\s+else|other\s+text|remaining\s+text)\b|나머지|그\s*밖|기호\s*밖|구간\s*밖/iu;
+var negativeScope = /\b(?:except\b|excluding\b|no\s+bilingual|(?:do\s+not|don't|never|avoid|disable|without)[^.;]*bilingual|korean(?:\s+translation)?\s+only|only\s+korean)\b|(?:한국어|한글)(?:로)?\s*만|병기[^.;]*(?:하지|금지|말고|없이)/iu;
+function affirmativeScope(clause) {
+  if (hasBilingualInstructionExclusion(clause)) return false;
+  return bilingualPromptRequestsOutput(clause) || !negativeScope.test(clause) && /(?:한\s*영|영\s*한)?\s*병기\s*(?:해|하라|하되|해주세요|해줘|필수|요청)/u.test(clause) || !negativeScope.test(clause) && /\b(?:translate|output|show|display|render|write)\b[^.;]*\bbilingually\b/iu.test(clause) || !/(?:never|do not|금지|하지)/iu.test(clause) && /(?:output|show|display).*both.*English.*(?:and|with).*Korean/iu.test(clause) || !/(?:do not|never|금지|하지\s*마)/iu.test(clause) && /(?:copy|keep|preserve|retain)\b.*\b(?:english|source|original)\b.*\b(?:add|append|include)\b.*\bkorean\b/iu.test(clause);
+}
+function promptRequestsScope(prompt, kind) {
+  if (!scopeKinds.includes(kind)) return false;
+  const clauses = String(prompt || "").split(/\r?\n|;|(?<=[.!?])\s+(?=[A-Z가-힣])|\b(?:but|however)\b|하지만|(?=\b(?:except|excluding)\b)|(?<=하되)\s*/iu).map((text) => text.trim()).filter((text) => text && !isBilingualFormatHeading(text));
+  const rules = clauses.map((text) => ({
+    text,
+    scopes: sourceScopes(text),
+    outside: outsideScope.test(text),
+    negative: negativeScope.test(text),
+    all: wholeSource.test(text),
+    positive: affirmativeScope(text)
+  }));
+  const declared = new Set(rules.filter((rule) => !rule.negative && !rule.outside && !rule.all).flatMap((rule) => rule.scopes));
+  const allowed = /* @__PURE__ */ new Set();
+  const denied = /* @__PURE__ */ new Set();
+  for (const rule of rules) {
+    if (rule.negative) {
+      if (rule.outside) {
+        for (const scope of scopeKinds) if (!declared.has(scope)) denied.add(scope);
+      } else {
+        for (const scope of rule.scopes.length ? rule.scopes : scopeKinds) denied.add(scope);
+      }
+      continue;
+    }
+    if (!rule.positive || rule.outside) continue;
+    const scopes = rule.all ? scopeKinds : rule.scopes.length ? rule.scopes : declared.size ? [...declared] : scopeKinds;
+    for (const scope of scopes) allowed.add(scope);
+  }
+  return allowed.has(kind) && !denied.has(kind);
+}
+function hasExplicitNonDialogueBilingualScope(prompt) {
+  return !promptRequestsScope(prompt, "dialogue") && scopeKinds.some((kind) => kind !== "dialogue" && promptRequestsScope(prompt, kind));
 }
 function bilingualScopeRequested(settings = {}, kind = "narration") {
   if (settings.developerMadKoreanOutputEnabled === true || settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== "off")) return false;
@@ -303,7 +353,7 @@ function outputFormatReviewContext(settings = {}) {
   });
 }
 
-// code-content.js
+// hankae-patch/verba/code-content.js
 var PROGRAM_LANGUAGES = /^(?:js|javascript|ts|typescript|jsx|tsx|css|scss|less|json|jsonc|python|py|sh|bash|shell|powershell|ps1|sql|java|c|cpp|csharp|cs|go|rust|ruby|rb|php|yaml|yml|toml|ini)$/i;
 var MACHINE_VALUE = /^(?:[\w]+[_./\\][\w./\\-]*|[a-z]+[A-Z][\w]*|https?:\/\/\S+|#[\da-f]{3,8}|\d+(?:\.\d+)?(?:px|em|rem|%|s|ms)?|true|false|null|undefined)$/;
 var CODE_LINE = /^\s*(?:(?:(?:const|let|var)\s+[\w$]+\s*=|(?:function|def|class)\s+[\w$]+\s*[(:{]|(?:if|while|for|switch|catch)\s*\(|(?:import|from)\s+[^\n]*\b(?:from|import)\b)|[\w.$]+\s*(?:\([^\n]*\)\s*[;{]?\s*$|(?:[+*/-]?=|=>))|[{}\[\]]\s*[,;]?\s*$|["'][^"']+["']\s*:|[.#][\w-]+\s*\{|[\w-]+\s*:\s*[^\n]*;)/;
@@ -442,7 +492,7 @@ function escapeCodeTranslation(text, quote) {
   return text.replace(/\\/g, "\\\\").replace(new RegExp(quote, "g"), "\\" + quote);
 }
 
-// deepseek-korean.js
+// hankae-patch/verba/deepseek-korean.js
 function deepseekKoreanEnabled(settings = {}) {
   return settings.developerMode === true && settings.developerDeepseekKoreanEnabled === true;
 }
@@ -663,7 +713,7 @@ SELECTIONS
 ${JSON.stringify(rows)}`;
 }
 
-// prompt-builders.js
+// hankae-patch/verba/prompt-builders.js
 function createPromptBuilders(h) {
   const j = JSON.stringify;
   const lines = (xs) => xs.filter(Boolean).join("\n");
@@ -981,7 +1031,7 @@ ${values[k]}`).join("\n");
   };
 }
 
-// response-parser.js
+// hankae-patch/verba/response-parser.js
 function segmentNumberKey(id) {
   const match = typeof id === "string" && /^seg_([0-9]+)$/.exec(id);
   return match ? match[1].replace(/^0+(?=\d)/, "") : null;
@@ -1215,7 +1265,7 @@ function collectSegmentResponse(raw, expectedSegments = []) {
   return { partial, parseError, missingIds, repairs: [...new Set(repairs)], issues: [...new Set(issues)] };
 }
 
-// core.js
+// hankae-patch/verba/core.js
 var PROTECTED_PATTERN = /<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 var PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
 var PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
@@ -2915,7 +2965,7 @@ var promptBuilders = createPromptBuilders({
   bilingualDialogueBracketPair
 });
 
-// timing.js
+// hankae-patch/verba/timing.js
 var PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 var LABELS = [
   ["banned", "\uAE08\uC9C0\uC5B4 \uBCF5\uAD6C"],
@@ -3069,7 +3119,7 @@ function summarize(job, status) {
   };
 }
 
-// output-splitting.js
+// hankae-patch/verba/output-splitting.js
 function outputSplitCount(settings = {}) {
   const count = Number(settings.developerOutputSplitCount);
   return [2, 3].includes(count) ? count : 1;
@@ -3163,7 +3213,7 @@ function createSplitRequestQueue(limit = 3) {
   });
 }
 
-// diagnostics.js
+// hankae-patch/verba/diagnostics.js
 var requestEvidence = /* @__PURE__ */ new WeakMap();
 var LIMIT = 1e4;
 function sanitizeDebugValue(value, limit = 6e3) {
@@ -3290,7 +3340,7 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
   return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
 }
 
-// output-comparison.js
+// hankae-patch/verba/output-comparison.js
 var STAGES = /* @__PURE__ */ new Set(["initial-parsed", "tag-normalization", "repairs", "dialogue-format", "english-review", "assembled", "received", "locked-segments", "display-normalization"]);
 var TYPES = /* @__PURE__ */ new Set(["narration", "dialogue_candidate", "tagged_content", "code_content"]);
 var METRICS = ["length", "latinLetters", "hangulLetters", "mixedLines", "koreanBracketPairs", "duplicateKoreanPairs"];
@@ -3431,7 +3481,7 @@ function createOutputComparison(segmented, enabled) {
   };
 }
 
-// minimal-output.js
+// hankae-patch/verba/minimal-output.js
 var POST_TRANSLATION_AI_REPAIR_ENABLED = false;
 function minimalOutputEnabled(settings = {}) {
   return deepseekKoreanEnabled(settings) || settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
@@ -3601,7 +3651,7 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
   };
 }
 
-// google-free.js
+// hankae-patch/verba/google-free.js
 var GOOGLE_FREE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 var DEFAULT_MAX_ENCODED_CHARS = 4200;
 var PROTECTED_TOKEN_PATTERN2 = /@@VERBA_(?:NAME_)?[A-Z0-9_]*\d{4}@@|@@VERBA_[A-Z0-9_]+@@/gu;
@@ -3764,7 +3814,7 @@ var GOOGLE_FREE_LIMITS = Object.freeze({
   concurrency: 2
 });
 
-// retry-policy.js
+// hankae-patch/verba/retry-policy.js
 function normalizedServerRetryLimit(value = 5) {
   if (value === null || String(value).trim() === "") return 5;
   const number2 = Number(value);
@@ -3790,7 +3840,7 @@ function googleRetryHintSeconds(error) {
   return null;
 }
 
-// previous-user-context.js
+// hankae-patch/verba/previous-user-context.js
 function appendPreviousUserContext(prompt, source) {
   if (typeof source !== "string" || !source.trim()) return prompt;
   return `${prompt}
@@ -3802,7 +3852,7 @@ ${JSON.stringify(source)}
 END PREVIOUS USER REFERENCE`;
 }
 
-// english-review.js
+// hankae-patch/verba/english-review.js
 var escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var blank = (value) => " ".repeat(value.length);
 function englishReviewTargets(segmented, translations, identity = {}, settings = {}) {
@@ -3876,7 +3926,7 @@ async function reviewEnglishLeftovers({ segmented, translations, settings = {}, 
   }
 }
 
-// taste-audit.js
+// hankae-patch/verba/taste-audit.js
 var galbwae = (settings) => settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && !["off", "all", "dialogueInner"].includes(settings.chuseokGalbwaeScope));
 function tasteAuditScope(segment, speakerScopes = {}) {
   if (segment.type === "tagged_content") return "tagged_content";
@@ -3958,7 +4008,7 @@ async function runTasteQualityAudit({ enabled = false, segmented, translations, 
   }
 }
 
-// engine-entry.js
+// hankae-patch/verba/engine-entry.js
 var variant = "verba";
 function createEngine(snapshot, transport, report = () => {
 }) {
@@ -5518,7 +5568,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     if (deepseekKoreanEnabled(settings)) return;
     if (settings.translationEngine === "google-free") return;
     if (!segmented?.segments?.some((item) => item.type === "dialogue_candidate")) return;
-    const pending = bilingualPromptsNeedingVerdict(settings);
+    const pending = bilingualPromptsNeedingVerdict(settings).filter((prompt) => !hasExplicitNonDialogueBilingualScope(prompt));
     if (!pending.length) return;
     const profiles = configuredProfileCycle();
     if (!profiles.active) return;

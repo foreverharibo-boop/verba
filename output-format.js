@@ -1,5 +1,5 @@
 import { customTranslationInstruction } from './translation-composer.js';
-import { bilingualPromptRequestsOutput } from './bilingual-intent.js';
+import { bilingualPromptRequestsOutput, isBilingualFormatHeading, hasBilingualInstructionExclusion } from './bilingual-intent.js';
 
 export function activeCustomOutput(settings = {}) {
     const exclusive = settings.developerMadKoreanOutputEnabled === true
@@ -14,34 +14,86 @@ const markers = {
     code: /backticks?|(?:inline\s*code|code\s*spans?)|백틱|(?<!`)`(?!`)/iu,
     bracket: /square\s*brackets?|대괄호|\[\.\.\.\]/iu,
 };
-// This is a conservative local permission check, not a rewrite of the user's
-// instructions. The model receives the full prompt to resolve detailed scopes.
-export function promptRequestsScope(prompt, kind) {
-    for (const line of String(prompt || '').split(/\r?\n/u)) {
-        const scopedMarkers = Object.entries(markers).filter(([, re]) => re.test(line)).map(([key]) => key);
-        if (scopedMarkers.includes('fenced') && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(line)) {
-            const i = scopedMarkers.indexOf('code'); if (i >= 0) scopedMarkers.splice(i, 1);
-        }
-        const clauses = line.split(/;|(?<=[.!?])\s+(?=[A-Z가-힣])|\bbut\b|하지만/iu);
-        const affirmative = clauses.some(clause => bilingualPromptRequestsOutput(clause)
-            || (!/(?:never|do not|금지|하지)/iu.test(clause) && /(?:output|show|display).*both.*English.*(?:and|with).*Korean/iu.test(clause))
-            || (!/(?:do not|never|금지|하지\s*마)/iu.test(clause)
-                && /(?:copy|keep|preserve|retain)\b.*\b(?:english|source|original)\b.*\b(?:add|append)\b.*\bkorean\b/iu.test(clause)));
-        if (!affirmative) continue;
-        if (kind === 'fenced' && scopedMarkers.length && !scopedMarkers.includes('fenced')) continue;
-        if (kind === 'code' && scopedMarkers.includes('fenced') && !scopedMarkers.includes('code')) continue;
-        if (scopedMarkers.length) {
-            // Brackets used only as the output separator are not source scopes.
-            const sourceScoped = /(?:marked|enclosed|inside|between|spans?|구간|사이|안에|안의|속의|속)/iu.test(line);
-            if (sourceScoped && !scopedMarkers.includes(kind)) continue;
-            if (sourceScoped) return true;
-        }
-        const dialogueOnly = /(?:dialogue|대사)/iu.test(line) && !/(?:narration|서술|all\s+text|전체)/iu.test(line);
-        const narrationOnly = /(?:narration|서술)/iu.test(line) && !/(?:dialogue|대사)/iu.test(line);
-        if (dialogueOnly && kind !== 'dialogue' || narrationOnly && kind === 'dialogue') continue;
-        return true;
+// Permissions describe SOURCE scopes, not punctuation used in an output example.
+// Collect scope declarations across sentences so "Copy the English ..." retains
+// the preceding marked-span restriction instead of enabling the whole message.
+const scopeKinds = ['italic', 'bold', 'code', 'fenced', 'bracket', 'dialogue', 'narration'];
+function namedScopes(value) {
+    const scopes = Object.entries(markers).filter(([, re]) => re.test(value)).map(([key]) => key);
+    if (scopes.includes('fenced') && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(value)) {
+        const index = scopes.indexOf('code');
+        if (index >= 0) scopes.splice(index, 1);
     }
-    return false;
+    if (/\bdialogue\b|대사/iu.test(value)) scopes.push('dialogue');
+    if (/\bnarration\b|서술|나레이션/iu.test(value)) scopes.push('narration');
+    return scopes;
+}
+function sourceScopes(clause) {
+    // In "For italics, place Korean in square brackets", brackets describe the
+    // output separator, not another source scope. Read the introductory scope.
+    const source = clause.match(/(?:source\s+text|(?:any|each|all)\s+spans?|text)\s+(?:in\s+the\s+source\s+)?(?:enclosed|marked|wrapped|inside|between)[\s\S]*?(?=\s+(?:is|are)\s|,\s*(?:preserve|keep|copy|retain|output|show)|$)/iu);
+    if (source) return namedScopes(source[0]);
+    const action = clause.search(/\b(?:copy|keep|preserve|retain|place|put|add|append|output|show|display|translate|render|write|include)\b/iu);
+    const beforeAction = action > 0 ? namedScopes(clause.slice(0, action)) : [];
+    if (beforeAction.length) return beforeAction;
+    const target = clause.match(/\b(?:for|inside|within|between|in)\s+(.+?)(?=\s+(?:as|using|with|followed)\b|$)/iu);
+    if (target && !/\b(?:korean|translation|english)\b/iu.test(target[1])) return namedScopes(target[1]);
+    // Korean instructions and short labelled rules ("Italics: ...") carry the
+    // scope before the action too. Don't infer scopes from bracketed examples.
+    const label = clause.match(/^\s*[-*]?\s*([^:]+):/u);
+    if (label) return namedScopes(label[1]);
+    if (/\b(?:dialogue|narration)\b|대사|서술|나레이션/iu.test(clause)) {
+        return namedScopes(clause).filter(kind => kind === 'dialogue' || kind === 'narration');
+    }
+    if (/(?:안의|안에|사이|속|구간|만|에는|은|는).*(?:병기|원문|영어|한국어)/u.test(clause)) return namedScopes(clause);
+    // A named emphasis/code source object can follow the verb too.
+    return namedScopes(clause).filter(kind => ['italic', 'bold', 'code', 'fenced'].includes(kind));
+}
+const wholeSource = /\b(?:all|every|entire|whole)\s+(?:source\s+)?(?:text|sentences?|paragraphs?|message|content)\b|(?:모든|전체)\s*(?:문장|본문|텍스트|글|내용)/iu;
+const outsideScope = /\b(?:outside|unmarked|everything\s+else|other\s+text|remaining\s+text)\b|나머지|그\s*밖|기호\s*밖|구간\s*밖/iu;
+const negativeScope = /\b(?:except\b|excluding\b|no\s+bilingual|(?:do\s+not|don't|never|avoid|disable|without)[^.;]*bilingual|korean(?:\s+translation)?\s+only|only\s+korean)\b|(?:한국어|한글)(?:로)?\s*만|병기[^.;]*(?:하지|금지|말고|없이)/iu;
+function affirmativeScope(clause) {
+    if (hasBilingualInstructionExclusion(clause)) return false;
+    return bilingualPromptRequestsOutput(clause)
+        || (!negativeScope.test(clause) && /(?:한\s*영|영\s*한)?\s*병기\s*(?:해|하라|하되|해주세요|해줘|필수|요청)/u.test(clause))
+        || (!negativeScope.test(clause) && /\b(?:translate|output|show|display|render|write)\b[^.;]*\bbilingually\b/iu.test(clause))
+        || (!/(?:never|do not|금지|하지)/iu.test(clause)
+            && /(?:output|show|display).*both.*English.*(?:and|with).*Korean/iu.test(clause))
+        || (!/(?:do not|never|금지|하지\s*마)/iu.test(clause)
+            && /(?:copy|keep|preserve|retain)\b.*\b(?:english|source|original)\b.*\b(?:add|append|include)\b.*\bkorean\b/iu.test(clause));
+}
+export function promptRequestsScope(prompt, kind) {
+    if (!scopeKinds.includes(kind)) return false;
+    const clauses = String(prompt || '').split(/\r?\n|;|(?<=[.!?])\s+(?=[A-Z가-힣])|\b(?:but|however)\b|하지만|(?=\b(?:except|excluding)\b)|(?<=하되)\s*/iu)
+        .map(text => text.trim()).filter(text => text && !isBilingualFormatHeading(text));
+    const rules = clauses.map(text => ({ text, scopes: sourceScopes(text),
+        outside: outsideScope.test(text), negative: negativeScope.test(text),
+        all: wholeSource.test(text), positive: affirmativeScope(text) }));
+    const declared = new Set(rules.filter(rule => !rule.negative && !rule.outside && !rule.all)
+        .flatMap(rule => rule.scopes));
+    const allowed = new Set();
+    const denied = new Set();
+    for (const rule of rules) {
+        if (rule.negative) {
+            if (rule.outside) {
+                for (const scope of scopeKinds) if (!declared.has(scope)) denied.add(scope);
+            } else {
+                for (const scope of rule.scopes.length ? rule.scopes : scopeKinds) denied.add(scope);
+            }
+            continue;
+        }
+        if (!rule.positive || rule.outside) continue;
+        const scopes = rule.all ? scopeKinds : rule.scopes.length ? rule.scopes
+            : declared.size ? [...declared] : scopeKinds;
+        for (const scope of scopes) allowed.add(scope);
+    }
+    return allowed.has(kind) && !denied.has(kind);
+}
+// An already explicit marked/narration-only scope needs no optional AI
+// dialogue-intent call. A broad yes/no verdict must not widen that scope.
+export function hasExplicitNonDialogueBilingualScope(prompt) {
+    return !promptRequestsScope(prompt, 'dialogue')
+        && scopeKinds.some(kind => kind !== 'dialogue' && promptRequestsScope(prompt, kind));
 }
 export function bilingualScopeRequested(settings = {}, kind = 'narration') {
     if (settings.developerMadKoreanOutputEnabled === true

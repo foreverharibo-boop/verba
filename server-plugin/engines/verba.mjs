@@ -2608,9 +2608,19 @@ function segmentSource(value, nameLocks = [], {
   const { protectedText, tokens, nameTokens } = protectSource(source, nameLocks);
   const taggedRanges = taggedInnerRangesInProtectedText(protectedText, tokens);
   const regions = codeAwareRegions(protectedText, tokens, taggedRanges);
+  const markupTokens = new Set(tokens.filter((entry) => /^<(?:!--|\/?[\p{L}_])/u.test(entry.value)).map((entry) => entry.token));
   const parts = [];
   let translatableIndex = 0;
   const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = "", codeKind = "") => {
+    const fragments = piece.text.split(/(@@VERBA_(?:DEEP_)?\d{4}@@)/gu);
+    if (fragments.some((fragment) => markupTokens.has(fragment))) {
+      for (const fragment of fragments) {
+        if (!fragment) continue;
+        if (markupTokens.has(fragment)) parts.push({ type: "passthrough", text: fragment });
+        else appendPiece({ ...piece, text: fragment }, insideTaggedContent, tagContext, codeQuote, codeKind);
+      }
+      return;
+    }
     const leading = piece.text.match(/^\s+/u)?.[0] || "";
     const afterLeading = piece.text.slice(leading.length);
     const trailing = afterLeading.match(/\s+$/u)?.[0] || "";
@@ -2697,15 +2707,22 @@ function bilingualizeNameOnlyDialogue(text, segmented, settings) {
   const built = ensureBilingualDialogueFormat({ type: "dialogue_candidate", text: trimmed }, trimmed, settings, null, nameTokens, segmented?.tokens || []);
   return `${leading}${built.trim()}${trailing}`;
 }
+function preserveSegmentMarkup(source, translated, markupTokens) {
+  const signature = (text) => (canonicalizeProtectedTokenVariants(String(text || "")).match(/@@VERBA_(?:DEEP_)?\d{4}@@|<!--[\s\S]*?-->|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gu) || []).filter((value) => value.startsWith("<") || markupTokens.has(value));
+  return JSON.stringify(signature(source)) === JSON.stringify(signature(translated)) ? translated : source;
+}
 function assembleTranslation(segmented, translations, options = {}) {
   const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
+  const markupEntries = (segmented.tokens || []).filter((entry) => /^<(?:!--|\/?[\p{L}_])/u.test(entry.value));
+  const markupTokens = new Set(markupEntries.map((entry) => entry.token));
   const joined = segmented.parts.map((part) => {
     if (part.type === "passthrough") return bilingualizeNameOnlyDialogue(part.text, segmented, options?.settings);
     const translated = map.get(part.id);
     if (typeof translated !== "string" || !translated.trim()) {
       throw new Error(`\uBC88\uC5ED \uACB0\uACFC \uB204\uB77D: ${part.id}`);
     }
-    const repaired = repairSourceEllipses(repairUnexpectedProseBreaks(translated, part), part);
+    const guarded = preserveSegmentMarkup(part.text, translated, markupTokens);
+    const repaired = repairSourceEllipses(repairUnexpectedProseBreaks(guarded, part), part);
     map.set(part.id, repaired);
     return escapeCodeTranslation(repaired, part.codeQuote);
   }).join("");
@@ -2714,7 +2731,8 @@ function assembleTranslation(segmented, translations, options = {}) {
     strict: true,
     allowMissing: true
   }));
-  const fullyRestored = restoreProtected(namesRestored, segmented.tokens, {
+  const markupRestored = restoreProtected(namesRestored, markupEntries, { strict: true });
+  const fullyRestored = restoreProtected(markupRestored, (segmented.tokens || []).filter((entry) => !markupTokens.has(entry.token)), {
     strict: options?.allowDamagedProtected !== true
   });
   return repairRenderedKoreanParticleAlternatives(fullyRestored);
@@ -3342,7 +3360,7 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
 }
 
 // hankae-patch/verba/output-comparison.js
-var STAGES = /* @__PURE__ */ new Set(["initial-parsed", "tag-normalization", "repairs", "dialogue-format", "english-review", "bilingual-review", "assembled", "received", "locked-segments", "display-normalization"]);
+var STAGES = /* @__PURE__ */ new Set(["initial-parsed", "tag-normalization", "repairs", "dialogue-format", "english-review", "bilingual-review", "markup-integrity", "assembled", "received", "locked-segments", "display-normalization"]);
 var TYPES = /* @__PURE__ */ new Set(["narration", "dialogue_candidate", "tagged_content", "code_content"]);
 var METRICS = ["length", "latinLetters", "hangulLetters", "mixedLines", "koreanBracketPairs", "duplicateKoreanPairs"];
 var MAX_ROWS = 32;
@@ -3659,6 +3677,7 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
   const translation = assembleTranslation(segmented, translations, {
     allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback
   });
+  comparison.capture("markup-integrity", translations);
   if (!translation.trim()) throw new Error("\uC644\uC131\uB41C \uBC88\uC5ED\uBB38\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
   return {
     translation,
@@ -4029,7 +4048,7 @@ function bilingualReviewTargets(segmented, translations, settings = {}) {
   const add = (segment, source, current, kind) => {
     const original = englishSource(source.body, names);
     if (!/[A-Za-z]/u.test(original.replace(TOKEN, "")) || !current.body.trim()) return;
-    if (tokenList(source.body).some((token) => !names.has(token)) || /[<>`]|\{\{/u.test(source.body)) {
+    if ([source.body, current.body].some((body) => tokenList(body).some((token) => !names.has(token)) || /[<>`]|\{\{/u.test(body))) {
       skipped++;
       return;
     }
@@ -6023,6 +6042,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
       settings,
       allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || useInitialSuccessfulTranslation
     });
+    comparison.capture("markup-integrity", translations);
     if (!result.trim()) throw new Error("\uC644\uC131\uB41C \uBC88\uC5ED\uBB38\uC774 \uBE44\uC5B4 \uC788\uC2B5\uB2C8\uB2E4.");
     return {
       translation: result,

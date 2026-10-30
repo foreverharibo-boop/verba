@@ -76,7 +76,7 @@ export function bilingualReviewTargets(segmented, translations, settings = {}) {
         const original = englishSource(source.body, names);
         if (!/[A-Za-z]/u.test(original.replace(TOKEN, '')) || !current.body.trim()) return;
         // Opaque code, URLs, HTML and macros remain outside the editable surface.
-        if (tokenList(source.body).some(token => !names.has(token)) || /[<>`]|\{\{/u.test(source.body)) { skipped++; return; }
+        if ([source.body, current.body].some(body => tokenList(body).some(token => !names.has(token)) || /[<>`]|\{\{/u.test(body))) { skipped++; return; }
         const size = original.length + current.body.length;
         if (targets.length >= LIMIT_TARGETS || total + size > LIMIT_TEXT) { skipped++; return; }
         targets.push({ id: `bilingual_${String(targets.length).padStart(4, '0')}`, type: 'bilingual_review',

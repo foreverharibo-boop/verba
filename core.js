@@ -1668,10 +1668,23 @@ export function segmentSource(value, nameLocks = [], {
     const { protectedText, tokens, nameTokens } = protectSource(source, nameLocks);
     const taggedRanges = taggedInnerRangesInProtectedText(protectedText, tokens);
     const regions = codeAwareRegions(protectedText, tokens, taggedRanges);
+    // HTML/custom tags and opaque markup are owned by local assembly, never
+    // by the translation provider. In particular, nested closing tags must
+    // not depend on a disabled AI protected-token repair pass.
+    const markupTokens = new Set(tokens.filter(entry => /^<(?:!--|\/?[\p{L}_])/u.test(entry.value)).map(entry => entry.token));
     const parts = [];
     let translatableIndex = 0;
 
     const appendPiece = (piece, insideTaggedContent = false, tagContext = [], codeQuote = '', codeKind = '') => {
+        const fragments = piece.text.split(/(@@VERBA_(?:DEEP_)?\d{4}@@)/gu);
+        if (fragments.some(fragment => markupTokens.has(fragment))) {
+            for (const fragment of fragments) {
+                if (!fragment) continue;
+                if (markupTokens.has(fragment)) parts.push({ type: 'passthrough', text: fragment });
+                else appendPiece({ ...piece, text: fragment }, insideTaggedContent, tagContext, codeQuote, codeKind);
+            }
+            return;
+        }
         const leading = piece.text.match(/^\s+/u)?.[0] || '';
         const afterLeading = piece.text.slice(leading.length);
         const trailing = afterLeading.match(/\s+$/u)?.[0] || '';
@@ -1791,8 +1804,19 @@ function bilingualizeNameOnlyDialogue(text, segmented, settings) {
     return `${leading}${built.trim()}${trailing}`;
 }
 
+// Legacy segment shapes may still carry nested markup tokens. Do not guess
+// their position after a bad response: retain that source segment only. This
+// also rejects invented tags/structural references from any AI post-review.
+function preserveSegmentMarkup(source, translated, markupTokens) {
+    const signature = text => (canonicalizeProtectedTokenVariants(String(text || '')).match(/@@VERBA_(?:DEEP_)?\d{4}@@|<!--[\s\S]*?-->|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gu) || [])
+        .filter(value => value.startsWith('<') || markupTokens.has(value));
+    return JSON.stringify(signature(source)) === JSON.stringify(signature(translated)) ? translated : source;
+}
+
 export function assembleTranslation(segmented, translations, options = {}) {
     const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
+    const markupEntries = (segmented.tokens || []).filter(entry => /^<(?:!--|\/?[\p{L}_])/u.test(entry.value));
+    const markupTokens = new Set(markupEntries.map(entry => entry.token));
     const joined = segmented.parts.map(part => {
         if (part.type === 'passthrough') return bilingualizeNameOnlyDialogue(part.text, segmented, options?.settings);
         const translated = map.get(part.id);
@@ -1800,7 +1824,8 @@ export function assembleTranslation(segmented, translations, options = {}) {
             throw new Error(`번역 결과 누락: ${part.id}`);
         }
         // Also cover later repair passes; keep the same map for source mapping.
-        const repaired = repairSourceEllipses(repairUnexpectedProseBreaks(translated, part), part);
+        const guarded = preserveSegmentMarkup(part.text, translated, markupTokens);
+        const repaired = repairSourceEllipses(repairUnexpectedProseBreaks(guarded, part), part);
         map.set(part.id, repaired);
         return escapeCodeTranslation(repaired, part.codeQuote);
     }).join('');
@@ -1813,7 +1838,10 @@ export function assembleTranslation(segmented, translations, options = {}) {
         strict: true,
         allowMissing: true,
     }));
-    const fullyRestored = restoreProtected(namesRestored, segmented.tokens, {
+    // Structural markup is never optional, even when non-structural token
+    // recovery is allowed to fall back to an imperfect initial translation.
+    const markupRestored = restoreProtected(namesRestored, markupEntries, { strict: true });
+    const fullyRestored = restoreProtected(markupRestored, (segmented.tokens || []).filter(entry => !markupTokens.has(entry.token)), {
         strict: options?.allowDamagedProtected !== true,
     });
 

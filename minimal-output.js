@@ -203,6 +203,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     const translation = assembleTranslation(segmented, translations, {
         allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback,
     });
+    comparison.capture('markup-integrity', translations);
     if (!translation.trim()) throw new Error('완성된 번역문이 비어 있습니다.');
     return { translation, sourceMap: buildSourceMap(segmented, translations, translation),
         ...(settings.debugMode === true ? { outputComparison: comparison.finish(translation) } : {}) };

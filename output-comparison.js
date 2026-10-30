@@ -1,6 +1,6 @@
 // Structural diagnostics only: never serialize source, prompts, or responses.
 // Each trace belongs to one output request, including split/batched requests.
-const STAGES = new Set(['initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'assembled', 'received', 'locked-segments', 'display-normalization']);
+const STAGES = new Set(['initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'markup-integrity', 'assembled', 'received', 'locked-segments', 'display-normalization']);
 const TYPES = new Set(['narration', 'dialogue_candidate', 'tagged_content', 'code_content']);
 const METRICS = ['length', 'latinLetters', 'hangulLetters', 'mixedLines', 'koreanBracketPairs', 'duplicateKoreanPairs'];
 const MAX_ROWS = 32;

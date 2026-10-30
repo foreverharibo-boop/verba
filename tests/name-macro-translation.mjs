@@ -57,11 +57,12 @@ const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const body = index.slice(index.indexOf('async function translateOutputText('), index.indexOf('function inputIdentitySpellingContext('));
 let minimal = true;
 const env = {
+    planBilingualDialogueVerdicts: async () => {},
     verbaServer: { hasPendingGeneration: () => false },
     settings: {}, normalizedCharacterNameLocks: () => [], segmentSource,
     minimalOutputEnabled: () => minimal,
     translateMinimalOutput: async prepared => prepared,
-    requestSegments: () => {}, buildSourceMap: () => [], reviewFinalEnglish: () => {},
+    requestSegments: () => {}, buildSourceMap: () => [], reviewFinalEnglish: () => {}, reviewFinalBilingual: () => {},
     planRepeatedRoleTermLocks: async prepared => {
         assert.equal(prepared.source, 'Dana waited. "Hi, Dana."');
         throw Error('normal path reached with resolved names');
@@ -87,3 +88,4 @@ const result = await translateMinimalOutput(segmented, { developerMode: true, de
 assert.equal(reviews, 1);
 assert.equal(result.translation, '다나는 기다렸다. "Hi, Dana. (안녕, 다나.)"');
 console.log('PASS: visible identity macros, protected contexts, name locks/particles, bilingual source, normal/minimal entry and final review.');
+

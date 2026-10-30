@@ -43,6 +43,10 @@ for (const [name, create] of [['verba', createVerba], ['deep', createDeep]]) {
                     globalPrompt: 'For all source text, preserve the original English and add Korean in brackets. Bilingual output.', ...extra }, profiles: { A: {} }, nameLocks: [], character: {}, context: {} }, async (_id, messages) => {
                     calls++;
                     const prompt = messages.map(m => m.content).join('\n');
+                    if(prompt.includes('\nBILINGUAL_TARGETS\n')) {
+                        const rows=JSON.parse(prompt.split('\nBILINGUAL_TARGETS\n')[1]);
+                        return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:row.CURRENT}))})};
+                    }
                     const marker = ['\nTARGETS\n', '\nSEGMENTS\n', '\nTRANSLATION TARGETS\n'].find(m => prompt.includes(m));
                     assert.ok(marker, 'unexpected extra provider request');
                     const rows = JSON.parse(prompt.slice(prompt.lastIndexOf(marker) + marker.length));

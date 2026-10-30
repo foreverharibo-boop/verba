@@ -1,6 +1,6 @@
 // Structural diagnostics only: never serialize source, prompts, or responses.
 // Each trace belongs to one output request, including split/batched requests.
-const STAGES = new Set(['initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'assembled', 'received', 'locked-segments', 'display-normalization']);
+const STAGES = new Set(['initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'assembled', 'received', 'locked-segments', 'display-normalization']);
 const TYPES = new Set(['narration', 'dialogue_candidate', 'tagged_content', 'code_content']);
 const METRICS = ['length', 'latinLetters', 'hangulLetters', 'mixedLines', 'koreanBracketPairs', 'duplicateKoreanPairs'];
 const MAX_ROWS = 32;
@@ -31,6 +31,11 @@ export function summarizeOutputText(value) {
     };
 }
 
+function cleanBilingualReview(value) {
+    return { checked: number(value?.checked), changed: number(value?.changed),
+        rejected: number(value?.rejected), skipped: number(value?.skipped),
+        status: ['not-needed', 'completed', 'failed', 'limit'].includes(value?.status) ? value.status : 'not-needed' };
+}
 function cleanMetrics(value) {
     return Object.fromEntries(METRICS.map(key => [key, number(value?.[key])]));
 }
@@ -66,6 +71,7 @@ export function sanitizeOutputComparison(value, { summaryOnly = false } = {}) {
     return {
         version: 1,
         contentIncluded: false,
+        ...(value.bilingualReview ? { bilingualReview: cleanBilingualReview(value.bilingualReview) } : {}),
         firstResponseMeaning: 'first-successfully-parsed-value-per-segment',
         limitation: 'Counts are hints, not proof of bilingual correctness. First means first parsed value per segment, possibly after a parse retry. Assembled totals include restored markup/code. Rendering and user regex are not inspected.',
         segmentCount: number(value.segmentCount),
@@ -124,6 +130,9 @@ export function createOutputComparison(segmented, enabled) {
             capture('initial-parsed', initial);
         },
         capture,
+        bilingualReview(result) {
+            if (enabled) report.bilingualReview = cleanBilingualReview(result);
+        },
         finish(translation) {
             if (!enabled) return null;
             const safe = sanitizeOutputComparison(report);

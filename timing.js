@@ -1,6 +1,7 @@
 // In-memory output-job diagnostics. Never retain prompts, response bodies, or identities.
 const PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 const LABELS = [
+    ['final-bilingual-review', '병기 AI 검수'],
     ['banned', '금지어 복구'], ['untranslated', '미번역 복구'],
     ['protected', '보호 토큰 복구'], ['token', '보호 토큰 복구'],
     ['quality-audit', '품질 검수'], ['role-term-plan', '용어 사전 정리'],
@@ -136,3 +137,4 @@ export function outputTimingText(record) {
         '합계는 병렬 중복을 제외한 실제 경과 시간입니다. 겹친 시간은 복구→재시도→본 번역→보조→대기열 순으로 배정하며, 요청별 시간은 서로 겹칠 수 있습니다.',
     ].join('\n');
 }
+

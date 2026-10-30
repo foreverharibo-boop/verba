@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -97,5 +98,7 @@ test('server manifest and UI advertise the new mode and compatible engine versio
     assert.match(index,/developerDeepseekKoreanEnabled: raw.developerDeepseekKoreanEnabled === true/);
     const manifest=JSON.parse(fs.readFileSync(new URL('../server-plugin/engines/manifest.json',import.meta.url)));
     assert.ok(index.includes(`const SERVER_ENGINE_VERSION = '${manifest.engines.verba.version}'`));
-    assert.equal(manifest.engines['verba-deep'].version,'0.6.45');
+    assert.match(manifest.engines['verba-deep'].version,/^0\.6\.\d+$/);
+    const deepBundle=fs.readFileSync(new URL('../server-plugin/engines/verba-deep.mjs',import.meta.url));
+    assert.equal(manifest.engines['verba-deep'].hash,createHash('sha256').update(deepBundle).digest('hex'));
 });

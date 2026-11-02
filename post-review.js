@@ -1,3 +1,4 @@
+import { bilingualSettingsDiagnostic } from './bilingual-diagnostics.js';
 import { bilingualReviewTargets, validBilingualReplacement } from './bilingual-review.js';
 import { activeCustomOutput, bilingualScopeRequested } from './output-format.js';
 import { findBannedWords } from './core.js';
@@ -117,36 +118,39 @@ function validGeneral(unit, after, settings) {
 
 export async function reviewOutputOnce({ segmented, translations, settings = {}, speakerScopes = {}, options = {}, reference = '', request }) {
     const stats = { checked:0, changed:0, rejected:0, skipped:0, status:'not-needed', checks:[] };
-    if (settings.translationEngine === 'google-free') return stats;
+    if (settings.debugMode === true) { stats.bilingualSettings = bilingualSettingsDiagnostic(settings); stats.reviewReason='no-targets'; }
+    if (settings.translationEngine === 'google-free') { if(settings.debugMode===true)stats.reviewReason='free-engine'; return stats; }
     const plan = planPostReview(segmented, translations, settings, speakerScopes);
     Object.assign(stats, { checks:plan.selected, skipped:plan.skipped });
-    if (!plan.units.length) return stats;
+    if (settings.debugMode === true) stats.units = {general:plan.units.filter(u=>u.type==='general').length,bilingual:plan.units.filter(u=>u.type==='bilingual').length,lockedTargets:plan.groups.reduce((n,g)=>n+g.spans.length,0)};
+    if (!plan.units.length) { if(settings.debugMode===true && !plan.selected.length)stats.reviewReason='all-off'; return stats; }
     const prompt = buildPostReviewPrompt(plan, segmented, settings, reference);
     // Never silently truncate source/rules or split a review into more calls.
-    if (plan.units.length > 300 || prompt.length > 120000) return { ...stats, status:'limit', skipped:stats.skipped + plan.units.length };
+    if (plan.units.length > 300 || prompt.length > 120000) return { ...stats, ...(settings.debugMode===true?{reviewReason:'limit'}:{}), status:'limit', skipped:stats.skipped + plan.units.length };
     try {
         options.signal?.throwIfAborted();
         stats.checked = plan.units.length;
+        if(settings.debugMode===true)stats.reviewReason='request-or-parse-failed';
         const result = await request(prompt, plan.units, options);
         options.signal?.throwIfAborted();
-        if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some(x => !result.has(x.id))) throw Error('Incomplete review');
+        if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some(x => !result.has(x.id))) { if(settings.debugMode===true)stats.reviewReason='incomplete-response'; throw Error('Incomplete review'); }
         const candidate = new Map(translations);
         for (const group of plan.groups) {
             let text = group.generalId ? result.get(group.generalId) : group.plain;
             if (group.generalId && text !== group.plain && !validGeneral(plan.units.find(x => x.id === group.generalId), text, settings)) {
-                stats.rejected++; throw Error('Invalid general review');
+                stats.rejected++; if(settings.debugMode===true)stats.reviewReason='invalid-general'; throw Error('Invalid general review');
             }
             for (const span of group.spans) {
                 const after = span.reviewId ? result.get(span.reviewId) : span.current;
                 if (after !== span.current && !validBilingualReplacement(span, after)) {
-                    stats.rejected++; throw Error('Invalid bilingual review');
+                    stats.rejected++; if(settings.debugMode===true)stats.reviewReason='invalid-bilingual'; throw Error('Invalid bilingual review');
                 }
                 if (after !== span.current && !span.formatEditable
                     && !same(structure(span.current.replace(span.source, '@@REVIEW_LOCK_9999@@')),
                         structure(after.replace(span.source, '@@REVIEW_LOCK_9999@@')))) {
-                    stats.rejected++; throw Error('Unselected bilingual format change');
+                    stats.rejected++; if(settings.debugMode===true)stats.reviewReason='unselected-format-change'; throw Error('Unselected bilingual format change');
                 }
-                if (typeof text !== 'string' || text.split(span.lock).length !== 2) { stats.rejected++; throw Error('Lost review lock'); }
+                if (typeof text !== 'string' || text.split(span.lock).length !== 2) { stats.rejected++; if(settings.debugMode===true)stats.reviewReason='missing-lock'; throw Error('Lost review lock'); }
                 text = text.replace(span.lock, () => after);
             }
             candidate.set(group.segment.id, text);
@@ -154,7 +158,7 @@ export async function reviewOutputOnce({ segmented, translations, settings = {},
         // Atomic commit: a malformed unit never leaves a partially reviewed draft.
         for (const [id, text] of candidate) if (text !== translations.get(id)) stats.changed++;
         for (const [id, text] of candidate) translations.set(id, text);
-        return { ...stats, status:'completed' };
+        return { ...stats, ...(settings.debugMode===true?{reviewReason:'completed'}:{}), status:'completed' };
     } catch (error) {
         if (options.signal?.aborted) throw error;
         return { ...stats, changed:0, status:'failed' };

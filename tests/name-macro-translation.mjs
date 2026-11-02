@@ -1,3 +1,4 @@
+import { outputBinding } from '../bilingual-diagnostics.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { resolveTranslationNameMacros, resolveOutputSpeakerIdentity, segmentSource, assembleTranslation, ensureBilingualDialogueFormat } from '../core.js';
@@ -57,6 +58,7 @@ const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const body = index.slice(index.indexOf('async function translateOutputText('), index.indexOf('function inputIdentitySpellingContext('));
 let minimal = true;
 const env = {
+    outputBinding,
     planBilingualDialogueVerdicts: async () => {},
     verbaServer: { hasPendingGeneration: () => false },
     settings: {}, normalizedCharacterNameLocks: () => [], segmentSource,

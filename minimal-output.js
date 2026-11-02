@@ -67,7 +67,8 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     };
     const oneTime = String(options.oneTimeInstruction || '');
     let usedInitialFallback = false;
-    const comparison = createOutputComparison(segmented, settings.debugMode === true);
+    const comparison = createOutputComparison(segmented, settings.debugMode === true, settings, options.diagnosticBinding || null, 'minimal');
+    comparison.translationSettings(config);
     const firstTranslations = new Map();
     const effectiveSplitCount = settings.translationEngine === 'google-free' ? 1 : outputSplitCount(settings);
     const translations = await runOutputBatches(segmented, effectiveSplitCount, options, async (segments, batchOptions) => {
@@ -140,6 +141,7 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     comparison.initial(firstTranslations);
     comparison.capture('repairs', translations);
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, config, {});
+    comparison.capture('local-normalization', translations, config);
     for (const segment of segmented.segments) {
         if (segment.type === 'tagged_content') translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
     }

@@ -1,3 +1,5 @@
+import { bilingualSettingsDiagnostic, sanitizeBilingualSettings, outputBinding } from './bilingual-diagnostics.js';
+import { hashText } from './core.js';
 import { sanitizeOutputComparison } from './output-comparison.js';
 import { compatibleCompletedSource, reconcileCompletedResult, describeSourceChange } from './server-result-compat.js?v=2';
 // Optional server transport. Disabled installations do not contact the plugin.
@@ -184,7 +186,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         if (!notificationRouting && envelope.notification?.routing === true) envelope.notification = envelope.notification.candidates.apk;
         // Retain the ID before sending. An ambiguous timeout never falls back to
         // another translation request. Only the exact same ID/body is retried.
-        remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),notificationRequested:envelope.notification?.translationEnabled===true,automaticOutput:envelope.kind==='output'&&envelope.options?.automatic===true&&envelope.options?.stage==='output-translation',at:Date.now()});
+        remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),notificationRequested:envelope.notification?.translationEnabled===true,automaticOutput:envelope.kind==='output'&&envelope.options?.automatic===true&&envelope.options?.stage==='output-translation',at:Date.now(),...(getSettings().debugMode===true && envelope.snapshot?.settings ? {submittedBilingualSettings:bilingualSettingsDiagnostic(envelope.snapshot.settings)} : {})});
         for(let i=0;;i++){
             if(signal?.aborted){await cancel(envelope.id);throw abortError();}
             try{return await api('/jobs',{method:'POST',body:JSON.stringify(envelope)});}
@@ -198,6 +200,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         const record=records.find(r=>r.id===id);
         jobDiagnostics.set(id,{
             jobId:id.slice(0,8),
+            ...(getSettings().debugMode === true ? {jobKey:id,sourceHash:typeof state.source==='string'?hashText(state.source):null,sourceLength:typeof state.source==='string'?state.source.length:null,resultHash:typeof state.result?.translation==='string'?hashText(state.result.translation):null,
+                ...(record?.submittedBilingualSettings?{submittedBilingualSettings:sanitizeBilingualSettings(record.submittedBilingualSettings)}:{})} : {}),
             kind:['generation','observed-generation','output','input','segments','request'].includes(state.kind)?state.kind:'unknown',
             state:['queued','generating','translating','completed','failed','cancelled'].includes(state.state)?state.state:'unknown',
             generationDone:state.generationDone===true,
@@ -263,6 +267,30 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             }
         }finally{signal?.removeEventListener('abort',stop);}
     }
+    function attachOutputTrace(result,source,options,id,route) {
+        if(getSettings().debugMode!==true || !result || typeof result!=='object')return result;
+        const comparison=sanitizeOutputComparison(result.outputComparison);
+        if(!comparison)return result;
+        // Keep engine binding (actual translated source), add the consuming job/message.
+        comparison.binding={...outputBinding(source,options,route,id),
+            ...(comparison.binding?.sourceHash?{sourceHash:comparison.binding.sourceHash,sourceLength:comparison.binding.sourceLength}:{})};
+        return {...result,outputComparison:sanitizeOutputComparison(comparison)};
+    }
+    function diagnostics(target=null) {
+        const jobs=records.filter(r=>r.scope===scopeKey()).map(r=>jobDiagnostics.get(r.id)).filter(Boolean)
+            .map(row=>({...row,notificationResults:[...row.notificationResults]}));
+        const sourceHash=target&&typeof target.source==='string'?hashText(target.source):null;
+        const resultHash=target&&typeof target.translation==='string'?hashText(target.translation):null;
+        const selectedMessage=getSettings().debugMode===true && target ? {
+            messageId:Number.isInteger(target.messageId)?target.messageId:null,swipeId:Number.isInteger(target.swipeId)?target.swipeId:null,
+            sourceHash,resultHash,
+            matches:jobs.filter(j=>j.jobKey===target.relayJobKey || sourceHash && j.sourceHash===sourceHash).map(j=>({
+                jobKey:j.jobKey,relayIdMatch:j.jobKey===target.relayJobKey,sourceHashMatch:j.sourceHash===sourceHash,
+                resultHashMatch:!!resultHash&&j.resultHash===resultHash})),
+            limitation:'Matches identify candidates, not proof of UI application. Hashes are non-cryptographic. An applied outputComparison.binding is the direct consumer trace.'
+        }:null;
+        return {serverVersion,jobs,selectedMessage,events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length};
+    }
     async function output(source,options,local){
         // Only a generation in the same chat and with the EXACT final source is
         // reusable. Regex/other extension changes never receive stale results.
@@ -290,7 +318,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             if(!result){trace('reuse-skipped',{reason:'result-cleanup-unsafe',...describeSourceChange(done.source,source)});continue;}
             if(record.kind!=='output')record.kind='used';save();
             trace('automatic-result-reused',{...describeSourceChange(done.source,source)});
-            return result;
+            return attachOutputTrace(result,source,options,record.id,'server-reused');
         }
         const serverAvailable=await available();
         source=options.refreshSource?.() ?? source;
@@ -315,7 +343,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         if(options.signal?.aborted)throw abortError();
         await submit(envelope,options.signal);
         const state=await waitResult(id,options.signal);
-        return state.result;
+        return kind==='output'?attachOutputTrace(state.result,source,options,id,'server-new'):state.result;
     }
     async function input(source,options,local){return await available()?run('input',source,options):local();}
     function generationStarted(type,options={},dryRun=false){
@@ -438,6 +466,6 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});
         ensureHook();flush();
     }
-    return {noteSourceChange:(id,before,after,flags)=>trace('application-source-changed',{messageId:Number.isInteger(id)?id:null,...describeSourceChange(before,after),chatChanged:flags.chatChanged===true,swipeChanged:flags.swipeChanged===true,reconciled:flags.reconciled===true}),check,available,output,input,run,install,status,cancel,refreshDiagnostics,diagnostics:()=>({serverVersion,jobs:records.filter(r=>r.scope===scopeKey()).map(r=>jobDiagnostics.get(r.id)).filter(Boolean).map(row=>({...row,notificationResults:[...row.notificationResults]})),events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length}),hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
+    return {noteSourceChange:(id,before,after,flags)=>trace('application-source-changed',{messageId:Number.isInteger(id)?id:null,...describeSourceChange(before,after),chatChanged:flags.chatChanged===true,swipeChanged:flags.swipeChanged===true,reconciled:flags.reconciled===true}),check,available,output,input,run,install,status,cancel,refreshDiagnostics,diagnostics,hasPendingGeneration:()=>records.some(r=>r.scope===scopeKey()&&r.kind==='generation')};
 }
 

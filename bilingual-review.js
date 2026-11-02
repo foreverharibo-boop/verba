@@ -70,56 +70,50 @@ function envelope(text, kind) {
 export function bilingualReviewTargets(segmented, translations, settings = {}) {
     const names = nameMap(segmented);
     const targets = [];
-    const decisions = [];
-    const note = (segment, reason) => decisions.push({segmentId:segment.id,reason});
     let skipped = 0, total = 0;
     const allowed = Object.fromEntries(['italic','bold','bracket','code','fenced','dialogue','narration'].map(kind => [kind, bilingualScopeRequested(settings, kind)]));
     const add = (segment, source, current, kind) => {
         const original = englishSource(source.body, names);
-        if (!/[A-Za-z]/u.test(original.replace(TOKEN, '')) || !current.body.trim()) { note(segment,'no-english-or-empty'); return; }
+        if (!/[A-Za-z]/u.test(original.replace(TOKEN, '')) || !current.body.trim()) return;
         // Opaque code, URLs, HTML and macros remain outside the editable surface.
-        if ([source.body, current.body].some(body => tokenList(body).some(token => !names.has(token)) || /[<>`]|\{\{/u.test(body))) { skipped++; note(segment,'opaque-content'); return; }
+        if ([source.body, current.body].some(body => tokenList(body).some(token => !names.has(token)) || /[<>`]|\{\{/u.test(body))) { skipped++; return; }
         const size = original.length + current.body.length;
-        if (targets.length >= LIMIT_TARGETS || total + size > LIMIT_TEXT) { skipped++; note(segment,'target-limit'); return; }
+        if (targets.length >= LIMIT_TARGETS || total + size > LIMIT_TEXT) { skipped++; return; }
         targets.push({ id: `bilingual_${String(targets.length).padStart(4, '0')}`, type: 'bilingual_review',
             segmentId: segment.id, start: current.start, end: current.end, kind,
             open: source.open, close: source.close, source: original, tokenSource: source.body,
             current: String(translations.get(segment.id)).slice(current.start, current.end),
             names: (segmented.nameTokens || []).filter(name => source.body.includes(name.token)) });
         total += size;
-        note(segment,'eligible');
     };
     for (const segment of segmented.segments || []) {
-        if (segment.type === 'tagged_content') { note(segment,'tag-excluded'); continue; }
+        if (segment.type === 'tagged_content') continue;
         const source = String(segment.text || ''), current = String(translations.get(segment.id) || '');
         const kind = segment.type === 'code_content' ? segment.codeKind === 'fenced' ? 'fenced' : 'code'
             : segment.type === 'dialogue_candidate' ? 'dialogue' : 'narration';
         if (kind === 'code' || kind === 'fenced') {
             if (allowed[kind]) add(segment, envelope(source, kind), envelope(current, kind), kind);
-            else note(segment,'scope-not-requested');
             continue;
         }
         const sourceSpans = markedSpans(source), currentSpans = markedSpans(current);
         if (allowed[kind] && sourceSpans?.length === 0) {
             // Do not consume new emphasis wrappers or unexpectedly changed quotes.
             const a = envelope(source, kind), b = envelope(current, kind);
-            if (!currentSpans || currentSpans.some(x => x.kind !== 'bracket') || a.open !== b.open || a.close !== b.close) { skipped++; note(segment,'wrapper-mismatch'); continue; }
+            if (!currentSpans || currentSpans.some(x => x.kind !== 'bracket') || a.open !== b.open || a.close !== b.close) { skipped++; continue; }
             add(segment, a, b, kind); continue;
         }
         if (!sourceSpans || !currentSpans || sourceSpans.length !== currentSpans.length
             || sourceSpans.some((span, i) => span.open !== currentSpans[i].open || span.close !== currentSpans[i].close)) {
             if (Object.values(allowed).some(Boolean)) skipped++;
-            note(segment,'span-alignment');
             continue;
         }
         sourceSpans.forEach((span, i) => {
-            if (!allowed[span.kind]) { note(segment,'scope-not-requested'); return; }
-            if (/[\[\]*_]/u.test(span.body.replace(TOKEN, '').replace(/\\./gu, ''))) { skipped++; note(segment,'nested-markers'); return; }
+            if (!allowed[span.kind]) return;
+            if (/[\[\]*_]/u.test(span.body.replace(TOKEN, '').replace(/\\./gu, ''))) { skipped++; return; }
             add(segment, span, currentSpans[i], span.kind);
         });
     }
-    for (const segment of segmented.segments || []) if (!decisions.some(d=>d.segmentId===segment.id)) note(segment,'scope-not-requested');
-    return { targets, skipped, decisions };
+    return { targets, skipped };
 }
 function activeFormatRules(settings) {
     return { global: settings.globalPromptEnabled !== false ? settings.globalPrompt || '' : '',

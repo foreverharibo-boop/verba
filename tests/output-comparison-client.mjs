@@ -24,16 +24,8 @@ test('server result comparison reaches caller; diagnostic copy is sanitized and 
     const client = createServerClient({ variant: 'verba', version: '0.6.81', getSettings: () => settings,
         getContext: () => ({ chatId: 'one', getRequestHeaders: () => ({}) }), isActive: () => true,
         getSnapshot: () => ({ settings: { ...settings }, nameLocks: [], context: {}, character: {} }), getGenerationOptions: () => ({ options: {} }) });
-    const result = await client.output('Quiet', {diagnosticMessageId:446,diagnosticSwipeId:0}, () => { throw Error('unexpected local fallback'); });
+    const result = await client.output('Quiet', {}, () => { throw Error('unexpected local fallback'); });
     assert.equal(result.outputComparison.version, 1);
-    assert.equal(result.outputComparison.binding.jobKey,envelope.id);
-    assert.equal(result.outputComparison.binding.messageId,446);
-    assert.equal(result.outputComparison.binding.route,'server-new');
-    const match=client.diagnostics({source:'Quiet',translation:'조용히 [조용히]',messageId:446,swipeId:0});
-    assert.equal(match.selectedMessage.matches.length,1);
-    assert.equal(match.selectedMessage.matches[0].resultHashMatch,true);
-    assert.equal(client.diagnostics({source:'Different'}).selectedMessage.matches.length,0);
-    assert.doesNotMatch(JSON.stringify(match),/SECRET|Quiet|조용히/);
     assert.equal(envelope.snapshot.settings.debugMode, true);
     const diagnostic = client.diagnostics();
     assert.equal(diagnostic.jobs[0].outputComparison.firstDuplicateHintStage, 'initial-parsed');

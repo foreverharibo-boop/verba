@@ -259,14 +259,14 @@ var markers = {
 };
 var scopeKinds = ["italic", "bold", "code", "fenced", "bracket", "dialogue", "narration"];
 function namedScopes(value) {
-  const scopes2 = Object.entries(markers).filter(([, re]) => re.test(value)).map(([key]) => key);
-  if (scopes2.includes("fenced") && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(value)) {
-    const index = scopes2.indexOf("code");
-    if (index >= 0) scopes2.splice(index, 1);
+  const scopes = Object.entries(markers).filter(([, re]) => re.test(value)).map(([key]) => key);
+  if (scopes.includes("fenced") && !/inline|single[ -]*backtick|백틱\s*(?:한|1)\s*개|(?<!`)`[^`\n]+`(?!`)/iu.test(value)) {
+    const index = scopes.indexOf("code");
+    if (index >= 0) scopes.splice(index, 1);
   }
-  if (/\bdialogue\b|대사/iu.test(value)) scopes2.push("dialogue");
-  if (/\bnarration\b|서술|나레이션/iu.test(value)) scopes2.push("narration");
-  return scopes2;
+  if (/\bdialogue\b|대사/iu.test(value)) scopes.push("dialogue");
+  if (/\bnarration\b|서술|나레이션/iu.test(value)) scopes.push("narration");
+  return scopes;
 }
 function sourceScopes(clause) {
   const source = clause.match(/(?:source\s+text|(?:any|each|all)\s+spans?|text)\s+(?:in\s+the\s+source\s+)?(?:enclosed|marked|wrapped|inside|between)[\s\S]*?(?=\s+(?:is|are)\s|,\s*(?:preserve|keep|copy|retain|output|show)|$)/iu);
@@ -315,8 +315,8 @@ function promptRequestsScope(prompt, kind) {
       continue;
     }
     if (!rule.positive || rule.outside) continue;
-    const scopes2 = rule.all ? scopeKinds : rule.scopes.length ? rule.scopes : declared.size ? [...declared] : scopeKinds;
-    for (const scope of scopes2) allowed.add(scope);
+    const scopes = rule.all ? scopeKinds : rule.scopes.length ? rule.scopes : declared.size ? [...declared] : scopeKinds;
+    for (const scope of scopes) allowed.add(scope);
   }
   return allowed.has(kind) && !denied.has(kind);
 }
@@ -2056,11 +2056,11 @@ function assembleTranslation(segmented, translations, options = {}) {
   return repairRenderedKoreanParticleAlternatives(fullyRestored);
 }
 function protectedTokenCounts(value) {
-  const counts2 = /* @__PURE__ */ new Map();
+  const counts = /* @__PURE__ */ new Map();
   for (const token of String(value || "").match(/@@VERBA_DEEP_(?:NAME_)?\d{4}@@/g) || []) {
-    counts2.set(token, (counts2.get(token) || 0) + 1);
+    counts.set(token, (counts.get(token) || 0) + 1);
   }
-  return counts2;
+  return counts;
 }
 function protectedTokenOccurrences(value, token) {
   return String(value || "").split(String(token || "")).length - 1;
@@ -4990,7 +4990,7 @@ function postDialogueSpeaker(text, aliases, targetGender, activeActor) {
 function inferLocalTargetDialogueScopes(segmented, identity = {}) {
   const aliases = speakerAliasSets(segmented, identity);
   const segments = segmented?.segments || [];
-  const scopes2 = {};
+  const scopes = {};
   let activeActor = "unknown";
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
@@ -5001,10 +5001,10 @@ function inferLocalTargetDialogueScopes(segmented, identity = {}) {
     const next = segments[index + 1];
     const tagged = next?.type === "narration" ? postDialogueSpeaker(next.text, aliases, identity.characterGender, activeActor) : "unknown";
     const actor = tagged === "unknown" ? activeActor : tagged;
-    scopes2[segment.id] = actor === "target" ? "target_dialogue" : actor === "other" || actor === "user" ? "other_dialogue" : "unknown_dialogue";
+    scopes[segment.id] = actor === "target" ? "target_dialogue" : actor === "other" || actor === "user" ? "other_dialogue" : "unknown_dialogue";
     if (tagged !== "unknown") activeActor = tagged;
   }
-  return scopes2;
+  return scopes;
 }
 
 // hankae-patch/veereubaa/timing.js
@@ -5346,7 +5346,7 @@ async function readErrorResponse(error) {
 }
 function protectedRecoverySnapshot(invalid, segmented, translations) {
   const entries = new Map([...segmented.tokens || [], ...segmented.nameTokens || []].map((row) => [row.token, row]));
-  const counts2 = (text) => {
+  const counts = (text) => {
     const result = /* @__PURE__ */ new Map();
     for (const mark of String(text || "").match(/@@VERBA_DEEP_(?:NAME_)?\d{4}@@/g) || []) result.set(mark, (result.get(mark) || 0) + 1);
     return result;
@@ -5354,7 +5354,7 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
   const rows = invalid.slice(0, 12).map((segment) => {
     const before = String(segment.text || "");
     const received = String(translations.get(segment.id) || "");
-    const expected = counts2(before), actual = counts2(received);
+    const expected = counts(before), actual = counts(received);
     const marks = [.../* @__PURE__ */ new Set([...expected.keys(), ...actual.keys()])];
     const text = (value, limit) => sanitizeDebugValue(value, limit);
     return {
@@ -5466,25 +5466,18 @@ function envelope(text, kind) {
 function bilingualReviewTargets(segmented, translations, settings = {}) {
   const names = nameMap(segmented);
   const targets = [];
-  const decisions = [];
-  const note = (segment, reason) => decisions.push({ segmentId: segment.id, reason });
   let skipped = 0, total = 0;
   const allowed = Object.fromEntries(["italic", "bold", "bracket", "code", "fenced", "dialogue", "narration"].map((kind) => [kind, bilingualScopeRequested(settings, kind)]));
   const add = (segment, source, current, kind) => {
     const original = englishSource(source.body, names);
-    if (!/[A-Za-z]/u.test(original.replace(TOKEN, "")) || !current.body.trim()) {
-      note(segment, "no-english-or-empty");
-      return;
-    }
+    if (!/[A-Za-z]/u.test(original.replace(TOKEN, "")) || !current.body.trim()) return;
     if ([source.body, current.body].some((body) => tokenList(body).some((token) => !names.has(token)) || /[<>`]|\{\{/u.test(body))) {
       skipped++;
-      note(segment, "opaque-content");
       return;
     }
     const size = original.length + current.body.length;
     if (targets.length >= LIMIT_TARGETS || total + size > LIMIT_TEXT) {
       skipped++;
-      note(segment, "target-limit");
       return;
     }
     targets.push({
@@ -5502,18 +5495,13 @@ function bilingualReviewTargets(segmented, translations, settings = {}) {
       names: (segmented.nameTokens || []).filter((name) => source.body.includes(name.token))
     });
     total += size;
-    note(segment, "eligible");
   };
   for (const segment of segmented.segments || []) {
-    if (segment.type === "tagged_content") {
-      note(segment, "tag-excluded");
-      continue;
-    }
+    if (segment.type === "tagged_content") continue;
     const source = String(segment.text || ""), current = String(translations.get(segment.id) || "");
     const kind = segment.type === "code_content" ? segment.codeKind === "fenced" ? "fenced" : "code" : segment.type === "dialogue_candidate" ? "dialogue" : "narration";
     if (kind === "code" || kind === "fenced") {
       if (allowed[kind]) add(segment, envelope(source, kind), envelope(current, kind), kind);
-      else note(segment, "scope-not-requested");
       continue;
     }
     const sourceSpans = markedSpans(source), currentSpans = markedSpans(current);
@@ -5521,7 +5509,6 @@ function bilingualReviewTargets(segmented, translations, settings = {}) {
       const a = envelope(source, kind), b = envelope(current, kind);
       if (!currentSpans || currentSpans.some((x) => x.kind !== "bracket") || a.open !== b.open || a.close !== b.close) {
         skipped++;
-        note(segment, "wrapper-mismatch");
         continue;
       }
       add(segment, a, b, kind);
@@ -5529,24 +5516,18 @@ function bilingualReviewTargets(segmented, translations, settings = {}) {
     }
     if (!sourceSpans || !currentSpans || sourceSpans.length !== currentSpans.length || sourceSpans.some((span, i) => span.open !== currentSpans[i].open || span.close !== currentSpans[i].close)) {
       if (Object.values(allowed).some(Boolean)) skipped++;
-      note(segment, "span-alignment");
       continue;
     }
     sourceSpans.forEach((span, i) => {
-      if (!allowed[span.kind]) {
-        note(segment, "scope-not-requested");
-        return;
-      }
+      if (!allowed[span.kind]) return;
       if (/[\[\]*_]/u.test(span.body.replace(TOKEN, "").replace(/\\./gu, ""))) {
         skipped++;
-        note(segment, "nested-markers");
         return;
       }
       add(segment, span, currentSpans[i], span.kind);
     });
   }
-  for (const segment of segmented.segments || []) if (!decisions.some((d) => d.segmentId === segment.id)) note(segment, "scope-not-requested");
-  return { targets, skipped, decisions };
+  return { targets, skipped };
 }
 function validBilingualReplacement(target, value) {
   if (typeof value !== "string" || !value.trim() || value !== value.trim()) return false;
@@ -5564,115 +5545,6 @@ function validBilingualReplacement(target, value) {
     else if (closes[ch] && stack.pop() !== closes[ch]) return false;
   }
   return stack.length === 0;
-}
-
-// hankae-patch/veereubaa/bilingual-diagnostics.js
-var KINDS = ["dialogue", "narration", "italic", "bold", "bracket", "code", "fenced"];
-var TYPES = ["dialogue_candidate", "narration", "tagged_content", "code_content"];
-var MODES = ["developerMode", "developerMadKoreanOutputEnabled", "developerHongjinFlavorEnabled", "developerMinimalPromptEnabled", "developerDeepseekKoreanEnabled", "developerCompressedPromptEnabled", "chuseokGalbwaeEnabled"];
-var REASONS = ["scope-not-requested", "tag-excluded", "opaque-content", "target-limit", "wrapper-mismatch", "span-alignment", "nested-markers", "no-english-or-empty", "eligible", "no-marked-target"];
-var n = (v) => Number.isFinite(v) ? Math.min(1e7, Math.max(0, Math.floor(v))) : 0;
-var counts = (keys, value) => Object.fromEntries(keys.map((k) => [k, n(value?.[k])]));
-var scopes = (v) => Object.fromEntries(KINDS.map((k) => [k, v?.[k] === true]));
-function bilingualSettingsDiagnostic(settings = {}) {
-  const slot = (text, enabled) => ({
-    enabled,
-    length: String(text || "").length,
-    requested: Object.fromEntries(KINDS.map((k) => [k, promptRequestsScope(text, k)]))
-  });
-  const effective = Object.fromEntries(KINDS.map((k) => [k, bilingualScopeRequested(settings, k)]));
-  const blocker = settings.developerMadKoreanOutputEnabled === true ? "mad-exclusive" : settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== "off") ? "galbwae-exclusive" : "none";
-  return {
-    slots: {
-      global: slot(settings.globalPrompt, settings.globalPromptEnabled !== false),
-      allDialogue: slot(settings.allDialoguePrompt, settings.allDialoguePromptEnabled !== false),
-      customOutput: slot(activeCustomOutput(settings), !!activeCustomOutput(settings))
-    },
-    effectiveScopes: effective,
-    blocker,
-    modes: Object.fromEntries(MODES.map((k) => [k, settings[k] === true]))
-  };
-}
-function sanitizeBilingualSettings(value) {
-  if (!value || typeof value !== "object") return null;
-  return {
-    slots: Object.fromEntries(["global", "allDialogue", "customOutput"].map((k) => [k, {
-      enabled: value.slots?.[k]?.enabled === true,
-      length: n(value.slots?.[k]?.length),
-      requested: scopes(value.slots?.[k]?.requested)
-    }])),
-    effectiveScopes: scopes(value.effectiveScopes),
-    blocker: ["none", "mad-exclusive", "galbwae-exclusive"].includes(value.blocker) ? value.blocker : "none",
-    modes: Object.fromEntries(MODES.map((k) => [k, value.modes?.[k] === true]))
-  };
-}
-function bilingualStageDiagnostic(segmented, values, settings, previous) {
-  const found = bilingualReviewTargets(segmented, values, settings), before = previous ? bilingualReviewTargets(segmented, previous, settings) : null;
-  const names = segmented.nameTokens || [];
-  const restore = (text) => names.reduce((s, x) => s.split(x.token).join(String(x.original || x.source || x.value || "")), String(text));
-  const exact = (t, map) => restore(map.get(t.segmentId) || "").includes(t.source);
-  const lost = before ? before.targets.filter((t) => exact(t, previous) && !exact(t, values)) : [];
-  const rows = (segmented.segments || []).map((s, index) => {
-    const targets = found.targets.filter((t) => t.segmentId === s.id);
-    const reason = found.decisions?.find((d) => d.segmentId === s.id)?.reason || "no-marked-target";
-    return {
-      index,
-      type: s.type,
-      targets: targets.length,
-      reason,
-      exactSourcePresent: targets.length > 0 && targets.every((t) => exact(t, values)),
-      lostExpectedSource: lost.some((t) => t.segmentId === s.id)
-    };
-  });
-  rows.sort((a, b) => Number(b.lostExpectedSource) - Number(a.lostExpectedSource) || Number(b.targets > 0) - Number(a.targets > 0) || a.index - b.index);
-  return {
-    eligibleTargets: found.targets.length,
-    validPairs: found.targets.filter((t) => validBilingualReplacement(t, t.current)).length,
-    exactSourceTargets: found.targets.filter((t) => exact(t, values)).length,
-    lostExpectedSourceTargets: lost.length,
-    reasons: Object.fromEntries(REASONS.map((k) => [k, (found.decisions || []).filter((d) => d.reason === k).length])),
-    rows: rows.slice(0, 32),
-    rowsOmitted: Math.max(0, rows.length - 32)
-  };
-}
-function sanitizeBilingualStage(value) {
-  if (!value || typeof value !== "object") return null;
-  return {
-    ...counts(["eligibleTargets", "validPairs", "exactSourceTargets", "lostExpectedSourceTargets", "rowsOmitted"], value),
-    reasons: counts(REASONS, value.reasons),
-    rows: (Array.isArray(value.rows) ? value.rows : []).slice(0, 32).map((r) => ({
-      index: n(r.index),
-      type: TYPES.includes(r.type) ? r.type : "unknown",
-      targets: n(r.targets),
-      reason: REASONS.includes(r.reason) ? r.reason : "no-marked-target",
-      exactSourcePresent: r.exactSourcePresent === true,
-      lostExpectedSource: r.lostExpectedSource === true
-    }))
-  };
-}
-function sanitizeOutputBinding(value) {
-  if (!value || typeof value !== "object") return null;
-  return {
-    jobKey: /^[a-f0-9]{32}$/.test(value.jobKey || "") ? value.jobKey : null,
-    sourceHash: /^[a-z0-9]{1,16}$/.test(value.sourceHash || "") ? value.sourceHash : null,
-    sourceLength: n(value.sourceLength),
-    messageId: Number.isInteger(value.messageId) && value.messageId >= 0 ? value.messageId : null,
-    swipeId: Number.isInteger(value.swipeId) && value.swipeId >= 0 ? value.swipeId : null,
-    route: ["browser", "server-engine", "server-new", "server-reused"].includes(value.route) ? value.route : "browser"
-  };
-}
-function outputBinding(source, options = {}, route = "browser", jobKey = null) {
-  return sanitizeOutputBinding({
-    sourceHash: hashText(source),
-    sourceLength: String(source || "").length,
-    messageId: options.diagnosticMessageId,
-    swipeId: options.diagnosticSwipeId,
-    route,
-    jobKey
-  });
-}
-function segmentTypeDiagnostic(segmented) {
-  return Object.fromEntries(TYPES.map((type) => [type, (segmented.segments || []).filter((s) => s.type === type).length]));
 }
 
 // hankae-patch/veereubaa/post-review.js
@@ -5794,46 +5666,29 @@ function validGeneral(unit, after, settings) {
 }
 async function reviewOutputOnce({ segmented, translations, settings = {}, speakerScopes = {}, options = {}, reference = "", request }) {
   const stats = { checked: 0, changed: 0, rejected: 0, skipped: 0, status: "not-needed", checks: [] };
-  if (settings.debugMode === true) {
-    stats.bilingualSettings = bilingualSettingsDiagnostic(settings);
-    stats.reviewReason = "no-targets";
-  }
-  if (settings.translationEngine === "google-free") {
-    if (settings.debugMode === true) stats.reviewReason = "free-engine";
-    return stats;
-  }
+  if (settings.translationEngine === "google-free") return stats;
   const plan = planPostReview(segmented, translations, settings, speakerScopes);
   Object.assign(stats, { checks: plan.selected, skipped: plan.skipped });
-  if (settings.debugMode === true) stats.units = { general: plan.units.filter((u) => u.type === "general").length, bilingual: plan.units.filter((u) => u.type === "bilingual").length, lockedTargets: plan.groups.reduce((n2, g) => n2 + g.spans.length, 0) };
-  if (!plan.units.length) {
-    if (settings.debugMode === true && !plan.selected.length) stats.reviewReason = "all-off";
-    return stats;
-  }
+  if (!plan.units.length) return stats;
   const prompt = buildPostReviewPrompt(plan, segmented, settings, reference);
-  if (plan.units.length > 300 || prompt.length > 12e4) return { ...stats, ...settings.debugMode === true ? { reviewReason: "limit" } : {}, status: "limit", skipped: stats.skipped + plan.units.length };
+  if (plan.units.length > 300 || prompt.length > 12e4) return { ...stats, status: "limit", skipped: stats.skipped + plan.units.length };
   try {
     options.signal?.throwIfAborted();
     stats.checked = plan.units.length;
-    if (settings.debugMode === true) stats.reviewReason = "request-or-parse-failed";
     const result = await request(prompt, plan.units, options);
     options.signal?.throwIfAborted();
-    if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some((x) => !result.has(x.id))) {
-      if (settings.debugMode === true) stats.reviewReason = "incomplete-response";
-      throw Error("Incomplete review");
-    }
+    if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some((x) => !result.has(x.id))) throw Error("Incomplete review");
     const candidate = new Map(translations);
     for (const group of plan.groups) {
       let text = group.generalId ? result.get(group.generalId) : group.plain;
       if (group.generalId && text !== group.plain && !validGeneral(plan.units.find((x) => x.id === group.generalId), text, settings)) {
         stats.rejected++;
-        if (settings.debugMode === true) stats.reviewReason = "invalid-general";
         throw Error("Invalid general review");
       }
       for (const span of group.spans) {
         const after = span.reviewId ? result.get(span.reviewId) : span.current;
         if (after !== span.current && !validBilingualReplacement(span, after)) {
           stats.rejected++;
-          if (settings.debugMode === true) stats.reviewReason = "invalid-bilingual";
           throw Error("Invalid bilingual review");
         }
         if (after !== span.current && !span.formatEditable && !same(
@@ -5841,12 +5696,10 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
           structure(after.replace(span.source, "@@REVIEW_LOCK_9999@@"))
         )) {
           stats.rejected++;
-          if (settings.debugMode === true) stats.reviewReason = "unselected-format-change";
           throw Error("Unselected bilingual format change");
         }
         if (typeof text !== "string" || text.split(span.lock).length !== 2) {
           stats.rejected++;
-          if (settings.debugMode === true) stats.reviewReason = "missing-lock";
           throw Error("Lost review lock");
         }
         text = text.replace(span.lock, () => after);
@@ -5855,7 +5708,7 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
     }
     for (const [id, text] of candidate) if (text !== translations.get(id)) stats.changed++;
     for (const [id, text] of candidate) translations.set(id, text);
-    return { ...stats, ...settings.debugMode === true ? { reviewReason: "completed" } : {}, status: "completed" };
+    return { ...stats, status: "completed" };
   } catch (error) {
     if (options.signal?.aborted) throw error;
     return { ...stats, changed: 0, status: "failed" };
@@ -5863,8 +5716,8 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
 }
 
 // hankae-patch/veereubaa/output-comparison.js
-var STAGES = /* @__PURE__ */ new Set(["local-normalization", "output-post-review", "initial-parsed", "tag-normalization", "repairs", "dialogue-format", "english-review", "bilingual-review", "markup-integrity", "assembled", "received", "locked-segments", "display-normalization"]);
-var TYPES2 = /* @__PURE__ */ new Set(["narration", "dialogue_candidate", "tagged_content", "code_content"]);
+var STAGES = /* @__PURE__ */ new Set(["output-post-review", "initial-parsed", "tag-normalization", "repairs", "dialogue-format", "english-review", "bilingual-review", "markup-integrity", "assembled", "received", "locked-segments", "display-normalization"]);
+var TYPES = /* @__PURE__ */ new Set(["narration", "dialogue_candidate", "tagged_content", "code_content"]);
 var METRICS = ["length", "latinLetters", "hangulLetters", "mixedLines", "koreanBracketPairs", "duplicateKoreanPairs"];
 var MAX_ROWS = 32;
 var number = (value) => Number.isFinite(value) ? Math.min(1e7, Math.max(0, Math.floor(value))) : 0;
@@ -5901,17 +5754,7 @@ function cleanBilingualReview(value) {
   };
 }
 function cleanPostReview(value) {
-  return {
-    ...cleanBilingualReview(value),
-    ...value?.reviewReason ? { reviewReason: ["no-targets", "all-off", "free-engine", "limit", "request-or-parse-failed", "incomplete-response", "invalid-general", "invalid-bilingual", "unselected-format-change", "missing-lock", "completed", "setup-failed"].includes(value.reviewReason) ? value.reviewReason : "unknown" } : {},
-    checks: POST_REVIEW_CHECKS.map((x) => x.key).filter((key) => value?.checks?.includes(key)),
-    ...value?.bilingualSettings ? { bilingualSettings: sanitizeBilingualSettings(value.bilingualSettings) } : {},
-    ...value?.units ? { units: { general: number(value.units.general), bilingual: number(value.units.bilingual), lockedTargets: number(value.units.lockedTargets) } } : {}
-  };
-}
-function cleanAssembly(value) {
-  const keys = ["visited", "changed", "scopeNotRequested", "unchangedSourcePresent", "unchangedNoKorean", "unchangedOther"];
-  return { phase: "final-dialogue-pass", ...Object.fromEntries(keys.map((k) => [k, number(value?.[k])])) };
+  return { ...cleanBilingualReview(value), checks: POST_REVIEW_CHECKS.map((x) => x.key).filter((key) => value?.checks?.includes(key)) };
 }
 function cleanMetrics(value) {
   return Object.fromEntries(METRICS.map((key) => [key, number(value?.[key])]));
@@ -5919,8 +5762,6 @@ function cleanMetrics(value) {
 function cleanStage(value) {
   return {
     stage: value.stage,
-    ...value.appliedSettings ? { appliedSettings: sanitizeBilingualSettings(value.appliedSettings) } : {},
-    ...value.bilingual ? { bilingual: sanitizeBilingualStage(value.bilingual) } : {},
     totals: cleanMetrics(value.totals),
     comparedRows: number(value.comparedRows),
     changedRows: number(value.changedRows),
@@ -5929,7 +5770,7 @@ function cleanStage(value) {
     rowsOmitted: number(value.rowsOmitted),
     rows: (Array.isArray(value.rows) ? value.rows : []).slice(0, MAX_ROWS).map((row) => ({
       index: number(row.index),
-      type: TYPES2.has(row.type) ? row.type : "unknown",
+      type: TYPES.has(row.type) ? row.type : "unknown",
       codeKind: ["inline", "fenced"].includes(row.codeKind) ? row.codeKind : "",
       changed: row.changed === true,
       sourceHasLatin: row.sourceHasLatin === true,
@@ -5948,12 +5789,6 @@ function sanitizeOutputComparison(value, { summaryOnly = false } = {}) {
   return {
     version: 1,
     contentIncluded: false,
-    ...value.dialogueAssembly ? { dialogueAssembly: cleanAssembly(value.dialogueAssembly) } : {},
-    ...value.binding ? { binding: sanitizeOutputBinding(value.binding) } : {},
-    ...value.translationSettings ? { translationSettings: sanitizeBilingualSettings(value.translationSettings) } : {},
-    ...value.bilingualSettings ? { bilingualSettings: sanitizeBilingualSettings(value.bilingualSettings) } : {},
-    ...value.segmentTypes ? { segmentTypes: Object.fromEntries([...TYPES2].map((k) => [k, number(value.segmentTypes[k])])) } : {},
-    ...value.assemblyPath ? { assemblyPath: ["normal", "minimal"].includes(value.assemblyPath) ? value.assemblyPath : "normal" } : {},
     ...value.postReview ? { postReview: cleanPostReview(value.postReview) } : {},
     ...value.bilingualReview ? { bilingualReview: cleanBilingualReview(value.bilingualReview) } : {},
     firstResponseMeaning: "first-successfully-parsed-value-per-segment",
@@ -5966,12 +5801,12 @@ function sanitizeOutputComparison(value, { summaryOnly = false } = {}) {
     stages
   };
 }
-function createOutputComparison(segmented, enabled, settings = {}, binding = null, assemblyPath = "normal") {
+function createOutputComparison(segmented, enabled) {
   const segments = segmented?.segments || [];
   const initial = /* @__PURE__ */ new Map();
   let previous = /* @__PURE__ */ new Map();
-  const report = { binding, bilingualSettings: enabled ? bilingualSettingsDiagnostic(settings) : null, segmentTypes: segmentTypeDiagnostic(segmented), assemblyPath, version: 1, segmentCount: segments.length, initialResponseBatches: 0, parseRetryResponses: 0, stages: [] };
-  function capture(stage, values, appliedSettings = settings) {
+  const report = { version: 1, segmentCount: segments.length, initialResponseBatches: 0, parseRetryResponses: 0, stages: [] };
+  function capture(stage, values) {
     if (!enabled || !STAGES.has(stage)) return;
     const totals = cleanMetrics({});
     let comparedRows = 0, changedRows = 0, lostLatinRows = 0, newDuplicateRows = 0;
@@ -6002,8 +5837,6 @@ function createOutputComparison(segmented, enabled, settings = {}, binding = nul
     rows.sort((a, b) => Number(b.duplicateKoreanPairs > 0) - Number(a.duplicateKoreanPairs > 0) || Number(b.changed) - Number(a.changed) || a.index - b.index);
     report.stages.push({
       stage,
-      ...appliedSettings !== settings ? { appliedSettings: bilingualSettingsDiagnostic(appliedSettings) } : {},
-      bilingual: bilingualStageDiagnostic(segmented, values, appliedSettings, previous),
       totals,
       comparedRows,
       changedRows,
@@ -6028,22 +5861,6 @@ function createOutputComparison(segmented, enabled, settings = {}, binding = nul
       capture("initial-parsed", initial);
     },
     capture,
-    translationSettings(config) {
-      if (enabled) report.translationSettings = bilingualSettingsDiagnostic(config);
-    },
-    assemblyResult(segment, before, after) {
-      if (!enabled) return;
-      const a = report.dialogueAssembly ||= cleanAssembly({});
-      a.visited++;
-      if (before !== after) a.changed++;
-      else if (!report.bilingualSettings?.effectiveScopes.dialogue) a.scopeNotRequested++;
-      else {
-        const restored = String(segment.text || "").trim().replace(/^["“「『]|["”」』]$/gu, "");
-        if (restored && String(after).includes(restored)) a.unchangedSourcePresent++;
-        else if (!/[가-힣]/u.test(withoutTokens(after))) a.unchangedNoKorean++;
-        else a.unchangedOther++;
-      }
-    },
     postReview(result) {
       if (enabled) report.postReview = cleanPostReview(result);
     },
@@ -6100,8 +5917,7 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
     chuseokGalbwaeScope: settings.developerMode === true && ["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) ? settings.chuseokGalbwaeScope : settings.developerMode === true && settings.chuseokGalbwaeEnabled === true ? "dialogueInner" : "off"
   };
   const oneTime = String(options.oneTimeInstruction || "");
-  const comparison = createOutputComparison(segmented, settings.debugMode === true, settings, options.diagnosticBinding || null, "minimal");
-  comparison.translationSettings(config);
+  const comparison = createOutputComparison(segmented, settings.debugMode === true);
   const firstTranslations = /* @__PURE__ */ new Map();
   const translations = await runOutputBatches(segmented, outputSplitCount(settings), options, async (segments, batchOptions) => {
     const request = (targets, repair = "") => {
@@ -6142,7 +5958,6 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
   comparison.initial(firstTranslations);
   comparison.capture("repairs", translations);
   normalizeLocallyRecoverableProtectedTokens(segmented, translations, config, {});
-  comparison.capture("local-normalization", translations, config);
   for (const segment of segmented.segments) {
     if (segment.type === "tagged_content") translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
   }
@@ -7367,7 +7182,7 @@ Do not add markdown fences, commentary, explanations, or extra ids.` : "";
     return totalMentions >= 2 ? ordered : [];
   }
   function repeatedRoleTerms(segments) {
-    const counts2 = /* @__PURE__ */ new Map();
+    const counts = /* @__PURE__ */ new Map();
     for (const segment of segments || []) {
       const source = String(segment?.text || "").replace(/@@VERBA_DEEP_[A-Z0-9_]+@@/g, " ");
       for (const match of source.matchAll(/[A-Za-z][A-Za-z'’-]{2,}/g)) {
@@ -7375,10 +7190,10 @@ Do not add markdown fences, commentary, explanations, or extra ids.` : "";
         term = term.replace(/[’']s$/u, "").replace(/[’']$/u, "");
         const singular = term.endsWith("s") ? term.slice(0, -1) : "";
         if (!CONSISTENCY_ROLE_TERMS.has(term) && !CONSISTENCY_ROLE_TERMS.has(singular)) continue;
-        counts2.set(term, (counts2.get(term) || 0) + 1);
+        counts.set(term, (counts.get(term) || 0) + 1);
       }
     }
-    return [...counts2.entries()].filter(([, count]) => count >= 2).map(([term]) => term);
+    return [...counts.entries()].filter(([, count]) => count >= 2).map(([term]) => term);
   }
   function segmentContainsRoleTerm(segment, terms) {
     const source = String(segment?.text || "");
@@ -7434,11 +7249,11 @@ Do not add markdown fences, commentary, explanations, or extra ids.` : "";
   }
   function protectedTokensIntact(previous, next) {
     const collect = (value) => {
-      const counts2 = /* @__PURE__ */ new Map();
+      const counts = /* @__PURE__ */ new Map();
       for (const token of String(value || "").match(/@@VERBA_DEEP_(?:NAME_)?\d{4}@@/g) || []) {
-        counts2.set(token, (counts2.get(token) || 0) + 1);
+        counts.set(token, (counts.get(token) || 0) + 1);
       }
-      return counts2;
+      return counts;
     };
     const before = collect(previous);
     const after = collect(next);
@@ -7938,7 +7753,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
       if (options.signal?.aborted) throw error;
       translations.clear();
       for (const [id, text] of before) translations.set(id, text);
-      return { checked: 0, changed: 0, rejected: 0, skipped: 0, status: "failed", checks: [], ...settings.debugMode === true ? { reviewReason: "setup-failed" } : {} };
+      return { checked: 0, changed: 0, rejected: 0, skipped: 0, status: "failed", checks: [] };
     }
   }
   async function planBilingualDialogueVerdicts(segmented, options = {}) {
@@ -7976,7 +7791,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);
     await planBilingualDialogueVerdicts(initialSegmented, { signal: options.signal, timing: options.timing });
     if (minimalOutputEnabled(settings)) {
-      return translateMinimalOutput(initialSegmented, settings, { ...options, diagnosticBinding: outputBinding(source, options, options.diagnosticRuntime || "browser") }, { requestSegments, buildSourceMap, reviewOutput: reviewFinalOutput });
+      return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap, reviewOutput: reviewFinalOutput });
     }
     const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
       signal: options.signal,
@@ -7989,7 +7804,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     }
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = inferLocalTargetDialogueScopes(segmented, speakerIdentity);
-    const comparison = createOutputComparison(segmented, settings.debugMode === true, settings, outputBinding(source, options, options.diagnosticRuntime || "browser"));
+    const comparison = createOutputComparison(segmented, settings.debugMode === true);
     const translations = await requestScopedOutputTranslations(segmented, speakerScopes, {
       ...options,
       speakerIdentity,
@@ -8000,7 +7815,6 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     normalizeTaggedOutputTranslations(segmented, translations);
     comparison.capture("tag-normalization", translations);
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
-    comparison.capture("local-normalization", translations);
     const initialSuccessfulTranslations = new Map(translations);
     let useInitialSuccessfulTranslation = false;
     const fallBackToInitialTranslation = (stage, error = null) => {
@@ -8108,7 +7922,6 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
         segmented.nameTokens || [],
         segmented.tokens || []
       ));
-      comparison.assemblyResult(segment, current, translations.get(segment.id));
     }
     comparison.capture("dialogue-format", translations);
     comparison.postReview(await reviewFinalOutput({ segmented, translations, speakerIdentity, speakerScopes, options }));
@@ -8175,7 +7988,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     translations.clear();
     for (const [id, value] of snapshot2 || []) translations.set(id, value);
   }
-  return { output: (source, options = {}) => translateOutputText(source, { ...options, diagnosticRuntime: "server-engine" }), input: translateInputText, segments: requestSegments, request: sendWithRetry, normalize: normalizeBilingualMappedTranslation, shouldTranslate: (source) => !isPredominantlyKorean(source) && hasForeignText(source) };
+  return { output: translateOutputText, input: translateInputText, segments: requestSegments, request: sendWithRetry, normalize: normalizeBilingualMappedTranslation, shouldTranslate: (source) => !isPredominantlyKorean(source) && hasForeignText(source) };
 }
 export {
   createEngine,

@@ -161,9 +161,14 @@ export function maskRequestedBilingualSource(segment, translation, settings = {}
     return masked;
 }
 
+export function activeOutputFormatRules(settings = {}) {
+    if (settings.developerMadKoreanOutputEnabled === true) return {};
+    return {global: settings.globalPromptEnabled !== false ? settings.globalPrompt || '' : '',
+        dialogue: settings.allDialoguePromptEnabled !== false ? settings.allDialoguePrompt || '' : '',
+        customOutput: activeCustomOutput(settings)};
+}
 export function outputFormatReviewContext(settings = {}) {
+    if (settings.developerMadKoreanOutputEnabled === true) return 'MAD KOREAN-ONLY: never add source-language copies. Preserve code, tags, tokens, URLs and genuine brands/acronyms.';
     return OUTPUT_FORMAT_POLICY + '\nFORMAT REFERENCE (retain requested source copies; do not expand their scope):\n'
-        + JSON.stringify({global: settings.globalPromptEnabled !== false ? settings.globalPrompt || '' : '',
-            dialogue: settings.allDialoguePromptEnabled !== false ? settings.allDialoguePrompt || '' : '',
-            customOutput: activeCustomOutput(settings)});
+        + JSON.stringify(activeOutputFormatRules(settings));
 }

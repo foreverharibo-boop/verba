@@ -1,7 +1,8 @@
+import { bilingualSettingsDiagnostic, sanitizeBilingualSettings, bilingualStageDiagnostic, sanitizeBilingualStage, segmentTypeDiagnostic, sanitizeOutputBinding } from './bilingual-diagnostics.js';
 import { POST_REVIEW_CHECKS } from './post-review.js';
 // Structural diagnostics only: never serialize source, prompts, or responses.
 // Each trace belongs to one output request, including split/batched requests.
-const STAGES = new Set(['output-post-review', 'initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'markup-integrity', 'assembled', 'received', 'locked-segments', 'display-normalization']);
+const STAGES = new Set(['mad-korean-only', 'mad-korean-only-final', 'local-normalization', 'output-post-review', 'initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'markup-integrity', 'assembled', 'received', 'locked-segments', 'display-normalization']);
 const TYPES = new Set(['narration', 'dialogue_candidate', 'tagged_content', 'code_content']);
 const METRICS = ['length', 'latinLetters', 'hangulLetters', 'mixedLines', 'koreanBracketPairs', 'duplicateKoreanPairs'];
 const MAX_ROWS = 32;
@@ -38,7 +39,14 @@ function cleanBilingualReview(value) {
         status: ['not-needed', 'completed', 'failed', 'limit'].includes(value?.status) ? value.status : 'not-needed' };
 }
 function cleanPostReview(value) {
-    return { ...cleanBilingualReview(value), checks: POST_REVIEW_CHECKS.map(x => x.key).filter(key => value?.checks?.includes(key)) };
+    return { ...cleanBilingualReview(value),
+        ...(value?.reviewReason ? {reviewReason:['no-targets','all-off','free-engine','limit','request-or-parse-failed','incomplete-response','invalid-general','invalid-bilingual','unselected-format-change','missing-lock','completed','setup-failed'].includes(value.reviewReason)?value.reviewReason:'unknown'} : {}), checks: POST_REVIEW_CHECKS.map(x => x.key).filter(key => value?.checks?.includes(key)),
+        ...(value?.bilingualSettings ? {bilingualSettings:sanitizeBilingualSettings(value.bilingualSettings)} : {}),
+        ...(value?.units ? {units:{general:number(value.units.general),bilingual:number(value.units.bilingual),lockedTargets:number(value.units.lockedTargets)}} : {}) };
+}
+function cleanAssembly(value) {
+    const keys=['visited','changed','scopeNotRequested','unchangedSourcePresent','unchangedNoKorean','unchangedOther'];
+    return {phase:'final-dialogue-pass',...Object.fromEntries(keys.map(k=>[k,number(value?.[k])]))};
 }
 function cleanMetrics(value) {
     return Object.fromEntries(METRICS.map(key => [key, number(value?.[key])]));
@@ -46,6 +54,8 @@ function cleanMetrics(value) {
 function cleanStage(value) {
     return {
         stage: value.stage,
+        ...(value.appliedSettings ? {appliedSettings:sanitizeBilingualSettings(value.appliedSettings)} : {}),
+        ...(value.bilingual ? {bilingual:sanitizeBilingualStage(value.bilingual)} : {}),
         totals: cleanMetrics(value.totals),
         comparedRows: number(value.comparedRows),
         changedRows: number(value.changedRows),
@@ -67,14 +77,21 @@ function cleanStage(value) {
 // Whitelist even local/server reports so a provider cannot inject text into logs.
 export function sanitizeOutputComparison(value, { summaryOnly = false } = {}) {
     if (value?.version !== 1) return null;
-    const stages = (Array.isArray(value.stages) ? value.stages : []).filter(row => STAGES.has(row?.stage)).slice(0, 12).map(cleanStage);
+    const stages = (Array.isArray(value.stages) ? value.stages : []).filter(row => STAGES.has(row?.stage)).slice(0, 16).map(cleanStage);
     if (summaryOnly) for (const stage of stages) {
         stage.rowsOmitted += stage.rows.length;
         stage.rows = [];
+        // Keep bounded structural bilingual rows even in server summaries.
     }
     return {
         version: 1,
         contentIncluded: false,
+        ...(value.dialogueAssembly ? {dialogueAssembly:cleanAssembly(value.dialogueAssembly)} : {}),
+        ...(value.binding ? {binding:sanitizeOutputBinding(value.binding)} : {}),
+        ...(value.translationSettings ? {translationSettings:sanitizeBilingualSettings(value.translationSettings)} : {}),
+        ...(value.bilingualSettings ? {bilingualSettings:sanitizeBilingualSettings(value.bilingualSettings)} : {}),
+        ...(value.segmentTypes ? {segmentTypes:Object.fromEntries([...TYPES].map(k=>[k,number(value.segmentTypes[k])]))} : {}),
+        ...(value.assemblyPath ? {assemblyPath:['normal','minimal'].includes(value.assemblyPath)?value.assemblyPath:'normal'} : {}),
         ...(value.postReview ? { postReview: cleanPostReview(value.postReview) } : {}),
         ...(value.bilingualReview ? { bilingualReview: cleanBilingualReview(value.bilingualReview) } : {}),
         firstResponseMeaning: 'first-successfully-parsed-value-per-segment',
@@ -88,12 +105,12 @@ export function sanitizeOutputComparison(value, { summaryOnly = false } = {}) {
     };
 }
 
-export function createOutputComparison(segmented, enabled) {
+export function createOutputComparison(segmented, enabled, settings = {}, binding = null, assemblyPath = 'normal') {
     const segments = segmented?.segments || [];
     const initial = new Map();
     let previous = new Map();
-    const report = { version: 1, segmentCount: segments.length, initialResponseBatches: 0, parseRetryResponses: 0, stages: [] };
-    function capture(stage, values) {
+    const report = { binding, bilingualSettings: enabled ? bilingualSettingsDiagnostic(settings) : null, segmentTypes:segmentTypeDiagnostic(segmented), assemblyPath, version: 1, segmentCount: segments.length, initialResponseBatches: 0, parseRetryResponses: 0, stages: [] };
+    function capture(stage, values, appliedSettings = settings) {
         if (!enabled || !STAGES.has(stage)) return;
         const totals = cleanMetrics({});
         let comparedRows = 0, changedRows = 0, lostLatinRows = 0, newDuplicateRows = 0;
@@ -117,7 +134,7 @@ export function createOutputComparison(segmented, enabled) {
         }
         // Prioritize suspicious/changed rows when a long message exceeds the cap.
         rows.sort((a, b) => Number(b.duplicateKoreanPairs > 0) - Number(a.duplicateKoreanPairs > 0) || Number(b.changed) - Number(a.changed) || a.index - b.index);
-        report.stages.push({ stage, totals, comparedRows, changedRows, lostLatinRows, newDuplicateRows,
+        report.stages.push({ stage, ...(appliedSettings !== settings ? {appliedSettings:bilingualSettingsDiagnostic(appliedSettings)} : {}), bilingual:bilingualStageDiagnostic(segmented, values, appliedSettings, previous), totals, comparedRows, changedRows, lostLatinRows, newDuplicateRows,
             rowsOmitted: Math.max(0, rows.length - MAX_ROWS), rows: rows.slice(0, MAX_ROWS) });
         previous = new Map(values);
     }
@@ -135,6 +152,20 @@ export function createOutputComparison(segmented, enabled) {
             capture('initial-parsed', initial);
         },
         capture,
+        translationSettings(config) { if(enabled) report.translationSettings=bilingualSettingsDiagnostic(config); },
+        assemblyResult(segment,before,after) {
+            if(!enabled)return;
+            const a=report.dialogueAssembly ||= cleanAssembly({});
+            a.visited++;
+            if(before!==after) a.changed++;
+            else if(!report.bilingualSettings?.effectiveScopes.dialogue) a.scopeNotRequested++;
+            else {
+                const restored=String(segment.text||'').trim().replace(/^["“「『]|["”」』]$/gu,'');
+                if(restored && String(after).includes(restored)) a.unchangedSourcePresent++;
+                else if(!/[가-힣]/u.test(withoutTokens(after))) a.unchangedNoKorean++;
+                else a.unchangedOther++;
+            }
+        },
         postReview(result) {
             if (enabled) report.postReview = cleanPostReview(result);
         },

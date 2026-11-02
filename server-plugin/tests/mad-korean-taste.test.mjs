@@ -8,7 +8,7 @@ for (const [name,create] of [['verba',createVerba],['verba-deep',createDeep]]) {
     for (const mode of [{},{developerMode:true,developerCompressedPromptEnabled:true},{developerMode:true,developerExtremeCompressedPromptEnabled:true}]) {
         for (const korean of [false,true]) for (const hongjin of [false,true]) {
             const settings = {
-                profileId:'A',activeProfileSlot:'A',autoProfileFallback:false,serverRetryLimit:1,
+                profileId:'A',activeProfileSlot:'A',autoProfileFallback:false,serverRetryLimit:1,aiPostReview:{},
                 developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:hongjin,
                 koreanFlavorEnabled:korean,koreanFlavorDialogueRhythm:'short',
                 koreanFlavorPronounOmission:'active',koreanFlavorProfanityTone:'dry',

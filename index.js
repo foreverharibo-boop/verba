@@ -1,3 +1,5 @@
+import { enforceMadKoreanOnly } from './mad-output.js';
+import { bilingualSettingsDiagnostic, outputBinding } from './bilingual-diagnostics.js';
 import { POST_REVIEW_CHECKS, normalizePostReview, postReviewSettingsMarkup, reviewOutputOnce } from './post-review.js';
 import { reviewBilingualOutput } from './bilingual-review.js';
 import { hasExplicitNonDialogueBilingualScope } from './output-format.js';
@@ -6,7 +8,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.86';
+import { createServerClient } from './server-client.js?v=0.6.88';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -70,9 +72,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.86';
+const EXTENSION_VERSION = '0.6.88';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.86';
+const SERVER_ENGINE_VERSION = '0.6.88';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -1131,7 +1133,8 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
         } : null,
         automaticOutput: recentDiagnosticEvents(automaticOutputLifecycle.diagnostics(), 22),
         browserExecution: recentDiagnosticEvents(executionTrace.diagnostics(), 24),
-        serverTranslation: verbaServer.diagnostics(),
+        serverTranslation: verbaServer.diagnostics(latest ? {source, translation:currentRecord(latest.message,latest.id)?.translation, relayJobKey:latest.message.extra?.silly_relay_translation?.id, messageId:latest.id, swipeId:currentSwipeId(latest.message)} : null),
+        ...(settings.debugMode === true ? {currentBilingualSettings:bilingualSettingsDiagnostic(settings)} : {}),
         outputComparison: settings.debugMode && latest
             ? outputComparisonStore.get(latest.message, hashText(source), currentSwipeId(latest.message)) : null,
         sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(), 16),
@@ -5032,7 +5035,7 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
         if (options.signal?.aborted) throw error;
         translations.clear();
         for (const [id, text] of before) translations.set(id, text);
-        return { checked:0, changed:0, rejected:0, skipped:0, status:'failed', checks:[] };
+        return { checked:0, changed:0, rejected:0, skipped:0, status:'failed', checks:[], ...(settings.debugMode===true?{reviewReason:'setup-failed'}:{}) };
     }
 }
 
@@ -5131,7 +5134,7 @@ async function translateOutputText(source, options = {}) {
     const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);
     await planBilingualDialogueVerdicts(initialSegmented, { signal: options.signal, timing: options.timing });
     if (minimalOutputEnabled(settings)) {
-        return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap, reviewOutput: reviewFinalOutput });
+        return translateMinimalOutput(initialSegmented, settings, { ...options, diagnosticBinding:outputBinding(source,options, options.diagnosticRuntime || 'browser') }, { requestSegments, buildSourceMap, reviewOutput: reviewFinalOutput });
     }
     const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
         signal: options.signal,
@@ -5146,7 +5149,7 @@ async function translateOutputText(source, options = {}) {
     }
     const speakerIdentity = options.speakerIdentity || {};
     const speakerScopes = inferLocalTargetDialogueScopes(segmented, speakerIdentity);
-    const comparison = createOutputComparison(segmented, settings.debugMode === true);
+    const comparison = createOutputComparison(segmented, settings.debugMode === true, settings, outputBinding(source, options, options.diagnosticRuntime || 'browser'));
     const translations = await requestScopedOutputTranslations(segmented, speakerScopes, {
         ...options,
         speakerIdentity,
@@ -5159,6 +5162,7 @@ async function translateOutputText(source, options = {}) {
 
     // Deterministic cleanup is local and does not call the provider.
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
+    comparison.capture('local-normalization', translations);
 
     // All optional AI output repairs are handled once by reviewFinalOutput.
     const initialSuccessfulTranslations = new Map(translations);
@@ -5276,12 +5280,17 @@ async function translateOutputText(source, options = {}) {
             segmented.nameTokens || [],
             segmented.tokens || [],
         ));
+        comparison.assemblyResult(segment, current, translations.get(segment.id));
     }
 
 
     comparison.capture('dialogue-format', translations);
+    enforceMadKoreanOnly(segmented, translations, settings);
+    comparison.capture('mad-korean-only', translations);
     comparison.postReview(await reviewFinalOutput({ segmented, translations, speakerIdentity, speakerScopes, options }));
     comparison.capture('output-post-review', translations);
+    enforceMadKoreanOnly(segmented, translations, settings);
+    comparison.capture('mad-korean-only-final', translations);
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));
     if (remaining.length) {
@@ -6161,6 +6170,8 @@ async function translateMessage(messageId, options = {}) {
                 // status/result request is in flight. Refresh the source and its
                 // application snapshot together, only for verified cleanup in
                 // this same chat/swipe. Real edits keep the stale-result guard.
+                diagnosticMessageId: id,
+                diagnosticSwipeId: snapshot.swipeId,
                 relayTranslation: message.extra?.silly_relay_translation,
                 refreshSource: () => {
                     const current = liveContext();

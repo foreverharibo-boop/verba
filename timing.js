@@ -1,6 +1,7 @@
 // In-memory output-job diagnostics. Never retain prompts, response bodies, or identities.
 const PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 const LABELS = [
+    ['output-post-review', '통합 AI 후검수'],
     ['final-bilingual-review', '병기 AI 검수'],
     ['banned', '금지어 복구'], ['untranslated', '미번역 복구'],
     ['protected', '보호 토큰 복구'], ['token', '보호 토큰 복구'],

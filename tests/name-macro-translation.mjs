@@ -62,7 +62,7 @@ const env = {
     settings: {}, normalizedCharacterNameLocks: () => [], segmentSource,
     minimalOutputEnabled: () => minimal,
     translateMinimalOutput: async prepared => prepared,
-    requestSegments: () => {}, buildSourceMap: () => [], reviewFinalEnglish: () => {}, reviewFinalBilingual: () => {},
+    requestSegments: () => {}, buildSourceMap: () => [], reviewFinalOutput: () => {}, reviewFinalBilingual: () => {},
     planRepeatedRoleTermLocks: async prepared => {
         assert.equal(prepared.source, 'Dana waited. "Hi, Dana."');
         throw Error('normal path reached with resolved names');
@@ -80,7 +80,7 @@ let reviews = 0;
 const result = await translateMinimalOutput(segmented, { developerMode: true, developerMinimalPromptEnabled: true }, { speakerIdentity: identity }, {
     requestSegments: async (_prompt, segments) => new Map(segments.map(segment => [segment.id, segment.type === 'dialogue_candidate' ? '"Hi, Dana. (안녕, Dana.)"' : 'Dana는 기다렸다.'])),
     buildSourceMap: () => [],
-    reviewEnglish: async args => {
+    reviewOutput: async args => {
         reviews++;
         await reviewEnglishLeftovers({ ...args, identity: args.speakerIdentity, request: async (_prompt, targets) => new Map(targets.map(row => [row.id, row.text.replace('Dana', '다나')])) });
     },

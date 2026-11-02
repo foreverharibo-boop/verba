@@ -1,3 +1,4 @@
+import { POST_REVIEW_CHECKS, normalizePostReview, postReviewSettingsMarkup, reviewOutputOnce } from './post-review.js';
 import { reviewBilingualOutput } from './bilingual-review.js';
 import { hasExplicitNonDialogueBilingualScope } from './output-format.js';
 import { createOutputComparison, appendOutputComparison, createOutputComparisonStore } from './output-comparison.js';
@@ -5,7 +6,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.84';
+import { createServerClient } from './server-client.js?v=0.6.86';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -69,9 +70,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.85';
+const EXTENSION_VERSION = '0.6.86';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.84';
+const SERVER_ENGINE_VERSION = '0.6.86';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -290,6 +291,7 @@ const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'madKorean', label: '미친 한출의 맛', selector: '#verba-developer-mad-korean-lab' },
     { key: 'hongjin', label: '김홍진의 맛', selector: '#verba-developer-hongjin-lab' },
     { key: 'beginner', label: '신입 챗시 전용', selector: '#verba-beginner-character-guide' },
+    { key: 'postReview', label: 'AI 후검수 설정', selector: '#verba-post-review-settings' },
     { key: 'debug', label: '디버그', selector: '#verba-debug-settings' },
     { key: 'developer', label: '개발자 모드', selector: '#verba-developer-settings' },
 ];
@@ -375,6 +377,7 @@ const DEFAULT_SETTINGS = {
     developerMinimalPrompt: '자연스럽게 한국어로 번역하라.',
     developerCompressedPromptEnabled: false,
     developerExtremeCompressedPromptEnabled: false,
+    aiPostReview: normalizePostReview(),
     qualityAuditEnabled: false,
     qualityAuditMeaning: true,
     qualityAuditReferent: true,
@@ -482,6 +485,7 @@ extension_settings[EXTENSION_KEY] = Object.assign(
 );
 const settings = extension_settings[EXTENSION_KEY];
 settings.autoOutput = settings.autoOutput !== false;
+settings.aiPostReview = normalizePostReview(settings.aiPostReview);
 // Retired local register-shift monitor: discard its obsolete saved flag.
 delete settings.developerRegisterShiftMonitor;
 
@@ -1411,6 +1415,7 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
         developerMinimalPrompt: typeof raw.developerMinimalPrompt === 'string' ? raw.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt,
         developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true && !extremeCompressed,
         developerExtremeCompressedPromptEnabled: extremeCompressed,
+        aiPostReview: normalizePostReview(raw.aiPostReview),
         qualityAuditEnabled: raw.qualityAuditEnabled === true,
         qualityAuditMeaning: raw.qualityAuditMeaning !== false,
         qualityAuditReferent: raw.qualityAuditReferent !== false,
@@ -1457,6 +1462,7 @@ function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
         developerMinimalPrompt: source.developerMinimalPrompt,
         developerCompressedPromptEnabled: source.developerCompressedPromptEnabled,
         developerExtremeCompressedPromptEnabled: source.developerExtremeCompressedPromptEnabled,
+        aiPostReview: normalizePostReview(source.aiPostReview),
         qualityAuditEnabled: source.qualityAuditEnabled,
         qualityAuditMeaning: source.qualityAuditMeaning,
         qualityAuditReferent: source.qualityAuditReferent,
@@ -2053,6 +2059,7 @@ function applyPromptPresetDeveloperSettings(value) {
     settings.developerMinimalPromptEnabled = next.developerMinimalPromptEnabled;
     settings.developerDeepseekKoreanEnabled = next.developerDeepseekKoreanEnabled;
     settings.developerMinimalPrompt = next.developerMinimalPrompt;
+    settings.aiPostReview = normalizePostReview(next.aiPostReview);
     settings.qualityAuditEnabled = next.qualityAuditEnabled;
     settings.developerCompressedPromptEnabled = next.developerCompressedPromptEnabled;
     settings.developerExtremeCompressedPromptEnabled = next.developerExtremeCompressedPromptEnabled;
@@ -2596,7 +2603,7 @@ function renderCurrentAppliedRules() {
                 ['인풋 회화 자연화', '기본 적용'],
                 ['금지어', banned.length ? `${banned.length}개 · ${banned.join(' / ')}` : '없음'],
                 ['우선순위', priority],
-                ['품질 검수 실험실', POST_TRANSLATION_AI_REPAIR_ENABLED && settings.qualityAuditEnabled === true ? 'ON' : 'OFF'],
+                ['AI 후검수', POST_REVIEW_CHECKS.filter(x => normalizePostReview(settings.aiPostReview)[x.key]).map(x => x.label).join(' · ') || 'OFF'],
                 ['압축 프롬프트 테스트', settings.developerMode && settings.developerCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['xxx미친압축xxx', settings.developerMode && settings.developerExtremeCompressedPromptEnabled === true ? 'ON' : 'OFF'],
                 ['미친 한출의 맛', settings.developerMadKoreanOutputEnabled ? 'ON' : 'OFF'],
@@ -4990,6 +4997,45 @@ async function runExperimentalQualityAudit({
     }
 }
 
+// All selected output checks share one bounded request, never the retry/race loop.
+async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}, speakerScopes = inferLocalTargetDialogueScopes(segmented, speakerIdentity), reviewSettings, options = {} }) {
+    const before = new Map(translations);
+    try {
+        const config = { ...(reviewSettings || settings), aiPostReview: normalizePostReview(settings.aiPostReview) };
+        if (deepseekKoreanEnabled(config)) {
+            config.aiPostReview.bilingual = false;
+            config.globalPromptEnabled = false;
+            config.allDialoguePromptEnabled = false;
+            config.customTranslatorEnabled = false;
+        }
+        const selected = config.aiPostReview;
+        const reference = selected.voice || selected.mad || selected.hongjin
+            ? buildOutputPrompt({ ...segmented, segments: [], protectedText: '' }, config,
+                options.oneTimeInstruction || '', speakerIdentity, options.tuning || null, speakerScopes)
+            : '';
+        const result = await reviewOutputOnce({ segmented, translations, settings: config, speakerScopes, reference, options,
+            request: async (prompt, targets, requestOptions) => {
+                const profiles = configuredProfileCycle();
+                const response = await sendProfileRequest(prompt, {
+                    ...requestOptions, profileId: profiles.active, profileSlot: profiles.slot,
+                    stage: 'output-post-review',
+                    timeoutSecondsOverride: Math.min(60, normalizedProfileFailureTimeoutSeconds()),
+                });
+                const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
+                if (parsed.parseError || parsed.partial.size !== targets.length) throw new Error('AI 후검수 응답 형식이 불완전합니다.');
+                return parsed.partial;
+            },
+        });
+        if (result.status === 'failed' || result.status === 'limit') console.warn('[Verba] AI 후검수 미적용 — 최초 번역본 유지', result.status);
+        return result;
+    } catch (error) {
+        if (options.signal?.aborted) throw error;
+        translations.clear();
+        for (const [id, text] of before) translations.set(id, text);
+        return { checked:0, changed:0, rejected:0, skipped:0, status:'failed', checks:[] };
+    }
+}
+
 // One bounded provider attempt; no normal retry/race/fallback pipeline.
 async function reviewFinalBilingual({ segmented, translations, options = {} }) {
     if (deepseekKoreanEnabled(settings)) return { checked: 0, changed: 0, rejected: 0, skipped: 0, status: 'not-needed' };
@@ -5085,7 +5131,7 @@ async function translateOutputText(source, options = {}) {
     const initialSegmented = segmentSource(source, characterNameLocks, segmentationOptions);
     await planBilingualDialogueVerdicts(initialSegmented, { signal: options.signal, timing: options.timing });
     if (minimalOutputEnabled(settings)) {
-        return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap, reviewEnglish: reviewFinalEnglish, reviewBilingual: reviewFinalBilingual });
+        return translateMinimalOutput(initialSegmented, settings, options, { requestSegments, buildSourceMap, reviewOutput: reviewFinalOutput });
     }
     const roleTermLocks = await planRepeatedRoleTermLocks(initialSegmented, {
         signal: options.signal,
@@ -5114,16 +5160,7 @@ async function translateOutputText(source, options = {}) {
     // Deterministic cleanup is local and does not call the provider.
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
 
-    // General AI post-audits remain disabled. Only strongly untranslated
-    // paired-tag text gets one targeted retry.
-    await repairUntranslatedTaggedContentOnce({
-        segmented,
-        translations,
-        speakerScopes,
-        speakerIdentity,
-        options,
-    });
-
+    // All optional AI output repairs are handled once by reviewFinalOutput.
     const initialSuccessfulTranslations = new Map(translations);
     let useInitialSuccessfulTranslation = false;
     const fallBackToInitialTranslation = (stage, error = null) => {
@@ -5243,10 +5280,8 @@ async function translateOutputText(source, options = {}) {
 
 
     comparison.capture('dialogue-format', translations);
-    await reviewFinalEnglish({ segmented, translations, speakerIdentity, options });
-    comparison.capture('english-review', translations);
-    comparison.bilingualReview(await reviewFinalBilingual({ segmented, translations, options }));
-    comparison.capture('bilingual-review', translations);
+    comparison.postReview(await reviewFinalOutput({ segmented, translations, speakerIdentity, speakerScopes, options }));
+    comparison.capture('output-post-review', translations);
 
     const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));
     if (remaining.length) {
@@ -10713,7 +10748,7 @@ function generalSplitSettingsMarkup() {
                                 ${[1, 2, 3].map(count => `<option value="${count}" ${Number(settings.developerOutputSplitCount) === count ? 'selected' : ''}>${count === 1 ? '분할 안 함' : `${count}분할`}</option>`).join('')}
                             </select>
                             <div class="verba-help">최소 프롬프트와 독립 설정입니다. 한출·홍진 등 현재 적용 중인 지침을 유지하며 원문을 나눠 동시에 번역합니다. 최소 프롬프트를 켜면 그 모드의 지침을 사용합니다.</div>
-                            <div class="verba-help">구간 수가 적으면 더 적게 나눕니다. 서버에 따라 3분할이 더 느릴 수 있고, 묶음 사이의 말투·용어가 달라질 수 있습니다. 화자별 분리·복구·검수 요청은 추가될 수 있습니다.</div>
+                            <div class="verba-help">구간 수가 적으면 더 적게 나눕니다. 서버에 따라 3분할이 더 느릴 수 있고, 묶음 사이의 말투·용어가 달라질 수 있습니다. 선택한 AI 후검수는 모든 분할 번역이 끝난 뒤 한 번에 실행됩니다.</div>
                             <div class="verba-help">인풋·선택 재번역은 제외합니다. 개발자 모드와 관계없이 선택한 분할 수를 적용합니다.</div>
                         </div>
                     </details>
@@ -10883,30 +10918,7 @@ function developerSettingsMarkup() {
                         </div>
                     </details>
 
-                    <details id="verba-developer-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 번역 품질 검수 실험실 <small>개발자</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-quality-audit-enabled" ${settings.qualityAuditEnabled ? 'checked' : ''} ${POST_TRANSLATION_AI_REPAIR_ENABLED ? '' : 'disabled'}>
-                                <span>품질 검수 사용</span>
-                            </label>
-                            <div class="verba-help">${POST_TRANSLATION_AI_REPAIR_ENABLED ? '로컬에서 이상 징후가 있을 때만 AI 품질 검수를 실행합니다.' : '현재 버전은 일반·미친 한출·김홍진 AI 후검수가 모두 꺼져 있습니다. 기능 코드는 보관되며 저장된 검수 설정은 유지됩니다. 별도로 한국어 영역에 영어가 남으면 해당 부분만 최대 1회 AI 검수합니다. 병기 지시가 적용된 구간은 별도 AI가 최대 1회 형식을 검수합니다. 검수 실패 시 기존 번역을 유지합니다.'}</div>
-
-                            <div id="verba-quality-audit-controls" class="${settings.qualityAuditEnabled ? '' : 'verba-control-disabled'}">
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-meaning" ${settings.qualityAuditMeaning !== false ? 'checked' : ''}><span>의미 보존 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-referent" ${settings.qualityAuditReferent !== false ? 'checked' : ''}><span>대명사·지칭 대상 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-voice" ${settings.qualityAuditVoice !== false ? 'checked' : ''}><span>캐릭터 말투 유지 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-translationese" ${settings.qualityAuditTranslationese !== false ? 'checked' : ''}><span>번역투 검사</span></label>
-                                <label class="verba-check-row"><input type="checkbox" id="verba-quality-audit-continuity" ${settings.qualityAuditContinuity !== false ? 'checked' : ''}><span>문맥 모순 검사</span></label>
-                            </div>
-
-                            <div class="verba-quality-audit-status-row">
-                                <span>최근 검수</span>
-                                <b id="verba-quality-audit-status">${escapeHtml(POST_TRANSLATION_AI_REPAIR_ENABLED ? lastQualityAuditSummary : '일반 품질 검수 꺼짐')}</b>
-                            </div>
-                            <div class="verba-help">정상 번역이면 추가 API 호출은 없습니다. 의심 구간이 감지돼도 검수 AI가 문제가 없다고 판단하면 원래 번역을 그대로 유지합니다.</div>
-                        </div>
-                    </details>
+                    <div class="verba-help">AI 후검수는 디버그 위의 「AI 후검수 설정」에서 항목별로 선택합니다.</div>
 
                     <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
                 ` : `
@@ -11970,6 +11982,7 @@ function injectSettingsPanel() {
                     </div>
                 </details>
 
+                ${postReviewSettingsMarkup('verba', settings)}
                 <details id="verba-debug-settings" class="verba-tool-details">
                     <summary>디버그 <small>최근 오류·번역 시간</small></summary>
                     <div class="verba-tool-details-content">
@@ -12651,6 +12664,14 @@ function injectSettingsPanel() {
         saveSettings();
     });
     syncProfileRaceUi();
+    panel.querySelectorAll('[data-post-review]').forEach(input => {
+        input.addEventListener('change', event => {
+            const key = event.target.dataset.postReview;
+            if (!POST_REVIEW_CHECKS.some(check => check.key === key)) return;
+            settings.aiPostReview = { ...normalizePostReview(settings.aiPostReview), [key]: event.target.checked };
+            saveSettings();
+        });
+    });
     const debugModeInput = panel.querySelector('#verba-debug-mode');
     const fullSourceInput = panel.querySelector('#verba-debug-full-source');
     const debugCopyButton = panel.querySelector('#verba-copy-last-debug');

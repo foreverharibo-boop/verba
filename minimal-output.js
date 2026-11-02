@@ -51,7 +51,7 @@ export function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [
 }
 
 // Prompt content is independent of the developer split setting.
-export async function translateMinimalOutput(segmented, settings, options, { requestSegments, buildSourceMap, reviewEnglish, reviewBilingual }) {
+export async function translateMinimalOutput(segmented, settings, options, { requestSegments, buildSourceMap, reviewOutput }) {
     const config = {
         customTranslatorEnabled: settings.customTranslatorEnabled,
         customTranslatorTemplates: settings.customTranslatorTemplates,
@@ -144,61 +144,10 @@ export async function translateMinimalOutput(segmented, settings, options, { req
         if (segment.type === 'tagged_content') translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
     }
 
-    // Keep minimal-prompt mode under the same tag-only safety net. A complete
-    // first translation adds no request; all failed tag rows share one retry.
-    // Free Google mode is kept strictly free and never wakes an AI profile.
-    const untranslatedTagged = deepseekKoreanEnabled(settings) || settings.translationEngine === 'google-free'
-        ? []
-        : findUntranslatedTaggedContentSegments(segmented.segments, translations, config, {});
-    if (untranslatedTagged.length) {
-        const originals = new Map(untranslatedTagged.map(segment => [segment.id, translations.get(segment.id)]));
-        try {
-            let prompt = buildMinimalOutputPrompt(untranslatedTagged, config, segmented.nameTokens || [], oneTime);
-            prompt += '\nTAGGED-CONTENT UNTRANSLATED REPAIR: The supplied targets are visible natural-language text inside paired tags and remained partly or wholly untranslated. Return complete KOREAN-ONLY replacements for every supplied id. Translate the remaining foreign sentence or phrase while preserving meaning, already-correct Korean, protected tokens, nested tag tokens, macros, URLs and formatting. Do not add bilingual text. JSON only.';
-            const repaired = await requestSegments(prompt, untranslatedTagged, {
-                ...options,
-                parallelRequest: false,
-                stage: 'tagged-content-untranslated-repair',
-            });
-            const candidates = new Map(translations);
-            for (const segment of untranslatedTagged) {
-                const replacement = String(repaired.get(segment.id) || '');
-                if (replacement.trim()) candidates.set(
-                    segment.id,
-                    normalizeStructuredMetadataTranslation(replacement),
-                );
-            }
-            normalizeLocallyRecoverableProtectedTokens(segmented, candidates, config, {});
-            const stillUntranslated = new Set(findUntranslatedTaggedContentSegments(
-                untranslatedTagged,
-                candidates,
-                config,
-                {},
-            ).map(segment => segment.id));
-            const damaged = new Set(findProtectedTokenIntegrityProblems(untranslatedTagged, candidates).map(segment => segment.id));
-            let accepted = 0;
-            for (const segment of untranslatedTagged) {
-                const replacement = String(candidates.get(segment.id) || '');
-                if (!replacement.trim() || stillUntranslated.has(segment.id) || damaged.has(segment.id)) {
-                    translations.set(segment.id, originals.get(segment.id));
-                    continue;
-                }
-                translations.set(segment.id, replacement);
-                accepted += 1;
-            }
-            console.info(`[베르바] 태그 미번역 복구(최소 프롬프트): 감지 ${untranslatedTagged.length}구간 · 적용 ${accepted}구간`);
-        } catch (error) {
-            for (const segment of untranslatedTagged) translations.set(segment.id, originals.get(segment.id));
-            if (options.signal?.aborted) throw error;
-            console.warn('[베르바] 태그 미번역 1회 복구 실패(최소 프롬프트) — 최초 번역을 유지합니다.', error);
-        }
-    }
-
     comparison.capture('tag-normalization', translations);
-    if (!deepseekKoreanEnabled(settings)) await reviewEnglish?.({ segmented, translations, speakerIdentity: options.speakerIdentity || {}, options });
-    comparison.capture('english-review', translations);
-    comparison.bilingualReview(await reviewBilingual?.({ segmented, translations, options }));
-    comparison.capture('bilingual-review', translations);
+    comparison.postReview(await reviewOutput?.({ segmented, translations,
+        speakerIdentity: options.speakerIdentity || {}, reviewSettings: settings, options }));
+    comparison.capture('output-post-review', translations);
 
     const translation = assembleTranslation(segmented, translations, {
         allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback,

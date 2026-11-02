@@ -5,7 +5,7 @@ import { createEngine as deep } from '../engines/verba-deep.mjs';
 for (const [name, create] of [['verba', verba], ['deep', deep]]) {
  test(`${name}: voice rules do not split narration, dialogue and code requests`, async () => {
   let calls = 0;
-  const engine = create({settings: {profileId:'A',activeProfileSlot:'A',autoProfileFallback:false,serverRetryLimit:1,translateTaggedContent:true,dialoguePromptEnabled:true,dialoguePrompt:'Use terse speech.',otherDialoguePromptEnabled:true,otherDialoguePrompt:'Use polite speech.',dialogueEndingRepetitionReduction:true},profiles:{A:{}},nameLocks:[],character:{},context:{}}, async (_id,messages) => {
+  const engine = create({settings: {aiPostReview:{},profileId:'A',activeProfileSlot:'A',autoProfileFallback:false,serverRetryLimit:1,translateTaggedContent:true,dialoguePromptEnabled:true,dialoguePrompt:'Use terse speech.',otherDialoguePromptEnabled:true,otherDialoguePrompt:'Use polite speech.',dialogueEndingRepetitionReduction:true},profiles:{A:{}},nameLocks:[],character:{},context:{}}, async (_id,messages) => {
    calls++;
    const prompt=messages.map(x=>x.content).join('\n');
    const marker=['\nTARGETS\n','\nSEGMENTS\n','\nTRANSLATION TARGETS\n'].find(x=>prompt.includes(x));

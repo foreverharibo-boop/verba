@@ -8,12 +8,12 @@ for (const [variant, create] of [['verba',verba],['deep',deep]]) {
     for (const [mode, extra] of [['normal',{}],['minimal',{developerMode:true,developerMinimalPromptEnabled:true}],['split',{developerMode:true,developerOutputSplitCount:2}],['compressed',{developerMode:true,developerCompressedPromptEnabled:true}]]) {
         test(`${variant}/${mode}: nested HTML survives a token-dropping provider and bilingual review`, async () => {
             let reviews = 0;
-            const engine = create({settings:{profileId:'A',autoProfileFallback:false,serverRetryLimit:1,debugMode:true,
+            const engine = create({settings:{aiPostReview:{bilingual:true},profileId:'A',autoProfileFallback:false,serverRetryLimit:1,debugMode:true,
                 globalPrompt:'Inside italics, preserve original English and add Korean in brackets. Everything outside italics must be Korean only.',...extra},profiles:{A:{}},nameLocks:[],character:{},context:{}}, async (_id, messages) => {
                 const text = messages.map(m=>m.content).join('\n');
-                if (text.includes('\nBILINGUAL_TARGETS\n')) {
+                if (text.includes('\nREVIEW_UNITS\n')) {
                     reviews++;
-                    const rows=JSON.parse(text.split('\nBILINGUAL_TARGETS\n')[1]);
+                    const rows=JSON.parse(text.split('\nREVIEW_UNITS\n')[1]);
                     assert.equal(rows.length,1);
                     return {content:JSON.stringify({segments:rows.map(r=>({id:r.id,translation:'*Stay quiet. [조용히 있어.]*'}))})};
                 }
@@ -35,7 +35,7 @@ for (const [variant, create] of [['verba',verba],['deep',deep]]) {
         });
     }
     test(`${variant}: invented closing tag falls back only the damaged text and is diagnosed`, async () => {
-        const engine=create({settings:{profileId:'A',autoProfileFallback:false,serverRetryLimit:1,debugMode:true},profiles:{A:{}},nameLocks:[],character:{},context:{}},async(_id,messages)=>{
+        const engine=create({settings:{aiPostReview:{bilingual:true},profileId:'A',autoProfileFallback:false,serverRetryLimit:1,debugMode:true},profiles:{A:{}},nameLocks:[],character:{},context:{}},async(_id,messages)=>{
             const text=messages.map(m=>m.content).join('\n');
             const marker=['\nTARGETS\n','\nSEGMENTS\n','\nTRANSLATION TARGETS\n'].find(x=>text.includes(x));
             assert.ok(marker);

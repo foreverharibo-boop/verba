@@ -1,3 +1,4 @@
+import { normalizePostReview } from '../post-review.js';
 import { deepseekKoreanEnabled } from '../deepseek-korean.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,10 +6,10 @@ import * as core from '../core.js';
 import {buildMinimalOutputPrompt, translateMinimalOutput} from '../minimal-output.js';
 const index=fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
 const slice=(a,b)=>index.slice(index.indexOf(a),index.indexOf(b,index.indexOf(a)));
-const api=Function('customTranslationDefaults',slice('const RELATION_TEMPERATURE_OPTIONS','const baseContext =')+`
+const api=Function('normalizePostReview','customTranslationDefaults',slice('const RELATION_TEMPERATURE_OPTIONS','const baseContext =')+`
 return { defaults: DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES, visible: CUSTOM_TRANSLATOR_VISIBLE_KEYS,
  normalize: normalizeCustomTranslatorSettings, normalizeText: normalizeCustomTranslatorInstruction,
- normalizeGalbwae: normalizedChuseokGalbwaeScope, defs: CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS };`)(core.customTranslationDefaults);
+ normalizeGalbwae: normalizedChuseokGalbwaeScope, defs: CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS };`)(normalizePostReview,core.customTranslationDefaults);
 const {defaults,normalize}=api;
 assert.deepEqual(api.visible,['output','input','selection','mad','hongjin']);
 for(const key of api.visible) {

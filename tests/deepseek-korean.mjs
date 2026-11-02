@@ -23,7 +23,7 @@ const settings = {
     qualityAuditEnabled:true, finalEnglishReviewEnabled:true, englishReviewEnabled:true,
     bannedWords:'미소', translateTaggedContent:true,
 };
-const snapshot = () => ({settings:structuredClone(settings),profiles:{A:{}},nameLocks:[{source:'Dana',target:'다나'}],character:{name:'Chris'},context:{name1:'Dana',name2:'Chris'}});
+const snapshot = () => ({settings:{...structuredClone(settings),aiPostReview:{}},profiles:{A:{}},nameLocks:[{source:'Dana',target:'다나'}],character:{name:'Chris'},context:{name1:'Dana',name2:'Chris'}});
 const source = 'Dana smiled.\n\n"Come here."\n\n`KEEP_CODE`\n\n<Info_panel>Sunny</Info_panel>';
 const segmented = segmentSource(source,[{source:'Dana',target:'다나'}]);
 function checkPrompt(prompt) {
@@ -75,7 +75,7 @@ test('bundled server engine sends the isolated prompt, preserves structure and s
     const engine=createEngine(original,async(id,messages)=>{calls++;assert.equal(id,'A');assert.equal(messages.length,1);checkPrompt(messages[0].content);return answer(messages[0].content);});
     const out=await engine.output(source,{oneTimeInstruction:'ONETIME_SENTINEL',previousUserSource:'PREVIOUS_SENTINEL',speakerIdentity:{sourceUserName:'Dana',userName:'다나'}});
     assert.equal(calls,1);assert.match(out.translation,/다나/);assert.match(out.translation,/KEEP_CODE/);assert.match(out.translation,/<Info_panel>맑음<\/Info_panel>/);assert.doesNotMatch(out.translation,/@@VERBA/);
-    assert.deepEqual(original.settings,settings);
+    assert.deepEqual(original.settings,{...settings,aiPostReview:{}});
 });
 test('switching off restores existing prompt and input translation remains unchanged',()=>{
     const off={...settings,developerDeepseekKoreanEnabled:false,chuseokGalbwaeScope:'off',customTranslatorEnabled:false};

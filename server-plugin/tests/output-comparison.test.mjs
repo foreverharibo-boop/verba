@@ -20,19 +20,19 @@ for (const [name, create] of [['verba', createVerba], ['deep', createDeep]]) {
         const engine = create({ settings: { profileId: 'A', debugMode: true, autoProfileFallback: false, serverRetryLimit: 1 }, profiles: { A: {} }, nameLocks: [], character: {}, context: {} }, async (_id, messages) => {
             calls++;
             const prompt = messages.map(m => m.content).join('\n');
-            const marker = ['\nTARGETS\n', '\nSEGMENTS\n', '\nTRANSLATION TARGETS\n', '\nTARGETS '].find(m => prompt.includes(m));
+            const marker = ['\nREVIEW_UNITS\n','\nTARGETS\n', '\nSEGMENTS\n', '\nTRANSLATION TARGETS\n', '\nTARGETS '].find(m => prompt.includes(m));
             assert.ok(marker);
             const rows = JSON.parse(prompt.slice(prompt.lastIndexOf(marker) + marker.length));
             return { content: JSON.stringify({ segments: rows.map(row => ({ id: row.id,
-                translation: calls === 1 ? 'Quiet [조용히]' : '조용히',
+                translation: calls === 1 ? 'Quiet [조용히]' : '조용히 [조용히]',
             })) }) };
         });
         const result = await engine.output('`Quiet`', {});
         assert.equal(calls, 2);
         const report = result.outputComparison;
         assert.equal(report.stages[0].totals.duplicateKoreanPairs, 0);
-        assert.equal(report.firstLatinLossStage, 'english-review');
-        assert.equal(report.firstDuplicateHintStage, 'english-review');
+        assert.equal(report.firstLatinLossStage, 'output-post-review');
+        assert.equal(report.firstDuplicateHintStage, 'output-post-review');
         assert.match(result.translation, /조용히 \[조용히\]/);
     });
     for (const [mode, extra] of [['normal', {}], ['minimal', { developerMode: true, developerMinimalPromptEnabled: true }], ['split', { developerMode: true, developerOutputSplitCount: 2 }]]) {
@@ -43,8 +43,8 @@ for (const [name, create] of [['verba', createVerba], ['deep', createDeep]]) {
                     globalPrompt: 'For all source text, preserve the original English and add Korean in brackets. Bilingual output.', ...extra }, profiles: { A: {} }, nameLocks: [], character: {}, context: {} }, async (_id, messages) => {
                     calls++;
                     const prompt = messages.map(m => m.content).join('\n');
-                    if(prompt.includes('\nBILINGUAL_TARGETS\n')) {
-                        const rows=JSON.parse(prompt.split('\nBILINGUAL_TARGETS\n')[1]);
+                    if(prompt.includes('\nREVIEW_UNITS\n')) {
+                        const rows=JSON.parse(prompt.split('\nREVIEW_UNITS\n')[1]);
                         return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:row.CURRENT}))})};
                     }
                     const marker = ['\nTARGETS\n', '\nSEGMENTS\n', '\nTRANSLATION TARGETS\n'].find(m => prompt.includes(m));

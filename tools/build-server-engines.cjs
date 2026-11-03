@@ -7,8 +7,9 @@ const acorn = require('acorn');
 const scope = require('eslint-scope');
 const esbuild = require('esbuild');
 const verbaOnly = process.argv[2] === '--verba-only';
-const roots = process.argv.slice(verbaOnly ? 3 : 2);
-if (roots.length !== (verbaOnly ? 1 : 2)) throw Error('Usage: build-server-engines.cjs VERBA_DIRECTORY DEEP_DIRECTORY | --verba-only VERBA_DIRECTORY');
+const deepOnly = process.argv[2] === '--deep-only';
+const roots = process.argv.slice(verbaOnly || deepOnly ? 3 : 2);
+if (roots.length !== (verbaOnly ? 1 : 2)) throw Error('Usage: build-server-engines.cjs VERBA_DIRECTORY DEEP_DIRECTORY | --verba-only VERBA_DIRECTORY | --deep-only SERVER_REPOSITORY DEEP_DIRECTORY');
 const overrides = {
     settings: 'const settings = structuredClone(snapshot.settings);',
     liveContext: 'function liveContext() { return { ...snapshot.context, ConnectionManagerRequestService: { sendRequest: transport } }; }',
@@ -62,7 +63,7 @@ async function build(root, variant) {
     if(forbidden.length) throw Error('Unadapted globals: '+forbidden.join(', '));
     const result=await esbuild.build({stdin:{contents:entry,resolveDir:root,sourcefile:'engine-entry.js'},bundle:true,platform:'node',format:'esm',target:'node20',write:false,legalComments:'none'});
     const out=result.outputFiles[0].text;
-    for(const destination of roots) {
+    for(const destination of (deepOnly ? roots.slice(0, 1) : roots)) {
         fs.mkdirSync(path.join(destination,'server-plugin/engines'),{recursive:true});
         fs.writeFileSync(path.join(destination,'server-plugin/engines',variant+'.mjs'),out);
     }
@@ -71,6 +72,14 @@ async function build(root, variant) {
     return {hash,version:JSON.parse(fs.readFileSync(path.join(root,'manifest.json'))).version};
 }
 (async()=>{
+ if (deepOnly) {
+  const root = path.resolve(roots[0]);
+  const file = path.join(root,'server-plugin/engines/manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(file,'utf8'));
+  manifest.engines['verba-deep'] = await build(path.resolve(roots[1]),'verba-deep');
+  fs.writeFileSync(file,JSON.stringify(manifest,null,2)+'\n');
+  return;
+ }
  if (verbaOnly) {
   const root = path.resolve(roots[0]);
   const file = path.join(root,'server-plugin/engines/manifest.json');

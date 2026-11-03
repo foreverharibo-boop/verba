@@ -1,6 +1,6 @@
 import { enforceMadKoreanOnly } from './mad-output.js';
 import { createOutputComparison } from './output-comparison.js';
-import { deepseekKoreanEnabled, buildDeepseekKoreanPrompt } from './deepseek-korean.js';
+import { deepseekKoreanEnabled, buildDeepseekKoreanPrompt, deepseekPromptSlots } from './deepseek-korean.js';
 import { translationProse, withTranslationComposition } from './translation-composer.js';
 import { outputSplitCount, runOutputBatches } from './output-splitting.js';
 import { assembleTranslation, findProtectedTokenIntegrityProblems, findUntranslatedSegments, findUntranslatedTaggedContentSegments, normalizeLocallyRecoverableProtectedTokens, normalizeStructuredMetadataTranslation } from './core.js';
@@ -46,36 +46,40 @@ TARGETS
 ${JSON.stringify(payload)}`;
 }
 
-export function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [], oneTimeInstruction = '') {
-    if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens);
+export function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [], oneTimeInstruction = '', speakerIdentity = {}) {
+    if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens, settings, speakerIdentity);
     return withTranslationComposition(settings, 'output', current => buildMinimalOutputPromptInternal(segments, current, nameTokens, oneTimeInstruction));
 }
 
 // Prompt content is independent of the developer split setting.
 export async function translateMinimalOutput(segmented, settings, options, { requestSegments, buildSourceMap, reviewOutput }) {
     const config = {
-        customTranslatorEnabled: settings.customTranslatorEnabled,
+        ...(deepseekKoreanEnabled(settings) ? deepseekPromptSlots(settings) : {}),
+        customTranslatorEnabled: deepseekKoreanEnabled(settings) ? false : settings.customTranslatorEnabled,
         customTranslatorTemplates: settings.customTranslatorTemplates,
         customTranslatorModified: settings.customTranslatorModified,
         developerMode: settings.developerMode === true,
         developerDeepseekKoreanEnabled: settings.developerDeepseekKoreanEnabled === true,
         developerMinimalPrompt: settings.developerMinimalPrompt,
-        chuseokGalbwaeScope: settings.developerMode === true && ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+        chuseokGalbwaeScope: !deepseekKoreanEnabled(settings) && settings.developerMode === true && ['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
             ? settings.chuseokGalbwaeScope
-            : settings.developerMode === true && settings.chuseokGalbwaeEnabled === true
+            : !deepseekKoreanEnabled(settings) && settings.developerMode === true && settings.chuseokGalbwaeEnabled === true
                 ? 'dialogueInner'
                 : 'off',
     };
+    const effectiveSettings = deepseekKoreanEnabled(settings)
+        ? { ...settings, ...config, developerMadKoreanOutputEnabled:false, developerHongjinFlavorEnabled:false, chuseokGalbwaeEnabled:false }
+        : settings;
     const oneTime = String(options.oneTimeInstruction || '');
     let usedInitialFallback = false;
-    const comparison = createOutputComparison(segmented, settings.debugMode === true, settings, options.diagnosticBinding || null, 'minimal');
+    const comparison = createOutputComparison(segmented, settings.debugMode === true, effectiveSettings, options.diagnosticBinding || null, 'minimal');
     comparison.translationSettings(config);
     const firstTranslations = new Map();
     const effectiveSplitCount = settings.translationEngine === 'google-free' ? 1 : outputSplitCount(settings);
     const translations = await runOutputBatches(segmented, effectiveSplitCount, options, async (segments, batchOptions) => {
         const request = (targets, repair = '') => {
             batchOptions.signal.throwIfAborted();
-            let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime);
+            let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime, options.speakerIdentity || {});
             if (repair === 'tokens') prompt += '\nPrevious result damaged protected tokens. Retranslate these targets and preserve each original token exactly once.';
             if (repair === 'names') prompt += '\nPrevious result left one or more source-language character names in Latin script. Retranslate these targets. Every clear human or fictional character name must use natural Hangul (fixed mapping first); never keep a character name in Latin script merely because it is a proper name. Keep genuine brands, acronyms, products, codes, URLs and handles unchanged.';
             return requestSegments(prompt, targets, {
@@ -148,12 +152,12 @@ export async function translateMinimalOutput(segmented, settings, options, { req
     }
 
     comparison.capture('tag-normalization', translations);
-    enforceMadKoreanOnly(segmented, translations, settings);
+    enforceMadKoreanOnly(segmented, translations, effectiveSettings);
     comparison.capture('mad-korean-only', translations);
     comparison.postReview(await reviewOutput?.({ segmented, translations,
-        speakerIdentity: options.speakerIdentity || {}, reviewSettings: settings, options }));
+        speakerIdentity: options.speakerIdentity || {}, reviewSettings: effectiveSettings, options }));
     comparison.capture('output-post-review', translations);
-    enforceMadKoreanOnly(segmented, translations, settings);
+    enforceMadKoreanOnly(segmented, translations, effectiveSettings);
     comparison.capture('mad-korean-only-final', translations);
 
     const translation = assembleTranslation(segmented, translations, {

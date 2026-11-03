@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from '../deepseek-korean.js';
+import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT, buildDeepseekUserRules } from '../deepseek-korean.js';
 import { buildMinimalOutputPrompt, translateMinimalOutput } from '../minimal-output.js';
 import { segmentSource, buildOutputPrompt, buildSelectionPrompt, buildMultiSelectionPrompt, buildInputPrompt, normalizeBilingualMappedTranslation } from '../core.js';
 import { createEngine } from '../server-plugin/engines/verba.mjs';
@@ -16,6 +16,7 @@ const settings = {
     customTranslatorModified:Object.fromEntries(['output','selection','mad','hongjin','quality','repair','other'].map(key=>[key,true])),
     baseTranslationCustom:{enabled:true,prompt:'BASE_SENTINEL'},
     globalPromptEnabled:true, globalPrompt:'GLOBAL_SENTINEL', dialoguePromptEnabled:true, dialoguePrompt:'DIALOGUE_SENTINEL',
+    otherDialoguePromptEnabled:true, otherDialoguePrompt:'OTHER_SENTINEL',
     allDialoguePromptEnabled:true, allDialoguePrompt:'Translate dialogue in English and Korean. BILINGUAL_SENTINEL',
     developerMadKoreanOutputEnabled:true, developerHongjinFlavorEnabled:true,
     developerExtremeCompressedPromptEnabled:true, developerRelationshipExperimentEnabled:true,
@@ -28,7 +29,8 @@ const source = 'Dana smiled.\n\n"Come here."\n\n`KEEP_CODE`\n\n<Info_panel>Sunny
 const segmented = segmentSource(source,[{source:'Dana',target:'다나'}]);
 function checkPrompt(prompt) {
     assert.ok(prompt.startsWith(DEEPSEEK_KOREAN_PROMPT));
-    assert.doesNotMatch(prompt,/SENTINEL|CHUSEOK GALBWAE|MAD KOREAN|HONG.JIN FLAVOR|PREVIOUS USER MESSAGE/);
+    for (const value of ['GLOBAL_SENTINEL','DIALOGUE_SENTINEL','OTHER_SENTINEL','BILINGUAL_SENTINEL']) assert.ok(prompt.includes(value),value);
+    assert.doesNotMatch(prompt,/MINIMAL_SENTINEL|CUSTOM_\w+_SENTINEL|BASE_SENTINEL|ADDRESS_SENTINEL|ONETIME_SENTINEL|CHUSEOK GALBWAE|MAD KOREAN|HONG.JIN FLAVOR|PREVIOUS USER MESSAGE/);
 }
 function answer(prompt) {
     const rows=JSON.parse(prompt.split('\nTARGETS\n').at(-1));
@@ -40,7 +42,7 @@ test('requires both developer access and the dedicated switch',()=>{
         assert.equal(deepseekKoreanEnabled({...settings,developerMode:dev,developerDeepseekKoreanEnabled:toggle}),dev&&toggle);
     }
 });
-test('all output and selection prompt builders exclude saved and one-time prompts',()=>{
+test('all output and selection builders include four scoped slots but exclude other experiment overrides',()=>{
     const before=structuredClone(settings);
     checkPrompt(buildMinimalOutputPrompt(segmented.segments,settings,segmented.nameTokens,'ONETIME_SENTINEL'));
     checkPrompt(buildOutputPrompt(segmented,settings,'ONETIME_SENTINEL'));
@@ -50,7 +52,7 @@ test('all output and selection prompt builders exclude saved and one-time prompt
     checkPrompt(buildMultiSelectionPrompt({...options,selections:[{id:'multi_0000',selected:'기다렸다.',start:3,end:8}]}));
     assert.deepEqual(settings,before);
 });
-test('browser pipeline uses only the experiment and skips review and tagged retry',async()=>{
+test('browser pipeline includes the four slots with no extra translation or tagged retry',async()=>{
     let calls=0;
     const result=await translateMinimalOutput(segmented,settings,{oneTimeInstruction:'ONETIME_SENTINEL'}, {
         requestSegments:async(prompt,rows)=>{calls++;checkPrompt(prompt);return new Map(rows.map(row=>[row.id,row.type==='tagged_content'?'The lantern flickers quietly.':`${(row.text.match(/@@VERBA[^@]+@@/g)||[]).join(' ')} 미소 지었다.`]));},
@@ -62,10 +64,10 @@ test('browser pipeline uses only the experiment and skips review and tagged retr
     assert.match(result.translation,/`KEEP_CODE`/);
     assert.match(result.translation,/<Info_panel>The lantern flickers quietly\.<\/Info_panel>/);
 });
-test('bundled server engine sends the isolated prompt, preserves structure and selected profile',async()=>{
+test('bundled server engine composes four slots and preserves structure and selected profile',async()=>{
     const original=snapshot();let calls=0;
-    const engine=createEngine(original,async(id,messages)=>{calls++;assert.equal(id,'A');assert.equal(messages.length,1);checkPrompt(messages[0].content);return answer(messages[0].content);});
-    const out=await engine.output(source,{oneTimeInstruction:'ONETIME_SENTINEL',previousUserSource:'PREVIOUS_SENTINEL',speakerIdentity:{sourceUserName:'Dana',userName:'다나'}});
+    const engine=createEngine(original,async(id,messages)=>{calls++;assert.equal(id,'A');assert.equal(messages.length,1);checkPrompt(messages[0].content);assert.match(messages[0].content,/\"character\":\"Chris\"/);return answer(messages[0].content);});
+    const out=await engine.output(source,{oneTimeInstruction:'ONETIME_SENTINEL',previousUserSource:'PREVIOUS_SENTINEL',speakerIdentity:{sourceUserName:'Dana',userName:'다나',characterName:'Chris'}});
     assert.equal(calls,1);assert.match(out.translation,/다나/);assert.match(out.translation,/KEEP_CODE/);assert.match(out.translation,/<Info_panel>맑음<\/Info_panel>/);assert.doesNotMatch(out.translation,/@@VERBA/);
     assert.deepEqual(original.settings,{...settings,aiPostReview:{}});
 });
@@ -74,7 +76,7 @@ test('switching off restores existing prompt and input translation remains uncha
     assert.match(buildMinimalOutputPrompt(segmented.segments,off),/^MINIMAL_SENTINEL/);
     assert.equal(buildInputPrompt('안녕.',settings),buildInputPrompt('안녕.',{...settings,developerDeepseekKoreanEnabled:false}));
 });
-test('Korean-only output is not rewrapped by the saved bilingual setting',()=>{
+test('experiment preserves model formatting without an extra forced bilingual wrapper',()=>{
     const map=[{id:'seg_0000',source:'"Come here."',start:0,end:6}];
     assert.deepEqual(normalizeBilingualMappedTranslation('"이리 와."',map,settings,'"Come here."'),{translation:'"이리 와."',sourceMap:map});
 });
@@ -93,4 +95,57 @@ test('server manifest and UI advertise the new mode and compatible engine versio
     assert.match(manifest.engines['verba-deep'].version,/^0\.6\.\d+$/);
     const deepBundle=fs.readFileSync(new URL('../server-plugin/engines/verba-deep.mjs',import.meta.url));
     assert.equal(manifest.engines['verba-deep'].hash,createHash('sha256').update(deepBundle).digest('hex'));
+});
+
+
+test('each prompt slot respects OFF and empty values in every builder',()=>{
+    const calls = s => [buildOutputPrompt(segmented,s),buildMinimalOutputPrompt(segmented.segments,s),buildSelectionPrompt({source:'He waits.',translation:'기다린다.',selected:'기다린다.',start:0,end:5,settings:s}),buildMultiSelectionPrompt({source:'He waits.',translation:'기다린다.',selections:[{selected:'기다린다.',start:0,end:5}],settings:s})];
+    for(const key of ['globalPrompt','allDialoguePrompt','dialoguePrompt','otherDialoguePrompt']) {
+        for(const prompt of calls({...settings,[key+'Enabled']:false})) assert.ok(!prompt.includes(settings[key]));
+        for(const prompt of calls({...settings,[key]:'   '})) assert.ok(!prompt.includes(settings[key]));
+    }
+    assert.equal(buildDeepseekUserRules({}), '');
+});
+test('user priority, identities and scope hints survive composition',()=>{
+    const rule=buildDeepseekUserRules({...settings,translationRuleOrder:['global','global','invalid','otherDialogue']},{characterName:'Chris',userName:'Dana'});
+    assert.ok(rule.indexOf('GLOBAL_SENTINEL')<rule.indexOf('OTHER_SENTINEL'));
+    assert.equal(rule.match(/GLOBAL_SENTINEL/g).length,1);
+    assert.match(rule,/ALL-DIALOGUE — direct speech by any speaker only/);
+    assert.match(rule,/TARGET-DIALOGUE — confirmed current-character direct speech only/);
+    assert.match(rule,/OTHER-DIALOGUE — USER, NPC, other or uncertain speakers only/);
+    const id=segmented.segments.find(x=>x.type==='dialogue_candidate').id;
+    const prompt=buildOutputPrompt(segmented,settings,'',{characterName:'Chris'},null,{[id]:'target_dialogue'});
+    assert.match(prompt, /"speaker_scope":"target_dialogue"/);
+    assert.match(buildSelectionPrompt({source:'"Wait."',translation:'"기다려."',selected:'기다려.',start:1,end:5,settings}), /"in_dialogue":true/);
+});
+test('saved MAD mode cannot strip bilingual output from the DeepSeek experiment',async()=>{
+    const sample=segmentSource('"Wait here."');
+    const result=await translateMinimalOutput(sample,settings,{}, {
+        requestSegments:async(prompt,rows)=>new Map(rows.map(row=>[row.id,'"Wait here. [여기서 기다려.]"'])),
+        buildSourceMap:()=>[],
+    });
+    assert.equal(result.translation,'"Wait here. [여기서 기다려.]"');
+});
+test('bundled review sees active bilingual rules without excluded MAD or custom rules',async()=>{
+    const original=snapshot();
+    original.settings.aiPostReview={bilingual:true};
+    original.settings.allDialoguePrompt='For dialogue, preserve English and include Korean in square brackets: "English [한국어]".';
+    let calls=0;
+    const engine=createEngine(original,async(id,messages)=>{
+        calls++;
+        const prompt=messages[0].content;
+        if(prompt.startsWith('UNIFIED OUTPUT POST REVIEW')) {
+            assert.match(prompt,/For dialogue, preserve English/);
+            assert.doesNotMatch(prompt,/MAD KOREAN-ONLY|CUSTOM_output_SENTINEL/);
+            const rows=JSON.parse(prompt.split('\nREVIEW_UNITS\n').at(-1));
+            assert.ok(rows.some(row=>row.checks.includes('bilingual')));
+            return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:'"Wait here. [여기서 기다려.]"'}))})};
+        }
+        const rows=JSON.parse(prompt.split('\nTARGETS\n').at(-1));
+        return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:'"여기서 기다려."'}))})};
+    });
+    const result=await engine.output('"Wait here."');
+    assert.equal(calls,2);
+    assert.match(result.translation,/Wait here/);
+    assert.match(result.translation,/여기서 기다려/);
 });

@@ -622,15 +622,42 @@ STRUCTURE AND OUTPUT
 - Preserve protected tokens, macros, URLs, executable syntax, HTML tags and attributes, opening/closing order, and Markdown markers. Do not translate, modify, or duplicate protected elements.
 - Translate natural language supplied as a target inside backticks or code blocks without inventing enclosing markers or executable syntax.
 - Preserve information-panel dates, times, quantities, field count, and field order. Translate visible natural language; render Thought as that character's inner monologue. Do not add emotions, judgments, or plans.
-- Output the Korean translation only. Do not append the English source, translation explanations, alternatives, or review commentary. Preserve English required by actual code, acronyms, and proper names.
+- Output Korean by default. Only an active GLOBAL or ALL-DIALOGUE instruction may request bilingual output, and only within its stated scope and format. Preserve each requested original-language half exactly once and its Korean translation exactly once. Do not add explanations, alternatives, or review commentary. Preserve English required by actual code, acronyms, and proper names.
 
 FINAL CHECK
 Does the Korean read naturally on its own? Compared with the source, does it preserve facts, causality, uncertainty, speech intent, and character voice? Have you invented setting details or jokes in the name of fluency? Are particles, names, tags, ids, and protected tokens intact? Correct only the problematic passages and return the final translation in the required format.`;
-var contract = 'Translate only the supplied targets. JSON only: {"segments":[{"id":"seg_0000","translation":"Korean translation"}]}. Return every supplied id exactly once with a string translation. Preserve formatting, tag structure, code, URLs, macros and placeholders. Keep every @@VERBA...@@ token exactly once in its original target. Do not introduce line breaks within single-line targets. Return Korean only, without appending the original foreign-language text.';
-function buildDeepseekKoreanPrompt(segments, nameTokens = []) {
-  const targets = segments.map(({ id, type, text, tagContext }) => ({ id, type, ...tagContext?.length ? { tag_context: tagContext } : {}, text }));
-  const names = nameTokens.filter((row) => targets.some((target) => String(target.text).includes(row.token))).map(({ token: token2, value }) => ({ token: token2, korean: value }));
+var contract = 'Translate only the supplied targets. JSON only: {"segments":[{"id":"seg_0000","translation":"Korean translation"}]}. Return every supplied id exactly once with a string translation. Preserve formatting, tag structure, code, URLs, macros and placeholders. Keep every @@VERBA...@@ token exactly once in its original target. Do not introduce line breaks within single-line targets. Korean only unless an active GLOBAL or ALL-DIALOGUE rule explicitly requests bilingual output for that source scope. Paired-tag interiors remain Korean-only. In bilingual output, use original source names in the original-language half and keep each name token only in the Korean half.';
+function deepseekPromptSlots(settings = {}) {
+  const result = { translationRuleOrder: settings.translationRuleOrder };
+  for (const key of ["globalPrompt", "allDialoguePrompt", "dialoguePrompt", "otherDialoguePrompt"]) {
+    result[key] = String(settings[key] || "");
+    result[`${key}Enabled`] = settings[`${key}Enabled`] !== false;
+  }
+  return result;
+}
+function buildDeepseekUserRules(settings = {}, identity = {}) {
+  const slots = {
+    global: ["globalPrompt", "GLOBAL \u2014 all translated prose"],
+    allDialogue: ["allDialoguePrompt", "ALL-DIALOGUE \u2014 direct speech by any speaker only"],
+    characterDialogue: ["dialoguePrompt", "TARGET-DIALOGUE \u2014 confirmed current-character direct speech only"],
+    otherDialogue: ["otherDialoguePrompt", "OTHER-DIALOGUE \u2014 USER, NPC, other or uncertain speakers only"]
+  };
+  const order = [.../* @__PURE__ */ new Set([...Array.isArray(settings.translationRuleOrder) ? settings.translationRuleOrder : [], "characterDialogue", "otherDialogue", "allDialogue", "global"])];
+  const active = order.filter((key) => slots[key] && settings[`${slots[key][0]}Enabled`] !== false && String(settings[slots[key][0]] || "").trim());
+  if (!active.length) return "";
+  return `ACTIVE USER RULES
+Apply these rules within their scopes; they override the base translation style on direct conflicts. Earlier groups win direct conflicts between user groups. Preserve facts, protected structure and the JSON contract. Never apply dialogue voice to narration or paired-tag interiors. Only GLOBAL and ALL-DIALOGUE control bilingual format within their requested source scopes; TARGET/OTHER rules control voice, not bilingual scope. Never infer a new bilingual scope from brackets used only in an output example.
+IDENTITY ${JSON.stringify({ character: identity.characterName || identity.sourceCharacterName || "", sourceCharacter: identity.sourceCharacterName || "", user: identity.userName || identity.sourceUserName || "", sourceUser: identity.sourceUserName || "" })}
+Resolve {{char}} as the current character and {{user}} as the user persona. Infer speakers from supplied context; use TARGET rules only when clearly that character, otherwise OTHER rules. Names never grant a new relationship or age.
+${active.map((key, index) => `${index + 1}. ${slots[key][1]}
+${String(settings[slots[key][0]]).trim()}`).join("\n")}`;
+}
+function buildDeepseekKoreanPrompt(segments, nameTokens = [], settings = {}, speakerIdentity = {}, speakerScopes = {}) {
+  const targets = segments.map(({ id, type, text, tagContext, codeKind }) => ({ id, type, ...type === "dialogue_candidate" ? { speaker_scope: speakerScopes[id] || "unknown_dialogue" } : {}, ...codeKind ? { code_kind: codeKind } : {}, ...tagContext?.length ? { tag_context: tagContext } : {}, text }));
+  const names = nameTokens.filter((row) => targets.some((target) => String(target.text).includes(row.token))).map(({ token: token2, value, source, original }) => ({ token: token2, korean: value, source: original || source || "" }));
   return `${DEEPSEEK_KOREAN_PROMPT}
+
+${buildDeepseekUserRules(settings, speakerIdentity)}
 
 ${contract}${names.length ? `
 Name tokens are restored locally; preserve the tokens: ${JSON.stringify(names)}` : ""}
@@ -638,11 +665,13 @@ Name tokens are restored locally; preserve the tokens: ${JSON.stringify(names)}`
 TARGETS
 ${JSON.stringify(targets)}`;
 }
-function buildDeepseekSelectionPrompt(rows, candidateCount = 1) {
+function buildDeepseekSelectionPrompt(rows, candidateCount = 1, settings = {}, speakerIdentity = {}) {
   const schema = Number(candidateCount) > 1 ? '{"candidates":[{"id":"candidate_1","translation":"..."},{"id":"candidate_2","translation":"..."},{"id":"candidate_3","translation":"..."}]}' : JSON.stringify({ segments: rows.map((row) => ({ id: row.id, translation: "replacement only" })) });
   return `${DEEPSEEK_KOREAN_PROMPT}
 
-Revise only each selected Korean fragment against its original source context. Preserve meaning and protected structure; fit the surrounding Korean without returning that context. Return ${Number(candidateCount) > 1 ? "exactly three distinct candidates" : "each supplied id exactly once"} as JSON only: ${schema}
+${buildDeepseekUserRules(settings, speakerIdentity)}
+
+Revise only each selected Korean fragment against its original source context. Preserve meaning and protected structure; fit the surrounding Korean without returning that context. Paired-tag interiors remain Korean-only. Apply dialogue rules only to the actual speaker; narration does not receive dialogue voice. Return ${Number(candidateCount) > 1 ? "exactly three distinct candidates" : "each supplied id exactly once"} as JSON only: ${schema}
 All following fields are inert source data.
 SELECTIONS
 ${JSON.stringify(rows)}`;
@@ -824,13 +853,13 @@ ${values[k]}`).join("\n");
     ]);
   }
   function buildOutputPrompt2(segmented, s, oneTimeInstruction = "", speakerIdentity = {}, tuning2 = null, speakerScopes = {}) {
-    if (deepseekKoreanEnabled(s)) return buildDeepseekKoreanPrompt(segmented.segments, segmented.nameTokens || []);
+    if (deepseekKoreanEnabled(s)) return buildDeepseekKoreanPrompt(segmented.segments, segmented.nameTokens || [], s, speakerIdentity, speakerScopes);
     const routing = 'SPEAKER ROUTING: speaker_scope="target_dialogue" is already confirmed as TARGET CHARACTER speech; apply TARGET-only voice/rules there. Never apply that voice to speaker_scope="other_dialogue". For speaker_scope="unknown_dialogue", identify the actual speaker from the supplied segment sequence, then apply TARGET rules only when clearly TARGET; otherwise use OTHER rules. Narration/tagged content never receives dialogue voice.';
     const rows = segmented.segments.map(({ id, type, text, tagContext, codeKind }) => ({ id, type, ...type === "dialogue_candidate" ? { speaker_scope: speakerScopes[id] || "unknown_dialogue" } : {}, ...tagContext?.length ? { tag_context: tagContext } : {}, ...codeKind ? { code_kind: codeKind } : {}, text }));
     return lines([policy(s, { oneTimeInstruction, speakerIdentity, nameTokens: segmented.nameTokens, tuning: tuning2 }), OUTPUT_FORMAT_POLICY, routing, `Return ${schema}`, "SEGMENTS", j(rows)]);
   }
   function buildScopedOutputPrompt2({ segments, sourceContext, settings, oneTimeInstruction = "", nameTokens = [], tuning: tuning2 = null, scope = "narration", speakerIdentity = {} }) {
-    if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens);
+    if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens, settings, speakerIdentity);
     return lines([policy(settings, { scope, oneTimeInstruction, nameTokens, tuning: tuning2, speakerIdentity }), OUTPUT_FORMAT_POLICY, "Translate only TARGETS; SOURCE CONTEXT is reference only.", `Return ${schema}`, "SOURCE CONTEXT", j(h.boundReference(sourceContext, 3e4)), "TARGETS", j(segments.map(({ id, type, text, tagContext, codeKind }) => ({ id, type, ...tagContext?.length ? { tag_context: tagContext } : {}, ...codeKind ? { code_kind: codeKind } : {}, text })))]);
   }
   function buildInputPrompt2(source, s = {}, targetGender = "unknown", i = {}) {
@@ -910,7 +939,7 @@ ${values[k]}`).join("\n");
   const selectionTask = "Rephrase SELECTED only, beyond whitespace changes. Preserve source meaning, grammar/referents, force, consistent terms/tokens/format; fit LEFT/RIGHT when supplied, omit context from output. Apply dialogue voice only to its actual speaker, never narration.";
   function buildSelectionPrompt({ source, sourceContext, translation, selected, start, end, settings, oneTimeInstruction, speakerIdentity = {}, candidateCount = 1, contextMode = "standard", tuning: tuning2 = null }) {
     const { left, right } = selectionContext(translation, start, end, contextMode);
-    if (deepseekKoreanEnabled(settings)) return buildDeepseekSelectionPrompt([{ id: "seg_0000", selected_korean: selected, source_context: ["selection", "narrow"].includes(contextMode) ? str(sourceContext) : str(sourceContext || source), left_context: left, right_context: right }], candidateCount);
+    if (deepseekKoreanEnabled(settings)) return buildDeepseekSelectionPrompt([{ id: "seg_0000", selected_korean: selected, source_context: ["selection", "narrow"].includes(contextMode) ? str(sourceContext) : str(sourceContext || source), left_context: left, right_context: right, in_dialogue: h.selectionTouchesDialogue(translation, start, end), in_tagged_content: selectionTouchesTaggedContent(translation, start, end) }], candidateCount, settings, speakerIdentity);
     const inDialogue = h.selectionTouchesDialogue(translation, start, end);
     const inInnerInfo = selectionTouchesInnerInfo(translation, start, end);
     const inTaggedContent = selectionTouchesTaggedContent(translation, start, end);
@@ -921,8 +950,8 @@ ${values[k]}`).join("\n");
   function buildMultiSelectionPrompt({ source, translation, selections, settings, oneTimeInstruction, speakerIdentity = {}, contextMode = "paragraph", tuning: tuning2 = null }) {
     if (deepseekKoreanEnabled(settings)) return buildDeepseekSelectionPrompt((selections || []).map((row, index) => {
       const { left, right } = selectionContext(translation, Number(row.start), Number(row.end), contextMode, true);
-      return { id: row.id || `multi_${String(index).padStart(4, "0")}`, selected_korean: row.selected, source_context: ["selection", "narrow"].includes(contextMode) ? str(row.sourceContext) : str(row.sourceContext || source), left_context: left, right_context: right };
-    }));
+      return { id: row.id || `multi_${String(index).padStart(4, "0")}`, selected_korean: row.selected, source_context: ["selection", "narrow"].includes(contextMode) ? str(row.sourceContext) : str(row.sourceContext || source), left_context: left, right_context: right, in_dialogue: h.selectionTouchesDialogue(translation, Number(row.start), Number(row.end)), in_tagged_content: selectionTouchesTaggedContent(translation, Number(row.start), Number(row.end)) };
+    }), 1, settings, speakerIdentity);
     const shared = contextMode === "message";
     const selectionOnly = contextMode === "selection" || contextMode === "narrow";
     const rows = (selections || []).map((x, index) => {
@@ -4075,30 +4104,32 @@ Name tokens (restored locally; keep tokens): ${JSON.stringify(names)}` : ""}
 TARGETS
 ${JSON.stringify(payload)}`;
 }
-function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [], oneTimeInstruction = "") {
-  if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens);
+function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [], oneTimeInstruction = "", speakerIdentity = {}) {
+  if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens, settings, speakerIdentity);
   return withTranslationComposition(settings, "output", (current) => buildMinimalOutputPromptInternal(segments, current, nameTokens, oneTimeInstruction));
 }
 async function translateMinimalOutput(segmented, settings, options, { requestSegments, buildSourceMap, reviewOutput }) {
   const config = {
-    customTranslatorEnabled: settings.customTranslatorEnabled,
+    ...deepseekKoreanEnabled(settings) ? deepseekPromptSlots(settings) : {},
+    customTranslatorEnabled: deepseekKoreanEnabled(settings) ? false : settings.customTranslatorEnabled,
     customTranslatorTemplates: settings.customTranslatorTemplates,
     customTranslatorModified: settings.customTranslatorModified,
     developerMode: settings.developerMode === true,
     developerDeepseekKoreanEnabled: settings.developerDeepseekKoreanEnabled === true,
     developerMinimalPrompt: settings.developerMinimalPrompt,
-    chuseokGalbwaeScope: settings.developerMode === true && ["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) ? settings.chuseokGalbwaeScope : settings.developerMode === true && settings.chuseokGalbwaeEnabled === true ? "dialogueInner" : "off"
+    chuseokGalbwaeScope: !deepseekKoreanEnabled(settings) && settings.developerMode === true && ["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) ? settings.chuseokGalbwaeScope : !deepseekKoreanEnabled(settings) && settings.developerMode === true && settings.chuseokGalbwaeEnabled === true ? "dialogueInner" : "off"
   };
+  const effectiveSettings = deepseekKoreanEnabled(settings) ? { ...settings, ...config, developerMadKoreanOutputEnabled: false, developerHongjinFlavorEnabled: false, chuseokGalbwaeEnabled: false } : settings;
   const oneTime = String(options.oneTimeInstruction || "");
   let usedInitialFallback = false;
-  const comparison = createOutputComparison(segmented, settings.debugMode === true, settings, options.diagnosticBinding || null, "minimal");
+  const comparison = createOutputComparison(segmented, settings.debugMode === true, effectiveSettings, options.diagnosticBinding || null, "minimal");
   comparison.translationSettings(config);
   const firstTranslations = /* @__PURE__ */ new Map();
   const effectiveSplitCount = settings.translationEngine === "google-free" ? 1 : outputSplitCount(settings);
   const translations = await runOutputBatches(segmented, effectiveSplitCount, options, async (segments, batchOptions) => {
     const request = (targets, repair = "") => {
       batchOptions.signal.throwIfAborted();
-      let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime);
+      let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime, options.speakerIdentity || {});
       if (repair === "tokens") prompt += "\nPrevious result damaged protected tokens. Retranslate these targets and preserve each original token exactly once.";
       if (repair === "names") prompt += "\nPrevious result left one or more source-language character names in Latin script. Retranslate these targets. Every clear human or fictional character name must use natural Hangul (fixed mapping first); never keep a character name in Latin script merely because it is a proper name. Keep genuine brands, acronyms, products, codes, URLs and handles unchanged.";
       return requestSegments(prompt, targets, {
@@ -4162,17 +4193,17 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
     if (segment.type === "tagged_content") translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
   }
   comparison.capture("tag-normalization", translations);
-  enforceMadKoreanOnly(segmented, translations, settings);
+  enforceMadKoreanOnly(segmented, translations, effectiveSettings);
   comparison.capture("mad-korean-only", translations);
   comparison.postReview(await reviewOutput?.({
     segmented,
     translations,
     speakerIdentity: options.speakerIdentity || {},
-    reviewSettings: settings,
+    reviewSettings: effectiveSettings,
     options
   }));
   comparison.capture("output-post-review", translations);
-  enforceMadKoreanOnly(segmented, translations, settings);
+  enforceMadKoreanOnly(segmented, translations, effectiveSettings);
   comparison.capture("mad-korean-only-final", translations);
   const translation = assembleTranslation(segmented, translations, {
     allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback
@@ -5935,10 +5966,11 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     try {
       const config = { ...reviewSettings || settings, aiPostReview: normalizePostReview(settings.aiPostReview) };
       if (deepseekKoreanEnabled(config)) {
-        config.aiPostReview.bilingual = false;
-        config.globalPromptEnabled = false;
-        config.allDialoguePromptEnabled = false;
         config.customTranslatorEnabled = false;
+        config.developerMadKoreanOutputEnabled = false;
+        config.developerHongjinFlavorEnabled = false;
+        config.chuseokGalbwaeScope = "off";
+        config.chuseokGalbwaeEnabled = false;
       }
       const selected = config.aiPostReview;
       const reference = selected.voice || selected.mad || selected.hongjin ? buildOutputPrompt(

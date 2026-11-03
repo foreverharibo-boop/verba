@@ -1,3 +1,4 @@
+import { createCharacterTranslationReference } from './character-translation-reference.js';
 import { createDisplayStateTrace } from './display-state-trace.js';
 import { enforceMadKoreanOnly } from './mad-output.js';
 import { bilingualSettingsDiagnostic, outputBinding } from './bilingual-diagnostics.js';
@@ -9,7 +10,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.105';
+import { createServerClient } from './server-client.js?v=0.6.106';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -73,9 +74,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.105';
+const EXTENSION_VERSION = '0.6.106';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.104';
+const SERVER_ENGINE_VERSION = '0.6.106';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -291,6 +292,7 @@ const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'expression', label: '표현 디테일', selector: '#verba-expression-detail' },
     { key: 'relationship', label: '말투·호칭 설정', selector: '#verba-developer-relationship-lab' },
     { key: 'deepseek', label: '딥식플 전용 프롬프트', selector: '#verba-deepseek-settings' },
+    { key: 'translationReference', label: '번역 참고 설정', selector: '#verba-translation-reference' },
     { key: 'koreanFlavor', label: '한캐의 맛', selector: '#verba-korean-flavor' },
     { key: 'englishFlavor', label: '영캐의 맛', selector: '#verba-english-flavor' },
     { key: 'madKorean', label: '미친 한출의 맛', selector: '#verba-developer-mad-korean-lab' },
@@ -883,6 +885,12 @@ function traceLatestAssistantSource(phase) {
 let lastPromptConflicts = [];
 
 
+const characterTranslationReference = createCharacterTranslationReference({
+    fieldKey: `${CHARACTER_FIELD_KEY}_translation_reference`,
+    currentReference: currentCharacterReference,
+    notify,
+});
+
 const verbaServer = createServerClient({
     variant: EXTENSION_KEY, version: SERVER_ENGINE_VERSION,
     getSettings: () => settings, getContext: liveContext,
@@ -890,6 +898,7 @@ const verbaServer = createServerClient({
     getSnapshot: () => ({
         settings: { ...settings, profileStats: undefined },
         nameLocks: normalizedCharacterNameLocks(),
+        translationReference: characterTranslationReference.read(),
         character: { name: currentCharacterReference()?.character?.name || liveContext().name2 || '', gender: detectCharacterGender(currentCharacterReference()?.character) },
         context: { name1: liveContext().name1, name2: liveContext().name2 },
     }),
@@ -5009,7 +5018,7 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
         const selected = config.aiPostReview;
         const reference = selected.voice || selected.mad || selected.hongjin || (selected.deepseekTranslationese && deepseekKoreanEnabled(config))
             ? buildOutputPrompt({ ...segmented, segments: [], protectedText: '' }, config,
-                options.oneTimeInstruction || '', speakerIdentity, options.tuning || null, speakerScopes)
+                options.oneTimeInstruction || '', { ...speakerIdentity, omitTranslationContext: true }, options.tuning || null, speakerScopes)
             : '';
         const postReviewTimeoutSeconds = Math.min(60, normalizedProfileFailureTimeoutSeconds());
         const result = await reviewOutputOnce({ segmented, translations, settings: config, speakerScopes, reference, options:{...options,postReviewTimeoutSeconds},
@@ -5401,11 +5410,11 @@ function messageSource(message) {
 function outputSpeakerIdentity(message) {
     const context = liveContext();
     const character = currentCharacterReference()?.character;
-    return resolveOutputSpeakerIdentity({
+    return { ...resolveOutputSpeakerIdentity({
         characterName: String(message?.name || context.name2 || '').trim(),
         characterGender: detectCharacterGender(character),
         userName: String(context.name1 || '').trim(),
-    }, normalizedCharacterNameLocks(character));
+    }, normalizedCharacterNameLocks(character)), translationReference: characterTranslationReference.read() };
 }
 
 function currentTranslationRecoveryScope() {
@@ -10859,6 +10868,18 @@ function generalRelationshipSettingsMarkup() {
                     </details>`;
 }
 
+function characterTranslationReferenceMarkup() {
+    return `<details id="verba-translation-reference" class="verba-tool-details">
+        <summary>번역 참고 설정 <small>캐릭터별</small></summary>
+        <div class="verba-tool-details-content">
+            <label for="verba-translation-reference-text">인물 관계·직책·용어</label>
+            <textarea id="verba-translation-reference-text" data-translation-reference class="text_pole" rows="3" maxlength="2000" placeholder="번역에 필요한 짧은 설정을 적어 주세요."></textarea>
+            <small data-translation-reference-status role="status"></small>
+            <div class="verba-help">현재 캐릭터에 자동 저장되어 같은 캐릭터의 다른 채팅에서도 사용해요. 최대 2,000자이며, 비워 두면 보내지 않아요.</div>
+        </div>
+    </details>`;
+}
+
 function deepseekSettingsMarkup() {
     return `
         <details id="verba-deepseek-settings" class="verba-tool-details verba-deepseek-settings">
@@ -11748,6 +11769,7 @@ function injectSettingsPanel() {
 
                 ${generalRelationshipSettingsMarkup()}
                 ${deepseekSettingsMarkup()}
+                ${characterTranslationReferenceMarkup()}
 
                 <details id="verba-korean-flavor" class="verba-tool-details verba-korean-flavor">
                         <summary>🍚 한캐의 맛 <small>한국어 말맛 커스텀</small></summary>
@@ -11993,6 +12015,7 @@ function injectSettingsPanel() {
     host.append(panel);
     bindSettingsSearch(panel);
     bindAutoInputSetting(panel);
+    characterTranslationReference.bind(panel);
     bindAutoOutputSetting(panel);
     bindServerTranslationSetting(panel);
     refreshProfileSelect();
@@ -13858,6 +13881,7 @@ function setupEvents() {
     if (types.GENERATION_ENDED) source.on(types.GENERATION_ENDED, handleGenerationEnded);
     if (types.CHAT_CHANGED) {
         source.on(types.CHAT_CHANGED, () => {
+            characterTranslationReference.refresh();
             if (fullSourceSnapshotsEnabled) {
                 lastDebugDiagnostic = null;
                 fullSourceSnapshotsEnabled = false;
@@ -13912,6 +13936,7 @@ function setupEvents() {
                 injectInputAction();
                 refreshProfileSelect();
                 renderNameLockManager();
+                characterTranslationReference.refresh();
                 scheduleChatOpenTranslationRestore();
                 scheduleRecentInsteadRevisionTranslations(220);
                 scheduleFreshMountedAssistantTranslations(220);

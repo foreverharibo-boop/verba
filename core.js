@@ -219,6 +219,24 @@ export function findBannedWords(text, configuredWordsOrSettings) {
     return [...new Set(found)];
 }
 
+
+// Diagnostic companion to the existing matcher; never changes acceptance rules.
+// Only matched terms are returned, never surrounding source/draft text.
+export function bannedWordRejectionDiagnostic(before, after, settings = {}) {
+    const configured = new Set(parseBannedWords(settings.bannedWords));
+    const prior = new Set(findBannedWords(before, settings));
+    const hits = findBannedWords(after, settings);
+    return {
+        bannedMatches: hits.slice(0, 8).map(term => ({
+            term: term.slice(0, 80),
+            rule: configured.has(term) ? 'configured' : 'developer-gendered-insult',
+            matchMode: configured.has(term) ? 'case-sensitive-substring' : 'pattern',
+            presentBefore: prior.has(term),
+        })),
+        bannedMatchesOmitted: Math.max(0, hits.length - 8),
+    };
+}
+
 function validationText(value) {
     return replaceProtectedSource(value, PROTECTED_PATTERN, ' ')
         .replace(PROTECTED_TOKEN_PATTERN, ' ')

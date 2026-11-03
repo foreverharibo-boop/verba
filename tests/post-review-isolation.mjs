@@ -126,3 +126,48 @@ test('failure diagnostics are bounded and sanitized again in server summaries', 
     const noDebug=await reviewOutputOnce({...fixture('He waited.',['그는 기다렸다.']),settings:{aiPostReview:{translationese:true}},request:async (_p,rows)=>new Map(rows.map(r=>[r.id,r.CURRENT+'\n']))});
     assert.equal(noDebug.status,'failed');assert.equal(noDebug.failures,undefined);
 });
+
+test('banned rejection identifies substring rule and old/new hits without exposing surrounding text', async () => {
+    for (const presentBefore of [false, true]) {
+        const draft=presentBefore?'그는 사랑스럽게 기다렸다.':'그는 조용히 기다렸다.';
+        const data=fixture('He waited.\n\nHe rested.',[draft,'그는 쉬는 것을 했다.']);
+        const settings={debugMode:true,bannedWords:'사랑,새금지',aiPostReview:{translationese:true,banned:true}};
+        const stats=await reviewOutputOnce({...data,settings,request:async(p,rows)=>{
+            assert.match(p,/case-sensitive literal substrings/);
+            assert.match(p,/새금지/); // Rules absent from CURRENT must still reach review.
+            return new Map(rows.map((r,i)=>[r.id,i===0?'그는 사랑스럽게 오래 기다렸다.':'그는 쉬었다.']));
+        }});
+        assert.equal(stats.status,'partial'); assert.equal(stats.changed,1);
+        assert.equal([...data.translations.values()][0],draft);
+        const safe=serialized(data,stats);
+        assert.deepEqual(safe.failures[0].bannedMatches,[{term:'사랑',rule:'configured',matchMode:'case-sensitive-substring',presentBefore}]);
+        assert.equal(safe.failures[0].bannedMatchesOmitted,0);
+        assert.doesNotMatch(JSON.stringify(safe),/사랑스럽게|오래|He waited|새금지/);
+    }
+});
+
+test('developer rule, debug opt-out, and disabled banned check keep their distinct behavior', async()=>{
+    for (const [debugMode,banned] of [[true,true],[false,true],[true,false]]) {
+        const data=fixture('He waited.',['그는 기다렸다.']);
+        const stats=await reviewOutputOnce({...data,settings:{debugMode,developerMadKoreanOutputEnabled:true,aiPostReview:{meaning:true,banned}},
+            request:async(_p,rows)=>new Map(rows.map(r=>[r.id,'그는 미친년이라고 했다.']))});
+        assert.equal(stats.rejected,banned?1:0);
+        if(debugMode && banned) assert.deepEqual(serialized(data,stats).failures[0].bannedMatches,[{term:'미친년이라고',rule:'developer-gendered-insult',matchMode:'pattern',presentBefore:false}]);
+        else assert.equal(stats.failures,undefined);
+    }
+});
+
+test('banned diagnostic terms and counts remain bounded through summary sanitization',async()=>{
+    const data=fixture('He waited.',['그는 기다렸다.']);
+    const terms=Array.from({length:12},(_,i)=>`금지${i}끝`);
+    const stats=await reviewOutputOnce({...data,settings:{debugMode:true,bannedWords:terms.join(','),aiPostReview:{banned:true}},
+        request:async(_p,rows)=>new Map(rows.map(r=>[r.id,terms.join(' ')]))});
+    const safe=serialized(data,stats).failures[0];
+    assert.equal(safe.bannedMatches.length,8); assert.equal(safe.bannedMatchesOmitted,4);
+    const hostile={...stats,failures:[{...stats.failures[0],bannedMatches:Array(10).fill({term:'가'.repeat(100)+'\n',rule:'SECRET',matchMode:'SECRET',presentBefore:'true',context:'PRIVATE'}),bannedMatchesOmitted:2}]};
+    const cleaned=serialized(data,hostile).failures[0];
+    assert.equal(cleaned.bannedMatches[0].term.length,80);
+    assert.equal(cleaned.bannedMatchesOmitted,4);
+    assert.equal(cleaned.bannedMatches[0].presentBefore,false);
+    assert.doesNotMatch(JSON.stringify(cleaned),/PRIVATE|SECRET/);
+});

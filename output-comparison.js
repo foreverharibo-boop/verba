@@ -1,6 +1,6 @@
 import { bilingualSettingsDiagnostic, sanitizeBilingualSettings, bilingualStageDiagnostic, sanitizeBilingualStage, segmentTypeDiagnostic, sanitizeOutputBinding } from './bilingual-diagnostics.js';
 import { POST_REVIEW_CHECKS } from './post-review.js';
-// Structural diagnostics only: never serialize source, prompts, or responses.
+// No full source, prompts or responses. Banned rejections may include bounded matched terms only.
 // Each trace belongs to one output request, including split/batched requests.
 const STAGES = new Set(['mad-korean-only', 'mad-korean-only-final', 'local-normalization', 'output-post-review', 'initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'markup-integrity', 'assembled', 'received', 'locked-segments', 'display-normalization']);
 const TYPES = new Set(['narration', 'dialogue_candidate', 'tagged_content', 'code_content']);
@@ -48,6 +48,15 @@ function cleanPostReview(value) {
                 type:['general','bilingual'].includes(row?.type) ? row.type : 'unknown',
                 reason:['invalid-general','invalid-bilingual','unselected-format-change','missing-lock'].includes(row?.reason) ? row.reason : 'unknown',
                 detail:['not-string','empty','length-limit','protected-structure','protected-tokens','opaque-tokens','added-latin','banned-word','bilingual-integrity'].includes(row?.detail) ? row.detail : 'unknown',
+                ...(row?.detail === 'banned-word' && Array.isArray(row.bannedMatches) ? {
+                    bannedMatches: row.bannedMatches.slice(0, 8).map(hit => ({
+                        term: typeof hit?.term === 'string' ? hit.term.slice(0, 80).replace(/[\u0000-\u001f\u007f]/gu, '') : '',
+                        rule: ['configured','developer-gendered-insult'].includes(hit?.rule) ? hit.rule : 'unknown',
+                        matchMode: ['case-sensitive-substring','pattern'].includes(hit?.matchMode) ? hit.matchMode : 'unknown',
+                        presentBefore: hit?.presentBefore === true,
+                    })),
+                    bannedMatchesOmitted: number(number(row.bannedMatchesOmitted) + Math.max(0, row.bannedMatches.length - 8)),
+                } : {}),
             })),
             failuresOmitted:number(number(value.failuresOmitted) + Math.max(0, value.failures.length - MAX_ROWS)),
         } : {}),

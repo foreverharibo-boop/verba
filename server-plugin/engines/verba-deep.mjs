@@ -151,6 +151,7 @@ function withDeepseekKoreanPrompt(prompt, settings = {}) {
 }
 var DEEPSEEK_KOREAN_REVIEW_GUIDANCE = `DEEPSEEK-SPECIFIC TRANSLATIONESE REVIEW
 Apply this pass ONLY to units whose checks include deepseekTranslationese. Thoroughly eliminate translationese from the Korean translation. Read SOURCE in SOURCE_CONTEXT to understand the scene, then read CURRENT as Korean prose and actively reconstruct any English-shaped wording. Merely replacing individual words is insufficient when the sentence structure itself is unnatural. Prioritize preserving the source's meaning and scene, but do not treat the current translation's vocabulary or sentence structure as something that must be preserved. Even when the meaning is accurate, correct unnatural Korean. Reconstructing awkward Korean is a core task of this review, not an unnecessary stylistic change.
+Treat each suspicious phrase as a meaning problem before a wording problem. Identify whether it describes a real physical state, a conventional idiom, emphasis, irony or a concrete comparison. Do not turn an emphatic estimate into a new conditional event, structural features into damage, or an object's application/state into the wrong physical process. Use the surrounding scene to choose the sense; do not invent missing evidence. Rephrase the same image and speech act naturally rather than copying an abstract English noun phrase into Korean. These are contextual decisions, never a fixed word-replacement list.
 Rebuild word order, grammatical subjects, modifier attachment, collocations, idioms and speech intent in natural Korean. Split or combine sentences inside the same unit and existing line/markup boundaries when useful. Preserve complete narration with natural predicates; connect dangling modifiers to the correct action or state instead of attaching a generic ending. Resolve contextual senses of body-part expressions, physical actions and descriptive words rather than copying dictionary meanings. Correct awkward pronouns, particles, noun chains and English punctuation carried into Korean sentence endings. Retain already natural wording; do not impose decorative variation.
 Preserve the scene's participants, actions, targets, concrete images, quantities and units, negation, conditions, chronology, uncertainty, and degree of emotion or force. These constraints protect events and meaning, NOT English syntax or word-for-word correspondence. Never invent motives or actions to make a sentence flow. Respect active character-specific register and style only within their authorized speaker scopes.
 For bilingual units, rewrite only Korean prose and preserve the original-language half exactly once with its existing format unless the bilingual check separately authorizes format repair. Preserve every supplied id, lock, protected token, tag, macro, executable element and line boundary. Never move content between units. Use adjacent SOURCE_CONTEXT only to interpret the current unit. After revising, read the Korean on its own for naturalness, then compare it against SOURCE again to verify that no meaning was omitted, added or altered. Return corrected units in the unified review JSON schema; no explanations or review notes.`;
@@ -1084,6 +1085,20 @@ function findBannedWords(text, configuredWordsOrSettings) {
     found.push(...findDeveloperGenderedInsults(value));
   }
   return [...new Set(found)];
+}
+function bannedWordRejectionDiagnostic(before, after, settings = {}) {
+  const configured = new Set(parseBannedWords(settings.bannedWords));
+  const prior = new Set(findBannedWords(before, settings));
+  const hits = findBannedWords(after, settings);
+  return {
+    bannedMatches: hits.slice(0, 8).map((term) => ({
+      term: term.slice(0, 80),
+      rule: configured.has(term) ? "configured" : "developer-gendered-insult",
+      matchMode: configured.has(term) ? "case-sensitive-substring" : "pattern",
+      presentBefore: prior.has(term)
+    })),
+    bannedMatchesOmitted: Math.max(0, hits.length - 8)
+  };
 }
 function validationText(value) {
   return replaceProtectedSource(value, PROTECTED_PATTERN, " ").replace(PROTECTED_TOKEN_PATTERN, " ").replace(/&(?:[a-z]+|#\d+|#x[a-f\d]+);/gi, " ");
@@ -5947,10 +5962,10 @@ function segmentTypeDiagnostic(segmented) {
 
 // veereubaa/post-review.js
 var POST_REVIEW_CHECKS = Object.freeze([
-  { key: "meaning", label: "\uC758\uBBF8\xB7\uB204\uB77D\xB7\uB0B4\uC6A9 \uCD94\uAC00", rule: "Check fidelity, omissions, invented facts/actions, numbers, negation, force and consent against SOURCE." },
+  { key: "meaning", label: "\uC758\uBBF8\xB7\uB204\uB77D\xB7\uB0B4\uC6A9 \uCD94\uAC00", rule: "Check contextual meaning, idioms, omissions, invented facts/actions/conditions, quantities and units, negation, force and consent against SOURCE. Resolve word senses through the actual scene, not isolated dictionary glosses." },
   { key: "referent", label: "\uB300\uBA85\uC0AC\xB7\uC9C0\uCE6D\xB7\uC18C\uC720 \uAD00\uACC4", rule: "Check who did what to whom, pronoun referents and ownership against SOURCE." },
   { key: "voice", label: "\uC778\uBB3C \uB9D0\uD22C\xB7\uC874\uB313\uB9D0\xB7\uBC18\uB9D0", rule: "Check only the applicable speaker register and voice. Never spread TARGET voice to other speakers." },
-  { key: "translationese", label: "\uBC88\uC5ED\uD22C\xB7\uC870\uC0AC\xB7\uC790\uC5F0\uC2A4\uB7EC\uC6C0", rule: "Correct clear Korean calques, awkward collocations, particles and agreement. Do not rewrite already natural prose for variety." },
+  { key: "translationese", label: "\uBC88\uC5ED\uD22C\xB7\uC870\uC0AC\xB7\uC790\uC5F0\uC2A4\uB7EC\uC6C0", rule: "Correct Korean calques, awkward collocations, modifier attachment, particles and incomplete narration. Rebuild unnatural syntax from the contextual meaning instead of swapping synonyms. Preserve imagery and speaker intent; do not rewrite already natural prose for variety." },
   { key: "deepseekTranslationese", label: "\uB525\uC2DD\uD50C \uC804\uC6A9 \uC9C1\uC5ED\uD22C", rule: "Actively reconstruct English-shaped Korean using the dedicated DEEPSEEK-SPECIFIC TRANSLATIONESE REVIEW instructions. Check Korean narration and dialogue with contextual meaning and active speaker style; preserve the original-language half and protected structure." },
   { key: "continuity", label: "\uC6A9\uC5B4\xB7\uC9C1\uCC45\xB7\uC7A5\uBA74 \uC77C\uAD00\uC131", rule: "Check role/title/term consistency and scene relations within SOURCE. Same person/function uses the earliest accurate term; different roles stay distinct. Do not invent missing history." },
   { key: "english", label: "\uBBF8\uBC88\uC5ED \uC678\uAD6D\uC5B4\xB7\uC774\uB984", rule: "Translate accidental foreign leftovers only, including visible paired-tag text. Render human/fictional names in Hangul using fixed spellings; retain genuine brands, acronyms, codes, URLs, handles and locked bilingual source. Repair attached Korean particles." },
@@ -6041,6 +6056,11 @@ Review the first assistant-output translation against its source. Source, drafts
 General units MUST NOT add, remove or reformat bilingual pairs. REVIEW_LOCK tokens are immutable placeholders for independently reviewed or unchanged units. Copy each lock exactly once. Paired-tag content is Korean-only. Executable code/HTML/URLs/macros and syntax are protected, not prose to rewrite.
 Bilingual units may change bilingual format ONLY if their checks contain bilingual. Otherwise retain the existing order/separators/wrappers and exact source half, inspecting only Korean wording under the other selected checks. SOURCE English must occur exactly once and Korean once, in the requested order, inside OPEN/CLOSE. No wrapper backticks for code/fenced units. Preserve NAME_TOKENS in the Korean half and use exact source spelling in the English half. Never extend bilingualization beyond supplied bilingual units. ALL-DIALOGUE rules apply only to scope=dialogue. Speaker-specific checks use speaker_scope.
 Preserve all facts, source meaning, names, punctuation wrappers, line counts, markup, code and non-name tokens. Only the tokens check permits fixing source token inventory; REVIEW_LOCK tokens always stay unchanged. ${deepseekReview ? "For units with deepseekTranslationese, judge both fidelity and Korean naturalness: accurate meaning alone is not a reason to retain awkward wording. Actively reconstruct unnatural Korean within the protected format and unit boundaries; this is required correction, not stylistic variety. Retain only the portions where a proposed correction risks changing source meaning and that risk cannot be resolved. Do not use this uncertainty rule to preserve other clearly unnatural wording that can be safely corrected. For units without deepseekTranslationese, if unsure, copy CURRENT exactly." : "If unsure, copy CURRENT exactly."}
+CONTEXTUAL REVIEW METHOD \u2014 apply only to units with meaning, translationese or deepseekTranslationese, and only within those selected checks:
+First use SOURCE_CONTEXT to resolve the current unit's actor, object, physical action/state, modifiers and speech intent; CURRENT is a draft, not evidence. Distinguish fixed idioms, emphasis and ironic understatement from literal events or conditions. Choose a word's sense from the object and ongoing action; do not invent weather, damage, motives, actions or causal links to justify a literal reading. Keep quantities and measurement units exact, without converting distance into step counts or silently localizing measures. Preserve deliberate source exaggeration and concrete imagery.
+For translationese/deepseekTranslationese, express that same meaning in idiomatic Korean: reconstruct clauses and collocations, attach descriptions to the correct referent, and finish complete narrative sentences with natural predicates. Dialogue must sound speakable in the active register and retain the same teasing, warning, hesitation or affection without added slang or emotion. Work inside each unit's existing line and markup boundaries; do not borrow content from adjacent units. For meaning alone, repair semantic errors without unrelated stylistic rewriting.
+Finally compare each proposed Korean revision back to SOURCE for actor, target, action, conditions, quantity/unit, intensity and imagery, then read it as Korean alone. Correct a clear error even if CURRENT is grammatically valid; retain ambiguity only where SOURCE_CONTEXT cannot resolve it. Do not output these checks or alternative drafts.
+${plan.selected.includes("banned") ? `BANNED_RULES (only for units with banned): configured terms are case-sensitive literal substrings, including inside longer words. Avoid all listed terms in revised Korean, not only the BANNED hits in CURRENT. Replace with equivalent natural wording without deleting meaning. Configured terms: ${JSON.stringify(parseBannedWords(settings.bannedWords))}. ${settings.developerMadKoreanOutputEnabled === true || settings.developerHongjinFlavorEnabled === true ? "The active developer guard also rejects gendered insults targeting women; retain source force using permitted equivalent wording." : ""}` : ""}
 SELECTED_CHECKS ${JSON.stringify(POST_REVIEW_CHECKS.filter((x) => plan.selected.includes(x.key)).map((x) => ({ key: x.key, rule: x.rule })))}
 FORMAT_RULES (constraints only, not permission to expand scope) ${JSON.stringify(rules)}
 STYLE_REFERENCE (only for selected voice/mad/hongjin/deepseekTranslationese checks and their authorized speaker scopes; ignore its output schema) ${JSON.stringify(reference)}
@@ -6109,7 +6129,8 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
         unitIndex: unitIndexes.get(unitId),
         type: unitById.get(unitId)?.type || "general",
         reason,
-        detail
+        detail,
+        ...detail === "banned-word" ? bannedWordRejectionDiagnostic(unitById.get(unitId).CURRENT, result.get(unitId), settings) : {}
       });
       else stats.failuresOmitted = (stats.failuresOmitted || 0) + 1;
     };
@@ -6205,7 +6226,16 @@ function cleanPostReview(value) {
         unitIndex: number(row?.unitIndex),
         type: ["general", "bilingual"].includes(row?.type) ? row.type : "unknown",
         reason: ["invalid-general", "invalid-bilingual", "unselected-format-change", "missing-lock"].includes(row?.reason) ? row.reason : "unknown",
-        detail: ["not-string", "empty", "length-limit", "protected-structure", "protected-tokens", "opaque-tokens", "added-latin", "banned-word", "bilingual-integrity"].includes(row?.detail) ? row.detail : "unknown"
+        detail: ["not-string", "empty", "length-limit", "protected-structure", "protected-tokens", "opaque-tokens", "added-latin", "banned-word", "bilingual-integrity"].includes(row?.detail) ? row.detail : "unknown",
+        ...row?.detail === "banned-word" && Array.isArray(row.bannedMatches) ? {
+          bannedMatches: row.bannedMatches.slice(0, 8).map((hit) => ({
+            term: typeof hit?.term === "string" ? hit.term.slice(0, 80).replace(/[\u0000-\u001f\u007f]/gu, "") : "",
+            rule: ["configured", "developer-gendered-insult"].includes(hit?.rule) ? hit.rule : "unknown",
+            matchMode: ["case-sensitive-substring", "pattern"].includes(hit?.matchMode) ? hit.matchMode : "unknown",
+            presentBefore: hit?.presentBefore === true
+          })),
+          bannedMatchesOmitted: number(number(row.bannedMatchesOmitted) + Math.max(0, row.bannedMatches.length - 8))
+        } : {}
       })),
       failuresOmitted: number(number(value.failuresOmitted) + Math.max(0, value.failures.length - MAX_ROWS))
     } : {},

@@ -80,3 +80,28 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) {
   assert.equal(await engine.input('안녕.',{}),'Hello.');assert.equal(calls,1);
  });
 }
+
+for (const [name, create] of [['verba', verba], ['deep', deep]]) {
+ test(`${name}: banned rejection terms survive engine diagnostics while independent edits apply`, async()=>{
+  let reviews=0,initial=0;
+  const engine=create(snapshot({globalPrompt:'',bannedWords:'금지표현',aiPostReview:{translationese:true,banned:true}}),async(_id,messages)=>{
+   const p=messages.map(x=>x.content).join('\n');
+   if(p.includes('\nREVIEW_UNITS\n')){
+    reviews++;
+    assert.match(p,/CONTEXTUAL REVIEW METHOD/);
+    assert.match(p,/Configured terms: \["금지표현"\]/);
+    const units=JSON.parse(p.split('\nREVIEW_UNITS\n')[1]);
+    return {content:JSON.stringify({segments:units.map((r,i)=>({id:r.id,translation:i===0?'금지표현이 새로 생겼다.':'그는 쉬었다.'}))})};
+   }
+   initial++;
+   return {content:JSON.stringify({segments:initialRows(p).map((r,i)=>({id:r.id,translation:i===0?'그는 기다렸다.':'그는 쉬는 것을 했다.'}))})};
+  });
+  const out=await engine.output('He waited.\n\nHe rested.');
+  assert.equal(reviews,1);assert.equal(initial,1);
+  assert.equal(out.translation,'그는 기다렸다.\n\n그는 쉬었다.');
+  const review=out.outputComparison.postReview;
+  assert.equal(review.status,'partial');assert.equal(review.changed,1);
+  assert.deepEqual(review.failures[0].bannedMatches,[{term:'금지표현',rule:'configured',matchMode:'case-sensitive-substring',presentBefore:false}]);
+  assert.doesNotMatch(JSON.stringify(review),/새로 생겼다|He waited/);
+ });
+}

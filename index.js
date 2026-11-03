@@ -8,7 +8,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.99';
+import { createServerClient } from './server-client.js?v=0.6.100';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -72,9 +72,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.99';
+const EXTENSION_VERSION = '0.6.100';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.99';
+const SERVER_ENGINE_VERSION = '0.6.100';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -1150,7 +1150,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             timeoutSeconds: Number(settings.timeoutSeconds) || 0,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
-        privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
+        privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 후검수 금지어 거부 진단에는 검출된 표현·판정 방식·수정 전 존재 여부가 포함됩니다. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
         ...(sourceChangeTracer.diagnostics().fullTextEnabled && settings.debugMode === true
             ? { fullSourceWarning: '원문 전체 비교 기록이 활성화되어 있습니다. sourceChangeTrace.events에는 변경 전후의 RP 본문 전체, 삭제/추가된 글이 포함됩니다. 외부 공유 전 반드시 내용을 검토하세요.' } : {}),
         limitation: '숨김은 브라우저 동결의 증거가 아닙니다. freeze 이벤트나 타이머 지연은 참고 정황이며, 실제 동결 중에는 브라우저 로그를 기록할 수 없습니다. 터먹스 로그는 별도입니다.',

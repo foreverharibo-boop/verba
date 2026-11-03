@@ -10,7 +10,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.106';
+import { createServerClient } from './server-client.js?v=0.6.107';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -74,9 +74,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.106';
+const EXTENSION_VERSION = '0.6.107';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.106';
+const SERVER_ENGINE_VERSION = '0.6.107';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -398,6 +398,7 @@ const DEFAULT_SETTINGS = {
     developerTargetToUserAddressFrequency: 'natural',
     developerTargetToUserRegister: 'unset',
     developerTargetToOtherRegister: 'unset',
+    developerUserToTargetRegister: 'unset',
     developerHongjinFlavorEnabled: false,
     developerMadKoreanOutputEnabled: false,
     developerMadKoreanTargetToUserRegister: 'source',
@@ -552,6 +553,9 @@ settings.developerTargetToUserRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.som
     : 'unset';
 settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === settings.developerTargetToOtherRegister)
     ? settings.developerTargetToOtherRegister
+    : 'unset';
+settings.developerUserToTargetRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === settings.developerUserToTargetRegister)
+    ? settings.developerUserToTargetRegister
     : 'unset';
 settings.developerHongjinFlavorEnabled = settings.developerHongjinFlavorEnabled === true;
 settings.developerMadKoreanOutputEnabled = settings.developerMadKoreanOutputEnabled === true;
@@ -1449,6 +1453,7 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
         developerTargetToUserAddressFrequency: valid(DEVELOPER_USER_ADDRESS_FREQUENCY_OPTIONS, raw.developerTargetToUserAddressFrequency, DEFAULT_SETTINGS.developerTargetToUserAddressFrequency),
         developerTargetToUserRegister: valid(DEVELOPER_AUDIENCE_REGISTER_OPTIONS, raw.developerTargetToUserRegister, DEFAULT_SETTINGS.developerTargetToUserRegister),
         developerTargetToOtherRegister: valid(DEVELOPER_AUDIENCE_REGISTER_OPTIONS, raw.developerTargetToOtherRegister, DEFAULT_SETTINGS.developerTargetToOtherRegister),
+        developerUserToTargetRegister: valid(DEVELOPER_AUDIENCE_REGISTER_OPTIONS, raw.developerUserToTargetRegister, DEFAULT_SETTINGS.developerUserToTargetRegister),
 
         developerMadKoreanOutputEnabled: raw.developerMadKoreanOutputEnabled === true,
         developerMadKoreanTargetToUserRegister: valid(DEVELOPER_MAD_KOREAN_REGISTER_OPTIONS, raw.developerMadKoreanTargetToUserRegister, DEFAULT_SETTINGS.developerMadKoreanTargetToUserRegister),
@@ -1496,6 +1501,7 @@ function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
         developerTargetToUserAddressFrequency: source.developerTargetToUserAddressFrequency,
         developerTargetToUserRegister: source.developerTargetToUserRegister,
         developerTargetToOtherRegister: source.developerTargetToOtherRegister,
+        developerUserToTargetRegister: source.developerUserToTargetRegister,
 
         developerMadKoreanOutputEnabled: source.developerMadKoreanOutputEnabled,
         developerMadKoreanTargetToUserRegister: source.developerMadKoreanTargetToUserRegister,
@@ -2096,6 +2102,7 @@ function applyPromptPresetDeveloperSettings(value) {
     settings.developerTargetToUserAddressFrequency = next.developerTargetToUserAddressFrequency;
     settings.developerTargetToUserRegister = next.developerTargetToUserRegister;
     settings.developerTargetToOtherRegister = next.developerTargetToOtherRegister;
+    settings.developerUserToTargetRegister = next.developerUserToTargetRegister;
 
     settings.developerMadKoreanOutputEnabled = next.developerMadKoreanOutputEnabled;
     settings.developerMadKoreanTargetToUserRegister = next.developerMadKoreanTargetToUserRegister;
@@ -2229,6 +2236,7 @@ function applyPromptPresetTranslationSettings(value) {
     setControlValue('#verba-developer-speech-distance', settings.developerSpeechDistance);
     setControlValue('#verba-developer-target-user-register', settings.developerTargetToUserRegister);
     setControlValue('#verba-developer-target-other-register', settings.developerTargetToOtherRegister);
+    setControlValue('#verba-developer-user-target-register', settings.developerUserToTargetRegister);
     setControlValue('#verba-developer-target-user-address', settings.developerTargetToUserAddress);
     setControlValue('#verba-developer-target-user-address-strength', settings.developerTargetToUserAddressStrength);
     setControlValue('#verba-developer-target-user-address-frequency', settings.developerTargetToUserAddressFrequency);
@@ -10804,19 +10812,24 @@ function generalRelationshipSettingsMarkup() {
                                 <section class="verba-relationship-section">
                                     <div class="verba-relationship-section-title">청자별 말투 분리</div>
 
-                                    <label for="verba-developer-target-user-register">USER에게</label>
+                                    <label for="verba-developer-target-user-register">캐릭터 → USER</label>
                                     <select id="verba-developer-target-user-register" class="text_pole">
                                         ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToUserRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
 
-                                    <label for="verba-developer-target-other-register">타인에게</label>
+                                    <label for="verba-developer-target-other-register">캐릭터 → 타인</label>
                                     <select id="verba-developer-target-other-register" class="text_pole">
                                         ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerTargetToOtherRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
 
+                                    <label for="verba-developer-user-target-register">USER → 캐릭터</label>
+                                    <select id="verba-developer-user-target-register" class="text_pole">
+                                        ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerUserToTargetRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                                    </select>
+
                                     <div class="verba-help verba-relationship-help">
                                         <span>미설정이면 기존 말투 거리감과 프롬프트를 따릅니다.</span>
-                                        <span>반말·존댓말은 캐릭터가 그 청자에게 말하는 것이 확실할 때만 적용합니다.</span>
+                                        <span>반말·존댓말은 선택한 화자와 청자의 직접 대화가 확실할 때만 적용합니다.</span>
                                         <span>청자가 애매하면 추측하지 않습니다.</span>
                                     </div>
                                 </section>
@@ -10859,8 +10872,8 @@ function generalRelationshipSettingsMarkup() {
                                         <span>호칭을 비워두면 나이·성별만 보고 오빠/언니/형/누나 같은 관계 호칭을 추측하지 않습니다.</span>
                                         <span>입력한 호칭은 캐릭터가 현재 USER를 가리키는 것이 확실한 일반 2인칭에만 참고합니다.</span>
                                         <span>원문에 baby/sweetheart 같은 애칭·명시적 호칭·직함·이름이 있으면 원문 표현이 우선합니다.</span>
-                                        <span>E→K 아웃풋의 현재 캐릭터 직접 대사에만 적용합니다.</span>
-                                        <span>USER/NPC 대사와 K→E 인풋에는 적용하지 않습니다.</span>
+                                        <span>호칭 설정은 E→K 아웃풋의 현재 캐릭터 직접 대사에만 적용합니다.</span>
+                                        <span>USER → 캐릭터 말투는 AI 답변 속 USER의 직접 대사에 적용합니다. NPC 대사와 K→E 인풋에는 적용하지 않습니다.</span>
                                     </div>
                                 </section>
                             </div>
@@ -11360,6 +11373,7 @@ function injectSettingsPanel() {
     if (existingPanels.length) {
         const keep = existingPanels[0];
         existingPanels.slice(1).forEach(panel => panel.remove());
+        characterTranslationReference.refresh();
         return keep;
     }
 
@@ -12328,6 +12342,14 @@ function injectSettingsPanel() {
 
         if (target.id === 'verba-developer-target-other-register' && target instanceof HTMLSelectElement) {
             settings.developerTargetToOtherRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === target.value)
+                ? target.value
+                : 'unset';
+            saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-developer-user-target-register' && target instanceof HTMLSelectElement) {
+            settings.developerUserToTargetRegister = DEVELOPER_AUDIENCE_REGISTER_OPTIONS.some(option => option.value === target.value)
                 ? target.value
                 : 'unset';
             saveSettings();

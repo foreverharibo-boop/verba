@@ -1,3 +1,4 @@
+import { userToCharacterRegisterRule } from './user-character-register.js';
 import { translationProse } from './translation-composer.js';
 
 export const TRANSLATION_REFERENCE_LIMIT = 2000;
@@ -7,11 +8,13 @@ export function normalizeTranslationReference(value) {
     return typeof value === 'string' ? value.slice(0, TRANSLATION_REFERENCE_LIMIT) : '';
 }
 
-export function translationContext(settings = {}, identity = {}) {
+export function translationContext(settings = {}, identity = {}, scope = 'mixed') {
     // The post-review's existing style-reference builder must not add this new pass.
-    if (identity.omitTranslationContext === true) return '';
+    const register = userToCharacterRegisterRule(settings, identity, scope);
+    if (identity.omitTranslationContext === true) return register;
     const reference = normalizeTranslationReference(identity.translationReference).trim();
     return [
+        register,
         settings.developerMadKoreanOutputEnabled === true
             ? CONTEXT_INTERPRETATION_RULES
             : translationProse(settings, 'primary', CONTEXT_INTERPRETATION_RULES),

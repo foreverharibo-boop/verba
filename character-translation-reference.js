@@ -58,10 +58,12 @@ export function createCharacterTranslationReference({ fieldKey, currentReference
     function refresh() {
         if (!input) return;
         boundReference = currentReference();
-        input.disabled = !boundReference;
-        input.value = read(boundReference);
+        if (input.disabled !== !boundReference) input.disabled = !boundReference;
+        const value = read(boundReference);
+        if (input.value !== value) input.value = value;
         const name = boundReference?.character?.name || boundReference?.character?.data?.name || '';
-        status.textContent = boundReference ? `${name} · ${entries.get(key(boundReference))?.dirty ? '저장 중…' : '캐릭터별 자동 저장'}` : '개별 캐릭터 채팅에서 입력해 주세요';
+        const label = boundReference ? `${name} · ${entries.get(key(boundReference))?.dirty ? '저장 중…' : '캐릭터별 자동 저장'}` : '개별 캐릭터 채팅에서 입력해 주세요';
+        if (status.textContent !== label) status.textContent = label;
     }
     function bind(root) {
         input = root.querySelector('[data-translation-reference]');
@@ -73,6 +75,9 @@ export function createCharacterTranslationReference({ fieldKey, currentReference
             const entry = entries.get(key(boundReference));
             if (entry?.timer) flush(entry);
         });
+        // A card may become available after CHAT_CHANGED/startup has fired.
+        // Recheck on opening/entering settings, including an initially disabled field.
+        for (const event of ['pointerdown', 'focusin', 'toggle']) root.addEventListener?.(event, refresh, true);
         refresh();
     }
     return { read, edit, bind, refresh, flush: reference => {

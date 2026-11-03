@@ -51,9 +51,10 @@ function cleanPostReview(value) {
                 ...(row?.detail === 'banned-word' && Array.isArray(row.bannedMatches) ? {
                     bannedMatches: row.bannedMatches.slice(0, 8).map(hit => ({
                         term: typeof hit?.term === 'string' ? hit.term.slice(0, 80).replace(/[\u0000-\u001f\u007f]/gu, '') : '',
-                        rule: ['configured','developer-gendered-insult'].includes(hit?.rule) ? hit.rule : 'unknown',
-                        matchMode: ['case-sensitive-substring','pattern'].includes(hit?.matchMode) ? hit.matchMode : 'unknown',
+                        rule: ['configured','configured-conditional','developer-gendered-insult'].includes(hit?.rule) ? hit.rule : 'unknown',
+                        matchMode: ['case-sensitive-substring','source-conditioned-word','pattern'].includes(hit?.matchMode) ? hit.matchMode : 'unknown',
                         presentBefore: hit?.presentBefore === true,
+                        ...(hit?.rule === 'configured-conditional' && typeof hit.sourceTerm === 'string' ? { sourceTerm: hit.sourceTerm.slice(0,80).replace(/[\u0000-\u001f\u007f]/gu, '') } : {}),
                     })),
                     bannedMatchesOmitted: number(number(row.bannedMatchesOmitted) + Math.max(0, row.bannedMatches.length - 8)),
                 } : {}),

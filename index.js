@@ -8,7 +8,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.100';
+import { createServerClient } from './server-client.js?v=0.6.101';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -72,9 +72,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.100';
+const EXTENSION_VERSION = '0.6.101';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.100';
+const SERVER_ENGINE_VERSION = '0.6.101';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -1150,7 +1150,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             timeoutSeconds: Number(settings.timeoutSeconds) || 0,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
-        privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 후검수 금지어 거부 진단에는 검출된 표현·판정 방식·수정 전 존재 여부가 포함됩니다. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
+        privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '채팅·프롬프트는 별도로 수집하지 않음. 후검수 금지어 거부 진단에는 검출된 표현·조건부 규칙의 원문 단어·판정 방식·수정 전 존재 여부가 포함됩니다. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
         ...(sourceChangeTracer.diagnostics().fullTextEnabled && settings.debugMode === true
             ? { fullSourceWarning: '원문 전체 비교 기록이 활성화되어 있습니다. sourceChangeTrace.events에는 변경 전후의 RP 본문 전체, 삭제/추가된 글이 포함됩니다. 외부 공유 전 반드시 내용을 검토하세요.' } : {}),
         limitation: '숨김은 브라우저 동결의 증거가 아닙니다. freeze 이벤트나 타이머 지연은 참고 정황이며, 실제 동결 중에는 브라우저 로그를 기록할 수 없습니다. 터먹스 로그는 별도입니다.',
@@ -4092,7 +4092,7 @@ async function planRepeatedRoleTermLocks(segmented, options = {}) {
                 || target.length > 40
                 || /[\r\n@]/.test(target)
                 || !hasKorean(target)
-                || findBannedWords(target, settings).length
+                || findBannedWords(target, settings, term).length
             ) return [];
             return [{ source: term, target }];
         });
@@ -4933,7 +4933,7 @@ async function runExperimentalQualityAudit({
             }
 
             const banned = changed.filter(segment =>
-                findBannedWords(translations.get(segment.id), settings).length,
+                findBannedWords(translations.get(segment.id), settings, segment.text).length,
             );
             if (banned.length) {
                 await repairSegmentsByOutputScope({
@@ -4967,7 +4967,7 @@ async function runExperimentalQualityAudit({
             });
 
             const auditStillInvalid = changed.some(segment =>
-                findBannedWords(translations.get(segment.id), settings).length,
+                findBannedWords(translations.get(segment.id), settings, segment.text).length,
             ) || findUntranslatedSegments(changed, translations, settings, speakerScopes).length
                 || findProtectedTokenIntegrityProblems(segmented.segments, translations).length;
             if (auditStillInvalid) {
@@ -5159,7 +5159,7 @@ async function translateOutputText(source, options = {}) {
     };
 
     const banned = segmented.segments.filter(segment =>
-        findBannedWords(translations.get(segment.id), settings).length,
+        findBannedWords(translations.get(segment.id), settings, segment.text).length,
     );
     if (POST_TRANSLATION_AI_REPAIR_ENABLED && banned.length) {
         try {
@@ -5173,7 +5173,7 @@ async function translateOutputText(source, options = {}) {
                 stage: 'banned-word-repair',
             });
             const remainingBanned = segmented.segments.some(segment =>
-                findBannedWords(translations.get(segment.id), settings).length,
+                findBannedWords(translations.get(segment.id), settings, segment.text).length,
             );
             if (remainingBanned) fallBackToInitialTranslation('금지어');
         } catch (error) {
@@ -5274,7 +5274,7 @@ async function translateOutputText(source, options = {}) {
     enforceMadKoreanOnly(segmented, translations, settings);
     comparison.capture('mad-korean-only-final', translations);
 
-    const remaining = [...translations.values()].flatMap(text => findBannedWords(text, settings));
+    const remaining = segmented.segments.flatMap(segment => findBannedWords(translations.get(segment.id), settings, segment.text));
     if (remaining.length) {
         console.warn(`[베르바] 금지어 의심이 남았지만 최초 번역 결과를 우선 적용합니다: ${[...new Set(remaining)].join(', ')}`);
     }
@@ -9438,7 +9438,7 @@ Return all required ids in the same schema. For listed ids, rephrase beyond Unic
             if (sameRetranslationWording(replacement, row.selected)) {
                 throw new Error(`AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
             }
-            const banned = findBannedWords(replacement, settings);
+            const banned = findBannedWords(replacement, settings, selectionSourceContext({ ...state, ...row }, 'selection'));
             if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
             if (replacement.length > Math.max(300, row.selected.length * 7)) {
                 throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
@@ -9700,7 +9700,7 @@ async function retranslateSelection(snapshot) {
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
-                if (findBannedWords(text, settings).length) return false;
+                if (findBannedWords(text, settings, selectionSourceContext(snapshot, 'selection')).length) return false;
                 return text.length <= Math.max(300, snapshot.selected.length * 7);
             });
             if (candidates.length < 2) {
@@ -9738,7 +9738,7 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
             }
         }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
-        const banned = findBannedWords(replacement, settings);
+        const banned = findBannedWords(replacement, settings, selectionSourceContext(snapshot, 'selection'));
         if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
         if (replacement.length > Math.max(300, snapshot.selected.length * 7)) {
             throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
@@ -11651,8 +11651,8 @@ function injectSettingsPanel() {
                     <summary>번역 금지어 <small>사용하지 않을 표현</small></summary>
                     <div class="verba-tool-details-content">
                 <label for="verba-banned-words">번역 금지어</label>
-                <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="한 줄에 하나씩 입력">${escapeHtml(settings.bannedWords)}</textarea>
-                <div class="verba-help">금지어가 나오면 해당 문단만 다시 요청하고 정상 문단은 유지해요.</div>
+                <textarea id="verba-banned-words" class="text_pole" rows="4" placeholder="bro=형, 형씨&#10;굳은살&#10;육봉">${escapeHtml(settings.bannedWords)}</textarea>
+                <div class="verba-help">원문=금지 번역, 금지 번역 형식은 해당 원문의 번역에만 적용해요. 예: bro=형, 형씨. 쉼표 앞뒤 공백은 무시하며, 다른 규칙은 다음 줄에 적어 주세요. = 없는 줄은 원문과 관계없는 금지어예요. AI 후검수의 금지어 항목을 켜면 교정을 요청하고, 위반이 남은 수정안은 적용하지 않아요.</div>
                     </div>
                 </details>
 

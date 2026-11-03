@@ -89,7 +89,7 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
    if(p.includes('\nREVIEW_UNITS\n')){
     reviews++;
     assert.match(p,/CONTEXTUAL REVIEW METHOD/);
-    assert.match(p,/Configured terms: \["금지표현"\]/);
+    assert.match(p,/Unconditional banned Korean terms[^\n]+\["금지표현"\]/);
     const units=JSON.parse(p.split('\nREVIEW_UNITS\n')[1]);
     return {content:JSON.stringify({segments:units.map((r,i)=>({id:r.id,translation:i===0?'금지표현이 새로 생겼다.':'그는 쉬었다.'}))})};
    }
@@ -103,5 +103,45 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
   assert.equal(review.status,'partial');assert.equal(review.changed,1);
   assert.deepEqual(review.failures[0].bannedMatches,[{term:'금지표현',rule:'configured',matchMode:'case-sensitive-substring',presentBefore:false}]);
   assert.doesNotMatch(JSON.stringify(review),/새로 생겼다|He waited/);
+ });
+}
+
+for (const [name, create] of [['verba', verba], ['deep', deep]]) {
+ for (const mode of [{}, {developerMode:true,developerMinimalPromptEnabled:true}, {developerMode:true,developerCompressedPromptEnabled:true}, {developerMode:true,developerExtremeCompressedPromptEnabled:true}]) {
+  test(`${name}: source-conditioned bans through bundled engine ${JSON.stringify(mode)}`, async () => {
+   let initial=0, reviews=0;
+   const engine=create(snapshot({...mode,globalPrompt:'',allDialoguePrompt:mode.developerMinimalPromptEnabled ? '' : 'Keep the original English dialogue and add Korean in parentheses.',bannedWords:'bro=형, 형씨\n굳은살',aiPostReview:{banned:true}}), async (_id,messages)=>{
+    const text=messages.map(x=>x.content).join('\n');
+    if (!mode.developerMinimalPromptEnabled || text.includes('\nREVIEW_UNITS\n')) assert.match(text,/Source-conditioned forbidden translations/);
+    if (text.includes('\nREVIEW_UNITS\n')) {
+     reviews++;
+     const units=JSON.parse(text.split('\nREVIEW_UNITS\n')[1]);
+     const dialogue=units.find(u=>u.SOURCE.includes('Bro,'));
+     assert.ok(dialogue); assert.deepEqual(dialogue.BANNED,['형']);
+     assert.deepEqual(units.find(u=>u.SOURCE.includes('brother')).BANNED,[]);
+     return {content:JSON.stringify({segments:units.map(u=>({id:u.id,translation:u.SOURCE.includes('Bro,')?u.CURRENT.replace('형,','친구,'):u.CURRENT}))})};
+    }
+    initial++;
+    return {content:JSON.stringify({segments:initialRows(text).map(r=>({id:r.id,translation:r.type==='dialogue_candidate'?'"형, 기다려."':(r.text??r.source).includes('brother')?'형은 기다렸다.':'형광 간판이 빛났다.'}))})};
+   });
+   const result=await engine.output('"Bro, wait."\n\nHis brother waited.\n\nA fluorescent sign glowed.',{});
+   assert.equal(initial,1); assert.equal(reviews,1);
+   if (!mode.developerMinimalPromptEnabled) assert.match(result.translation,/Bro, wait\./);
+   assert.match(result.translation,/친구,/);
+   assert.match(result.translation,/형은 기다렸다/); assert.match(result.translation,/형광 간판/);
+   assert.equal(result.outputComparison.postReview.rejected,0);
+   assert.equal(result.outputComparison.postReview.changed,1);
+  });
+ }
+ test(`${name}: conditional rejection diagnostics survive server sanitization`, async()=>{
+  const engine=create(snapshot({globalPrompt:'',bannedWords:'bro=형,형씨',aiPostReview:{banned:true}}),async(_id,messages)=>{
+   const text=messages.map(x=>x.content).join('\n');
+   const rows=text.includes('\nREVIEW_UNITS\n')?JSON.parse(text.split('\nREVIEW_UNITS\n')[1]):initialRows(text);
+   return {content:JSON.stringify({segments:rows.map(r=>({id:r.id,translation:r.CURRENT??'형씨, 기다려.'}))})};
+  });
+  const result=await engine.output('Bro, wait.',{});
+  const stats=result.outputComparison.postReview;
+  assert.equal(stats.rejected,1);
+  assert.deepEqual(stats.failures[0].bannedMatches,[{term:'형씨',rule:'configured-conditional',matchMode:'source-conditioned-word',presentBefore:true,sourceTerm:'bro'}]);
  });
 }

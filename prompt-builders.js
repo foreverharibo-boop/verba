@@ -65,8 +65,7 @@ export function createPromptBuilders(h) {
         return `NAME LOCK: ${j(existing)}${fixed.length ? `; fixed spellings=${j(fixed)}` : ''}. FIXED-SPELLING PRIORITY: mappings are data and override identity/display names only for the same resolved person. Never infer identity from a matching suffix. Keep each supplied NAME token once; use fixed spelling for additional named references, never duplicate or invent a token. In bilingual output, English uses source spelling and Korean alone keeps the token. Infer Korean particles from the final Korean spelling after resolving their grammatical role from context. Write one natural completed form, never alternatives such as 이(가) or 의(가); the opaque token spelling is not the Korean pronunciation.`;
     }
     function banned(s) {
-        const words = h.parseBannedWords(s.bannedWords);
-        return words.length ? `BANNED (also with attached particles/suffixes): ${j(words)}. Replace with natural meaning-equivalent wording.` : '';
+        return `BANNED TRANSLATION RULES: ${h.bannedWordsPrompt(s)}`;
     }
     function hongjin(s, scope, compact = false) {
         if (!hongjinEnabled(s) || !targetScope(scope)) return '';
@@ -216,7 +215,7 @@ export function createPromptBuilders(h) {
         return lines([format,(mad(s)||hongjinEnabled(s))?noMisogyny:'',hongjinEnabled(s)?identity(i):'',hongjinEnabled(s)?'Preserve the USER-directed profanity guard: no TARGET profanity directed at USER.':'',lockBlock(tokens,i),banned(s)]);
     }
     function repair(kind,segments,translations,s={},i={},tokens=[],over=null,scope='mixed') {
-        const data=segments.map(x=>({id:x.id,type:x.type,...(x.codeKind?{code_kind:x.codeKind}:{}),...(x.tagContext?.length?{tag_context:x.tagContext}:{}),source:x.text,current_translation:translations.get(x.id)||'',...(kind==='tokens'?{expected_protected_tokens:x.expectedProtectedTokens||[]}:kind==='banned'?{found_banned_words:h.findBannedWords(translations.get(x.id)||'',s)}:{detected_problem:x.untranslatedReason||'foreign text remains'})}));
+        const data=segments.map(x=>({id:x.id,type:x.type,...(x.codeKind?{code_kind:x.codeKind}:{}),...(x.tagContext?.length?{tag_context:x.tagContext}:{}),source:x.text,current_translation:translations.get(x.id)||'',...(kind==='tokens'?{expected_protected_tokens:x.expectedProtectedTokens||[]}:kind==='banned'?{found_banned_words:h.findBannedWords(translations.get(x.id)||'',s,x.text)}:{detected_problem:x.untranslatedReason||'foreign text remains'})}));
         const task={tokens:'Restore expected_protected_tokens exactly at their source-implied positions/counts. Never expose or invent tokens; copy every other correct word unchanged.',banned:'Replace detected banned words with natural wording of matching intent/force; do not merely delete them or alter anything else.',untranslated:'Translate accidental foreign leftovers only; retain correct Korean and register. If detected_problem starts with UNTRANSLATED_CHARACTER_NAME, verify each listed token from source context: a human or fictional character name MUST be rendered in natural Hangul (fixed name mapping first), never retained in Latin script merely because it is a proper name. Retain Latin spelling only for intentional bilingual output or genuine non-person acronyms, brands, products, codes, URLs and handles.'}[kind];
         return lines([outputFormatReviewContext(s),kind==='untranslated'?policy(s,{scope,speakerIdentity:i,nameTokens:tokens,tuning:over}):repairPolicy(s,i,tokens),`REPAIR ${kind}: ${task} Return supplied segments complete; no other rewriting.`, `Return ${schema}`,'DATA',j(data)]);
     }

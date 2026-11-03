@@ -2,7 +2,7 @@ import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_REVIEW_GUIDANCE } from './deepse
 import { bilingualSettingsDiagnostic } from './bilingual-diagnostics.js';
 import { bilingualReviewTargets, validBilingualReplacement } from './bilingual-review.js';
 import { activeOutputFormatRules, bilingualScopeRequested } from './output-format.js';
-import { findBannedWords, parseBannedWords, bannedWordRejectionDiagnostic } from './core.js';
+import { findBannedWords, bannedWordsPrompt, bannedWordRejectionDiagnostic } from './core.js';
 
 // One request per completed output, regardless of split count or check count.
 // Input/selection translation do not call this module.
@@ -50,6 +50,7 @@ export function planPostReview(segmented, translations, settings = {}, speakerSc
             : segment.type === 'dialogue_candidate' ? speakerScopes[segment.id] === 'target_dialogue' ? 'target_dialogue' : 'other_dialogue' : 'narration';
         const spans = found.targets.filter(x => x.segmentId === segment.id).map((x, i) => ({ ...x, lock: `@@REVIEW_LOCK_${String(i).padStart(4,'0')}@@` }));
         const plain = replaceSpans(current, spans, x => x.lock);
+        const bannedSource = spans.reduce((text, span) => text.replace(span.tokenSource, span.lock), segment.text);
         const general = selected.filter(key => key !== 'bilingual'
             && (key !== 'mad' || settings.developerMadKoreanOutputEnabled === true && !galbwae(settings))
             && (key !== 'hongjin' || settings.developerHongjinFlavorEnabled === true && scope === 'target_dialogue' && !galbwae(settings)));
@@ -64,10 +65,10 @@ export function planPostReview(segmented, translations, settings = {}, speakerSc
         if (general.length && plain.replace(/@@REVIEW_LOCK_\d+@@/gu, '').trim() && !ambiguous) {
             group.generalId = `review_${String(units.length).padStart(4,'0')}`;
             units.push({ id: group.generalId, type: 'general', scope, checks: general,
-                SOURCE: segment.text, CURRENT: plain, EXPECTED_TOKENS: tokens(segment.text),
+                SOURCE: segment.text, BANNED_SOURCE: bannedSource, CURRENT: plain, EXPECTED_TOKENS: tokens(segment.text),
                 LOCKED_UNITS: spans.map(x => ({ token: x.lock, SOURCE: x.source, CURRENT: x.current, sourceTokens: tokens(x.tokenSource) })),
                 codeKind: segment.codeKind || '',
-                BANNED: checks.banned ? findBannedWords(plain, settings) : [] });
+                BANNED: checks.banned ? findBannedWords(plain, settings, bannedSource) : [] });
         } else if (general.length && ambiguous) skipped++;
         for (const span of spans) {
             // Other selected checks may inspect the Korean half of an already
@@ -77,7 +78,7 @@ export function planPostReview(segmented, translations, settings = {}, speakerSc
             span.formatEditable = checks.bilingual;
             units.push({ id: span.reviewId, type: 'bilingual', scope: span.kind, speaker_scope: scope,
                 checks: [...general, ...(checks.bilingual ? ['bilingual'] : [])],
-                SOURCE: span.source, CURRENT: span.current, OPEN: span.open, CLOSE: span.close, NAME_TOKENS: span.names });
+                SOURCE: span.source, BANNED: checks.banned ? findBannedWords(span.current.replace(span.source, ''), settings, span.source) : [], CURRENT: span.current, OPEN: span.open, CLOSE: span.close, NAME_TOKENS: span.names });
         }
         groups.push(group);
     }
@@ -98,7 +99,7 @@ CONTEXTUAL REVIEW METHOD — apply only to units with meaning, translationese or
 First use SOURCE_CONTEXT to resolve the current unit's actor, object, physical action/state, modifiers and speech intent; CURRENT is a draft, not evidence. Distinguish fixed idioms, emphasis and ironic understatement from literal events or conditions. Choose a word's sense from the object and ongoing action; do not invent weather, damage, motives, actions or causal links to justify a literal reading. Keep quantities and measurement units exact, without converting distance into step counts or silently localizing measures. Preserve deliberate source exaggeration and concrete imagery.
 For translationese/deepseekTranslationese, express that same meaning in idiomatic Korean: reconstruct clauses and collocations, attach descriptions to the correct referent, and finish complete narrative sentences with natural predicates. Dialogue must sound speakable in the active register and retain the same teasing, warning, hesitation or affection without added slang or emotion. Work inside each unit's existing line and markup boundaries; do not borrow content from adjacent units. For meaning alone, repair semantic errors without unrelated stylistic rewriting.
 Finally compare each proposed Korean revision back to SOURCE for actor, target, action, conditions, quantity/unit, intensity and imagery, then read it as Korean alone. Correct a clear error even if CURRENT is grammatically valid; retain ambiguity only where SOURCE_CONTEXT cannot resolve it. Do not output these checks or alternative drafts.
-${plan.selected.includes('banned') ? `BANNED_RULES (only for units with banned): configured terms are case-sensitive literal substrings, including inside longer words. Avoid all listed terms in revised Korean, not only the BANNED hits in CURRENT. Replace with equivalent natural wording without deleting meaning. Configured terms: ${JSON.stringify(parseBannedWords(settings.bannedWords))}. ${settings.developerMadKoreanOutputEnabled === true || settings.developerHongjinFlavorEnabled === true ? 'The active developer guard also rejects gendered insults targeting women; retain source force using permitted equivalent wording.' : ''}` : ''}
+${plan.selected.includes('banned') ? `BANNED_RULES (only for units with banned): ${bannedWordsPrompt(settings)} Replace violations with equivalent natural wording without deleting meaning. Use BANNED_SOURCE for general units and SOURCE for bilingual units. ${settings.developerMadKoreanOutputEnabled === true || settings.developerHongjinFlavorEnabled === true ? 'The active developer guard also rejects gendered insults targeting women; retain source force using permitted equivalent wording.' : ''}` : ''}
 SELECTED_CHECKS ${JSON.stringify(POST_REVIEW_CHECKS.filter(x => plan.selected.includes(x.key)).map(x => ({ key:x.key, rule:x.rule })))}
 FORMAT_RULES (constraints only, not permission to expand scope) ${JSON.stringify(rules)}
 STYLE_REFERENCE (only for selected voice/mad/hongjin/deepseekTranslationese checks and their authorized speaker scopes; ignore its output schema) ${JSON.stringify(reference)}
@@ -125,7 +126,7 @@ function generalRejection(unit, after, settings) {
         if (index < 0) return 'added-latin';
         remaining.splice(index, 1);
     }
-    if (unit.checks.includes('banned') && findBannedWords(after, settings).length) return 'banned-word';
+    if (unit.checks.includes('banned') && findBannedWords(after, settings, unit.BANNED_SOURCE ?? unit.SOURCE).length) return 'banned-word';
     return null;
 }
 
@@ -161,7 +162,10 @@ export async function reviewOutputOnce({ segmented, translations, settings = {},
                 segmentIndex: segmentIndexes.get(group.segment.id),
                 unitIndex: unitIndexes.get(unitId),
                 type: unitById.get(unitId)?.type || 'general', reason, detail,
-                ...(detail === 'banned-word' ? bannedWordRejectionDiagnostic(unitById.get(unitId).CURRENT, result.get(unitId), settings) : {}),
+                ...(detail === 'banned-word' ? bannedWordRejectionDiagnostic(
+                    unitById.get(unitId).type === 'bilingual' ? unitById.get(unitId).CURRENT.replace(unitById.get(unitId).SOURCE, '') : unitById.get(unitId).CURRENT,
+                    unitById.get(unitId).type === 'bilingual' ? result.get(unitId).replace(unitById.get(unitId).SOURCE, '') : result.get(unitId),
+                    settings, unitById.get(unitId).BANNED_SOURCE ?? unitById.get(unitId).SOURCE) : {}),
             });
             else stats.failuresOmitted = (stats.failuresOmitted || 0) + 1;
         };
@@ -170,14 +174,20 @@ export async function reviewOutputOnce({ segmented, translations, settings = {},
         groups:
         for (const group of plan.groups) {
             let text = group.generalId ? result.get(group.generalId) : group.plain;
-            if (group.generalId && text !== group.plain) {
-                const detail = generalRejection(unitById.get(group.generalId), text, settings);
+            if (group.generalId) {
+                const unit = unitById.get(group.generalId);
+                const detail = text !== group.plain ? generalRejection(unit, text, settings)
+                    : unit.checks.includes('banned') && findBannedWords(text, settings, unit.BANNED_SOURCE ?? unit.SOURCE).length ? 'banned-word' : null;
                 if (detail) { reject(group, group.generalId, 'invalid-general', detail); continue; }
             }
             for (const span of group.spans) {
                 const after = span.reviewId ? result.get(span.reviewId) : span.current;
                 if (after !== span.current && !validBilingualReplacement(span, after)) {
                     reject(group, span.reviewId, 'invalid-bilingual', 'bilingual-integrity'); continue groups;
+                }
+                if (span.reviewId && unitById.get(span.reviewId).checks.includes('banned')
+                    && typeof after === 'string' && findBannedWords(after.replace(span.source, ''), settings, span.source).length) {
+                    reject(group, span.reviewId, 'invalid-bilingual', 'banned-word'); continue groups;
                 }
                 if (after !== span.current && !span.formatEditable
                     && !same(structure(span.current.replace(span.source, '@@REVIEW_LOCK_9999@@')),

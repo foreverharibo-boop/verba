@@ -61,7 +61,7 @@ export async function runTasteQualityAudit({ enabled = false, segmented, transla
             const value = reviewed.get(segment.id);
             if (typeof value !== 'string' || !value.trim()) throw new Error('Empty audit translation');
             if (!/[\r\n]/u.test(segment.text) && /[\r\n]/u.test(value)) throw new Error('Audit changed single-line layout');
-            if (findBannedWords(value, settings).length) throw new Error('Audit contains banned words');
+            if (findBannedWords(value, settings, segment.text).length) throw new Error('Audit contains banned words');
             next.set(segment.id, value);
         }
         if (findProtectedTokenIntegrityProblems(segments, next).length || findUntranslatedSegments(segments, next, settings, speakerScopes).length) throw new Error('Audit damaged protected content or left untranslated text');

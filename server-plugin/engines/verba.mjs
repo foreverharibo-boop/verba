@@ -3330,6 +3330,29 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
   });
   return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
 }
+function requestFailureSummary(error) {
+  const chain = [], seen = /* @__PURE__ */ new Set();
+  for (let item = error; item && !seen.has(item) && chain.length < 6; item = item.cause) {
+    seen.add(item);
+    chain.push(item);
+  }
+  const status = chain.flatMap((item) => [
+    item.status,
+    item.statusCode,
+    item.response?.status,
+    requestEvidence.get(item)?.httpStatus
+  ]).map(Number).find((n2) => Number.isInteger(n2) && n2 >= 400 && n2 <= 599) || null;
+  const hasCode = (...codes) => chain.some((item) => codes.includes(item.code));
+  let kind = "request-failed";
+  if (hasCode("VERBA_REVIEW_FORMAT")) kind = "response-format";
+  else if (hasCode("VERBA_REVIEW_INCOMPLETE")) kind = "incomplete-response";
+  else if (hasCode("VERBA_TIMEOUT", "VERBA_DEEP_TIMEOUT", "ETIMEDOUT", "ESOCKETTIMEDOUT", "UND_ERR_CONNECT_TIMEOUT") || chain.some((item) => item.name === "TimeoutError")) kind = "timeout";
+  else if (status) kind = "http-error";
+  else if (hasCode("VERBA_RESPONSE_EMPTY", "VERBA_DEEP_RESPONSE_EMPTY")) kind = "empty-response";
+  else if (chain.some((item) => item.name === "AbortError")) kind = "aborted";
+  else if (hasCode("ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN") || chain.some((item) => /Failed to fetch|NetworkError|network request failed|Load failed/i.test(String(item.message || "")))) kind = "network-error";
+  return { kind, httpStatus: status };
+}
 
 // verba/mad-output.js
 var pairs = [["[", "]"], ["(", ")"], ["\uFF08", "\uFF09"], ["\u3010", "\u3011"]];
@@ -3860,6 +3883,13 @@ function generalRejection(unit, after, settings) {
 }
 async function reviewOutputOnce({ segmented, translations, settings = {}, speakerScopes = {}, options = {}, reference = "", request }) {
   const stats = { checked: 0, changed: 0, rejected: 0, skipped: 0, status: "not-needed", checks: [] };
+  const diagnostic = settings.debugMode === true;
+  if (diagnostic) Object.assign(stats, {
+    requestedUnits: 0,
+    receivedUnits: 0,
+    elapsedMs: 0,
+    requestTimeoutSeconds: Number(options.postReviewTimeoutSeconds) || null
+  });
   if (settings.debugMode === true) {
     stats.bilingualSettings = bilingualSettingsDiagnostic(settings);
     stats.reviewReason = "no-targets";
@@ -3877,16 +3907,19 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
   }
   const prompt = buildPostReviewPrompt(plan, segmented, settings, reference);
   if (plan.units.length > 300 || prompt.length > 12e4) return { ...stats, ...settings.debugMode === true ? { reviewReason: "limit" } : {}, status: "limit", skipped: stats.skipped + plan.units.length };
+  const startedAt = performance.now();
   try {
     options.signal?.throwIfAborted();
-    stats.checked = plan.units.length;
+    if (diagnostic) stats.requestedUnits = plan.units.length;
     if (settings.debugMode === true) stats.reviewReason = "request-or-parse-failed";
     const result = await request(prompt, plan.units, options);
     options.signal?.throwIfAborted();
+    if (diagnostic) stats.receivedUnits = result instanceof Map ? plan.units.filter((x) => result.has(x.id)).length : 0;
     if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some((x) => !result.has(x.id))) {
       if (settings.debugMode === true) stats.reviewReason = "incomplete-response";
-      throw Error("Incomplete review");
+      throw Object.assign(new Error("Incomplete review"), { code: "VERBA_REVIEW_INCOMPLETE" });
     }
+    stats.checked = plan.units.length;
     const candidate = new Map(translations);
     const unitById = new Map(plan.units.map((unit) => [unit.id, unit]));
     const unitIndexes = new Map(plan.units.map((unit, index) => [unit.id, index]));
@@ -3950,10 +3983,18 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
     options.signal?.throwIfAborted();
     for (const [id, text] of candidate) if (text !== translations.get(id)) stats.changed++;
     for (const [id, text] of candidate) translations.set(id, text);
+    if (diagnostic) stats.elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
     const status = stats.rejected ? stats.changed ? "partial" : "failed" : "completed";
     return { ...stats, ...settings.debugMode === true && status !== "failed" ? { reviewReason: status === "partial" ? "partial-rejection" : "completed" } : {}, status };
   } catch (error) {
     if (options.signal?.aborted) throw error;
+    if (diagnostic) {
+      stats.elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
+      if (["VERBA_REVIEW_FORMAT", "VERBA_REVIEW_INCOMPLETE"].includes(error?.code))
+        stats.receivedUnits = Math.min(plan.units.length, Math.max(stats.receivedUnits, Number(error.receivedUnits) || 0));
+      stats.requestFailure = requestFailureSummary(error);
+      stats.reviewReason = stats.requestFailure.kind;
+    }
     return { ...stats, changed: 0, status: "failed" };
   }
 }
@@ -4000,7 +4041,18 @@ function cleanPostReview(value) {
   return {
     ...cleanBilingualReview(value),
     ...value?.status === "partial" ? { status: "partial" } : {},
-    ...value?.reviewReason ? { reviewReason: ["no-targets", "all-off", "free-engine", "limit", "request-or-parse-failed", "incomplete-response", "invalid-general", "invalid-bilingual", "unselected-format-change", "missing-lock", "completed", "partial-rejection", "setup-failed"].includes(value.reviewReason) ? value.reviewReason : "unknown" } : {},
+    ...Object.hasOwn(value || {}, "requestedUnits") ? {
+      requestedUnits: number(value.requestedUnits),
+      receivedUnits: number(value.receivedUnits),
+      elapsedMs: number(value.elapsedMs),
+      requestTimeoutSeconds: Number.isFinite(value.requestTimeoutSeconds) && value.requestTimeoutSeconds > 0 ? Math.min(3600, value.requestTimeoutSeconds) : null,
+      checkedMeaning: "Units in a complete parsed response passed to local validation; not proof of semantic quality."
+    } : {},
+    ...value?.requestFailure ? { requestFailure: {
+      kind: ["response-format", "incomplete-response", "timeout", "http-error", "empty-response", "aborted", "network-error", "request-failed"].includes(value.requestFailure.kind) ? value.requestFailure.kind : "request-failed",
+      httpStatus: Number.isInteger(value.requestFailure.httpStatus) && value.requestFailure.httpStatus >= 400 && value.requestFailure.httpStatus <= 599 ? value.requestFailure.httpStatus : null
+    } } : {},
+    ...value?.reviewReason ? { reviewReason: ["no-targets", "all-off", "free-engine", "limit", "request-or-parse-failed", "incomplete-response", "response-format", "timeout", "http-error", "empty-response", "aborted", "network-error", "request-failed", "invalid-general", "invalid-bilingual", "unselected-format-change", "missing-lock", "completed", "partial-rejection", "setup-failed"].includes(value.reviewReason) ? value.reviewReason : "unknown" } : {},
     checks: POST_REVIEW_CHECKS.map((x) => x.key).filter((key) => value?.checks?.includes(key)),
     ...Array.isArray(value?.failures) ? {
       failures: value.failures.slice(0, MAX_ROWS).map((row) => ({
@@ -6070,13 +6122,14 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
         options.tuning || null,
         speakerScopes
       ) : "";
+      const postReviewTimeoutSeconds = Math.min(60, normalizedProfileFailureTimeoutSeconds());
       const result = await reviewOutputOnce({
         segmented,
         translations,
         settings: config,
         speakerScopes,
         reference,
-        options,
+        options: { ...options, postReviewTimeoutSeconds },
         request: async (prompt, targets, requestOptions) => {
           const profiles = configuredProfileCycle();
           const response = await sendProfileRequest(prompt, {
@@ -6084,10 +6137,16 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
             profileId: profiles.active,
             profileSlot: profiles.slot,
             stage: "output-post-review",
-            timeoutSecondsOverride: Math.min(60, normalizedProfileFailureTimeoutSeconds())
+            timeoutSecondsOverride: postReviewTimeoutSeconds
           });
           const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
-          if (parsed.parseError || parsed.partial.size !== targets.length) throw new Error("AI \uD6C4\uAC80\uC218 \uC751\uB2F5 \uD615\uC2DD\uC774 \uBD88\uC644\uC804\uD569\uB2C8\uB2E4.");
+          if (parsed.parseError || parsed.partial.size !== targets.length) {
+            const malformed = parsed.issues?.some((issue) => ["JSON \uBB38\uBC95 \uC624\uB958\xB7\uC751\uB2F5 \uC798\uB9BC", "segments \uBC30\uC5F4 \uC5C6\uC74C"].includes(issue));
+            throw Object.assign(new Error("AI \uD6C4\uAC80\uC218 \uC751\uB2F5 \uD615\uC2DD\uC774 \uBD88\uC644\uC804\uD569\uB2C8\uB2E4."), {
+              code: malformed ? "VERBA_REVIEW_FORMAT" : "VERBA_REVIEW_INCOMPLETE",
+              receivedUnits: targets.filter((target) => parsed.partial.has(target.id)).length
+            });
+          }
           return parsed.partial;
         }
       });

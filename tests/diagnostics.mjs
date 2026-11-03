@@ -93,9 +93,11 @@ const retries = new Map([[1, { retryCount: 2, maxRetries: 20, delayMs: 5000, upd
 let lifecycleEvents = ['page-hidden'];
 const api = Function('settings', 'document', 'copyText', 'debugDiagnosticText',
     'verbaServer', 'createDebugDiagnostic', 'pendingOutputs', 'automaticTranslationTimers', 'swipeTranslationJobs', 'serverRetryStates',
+    'executionTrace', 'traceLatestAssistantSource',
     'let lastDebugDiagnostic = null;\n' + storeSource + copySource + '\nreturn { storeDebugDiagnostic, copyDebugDiagnostic, latest: () => lastDebugDiagnostic };')(
     settings, { querySelector: () => button }, async value => copies.push(JSON.parse(value)), JSON.stringify,
-    { refreshDiagnostics: async () => {} }, () => ({ automaticOutput: { events: [...lifecycleEvents] } }), outputJobs, new Map(), new Map(), retries);
+    { refreshDiagnostics: async () => {} }, () => ({ automaticOutput: { events: [...lifecycleEvents] } }), outputJobs, new Map(), new Map(), retries,
+    { heartbeat() {} }, () => {});
 settings.debugMode = true;
 await api.copyDebugDiagnostic();
 assert.deepEqual(copies.at(-1).activeWork.outputMessageIds, [8], 'capture running output without any error');
@@ -118,7 +120,7 @@ await api.copyDebugDiagnostic();
 assert.deepEqual(copies.at(-1).lastRecordedDiagnostic, { id: 2 }, 'retain prior diagnostic alongside live status');
 settings.debugMode = false;
 await assert.rejects(api.copyDebugDiagnostic(), /디버그 모드/);
-assert.ok(index.includes('if (!settings.debugMode) lastDebugDiagnostic = null;'));
+assert.match(index,/if \(!settings\.debugMode\) \{[\s\S]*?lastDebugDiagnostic = null;/);
 assert.equal((index.match(/>로그 복사<\/button>/g) || []).length, 1);
 assert.ok(!index.includes("copy.textContent = '진단 복사'"));
 console.log('PASS: diagnostic classification, redaction, bounded raw responses, request ON/OFF, cancellation, last-record UI/copy gates');

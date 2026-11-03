@@ -26,7 +26,8 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) {
    assert.match(result.translation,/`Door locked\. \[문이 잠겼다\.\]`/);
    assert.doesNotMatch(result.translation,/He waited|Wait here/);
    const comparison=result.outputComparison;
-   const {bilingualSettings,units,reviewReason,...legacyReview}=comparison.postReview;
+   const {bilingualSettings,units,reviewReason,requestedUnits,receivedUnits,elapsedMs,requestTimeoutSeconds,checkedMeaning,...legacyReview}=comparison.postReview;
+   assert.equal(requestedUnits,2);assert.equal(receivedUnits,2);assert.equal(requestTimeoutSeconds,60);assert.ok(elapsedMs>=0);assert.match(checkedMeaning,/not proof/);
    assert.equal(units.bilingual,2);
    assert.deepEqual(legacyReview,{checked:2,changed:2,rejected:0,skipped:0,status:'completed',checks:['bilingual']});
    assert.equal(comparison.stages.find(x=>x.stage==='output-post-review').changedRows,2);

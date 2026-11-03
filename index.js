@@ -1,3 +1,4 @@
+import { createDisplayStateTrace } from './display-state-trace.js';
 import { enforceMadKoreanOnly } from './mad-output.js';
 import { bilingualSettingsDiagnostic, outputBinding } from './bilingual-diagnostics.js';
 import { POST_REVIEW_CHECKS, normalizePostReview, postReviewSettingsMarkup, reviewOutputOnce } from './post-review.js';
@@ -8,7 +9,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.101';
+import { createServerClient } from './server-client.js?v=0.6.102';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -72,9 +73,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.101';
+const EXTENSION_VERSION = '0.6.102';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.101';
+const SERVER_ENGINE_VERSION = '0.6.102';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -843,6 +844,15 @@ const executionTrace = createBrowserExecutionDiagnostics({
     enabled: () => settings.debugMode === true,
     visibility: () => document.visibilityState || 'unknown',
 });
+const displayStateTrace = createDisplayStateTrace({ enabled: () => settings.debugMode === true });
+function traceDisplayForMessage(messageId, message, phase) {
+    if (settings.debugMode !== true) return;
+    try {
+        const record = currentRecord(message, messageId);
+        displayStateTrace.observe(Number(messageId), message, record, phase,
+            isTranslationExtensionActive(EXTENSION_KEY), sourceViewRequested(message, record));
+    } catch { /* Diagnostics cannot interrupt translation or rendering. */ }
+}
 const sourceChangeTracer = createSourceChangeTracer({
     enabled: () => settings.debugMode === true && isTranslationExtensionActive(EXTENSION_KEY),
     fullTextEnabled: () => fullSourceSnapshotsEnabled,
@@ -856,7 +866,11 @@ const sourceChangeTracer = createSourceChangeTracer({
 function traceSourceForMessage(messageId, phase) {
     if (settings.debugMode !== true) return;
     const id = Number(messageId);
-    if (Number.isInteger(id) && id >= 0) sourceChangeTracer.observe(id, liveContext().chat?.[id], phase);
+    if (Number.isInteger(id) && id >= 0) {
+        const message = liveContext().chat?.[id];
+        sourceChangeTracer.observe(id, message, phase);
+        if (message) traceDisplayForMessage(id, message, phase);
+    }
 }
 function traceLatestAssistantSource(phase) {
     if (settings.debugMode !== true) return;
@@ -1092,6 +1106,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
         }
         return null;
     })();
+    if (latest) traceDisplayForMessage(latest.id, latest.message, 'diagnostic');
     const source = latest ? messageSource(latest.message) : '';
     const configured = configuredProfiles();
     const viewport = globalThis.visualViewport;
@@ -1137,6 +1152,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
         ...(settings.debugMode === true ? {currentBilingualSettings:bilingualSettingsDiagnostic(settings)} : {}),
         outputComparison: settings.debugMode && latest
             ? outputComparisonStore.get(latest.message, hashText(source), currentSwipeId(latest.message)) : null,
+        displayStateTrace: displayStateTrace.diagnostics(),
         sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(), 16),
         settingsState: {
             autoInput: Boolean(settings.autoInput),
@@ -4999,16 +5015,23 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
             ? buildOutputPrompt({ ...segmented, segments: [], protectedText: '' }, config,
                 options.oneTimeInstruction || '', speakerIdentity, options.tuning || null, speakerScopes)
             : '';
-        const result = await reviewOutputOnce({ segmented, translations, settings: config, speakerScopes, reference, options,
+        const postReviewTimeoutSeconds = Math.min(60, normalizedProfileFailureTimeoutSeconds());
+        const result = await reviewOutputOnce({ segmented, translations, settings: config, speakerScopes, reference, options:{...options,postReviewTimeoutSeconds},
             request: async (prompt, targets, requestOptions) => {
                 const profiles = configuredProfileCycle();
                 const response = await sendProfileRequest(prompt, {
                     ...requestOptions, profileId: profiles.active, profileSlot: profiles.slot,
                     stage: 'output-post-review',
-                    timeoutSecondsOverride: Math.min(60, normalizedProfileFailureTimeoutSeconds()),
+                    timeoutSecondsOverride: postReviewTimeoutSeconds,
                 });
                 const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
-                if (parsed.parseError || parsed.partial.size !== targets.length) throw new Error('AI 후검수 응답 형식이 불완전합니다.');
+                if (parsed.parseError || parsed.partial.size !== targets.length) {
+                    const malformed = parsed.issues?.some(issue => ['JSON 문법 오류·응답 잘림','segments 배열 없음'].includes(issue));
+                    throw Object.assign(new Error('AI 후검수 응답 형식이 불완전합니다.'), {
+                        code:malformed ? 'VERBA_REVIEW_FORMAT' : 'VERBA_REVIEW_INCOMPLETE',
+                        receivedUnits:targets.filter(target=>parsed.partial.has(target.id)).length,
+                    });
+                }
                 return parsed.partial;
             },
         });
@@ -5829,6 +5852,7 @@ function applyTranslation(messageId, message, source, translation, chatReference
         return { record: null, renderResult: { status: 'pair-inactive', rendered: false } };
     }
     if (!message.extra || typeof message.extra !== 'object') message.extra = {};
+    traceDisplayForMessage(messageId, message, 'apply-before');
     const previousRecord = currentRecord(message);
     const sourceMap = metadata.sourceMap !== undefined
         ? normalizedSourceMap(metadata.sourceMap)
@@ -5858,7 +5882,9 @@ function applyTranslation(messageId, message, source, translation, chatReference
         multiSelectionState?.messageId === Number(messageId)
         && multiSelectionState.translation !== translation
     ) clearMultiSelection();
+    traceDisplayForMessage(messageId, message, 'apply-stored');
     const renderResult = updateMessageBlock(messageId, message);
+    traceDisplayForMessage(messageId, message, 'apply-rendered');
     cacheRenderedTranslation(messageId, message, record);
     scheduleChatSave(chatReference);
     if (remainingProtectedTokens.length) {
@@ -12680,6 +12706,7 @@ function injectSettingsPanel() {
         if (!settings.debugMode) {
             fullSourceSnapshotsEnabled = false;
             sourceChangeTracer.reset();
+            displayStateTrace.reset();
             executionTrace.clear({ dropTimer: true });
             lastDebugDiagnostic = null;
         } else {
@@ -12696,6 +12723,7 @@ function injectSettingsPanel() {
         fullSourceSnapshotsEnabled = Boolean(event.target.checked)
             && settings.debugMode === true;
         sourceChangeTracer.reset();
+        displayStateTrace.reset();
         // Do not leave a previous error report holding full snapshots after opt-out.
         if (!fullSourceSnapshotsEnabled) lastDebugDiagnostic = null;
         traceLatestAssistantSource(fullSourceSnapshotsEnabled ? 'full-text-enabled' : 'full-text-disabled');
@@ -13924,6 +13952,7 @@ function setupEvents() {
                 if (fullInput) fullInput.checked = false;
             }
             sourceChangeTracer.reset();
+            displayStateTrace.reset();
             executionTrace.clear();
             automaticOutputLifecycle.reset();
             // Locks and bundles are one-shot editing state. Clear tracked

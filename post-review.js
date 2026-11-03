@@ -1,3 +1,4 @@
+import { requestFailureSummary } from './diagnostics.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_REVIEW_GUIDANCE } from './deepseek-korean.js';
 import { bilingualSettingsDiagnostic } from './bilingual-diagnostics.js';
 import { bilingualReviewTargets, validBilingualReplacement } from './bilingual-review.js';
@@ -132,6 +133,9 @@ function generalRejection(unit, after, settings) {
 
 export async function reviewOutputOnce({ segmented, translations, settings = {}, speakerScopes = {}, options = {}, reference = '', request }) {
     const stats = { checked:0, changed:0, rejected:0, skipped:0, status:'not-needed', checks:[] };
+    const diagnostic = settings.debugMode === true;
+    if (diagnostic) Object.assign(stats, {requestedUnits:0, receivedUnits:0, elapsedMs:0,
+        requestTimeoutSeconds:Number(options.postReviewTimeoutSeconds)||null});
     if (settings.debugMode === true) { stats.bilingualSettings = bilingualSettingsDiagnostic(settings); stats.reviewReason='no-targets'; }
     if (settings.translationEngine === 'google-free') { if(settings.debugMode===true)stats.reviewReason='free-engine'; return stats; }
     const plan = planPostReview(segmented, translations, settings, speakerScopes);
@@ -141,13 +145,16 @@ export async function reviewOutputOnce({ segmented, translations, settings = {},
     const prompt = buildPostReviewPrompt(plan, segmented, settings, reference);
     // Never silently truncate source/rules or split a review into more calls.
     if (plan.units.length > 300 || prompt.length > 120000) return { ...stats, ...(settings.debugMode===true?{reviewReason:'limit'}:{}), status:'limit', skipped:stats.skipped + plan.units.length };
+    const startedAt = performance.now();
     try {
         options.signal?.throwIfAborted();
-        stats.checked = plan.units.length;
+        if (diagnostic) stats.requestedUnits = plan.units.length;
         if(settings.debugMode===true)stats.reviewReason='request-or-parse-failed';
         const result = await request(prompt, plan.units, options);
         options.signal?.throwIfAborted();
-        if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some(x => !result.has(x.id))) { if(settings.debugMode===true)stats.reviewReason='incomplete-response'; throw Error('Incomplete review'); }
+        if (diagnostic) stats.receivedUnits = result instanceof Map ? plan.units.filter(x=>result.has(x.id)).length : 0;
+        if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some(x => !result.has(x.id))) { if(settings.debugMode===true)stats.reviewReason='incomplete-response'; throw Object.assign(new Error('Incomplete review'), {code:'VERBA_REVIEW_INCOMPLETE'}); }
+        stats.checked = plan.units.length;
         const candidate = new Map(translations);
         const unitById = new Map(plan.units.map(unit => [unit.id, unit]));
         const unitIndexes = new Map(plan.units.map((unit, index) => [unit.id, index]));
@@ -205,10 +212,18 @@ export async function reviewOutputOnce({ segmented, translations, settings = {},
         options.signal?.throwIfAborted();
         for (const [id, text] of candidate) if (text !== translations.get(id)) stats.changed++;
         for (const [id, text] of candidate) translations.set(id, text);
+        if (diagnostic) stats.elapsedMs = Math.max(0, Math.round(performance.now()-startedAt));
         const status = stats.rejected ? stats.changed ? 'partial' : 'failed' : 'completed';
         return { ...stats, ...(settings.debugMode===true && status !== 'failed' ? {reviewReason:status === 'partial' ? 'partial-rejection' : 'completed'} : {}), status };
     } catch (error) {
         if (options.signal?.aborted) throw error;
+        if (diagnostic) {
+            stats.elapsedMs = Math.max(0, Math.round(performance.now()-startedAt));
+            if (['VERBA_REVIEW_FORMAT','VERBA_REVIEW_INCOMPLETE'].includes(error?.code))
+                stats.receivedUnits = Math.min(plan.units.length, Math.max(stats.receivedUnits, Number(error.receivedUnits)||0));
+            stats.requestFailure = requestFailureSummary(error);
+            stats.reviewReason = stats.requestFailure.kind;
+        }
         return { ...stats, changed:0, status:'failed' };
     }
 }

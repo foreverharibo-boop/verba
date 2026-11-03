@@ -41,7 +41,17 @@ function cleanBilingualReview(value) {
 function cleanPostReview(value) {
     return { ...cleanBilingualReview(value),
         ...(value?.status === 'partial' ? {status:'partial'} : {}),
-        ...(value?.reviewReason ? {reviewReason:['no-targets','all-off','free-engine','limit','request-or-parse-failed','incomplete-response','invalid-general','invalid-bilingual','unselected-format-change','missing-lock','completed','partial-rejection','setup-failed'].includes(value.reviewReason)?value.reviewReason:'unknown'} : {}), checks: POST_REVIEW_CHECKS.map(x => x.key).filter(key => value?.checks?.includes(key)),
+        ...(Object.hasOwn(value || {}, 'requestedUnits') ? {
+            requestedUnits:number(value.requestedUnits), receivedUnits:number(value.receivedUnits),
+            elapsedMs:number(value.elapsedMs),
+            requestTimeoutSeconds:Number.isFinite(value.requestTimeoutSeconds) && value.requestTimeoutSeconds>0 ? Math.min(3600,value.requestTimeoutSeconds) : null,
+            checkedMeaning:'Units in a complete parsed response passed to local validation; not proof of semantic quality.',
+        } : {}),
+        ...(value?.requestFailure ? {requestFailure:{
+            kind:['response-format','incomplete-response','timeout','http-error','empty-response','aborted','network-error','request-failed'].includes(value.requestFailure.kind)?value.requestFailure.kind:'request-failed',
+            httpStatus:Number.isInteger(value.requestFailure.httpStatus) && value.requestFailure.httpStatus>=400 && value.requestFailure.httpStatus<=599 ? value.requestFailure.httpStatus : null,
+        }} : {}),
+        ...(value?.reviewReason ? {reviewReason:['no-targets','all-off','free-engine','limit','request-or-parse-failed','incomplete-response','response-format','timeout','http-error','empty-response','aborted','network-error','request-failed','invalid-general','invalid-bilingual','unselected-format-change','missing-lock','completed','partial-rejection','setup-failed'].includes(value.reviewReason)?value.reviewReason:'unknown'} : {}), checks: POST_REVIEW_CHECKS.map(x => x.key).filter(key => value?.checks?.includes(key)),
         ...(Array.isArray(value?.failures) ? {
             failures: value.failures.slice(0, MAX_ROWS).map(row => ({
                 segmentIndex:number(row?.segmentIndex), unitIndex:number(row?.unitIndex),

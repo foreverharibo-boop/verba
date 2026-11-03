@@ -145,3 +145,28 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
   assert.deepEqual(stats.failures[0].bannedMatches,[{term:'형씨',rule:'configured-conditional',matchMode:'source-conditioned-word',presentBefore:true,sourceTerm:'bro'}]);
  });
 }
+
+for(const [name,create] of [['verba',verba],['deep',deep]]) {
+ for(const failure of ['timeout','http','format','missing','empty','ok']) test(`${name}: review telemetry survives generated engine / ${failure}`,async()=>{
+  let calls=0;
+  const engine=create(snapshot({globalPrompt:'',timeoutSeconds:120,aiPostReview:{meaning:true}}),async(_id,messages)=>{
+   const text=messages.map(x=>x.content).join('\n');
+   if(text.includes('\nREVIEW_UNITS\n')){
+    calls++;
+    if(failure==='timeout')throw Object.assign(new Error('PRIVATE'),{code:name==='deep'?'VERBA_DEEP_TIMEOUT':'VERBA_TIMEOUT'});
+    if(failure==='http')throw Object.assign(new Error('PRIVATE'),{status:503});
+    if(failure==='format')return {content:'PRIVATE malformed json'};
+    if(failure==='empty')return {content:''};
+    const rows=JSON.parse(text.split('\nREVIEW_UNITS\n')[1]);
+    return {content:JSON.stringify({segments:(failure==='missing'?rows.slice(1):rows).map(r=>({id:r.id,translation:r.CURRENT}))})};
+   }
+   return {content:JSON.stringify({segments:initialRows(text).map(r=>({id:r.id,translation:'그녀는 기다렸다.'}))})};
+  });
+  const result=await engine.output('She waited.');
+  const stats=result.outputComparison.postReview;
+  assert.equal(calls,1);assert.equal(stats.requestTimeoutSeconds,60);assert.equal(stats.requestedUnits,1);
+  assert.equal(stats.checked,failure==='ok'?1:0);assert.equal(stats.receivedUnits,failure==='ok'?1:0);
+  assert.equal(stats.reviewReason,({timeout:'timeout',http:'http-error',format:'response-format',missing:'incomplete-response',empty:'empty-response',ok:'completed'})[failure]);
+  assert.equal(result.translation,'그녀는 기다렸다.');assert.doesNotMatch(JSON.stringify(result.outputComparison),/PRIVATE/);
+ });
+}

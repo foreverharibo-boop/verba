@@ -162,3 +162,23 @@ export function protectedRecoverySnapshot(invalid, segmented, translations) {
     });
     return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
 }
+
+// Bounded metadata only: never copy provider messages, responses, prompts or stacks.
+export function requestFailureSummary(error) {
+    const chain = [], seen = new Set();
+    for (let item = error; item && !seen.has(item) && chain.length < 6; item = item.cause) {
+        seen.add(item); chain.push(item);
+    }
+    const status = chain.flatMap(item => [item.status, item.statusCode, item.response?.status,
+        requestEvidence.get(item)?.httpStatus]).map(Number).find(n => Number.isInteger(n) && n >= 400 && n <= 599) || null;
+    const hasCode = (...codes) => chain.some(item => codes.includes(item.code));
+    let kind = 'request-failed';
+    if (hasCode('VERBA_REVIEW_FORMAT')) kind = 'response-format';
+    else if (hasCode('VERBA_REVIEW_INCOMPLETE')) kind = 'incomplete-response';
+    else if (hasCode('VERBA_TIMEOUT', 'VERBA_DEEP_TIMEOUT', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT') || chain.some(item => item.name === 'TimeoutError')) kind = 'timeout';
+    else if (status) kind = 'http-error';
+    else if (hasCode('VERBA_RESPONSE_EMPTY', 'VERBA_DEEP_RESPONSE_EMPTY')) kind = 'empty-response';
+    else if (chain.some(item => item.name === 'AbortError')) kind = 'aborted';
+    else if (hasCode('ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN') || chain.some(item => /Failed to fetch|NetworkError|network request failed|Load failed/i.test(String(item.message || '')))) kind = 'network-error';
+    return { kind, httpStatus: status };
+}

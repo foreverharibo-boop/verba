@@ -5,6 +5,7 @@ const os=require('node:os');
 const path=require('node:path');
 const {spawnSync}=require('node:child_process');
 const source=path.resolve(__dirname,'../..');
+const expectedVersion=JSON.parse(fs.readFileSync(path.join(source,'server-plugin/package.json'))).version;
 function git(cwd,args){const r=spawnSync('git',args,{cwd,encoding:'utf8'});assert.equal(r.status,0,r.stderr||r.stdout);return r.stdout.trim();}
 function fixture(t){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'verba git install '));
@@ -31,10 +32,10 @@ function legacyPlugin(dir,label='legacy-data'){
 test('verified Git install atomically migrates a copied plugin and later pulls updates',t=>{
   const {root,st,dest,backups}=fixture(t),repo=makeRepository(root);legacyPlugin(dest,'preserve me');
   const outside=path.join(root,'outside.txt');fs.writeFileSync(outside,'unchanged');fs.symlinkSync(outside,path.join(dest,'legacy-link'));
-  const first=install(st,repo);assert.equal(first.status,0,first.stderr||first.stdout);assert.match(first.stdout,/0\.1\.7/);
+  const first=install(st,repo);assert.equal(first.status,0,first.stderr||first.stdout);assert.ok(first.stdout.includes(`Verba Server ${expectedVersion} Git 설치·업데이트 완료`));
   assert.equal(git(dest,['rev-parse','--show-toplevel']),dest);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dest,'package.json'))).main,'server-plugin/index.cjs');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dest,'server-plugin/package.json'))).version,'0.1.7');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dest,'server-plugin/package.json'))).version,expectedVersion);
   assert.equal(fs.readFileSync(path.join(st,'config.yaml'),'utf8'),'keep: true');assert.equal(fs.readFileSync(outside,'utf8'),'unchanged');
   const saved=fs.readdirSync(backups).filter(name=>name.startsWith('legacy-verba-server-'));assert.equal(saved.length,1);
   assert.equal(fs.readFileSync(path.join(backups,saved[0],'legacy-note.txt'),'utf8'),'preserve me');

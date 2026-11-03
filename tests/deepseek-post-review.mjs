@@ -58,14 +58,18 @@ test('mixed paragraph keeps locked English while recasting its Korean and surrou
  }});
  assert.equal(stats.status,'completed');assert.equal(assembleTranslation(data.segmented,data.translations),'그는 기다렸다. *Stay quiet. [조용히 있어.]*');
 });
-test('English alteration, wrapper damage, missing IDs and network errors keep the complete draft',async()=>{
+test('English and wrapper damage stay local; missing IDs and network errors keep the complete draft',async()=>{
  for(const failure of ['english','wrapper','missing','network']){
   const data=fixture('He waited.\n\n"Stay quiet."',['그는 기다리는 것을 했다.','"Stay quiet. (조용함을 유지해.)"']);const before=[...data.translations];let calls=0;
   const stats=await reviewOutputOnce({...data,settings:{...cfg,allDialoguePrompt:reportedPrompt},request:async(p,rows)=>{
    calls++;if(failure==='network')throw Error('offline');if(failure==='missing')return new Map();
    return new Map(rows.map(r=>[r.id,r.type==='bilingual'?failure==='english'?r.CURRENT.replace('Stay quiet.','Be quiet.'):r.CURRENT.replace('"',''):r.CURRENT.replace('기다리는 것을 했다','기다렸다')]));
   }});
-  assert.equal(calls,1);assert.equal(stats.status,'failed');assert.equal(stats.changed,0);assert.deepEqual([...data.translations],before);
+  assert.equal(calls,1);
+  if(failure==='english'||failure==='wrapper'){
+   assert.equal(stats.status,'partial');assert.equal(stats.changed,1);
+   assert.equal([...data.translations][0][1],'그는 기다렸다.');assert.equal([...data.translations][1][1],before[1][1]);
+  }else{assert.equal(stats.status,'failed');assert.equal(stats.changed,0);assert.deepEqual([...data.translations],before);}
  }
 });
 test('free engine excludes the dedicated check and protected tokens survive valid rewrites',async()=>{

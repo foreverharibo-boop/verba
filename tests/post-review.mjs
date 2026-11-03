@@ -42,11 +42,12 @@ test('bilingual source is frozen when only general checks selected, including mi
  }});
  assert.equal(result.status,'completed');assert.match([...data.translations.values()][0],/\*Stay quiet\. \[조용히 있어\.\]\*/);
 });
-test('unrequested bilingual expansion and HTML damage roll back the entire review atomically',async()=>{
+test('unrequested bilingual expansion and HTML damage preserve only the rejected segment',async()=>{
  for(const bad of ['그는 기다렸다. [He waited.]','그는 기다렸다.</div>','@@VERBA_9999@@그는 기다렸다.','그는\n기다렸다.']){
   const data=fixture('He waited.\n\n*Stay quiet.*',['그는 기다렸다.','*조용히 있어.*']);const before=[...data.translations];
   const result=await reviewOutputOnce({...data,settings:{...settings,aiPostReview:{meaning:true,bilingual:true}},request:async(p,rows)=>new Map(rows.map(r=>[r.id,r.type==='bilingual'?'*Stay quiet. [조용히 있어.]*':bad]))});
-  assert.equal(result.status,'failed');assert.deepEqual([...data.translations],before);assert.equal(result.changed,0);
+  assert.equal(result.status,'partial');assert.equal([...data.translations][0][1],before[0][1]);assert.equal(result.changed,1);
+  assert.equal([...data.translations][1][1],'*Stay quiet. [조용히 있어.]*');assert.equal(result.rejected,1);
  }
 });
 test('network, malformed IDs, and invalid bilingual unit keep first result; never retry',async()=>{

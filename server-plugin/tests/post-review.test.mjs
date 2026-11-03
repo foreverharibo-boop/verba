@@ -47,7 +47,7 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) {
   });
   const result=await engine.output(source,{});assert.equal(calls,1);assert.match(result.translation,/<div>Hello\.<\/div>/);
  });
- test(`${name}: failed or corrupt review makes no retry and returns whole first translation`,async()=>{
+ test(`${name}: request failures keep whole draft; markup damage keeps its segment without retry`,async()=>{
   for(const failure of ['network','json','missing','markup']){
    let reviews=0;
    const engine=create(snapshot({aiPostReview:{meaning:true,english:true,bilingual:true},serverRetryLimit:4}),async(_id,messages)=>{
@@ -60,8 +60,15 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) {
     return {content:JSON.stringify({segments:initialRows(text).map(r=>({id:r.id,translation:draft(r)}))})};
    });
    const result=await engine.output(source,{});
-   assert.equal(reviews,1);assert.equal(result.outputComparison.postReview.status,'failed');
-   assert.equal(result.translation,'그는 기다렸다.\n\n*조용히 있어. [조용히 있어.]*\n\n`문이 잠겼다. [문이 잠겼다.]`\n\n<div>Hello.</div>');
+   assert.equal(reviews,1);
+   if(failure==='markup'){
+    assert.equal(result.outputComparison.postReview.status,'partial');
+    assert.equal(result.translation,'그는 기다렸다.\n\n*Stay quiet. [조용히 있어.]*\n\n`Door locked. [문이 잠겼다.]`\n\n<div>Hello.</div>');
+    assert.equal(result.outputComparison.postReview.failures[0].detail,'protected-structure');
+   }else{
+    assert.equal(result.outputComparison.postReview.status,'failed');
+    assert.equal(result.translation,'그는 기다렸다.\n\n*조용히 있어. [조용히 있어.]*\n\n`문이 잠겼다. [문이 잠겼다.]`\n\n<div>Hello.</div>');
+   }
   }
  });
  test(`${name}: input unaffected even with all review criteria selected`,async()=>{

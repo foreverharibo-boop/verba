@@ -103,23 +103,25 @@ REVIEW_UNITS
 ${JSON.stringify(plan.units)}`;
 }
 
-function validGeneral(unit, after, settings) {
-    if (typeof after !== 'string' || !after.trim() || after.length > Math.max(1000, unit.CURRENT.length * 4)) return false;
-    if (!same(structure(unit.CURRENT), structure(after))) return false;
+function generalRejection(unit, after, settings) {
+    if (typeof after !== 'string') return 'not-string';
+    if (!after.trim()) return 'empty';
+    if (after.length > Math.max(1000, unit.CURRENT.length * 4)) return 'length-limit';
+    if (!same(structure(unit.CURRENT), structure(after))) return 'protected-structure';
     const expected = unit.checks.includes('tokens')
         ? [...unit.EXPECTED_TOKENS.filter(x => !unit.LOCKED_UNITS.some(lock => lock.sourceTokens.includes(x))), ...unit.LOCKED_UNITS.map(x => x.token)].sort()
         : tokens(unit.CURRENT);
-    if (!same(expected, tokens(after))) return false;
-    if (!same(opaque(unit.checks.includes('tokens') ? unit.SOURCE : unit.CURRENT), opaque(after))) return false;
+    if (!same(expected, tokens(after))) return 'protected-tokens';
+    if (!same(opaque(unit.checks.includes('tokens') ? unit.SOURCE : unit.CURRENT), opaque(after))) return 'opaque-tokens';
     // General checks cannot invent an English source half or new Latin names.
     const remaining = latin(unit.CURRENT);
     for (const word of latin(after)) {
         const index = remaining.indexOf(word);
-        if (index < 0) return false;
+        if (index < 0) return 'added-latin';
         remaining.splice(index, 1);
     }
-    if (unit.checks.includes('banned') && findBannedWords(after, settings).length) return false;
-    return true;
+    if (unit.checks.includes('banned') && findBannedWords(after, settings).length) return 'banned-word';
+    return null;
 }
 
 export async function reviewOutputOnce({ segmented, translations, settings = {}, speakerScopes = {}, options = {}, reference = '', request }) {
@@ -141,30 +143,54 @@ export async function reviewOutputOnce({ segmented, translations, settings = {},
         options.signal?.throwIfAborted();
         if (!(result instanceof Map) || result.size !== plan.units.length || plan.units.some(x => !result.has(x.id))) { if(settings.debugMode===true)stats.reviewReason='incomplete-response'; throw Error('Incomplete review'); }
         const candidate = new Map(translations);
+        const unitById = new Map(plan.units.map(unit => [unit.id, unit]));
+        const unitIndexes = new Map(plan.units.map((unit, index) => [unit.id, index]));
+        const segmentIndexes = new Map(segmented.segments.map((segment, index) => [segment.id, index]));
+        const reject = (group, unitId, reason, detail) => {
+            // Count rejected segments; stop at the first unsafe unit in each segment.
+            stats.rejected++;
+            if (settings.debugMode !== true) return;
+            if (stats.rejected === 1) stats.reviewReason = reason;
+            const failures = stats.failures ||= [];
+            if (failures.length < 32) failures.push({
+                segmentIndex: segmentIndexes.get(group.segment.id),
+                unitIndex: unitIndexes.get(unitId),
+                type: unitById.get(unitId)?.type || 'general', reason, detail,
+            });
+            else stats.failuresOmitted = (stats.failuresOmitted || 0) + 1;
+        };
+        // Apply each segment atomically, including its surrounding prose and pairs.
+        // A damaged segment cannot discard safe edits in independent segments.
+        groups:
         for (const group of plan.groups) {
             let text = group.generalId ? result.get(group.generalId) : group.plain;
-            if (group.generalId && text !== group.plain && !validGeneral(plan.units.find(x => x.id === group.generalId), text, settings)) {
-                stats.rejected++; if(settings.debugMode===true)stats.reviewReason='invalid-general'; throw Error('Invalid general review');
+            if (group.generalId && text !== group.plain) {
+                const detail = generalRejection(unitById.get(group.generalId), text, settings);
+                if (detail) { reject(group, group.generalId, 'invalid-general', detail); continue; }
             }
             for (const span of group.spans) {
                 const after = span.reviewId ? result.get(span.reviewId) : span.current;
                 if (after !== span.current && !validBilingualReplacement(span, after)) {
-                    stats.rejected++; if(settings.debugMode===true)stats.reviewReason='invalid-bilingual'; throw Error('Invalid bilingual review');
+                    reject(group, span.reviewId, 'invalid-bilingual', 'bilingual-integrity'); continue groups;
                 }
                 if (after !== span.current && !span.formatEditable
                     && !same(structure(span.current.replace(span.source, '@@REVIEW_LOCK_9999@@')),
                         structure(after.replace(span.source, '@@REVIEW_LOCK_9999@@')))) {
-                    stats.rejected++; if(settings.debugMode===true)stats.reviewReason='unselected-format-change'; throw Error('Unselected bilingual format change');
+                    reject(group, span.reviewId, 'unselected-format-change', 'protected-structure'); continue groups;
                 }
-                if (typeof text !== 'string' || text.split(span.lock).length !== 2) { stats.rejected++; if(settings.debugMode===true)stats.reviewReason='missing-lock'; throw Error('Lost review lock'); }
+                if (typeof text !== 'string' || text.split(span.lock).length !== 2) {
+                    reject(group, group.generalId || span.reviewId, 'missing-lock', 'protected-tokens'); continue groups;
+                }
                 text = text.replace(span.lock, () => after);
             }
             candidate.set(group.segment.id, text);
         }
-        // Atomic commit: a malformed unit never leaves a partially reviewed draft.
+        // Network/parse errors and cancellation still leave the complete draft intact.
+        options.signal?.throwIfAborted();
         for (const [id, text] of candidate) if (text !== translations.get(id)) stats.changed++;
         for (const [id, text] of candidate) translations.set(id, text);
-        return { ...stats, ...(settings.debugMode===true?{reviewReason:'completed'}:{}), status:'completed' };
+        const status = stats.rejected ? stats.changed ? 'partial' : 'failed' : 'completed';
+        return { ...stats, ...(settings.debugMode===true && status !== 'failed' ? {reviewReason:status === 'partial' ? 'partial-rejection' : 'completed'} : {}), status };
     } catch (error) {
         if (options.signal?.aborted) throw error;
         return { ...stats, changed:0, status:'failed' };
@@ -179,6 +205,6 @@ export function postReviewSettingsMarkup(prefix, settings) {
         <div class="${prefix}-tool-details-content">
         <div class="${prefix}-help">선택한 항목을 모아 번역 후 한 번에 AI로 검수합니다. 검수할 대상이 있으면 API 요청이 1회 추가되며 토큰과 시간이 더 사용됩니다. 모두 끄면 AI 후검수를 하지 않습니다.</div>
         ${POST_REVIEW_CHECKS.map(x => `<label class="${prefix}-check-row"><input type="checkbox" data-post-review="${x.key}" ${checks[x.key] ? 'checked' : ''}><span>${x.label}</span></label>`).join('')}
-        <div class="${prefix}-help">병기는 번역 프롬프트에서 요청한 범위만 검사합니다. 맛 유지 검수는 해당 맛을 사용 중일 때만 적용됩니다. 딥식플 전용 직역투는 기본 OFF이며, 체크하고 개발자 모드의 딥식플한출을 켰을 때만 다른 선택 항목과 함께 검수합니다. 검수 실패·응답 손상 시 최초 번역본을 표시합니다. 인풋·선택 재번역·무료 구글 번역에는 적용하지 않습니다.</div>
+        <div class="${prefix}-help">병기는 번역 프롬프트에서 요청한 범위만 검사합니다. 맛 유지 검수는 해당 맛을 사용 중일 때만 적용됩니다. 딥식플 전용 직역투는 기본 OFF이며, 체크하고 개발자 모드의 딥식플한출을 켰을 때만 다른 선택 항목과 함께 검수합니다. 검수 결과가 보호 조건을 어긴 구간은 기존 번역을 유지하고, 통과한 다른 구간의 수정은 반영합니다. 요청 실패·응답 형식 손상 시에는 검수 전 번역 전체를 유지합니다. 인풋·선택 재번역·무료 구글 번역에는 적용하지 않습니다.</div>
         </div></details>`;
 }

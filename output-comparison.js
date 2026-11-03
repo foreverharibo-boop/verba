@@ -40,7 +40,17 @@ function cleanBilingualReview(value) {
 }
 function cleanPostReview(value) {
     return { ...cleanBilingualReview(value),
-        ...(value?.reviewReason ? {reviewReason:['no-targets','all-off','free-engine','limit','request-or-parse-failed','incomplete-response','invalid-general','invalid-bilingual','unselected-format-change','missing-lock','completed','setup-failed'].includes(value.reviewReason)?value.reviewReason:'unknown'} : {}), checks: POST_REVIEW_CHECKS.map(x => x.key).filter(key => value?.checks?.includes(key)),
+        ...(value?.status === 'partial' ? {status:'partial'} : {}),
+        ...(value?.reviewReason ? {reviewReason:['no-targets','all-off','free-engine','limit','request-or-parse-failed','incomplete-response','invalid-general','invalid-bilingual','unselected-format-change','missing-lock','completed','partial-rejection','setup-failed'].includes(value.reviewReason)?value.reviewReason:'unknown'} : {}), checks: POST_REVIEW_CHECKS.map(x => x.key).filter(key => value?.checks?.includes(key)),
+        ...(Array.isArray(value?.failures) ? {
+            failures: value.failures.slice(0, MAX_ROWS).map(row => ({
+                segmentIndex:number(row?.segmentIndex), unitIndex:number(row?.unitIndex),
+                type:['general','bilingual'].includes(row?.type) ? row.type : 'unknown',
+                reason:['invalid-general','invalid-bilingual','unselected-format-change','missing-lock'].includes(row?.reason) ? row.reason : 'unknown',
+                detail:['not-string','empty','length-limit','protected-structure','protected-tokens','opaque-tokens','added-latin','banned-word','bilingual-integrity'].includes(row?.detail) ? row.detail : 'unknown',
+            })),
+            failuresOmitted:number(number(value.failuresOmitted) + Math.max(0, value.failures.length - MAX_ROWS)),
+        } : {}),
         ...(value?.bilingualSettings ? {bilingualSettings:sanitizeBilingualSettings(value.bilingualSettings)} : {}),
         ...(value?.units ? {units:{general:number(value.units.general),bilingual:number(value.units.bilingual),lockedTargets:number(value.units.lockedTargets)}} : {}) };
 }

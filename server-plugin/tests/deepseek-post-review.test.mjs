@@ -41,7 +41,7 @@ for(const [name,create] of [['verba',verba],['deep',deep]]){
   });
   assert.equal(await engine.input('안녕.'),'Hello.');assert.equal(calls,1);
  });
- test(`${name}: corrupt dedicated review rolls back to the initial translation without retry`,async()=>{
+ test(`${name}: corrupt dialogue keeps its draft while valid narration applies without retry`,async()=>{
   let reviews=0;const engine=create(snapshot({}),async(_id,messages)=>{
    const p=messages[0].content;
    if(p.startsWith('UNIFIED OUTPUT POST REVIEW')){
@@ -49,7 +49,8 @@ for(const [name,create] of [['verba',verba],['deep',deep]]){
    }
    return reply(rows(p).map(r=>({id:r.id,translation:r.type==='dialogue_candidate'?'"Enjoy the seat. (좌석을 즐겨.)"':'그는 척추를 대고 누웠다.'})));
   });
-  const out=await engine.output(source);assert.equal(reviews,1);assert.equal(out.outputComparison.postReview.status,'failed');
-  assert.equal(out.translation,'그는 척추를 대고 누웠다.\n\n"Enjoy the seat. (좌석을 즐겨.)"');
+  const out=await engine.output(source);assert.equal(reviews,1);assert.equal(out.outputComparison.postReview.status,'partial');
+  assert.equal(out.outputComparison.postReview.failures[0].reason,'invalid-bilingual');
+  assert.equal(out.translation,'그는 등을 대고 누웠다.\n\n"Enjoy the seat. (좌석을 즐겨.)"');
  });
 }

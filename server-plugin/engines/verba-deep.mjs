@@ -6049,20 +6049,22 @@ Return JSON only: {"segments":[{"id":"review_0000","translation":"complete corre
 REVIEW_UNITS
 ${JSON.stringify(plan.units)}`;
 }
-function validGeneral(unit, after, settings) {
-  if (typeof after !== "string" || !after.trim() || after.length > Math.max(1e3, unit.CURRENT.length * 4)) return false;
-  if (!same(structure(unit.CURRENT), structure(after))) return false;
+function generalRejection(unit, after, settings) {
+  if (typeof after !== "string") return "not-string";
+  if (!after.trim()) return "empty";
+  if (after.length > Math.max(1e3, unit.CURRENT.length * 4)) return "length-limit";
+  if (!same(structure(unit.CURRENT), structure(after))) return "protected-structure";
   const expected = unit.checks.includes("tokens") ? [...unit.EXPECTED_TOKENS.filter((x) => !unit.LOCKED_UNITS.some((lock) => lock.sourceTokens.includes(x))), ...unit.LOCKED_UNITS.map((x) => x.token)].sort() : tokens(unit.CURRENT);
-  if (!same(expected, tokens(after))) return false;
-  if (!same(opaque2(unit.checks.includes("tokens") ? unit.SOURCE : unit.CURRENT), opaque2(after))) return false;
+  if (!same(expected, tokens(after))) return "protected-tokens";
+  if (!same(opaque2(unit.checks.includes("tokens") ? unit.SOURCE : unit.CURRENT), opaque2(after))) return "opaque-tokens";
   const remaining = latin(unit.CURRENT);
   for (const word of latin(after)) {
     const index = remaining.indexOf(word);
-    if (index < 0) return false;
+    if (index < 0) return "added-latin";
     remaining.splice(index, 1);
   }
-  if (unit.checks.includes("banned") && findBannedWords(after, settings).length) return false;
-  return true;
+  if (unit.checks.includes("banned") && findBannedWords(after, settings).length) return "banned-word";
+  return null;
 }
 async function reviewOutputOnce({ segmented, translations, settings = {}, speakerScopes = {}, options = {}, reference = "", request }) {
   const stats = { checked: 0, changed: 0, rejected: 0, skipped: 0, status: "not-needed", checks: [] };
@@ -6094,40 +6096,59 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
       throw Error("Incomplete review");
     }
     const candidate = new Map(translations);
-    for (const group of plan.groups) {
-      let text = group.generalId ? result.get(group.generalId) : group.plain;
-      if (group.generalId && text !== group.plain && !validGeneral(plan.units.find((x) => x.id === group.generalId), text, settings)) {
-        stats.rejected++;
-        if (settings.debugMode === true) stats.reviewReason = "invalid-general";
-        throw Error("Invalid general review");
+    const unitById = new Map(plan.units.map((unit) => [unit.id, unit]));
+    const unitIndexes = new Map(plan.units.map((unit, index) => [unit.id, index]));
+    const segmentIndexes = new Map(segmented.segments.map((segment, index) => [segment.id, index]));
+    const reject = (group, unitId, reason, detail) => {
+      stats.rejected++;
+      if (settings.debugMode !== true) return;
+      if (stats.rejected === 1) stats.reviewReason = reason;
+      const failures = stats.failures ||= [];
+      if (failures.length < 32) failures.push({
+        segmentIndex: segmentIndexes.get(group.segment.id),
+        unitIndex: unitIndexes.get(unitId),
+        type: unitById.get(unitId)?.type || "general",
+        reason,
+        detail
+      });
+      else stats.failuresOmitted = (stats.failuresOmitted || 0) + 1;
+    };
+    groups:
+      for (const group of plan.groups) {
+        let text = group.generalId ? result.get(group.generalId) : group.plain;
+        if (group.generalId && text !== group.plain) {
+          const detail = generalRejection(unitById.get(group.generalId), text, settings);
+          if (detail) {
+            reject(group, group.generalId, "invalid-general", detail);
+            continue;
+          }
+        }
+        for (const span of group.spans) {
+          const after = span.reviewId ? result.get(span.reviewId) : span.current;
+          if (after !== span.current && !validBilingualReplacement(span, after)) {
+            reject(group, span.reviewId, "invalid-bilingual", "bilingual-integrity");
+            continue groups;
+          }
+          if (after !== span.current && !span.formatEditable && !same(
+            structure(span.current.replace(span.source, "@@REVIEW_LOCK_9999@@")),
+            structure(after.replace(span.source, "@@REVIEW_LOCK_9999@@"))
+          )) {
+            reject(group, span.reviewId, "unselected-format-change", "protected-structure");
+            continue groups;
+          }
+          if (typeof text !== "string" || text.split(span.lock).length !== 2) {
+            reject(group, group.generalId || span.reviewId, "missing-lock", "protected-tokens");
+            continue groups;
+          }
+          text = text.replace(span.lock, () => after);
+        }
+        candidate.set(group.segment.id, text);
       }
-      for (const span of group.spans) {
-        const after = span.reviewId ? result.get(span.reviewId) : span.current;
-        if (after !== span.current && !validBilingualReplacement(span, after)) {
-          stats.rejected++;
-          if (settings.debugMode === true) stats.reviewReason = "invalid-bilingual";
-          throw Error("Invalid bilingual review");
-        }
-        if (after !== span.current && !span.formatEditable && !same(
-          structure(span.current.replace(span.source, "@@REVIEW_LOCK_9999@@")),
-          structure(after.replace(span.source, "@@REVIEW_LOCK_9999@@"))
-        )) {
-          stats.rejected++;
-          if (settings.debugMode === true) stats.reviewReason = "unselected-format-change";
-          throw Error("Unselected bilingual format change");
-        }
-        if (typeof text !== "string" || text.split(span.lock).length !== 2) {
-          stats.rejected++;
-          if (settings.debugMode === true) stats.reviewReason = "missing-lock";
-          throw Error("Lost review lock");
-        }
-        text = text.replace(span.lock, () => after);
-      }
-      candidate.set(group.segment.id, text);
-    }
+    options.signal?.throwIfAborted();
     for (const [id, text] of candidate) if (text !== translations.get(id)) stats.changed++;
     for (const [id, text] of candidate) translations.set(id, text);
-    return { ...stats, ...settings.debugMode === true ? { reviewReason: "completed" } : {}, status: "completed" };
+    const status = stats.rejected ? stats.changed ? "partial" : "failed" : "completed";
+    return { ...stats, ...settings.debugMode === true && status !== "failed" ? { reviewReason: status === "partial" ? "partial-rejection" : "completed" } : {}, status };
   } catch (error) {
     if (options.signal?.aborted) throw error;
     return { ...stats, changed: 0, status: "failed" };
@@ -6175,8 +6196,19 @@ function cleanBilingualReview(value) {
 function cleanPostReview(value) {
   return {
     ...cleanBilingualReview(value),
-    ...value?.reviewReason ? { reviewReason: ["no-targets", "all-off", "free-engine", "limit", "request-or-parse-failed", "incomplete-response", "invalid-general", "invalid-bilingual", "unselected-format-change", "missing-lock", "completed", "setup-failed"].includes(value.reviewReason) ? value.reviewReason : "unknown" } : {},
+    ...value?.status === "partial" ? { status: "partial" } : {},
+    ...value?.reviewReason ? { reviewReason: ["no-targets", "all-off", "free-engine", "limit", "request-or-parse-failed", "incomplete-response", "invalid-general", "invalid-bilingual", "unselected-format-change", "missing-lock", "completed", "partial-rejection", "setup-failed"].includes(value.reviewReason) ? value.reviewReason : "unknown" } : {},
     checks: POST_REVIEW_CHECKS.map((x) => x.key).filter((key) => value?.checks?.includes(key)),
+    ...Array.isArray(value?.failures) ? {
+      failures: value.failures.slice(0, MAX_ROWS).map((row) => ({
+        segmentIndex: number(row?.segmentIndex),
+        unitIndex: number(row?.unitIndex),
+        type: ["general", "bilingual"].includes(row?.type) ? row.type : "unknown",
+        reason: ["invalid-general", "invalid-bilingual", "unselected-format-change", "missing-lock"].includes(row?.reason) ? row.reason : "unknown",
+        detail: ["not-string", "empty", "length-limit", "protected-structure", "protected-tokens", "opaque-tokens", "added-latin", "banned-word", "bilingual-integrity"].includes(row?.detail) ? row.detail : "unknown"
+      })),
+      failuresOmitted: number(number(value.failuresOmitted) + Math.max(0, value.failures.length - MAX_ROWS))
+    } : {},
     ...value?.bilingualSettings ? { bilingualSettings: sanitizeBilingualSettings(value.bilingualSettings) } : {},
     ...value?.units ? { units: { general: number(value.units.general), bilingual: number(value.units.bilingual), lockedTargets: number(value.units.lockedTargets) } } : {}
   };
@@ -8209,6 +8241,7 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
         }
       });
       if (result.status === "failed" || result.status === "limit") console2.warn("[Verba] AI \uD6C4\uAC80\uC218 \uBBF8\uC801\uC6A9 \u2014 \uCD5C\uCD08 \uBC88\uC5ED\uBCF8 \uC720\uC9C0", result.status);
+      if (result.status === "partial") console2.warn("[Verba] AI \uD6C4\uAC80\uC218 \uC77C\uBD80 \uC801\uC6A9 \u2014 \uAC70\uBD80\uB41C \uAD6C\uAC04\uC740 \uAE30\uC874 \uBC88\uC5ED \uC720\uC9C0", result.changed, result.rejected);
       return result;
     } catch (error) {
       if (options.signal?.aborted) throw error;

@@ -4,12 +4,13 @@ import { createEngine as verba } from '../engines/verba.mjs';
 import { createEngine as deep } from '../engines/verba-deep.mjs';
 for (const [name,createEngine] of [['verba',verba],['deep',deep]]) {
  test(`${name}: serialized USER register reaches output and existing voice review without extra calls`,async()=>{
-  const snapshot=JSON.parse(JSON.stringify({settings:{profileId:'A',activeProfileSlot:'A',serverRetryLimit:1,dialogueEndingRepetitionReduction:false,developerRelationshipExperimentEnabled:true,developerUserToTargetRegister:'jondaetmal',aiPostReview:{voice:true}},profiles:{A:{}},nameLocks:[],character:{name:'Morgan'},context:{name1:'Alex',name2:'Morgan'}}));
+  const snapshot=JSON.parse(JSON.stringify({settings:{profileId:'A',activeProfileSlot:'A',serverRetryLimit:1,dialogueEndingRepetitionReduction:false,developerRelationshipExperimentEnabled:true,developerUserToTargetRegister:'jondaetmal',developerUserToOtherRegister:'banmal',aiPostReview:{voice:true}},profiles:{A:{}},nameLocks:[],character:{name:'Morgan'},context:{name1:'Alex',name2:'Morgan'}}));
   let calls=0;
   const engine=createEngine(snapshot,async(_id,messages)=>{
    calls++;const prompt=messages[0].content;
    assert.match(prompt,/USER-TO-CHARACTER SPEECH REGISTER/);
    assert.match(prompt,/USER→TARGET=JONDAETMAL/);
+   assert.match(prompt,/USER→OTHER=BANMAL/);
    if(prompt.startsWith('UNIFIED OUTPUT POST REVIEW')){
     const rows=JSON.parse(prompt.split('\nREVIEW_UNITS\n').at(-1));
     return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:row.current_translation}))})};

@@ -70,3 +70,34 @@ test('new control is normalized, snapshotted, restored and persisted from its ow
  for(const expected of ["developerUserToTargetRegister: 'unset'",'raw.developerUserToTargetRegister','developerUserToTargetRegister: source.developerUserToTargetRegister','settings.developerUserToTargetRegister = next.developerUserToTargetRegister','USER → 캐릭터'])assert.ok(index.includes(expected),expected);
  assert.match(index,/target\.id === '[^']+-developer-user-target-register'[\s\S]*?settings\.developerUserToTargetRegister[\s\S]*?saveSettings\(\)/);
 });
+
+test('USER to OTHER is independent, opt-in, output-only and scoped',()=>{
+ const otherMarker=/USER-TO-OTHER SPEECH REGISTER/;
+ for(const target of ['unset','banmal','jondaetmal'])for(const other of ['unset','banmal','jondaetmal']){
+  const settings={...base,developerUserToTargetRegister:target,developerUserToOtherRegister:other};
+  const prompt=core.buildOutputPrompt(segmented,settings,'',identity);
+  assert.equal(marker.test(prompt),target!=='unset');
+  assert.equal(otherMarker.test(prompt),other!=='unset');
+  if(other!=='unset') {
+   assert.ok(prompt.includes(`USER→OTHER=${other.toUpperCase()}`));
+   assert.match(prompt,/OTHER means an NPC\/addressee, not an NPC speaking/);
+   assert.match(prompt,/Never treat an unknown listener as OTHER by default/);
+  }
+  assert.doesNotMatch(core.buildInputPrompt('기다려',settings,'unknown',identity),otherMarker);
+  assert.doesNotMatch(core.buildOutputPrompt(segmented,{...settings,developerRelationshipExperimentEnabled:false},'',identity),otherMarker);
+  for(const scope of ['mixed','dialogue_mixed','other_dialogue','target_dialogue','narration','tagged_content']){
+   const p=core.buildScopedOutputPrompt({segments:segmented.segments,sourceContext:source,settings,speakerIdentity:identity,scope});
+   assert.equal(otherMarker.test(p),other!=='unset'&&['mixed','dialogue_mixed','other_dialogue'].includes(scope));
+  }
+ }
+});
+
+test('OTHER register reaches selection and custom prompts but does not override MAD pair register or Galbwae',()=>{
+ const settings={...base,developerUserToTargetRegister:'unset',developerUserToOtherRegister:'jondaetmal',developerMadKoreanUserToTargetRegister:'banmal'};
+ assert.equal(effectiveMadUserRegister(settings),'banmal');
+ const options={source,translation:'"기다려."',selected:'기다려',start:1,end:4,settings,speakerIdentity:identity,selections:[{id:'multi_0000',start:1,end:4,selected:'기다려'}]};
+ for(const prompt of [core.buildSelectionPrompt(options),core.buildMultiSelectionPrompt(options),core.buildOutputPrompt(segmented,{...settings,customTranslatorEnabled:true,customTranslatorTemplates:{output:'MY_CUSTOM_RULE'},customTranslatorModified:{output:true}},'',identity)]) assert.match(prompt,/USER→OTHER=JONDAETMAL/);
+ assert.equal(userToCharacterRegisterRule({...settings,developerMode:true,chuseokGalbwaeScope:'all'},identity),'');
+ const index=fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
+ for(const expected of ["developerUserToOtherRegister: 'unset'",'raw.developerUserToOtherRegister','developerUserToOtherRegister: source.developerUserToOtherRegister','settings.developerUserToOtherRegister = next.developerUserToOtherRegister','USER → 타인(NPC)'])assert.ok(index.includes(expected),expected);
+});

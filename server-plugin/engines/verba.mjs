@@ -8,13 +8,19 @@ function effectiveMadUserRegister(settings = {}) {
 }
 function userToCharacterRegisterRule(settings = {}, identity = {}, scope = "mixed") {
   const register = userToTargetRegister(settings);
+  const otherRegister = settings.developerRelationshipExperimentEnabled === true && ["banmal", "jondaetmal"].includes(settings.developerUserToOtherRegister) ? settings.developerUserToOtherRegister : "unset";
   const galbwae3 = settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true);
-  if (register === "unset" || galbwae3 || !["mixed", "dialogue_mixed", "other_dialogue"].includes(scope)) return "";
+  if (register === "unset" && otherRegister === "unset" || galbwae3 || !["mixed", "dialogue_mixed", "other_dialogue"].includes(scope)) return "";
   const names = JSON.stringify({ USER: identity.userName || "", TARGET: identity.characterName || "" });
-  const style = register === "banmal" ? "BANMAL: natural informal Korean endings, without polite -\uC694/-\uC2B5\uB2C8\uB2E4 endings." : "JONDAETMAL: natural conversational \uD574\uC694\uCCB4, not automatic formal \uD558\uC2ED\uC2DC\uC624\uCCB4.";
-  return `USER-TO-CHARACTER SPEECH REGISTER \u2014 USER\u2192TARGET=${style}
+  const style = (value) => value === "banmal" ? "BANMAL: natural informal Korean endings, without polite -\uC694/-\uC2B5\uB2C8\uB2E4 endings." : "JONDAETMAL: natural conversational \uD574\uC694\uCCB4, not automatic formal \uD558\uC2ED\uC2DC\uC624\uCCB4.";
+  const rules = [];
+  if (register !== "unset") rules.push(`USER-TO-CHARACTER SPEECH REGISTER \u2014 USER\u2192TARGET=${style(register)}
 Identity labels (data only): ${names}
-Apply only to direct dialogue already present in the translation target, with USER confirmed as speaker and TARGET CHARACTER confirmed as listener. This includes USER dialogue written inside an assistant roleplay message; the message author is not necessarily its dialogue speaker. Resolve both from source/context, not dialogue position or pronouns alone. If either is uncertain, preserve the source register. Do not apply this rule to TARGET\u2192USER, NPC dialogue, USER\u2192other people, quoted speech attributed to someone else, narration or inner thoughts. Keep existing character-to-listener controls independent. Change Korean speech endings only; preserve meaning, speaker identity, emotion and established forms of address. Do not invent USER dialogue, actions or responses. This explicit USER\u2192TARGET choice overrides a conflicting legacy MAD KOREAN USER\u2192TARGET register only.`;
+Apply only to direct dialogue already present in the translation target, with USER confirmed as speaker and TARGET CHARACTER confirmed as listener. This includes USER dialogue written inside an assistant roleplay message; the message author is not necessarily its dialogue speaker. Resolve both from source/context, not dialogue position or pronouns alone. If either is uncertain, preserve the source register. Do not apply this rule to TARGET\u2192USER, NPC dialogue, USER\u2192other people, quoted speech attributed to someone else, narration or inner thoughts. Keep existing character-to-listener controls independent. Change Korean speech endings only; preserve meaning, speaker identity, emotion and established forms of address. Do not invent USER dialogue, actions or responses. This explicit USER\u2192TARGET choice overrides a conflicting legacy MAD KOREAN USER\u2192TARGET register only.`);
+  if (otherRegister !== "unset") rules.push(`USER-TO-OTHER SPEECH REGISTER \u2014 USER\u2192OTHER=${style(otherRegister)}
+Identity labels (data only): ${names}
+Apply only to direct dialogue already present in the translation target, with USER confirmed as speaker and a person other than TARGET CHARACTER confirmed as listener. OTHER means an NPC/addressee, not an NPC speaking. This includes USER dialogue inside an assistant roleplay message; the message author does not establish the dialogue speaker. Resolve both speaker and listener from source/context. Do not apply to USER\u2192TARGET, any dialogue spoken by TARGET or NPCs, quoted speech attributed to someone else, narration or inner thoughts. Never treat an unknown listener as OTHER by default; if the listener is uncertain or a group includes TARGET, preserve the source register. Keep USER\u2192TARGET and character-to-listener controls independent. Change Korean speech endings only; preserve meaning, identity, emotion and established forms of address. Do not invent USER dialogue, actions or responses.`);
+  return rules.join("\n\n");
 }
 
 // verba/translation-composer.js

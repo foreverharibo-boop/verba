@@ -62,6 +62,7 @@ const choices=[
     ['target-user-register','developerTargetToUserRegister','jondaetmal',Select],
     ['target-other-register','developerTargetToOtherRegister','banmal',Select],
     ['user-target-register','developerUserToTargetRegister','jondaetmal',Select],
+    ['user-other-register','developerUserToOtherRegister','banmal',Select],
     ['target-user-address','developerTargetToUserAddress','선배님',Input],
     ['target-user-address-strength','developerTargetToUserAddressStrength','prefer',Select],
     ['target-user-address-frequency','developerTargetToUserAddressFrequency','minimal',Select],

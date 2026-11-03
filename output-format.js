@@ -64,7 +64,9 @@ function affirmativeScope(clause) {
 }
 export function promptRequestsScope(prompt, kind) {
     if (!scopeKinds.includes(kind)) return false;
-    const clauses = String(prompt || '').split(/\r?\n|;|(?<=[.!?])\s+(?=[A-Z가-힣])|\b(?:but|however)\b|하지만|(?=\b(?:except|excluding)\b)|(?<=하되)\s*/iu)
+    // A pasted list may put "Dialogue rule. - Narration rule." on one line.
+    // Split those sentences before assigning scopes to a Korean-only rule.
+    const clauses = String(prompt || '').split(/\r?\n|;|(?<=[.!?])\s+(?=(?:[-*+•]\s+|\d+[.)]\s+)?[A-Z가-힣])|\b(?:but|however)\b|하지만|(?=\b(?:except|excluding)\b)|(?<=하되)\s*/iu)
         .map(text => text.trim()).filter(text => text && !isBilingualFormatHeading(text));
     const rules = clauses.map(text => ({ text, scopes: sourceScopes(text),
         outside: outsideScope.test(text), negative: negativeScope.test(text),

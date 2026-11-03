@@ -269,7 +269,7 @@ function affirmativeScope(clause) {
 }
 function promptRequestsScope(prompt, kind) {
   if (!scopeKinds.includes(kind)) return false;
-  const clauses = String(prompt || "").split(/\r?\n|;|(?<=[.!?])\s+(?=[A-Z가-힣])|\b(?:but|however)\b|하지만|(?=\b(?:except|excluding)\b)|(?<=하되)\s*/iu).map((text) => text.trim()).filter((text) => text && !isBilingualFormatHeading(text));
+  const clauses = String(prompt || "").split(/\r?\n|;|(?<=[.!?])\s+(?=(?:[-*+•]\s+|\d+[.)]\s+)?[A-Z가-힣])|\b(?:but|however)\b|하지만|(?=\b(?:except|excluding)\b)|(?<=하되)\s*/iu).map((text) => text.trim()).filter((text) => text && !isBilingualFormatHeading(text));
   const rules = clauses.map((text) => ({
     text,
     scopes: sourceScopes(text),

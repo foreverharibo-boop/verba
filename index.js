@@ -8,7 +8,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.88';
+import { createServerClient } from './server-client.js?v=0.6.89';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -72,9 +72,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.88';
+const EXTENSION_VERSION = '0.6.89';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.88';
+const SERVER_ENGINE_VERSION = '0.6.89';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -10883,16 +10883,16 @@ function developerSettingsMarkup() {
                 ${settings.developerMode ? `
                     <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
                     <details id="verba-developer-deepseek-korean-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>딥식플한출 <small>영어 프롬프트 단독 테스트</small></summary>
+                        <summary>딥식플한출 <small>영미권 문체 번역 실험</small></summary>
                         <div class="verba-tool-details-content">
                             <label class="verba-check-row">
                                 <input type="checkbox" id="verba-developer-deepseek-korean-enabled" ${settings.developerDeepseekKoreanEnabled ? 'checked' : ''}>
                                 <span>딥식플한출 사용</span>
                             </label>
-                            <div class="verba-help">한국어 출력·전체/선택 재번역에 전용 영어 프롬프트만 사용합니다. 다른 기본·커스텀·한출·홍진·갈봬·미세조정 지침과 일회성 요구사항은 보내지 않으며, 한영병기 판정·번역 후 AI 검수도 생략합니다.</div>
+                            <div class="verba-help">한국어 출력·전체/선택 재번역에 전용 번역 프롬프트만 사용합니다. 다른 기본·커스텀·한출·홍진·갈봬·미세조정 지침과 일회성 요구사항은 보내지 않으며, 한영병기 판정·번역 후 AI 검수도 생략합니다.</div>
                             <div class="verba-help">원문, 선택 구간의 문맥, 이름 고정 정보, JSON·보호 요소 규칙만 함께 보냅니다. AI 연결 프로필에서 테스트할 모델을 직접 선택해 주세요. 모델은 자동 변경되지 않으며 무료 구글 번역에는 적용되지 않습니다.</div>
                             <div class="verba-help">끄면 저장된 기존 설정으로 돌아갑니다. 한국어→영어 인풋 번역은 기존 설정을 사용합니다. 서버 번역 사용자는 베르바 서버 플러그인도 업데이트해 주세요.</div>
-                            <details><summary>영어 프롬프트 보기</summary><pre class="verba-help" style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(DEEPSEEK_KOREAN_PROMPT)}</pre></details>
+                            <details><summary>번역 프롬프트 보기</summary><pre class="verba-help" style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(DEEPSEEK_KOREAN_PROMPT)}</pre></details>
                         </div>
                     </details>
                     ${developerChuseokGalbwaeMarkup()}

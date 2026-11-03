@@ -8,7 +8,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.91';
+import { createServerClient } from './server-client.js?v=0.6.92';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -72,9 +72,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.91';
+const EXTENSION_VERSION = '0.6.92';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.91';
+const SERVER_ENGINE_VERSION = '0.6.92';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -1253,11 +1253,6 @@ function warnTranslationPromptConflicts({
     includeDialogue = true,
     includeCharacterDialogue = true,
 } = {}) {
-    if (deepseekKoreanEnabled(settings)) {
-        lastPromptConflicts = [];
-        renderPromptConflictInspector([]);
-        return [];
-    }
     const conflicts = findTranslationPromptConflicts({
         settings,
         oneTimeInstruction,
@@ -2447,22 +2442,6 @@ function renderCurrentAppliedRules() {
     const host = document.querySelector('#verba-current-rules-content');
     if (!host) return;
 
-    if (deepseekKoreanEnabled(settings)) {
-        host.innerHTML = currentRulesSimpleCard('딥식플한출 · 한국어 출력/재번역', [
-            ['번역 지침', DEEPSEEK_KOREAN_PROMPT],
-            ['함께 전송', '켜진 프롬프트 입력창 4개(전역·모든 대사·캐릭터 대사·NPC/USER 대사), 화자 정보, 원문·선택 문맥, 이름 토큰, JSON·보호 요소 규칙'],
-            ['일시 제외', '다른 기본·커스텀·한출·홍진·갈봬·미세조정 프롬프트, 일회성 요구사항'],
-            ['병기·검수', '전역·모든 대사 지시에서 요청한 범위의 병기 허용 · 선택된 AI 후검수 설정 적용'],
-            ['연결', '현재 선택한 AI 연결 프로필 사용 · 모델 자동 변경 없음'],
-        ]) + [
-            currentRulesPromptSlotMarkup('전체 번역 전역 프롬프트', settings.globalPrompt, settings.globalPromptEnabled !== false),
-            currentRulesPromptSlotMarkup('모든 대사 공통 프롬프트', settings.allDialoguePrompt, settings.allDialoguePromptEnabled !== false),
-            currentRulesPromptSlotMarkup('캐릭터 대사 전용 프롬프트', settings.dialoguePrompt, settings.dialoguePromptEnabled !== false),
-            currentRulesPromptSlotMarkup('NPC·USER 대사 전용 프롬프트', settings.otherDialoguePrompt, settings.otherDialoguePromptEnabled !== false),
-        ].join('');
-        return;
-    }
-
     if (minimalOutputEnabled(settings)) {
         host.innerHTML = currentRulesSimpleCard('최소 프롬프트 실험 · 출력/전체 재번역', [
             ['처리 방식', outputSplitCount(settings) > 1 ? `${outputSplitCount(settings)}분할 동시 번역` : '분할 안 함'],
@@ -2520,6 +2499,11 @@ function renderCurrentAppliedRules() {
     host.innerHTML = `
         <div class="verba-current-rules-note">현재 아웃풋 E→K 번역에 적용되는 사용자 규칙을 정리해서 보여줍니다. 인풋 K→E 자동번역 규칙은 포함하지 않으며 API 호출도 하지 않습니다.</div>
 
+        ${deepseekKoreanEnabled(settings) ? currentRulesSimpleCard('딥식 번역 지침 · 일반 설정 함께 적용', [
+            ['기본 지침', DEEPSEEK_KOREAN_PROMPT],
+            ['함께 적용', '일반 베르바의 활성 프롬프트·맛·미세조정·금지어·일회성 요구사항·AI 후검수'],
+            ['우선순위', '기존 적용 범위와 우선순위 유지 · 미친 한출/갈봬의 한국어 전용 규칙도 유지'],
+        ]) : ''}
         <div class="verba-current-rule-grid">
             ${currentRulesPromptSlotMarkup('전체 번역 전역 프롬프트', settings.globalPrompt, settings.globalPromptEnabled !== false)}
             ${currentRulesPromptSlotMarkup('모든 대사 공통 프롬프트', settings.allDialoguePrompt, settings.allDialoguePromptEnabled !== false)}
@@ -3515,7 +3499,6 @@ function customTranslatorPromptKey(stage = '') {
 }
 
 function applyCustomTranslatorPrompt(prompt, options = {}) {
-    if (deepseekKoreanEnabled(settings) && customTranslatorPromptKey(options.stage) !== 'input') return String(prompt || '');
     // Public translation builders already replace just the registered prose.
     // Never rebuild from targets here: doing so loses live names/settings,
     // selection context, repair diagnostics and candidate response schemas.
@@ -3699,7 +3682,7 @@ async function sendWithRetry(prompt, options = {}) {
 
     const requestOptions = { ...options, signal: controller.signal };
     const customPrompt = applyCustomTranslatorPrompt(prompt, options);
-    const outgoingPrompt = options.previousUserSource && !(deepseekKoreanEnabled(settings) && customTranslatorPromptKey(options.stage) !== 'input')
+    const outgoingPrompt = options.previousUserSource
         ? appendPreviousUserContext(customPrompt, options.previousUserSource)
         : customPrompt;
     let lastError;
@@ -5011,13 +4994,6 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
     const before = new Map(translations);
     try {
         const config = { ...(reviewSettings || settings), aiPostReview: normalizePostReview(settings.aiPostReview) };
-        if (deepseekKoreanEnabled(config)) {
-            config.customTranslatorEnabled = false;
-            config.developerMadKoreanOutputEnabled = false;
-            config.developerHongjinFlavorEnabled = false;
-            config.chuseokGalbwaeScope = 'off';
-            config.chuseokGalbwaeEnabled = false;
-        }
         const selected = config.aiPostReview;
         const reference = selected.voice || selected.mad || selected.hongjin
             ? buildOutputPrompt({ ...segmented, segments: [], protectedText: '' }, config,
@@ -5048,7 +5024,6 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
 
 // One bounded provider attempt; no normal retry/race/fallback pipeline.
 async function reviewFinalBilingual({ segmented, translations, options = {} }) {
-    if (deepseekKoreanEnabled(settings)) return { checked: 0, changed: 0, rejected: 0, skipped: 0, status: 'not-needed' };
     const result = await reviewBilingualOutput({
         segmented, translations, settings, options,
         request: async (prompt, targets, requestOptions) => {
@@ -5101,7 +5076,6 @@ async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {
  * 20-second / 512-token decision request.
  */
 async function planBilingualDialogueVerdicts(segmented, options = {}) {
-    if (deepseekKoreanEnabled(settings)) return;
     if (settings.translationEngine === 'google-free') return;
     if (!segmented?.segments?.some(item => item.type === 'dialogue_candidate')) return;
     const pending = bilingualPromptsNeedingVerdict(settings)
@@ -9443,7 +9417,7 @@ async function retranslateSelectionBundle() {
         const unchangedIds = selections
             .filter(row => sameRetranslationWording(result.get(row.id), row.selected))
             .map(row => row.id);
-        if (unchangedIds.length && !deepseekKoreanEnabled(settings)) {
+        if (unchangedIds.length) {
             const changedPrompt = `${prompt}\n\nMANDATORY BUNDLE RETRANSLATION CORRECTION
 Your previous response echoed the existing Korean wording for these ids: ${JSON.stringify(unchangedIds)}.
 Return all required ids in the same schema. For listed ids, rephrase beyond Unicode/spacing/punctuation changes; retain meaning, referents, tense, force, explicitness and grammar role. Apply the one-time instruction.`;
@@ -9460,10 +9434,10 @@ Return all required ids in the same schema. For listed ids, rephrase beyond Unic
         const replacements = selections.map(row => {
             const replacement = String(result.get(row.id) || '').trim();
             if (!replacement) throw new Error('묶음 재번역 결과 중 비어 있는 구간이 있습니다.');
-            if (!deepseekKoreanEnabled(settings) && sameRetranslationWording(replacement, row.selected)) {
+            if (sameRetranslationWording(replacement, row.selected)) {
                 throw new Error(`AI가 두 번 모두 기존 번역과 같은 문장을 반환했습니다: ${row.selected.slice(0, 40)}`);
             }
-            const banned = deepseekKoreanEnabled(settings) ? [] : findBannedWords(replacement, settings);
+            const banned = findBannedWords(replacement, settings);
             if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
             if (replacement.length > Math.max(300, row.selected.length * 7)) {
                 throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
@@ -9725,7 +9699,7 @@ async function retranslateSelection(snapshot) {
             const candidates = received.filter(candidate => {
                 const text = String(candidate || '').trim();
                 if (!text || sameRetranslationWording(text, snapshot.selected)) return false;
-                if (!deepseekKoreanEnabled(settings) && findBannedWords(text, settings).length) return false;
+                if (findBannedWords(text, settings).length) return false;
                 return text.length <= Math.max(300, snapshot.selected.length * 7);
             });
             if (candidates.length < 2) {
@@ -9744,7 +9718,7 @@ async function retranslateSelection(snapshot) {
                 stage: 'selection-retranslation',
             });
             replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
-            if (!deepseekKoreanEnabled(settings) && (!replacement || sameRetranslationWording(replacement, snapshot.selected))) {
+            if (!replacement || sameRetranslationWording(replacement, snapshot.selected)) {
                 const changedPrompt = `${prompt}\n\nMANDATORY RETRANSLATION CORRECTION
 Your previous replacement was empty or unchanged. Return a genuinely different Korean wording for the selected fragment now.
 - Do not repeat the existing selected fragment verbatim or with whitespace-only changes.
@@ -9758,12 +9732,12 @@ Your previous replacement was empty or unchanged. Return a genuinely different K
                 });
                 replacement = repairKoreanParticleAlternatives(repairIndivisibleIdentityNames(result.get('seg_0000'), speakerIdentity)).trim();
             }
-            if (!deepseekKoreanEnabled(settings) && sameRetranslationWording(replacement, snapshot.selected)) {
+            if (sameRetranslationWording(replacement, snapshot.selected)) {
                 throw new Error('AI가 두 번 모두 기존 번역과 같은 문장을 반환하여 변경하지 않았습니다. 요구사항을 더 구체적으로 적어 다시 시도해 주세요.');
             }
         }
         if (!replacement) throw new Error('선택 부분 재번역 결과가 비어 있습니다.');
-        const banned = deepseekKoreanEnabled(settings) ? [] : findBannedWords(replacement, settings);
+        const banned = findBannedWords(replacement, settings);
         if (banned.length) throw new Error(`재번역 결과에 금지어가 남았습니다: ${banned.join(', ')}`);
         if (replacement.length > Math.max(300, snapshot.selected.length * 7)) {
             throw new Error('선택 범위보다 지나치게 긴 결과가 반환되었습니다.');
@@ -10896,8 +10870,8 @@ function developerSettingsMarkup() {
                                 <input type="checkbox" id="verba-developer-deepseek-korean-enabled" ${settings.developerDeepseekKoreanEnabled ? 'checked' : ''}>
                                 <span>딥식플한출 사용</span>
                             </label>
-                            <div class="verba-help">한국어 출력·전체/선택 재번역에 전용 영어 번역 지침과 켜진 프롬프트 입력창 4개를 함께 보냅니다. 전역은 전체에, 대사 지시는 해당 화자의 대사에 적용합니다. 전역·모든 대사에서 요청한 범위의 병기를 허용하며 선택한 AI 후검수 설정을 적용합니다. 다른 기본·커스텀·한출·홍진·갈봬·미세조정 지침과 일회성 요구사항은 보내지 않습니다.</div>
-                            <div class="verba-help">원문, 선택 구간의 문맥, 이름 고정 정보, JSON·보호 요소 규칙도 함께 보냅니다. AI 연결 프로필에서 테스트할 모델을 직접 선택해 주세요. 모델은 자동 변경되지 않으며 무료 구글 번역에는 적용되지 않습니다.</div>
+                            <div class="verba-help">한국어 출력·전체/선택 재번역에 전용 영어 번역 지침을 추가하고, 일반 베르바에서 켜둔 프롬프트·영캐/한캐의 맛·관계와 현지화·말투·커스텀 지침·금지어·일회성 요구사항을 기존 적용 범위대로 함께 사용합니다. 프롬프트 우선순위와 미친 한출/갈봬의 전용 규칙은 그대로 유지됩니다. 선택한 AI 후검수도 일반 번역과 동일하게 적용합니다.</div>
+                            <div class="verba-help">최소 프롬프트 실험이 함께 켜져 있어도 이 모드에서는 일반 번역 경로를 사용합니다. 원문·문맥·이름 고정·JSON·보호 요소 규칙도 유지합니다. AI 연결 프로필에서 테스트할 모델을 직접 선택해 주세요. 모델은 자동 변경되지 않으며 무료 구글 번역에는 적용되지 않습니다.</div>
                             <div class="verba-help">끄면 저장된 기존 설정으로 돌아갑니다. 한국어→영어 인풋 번역은 기존 설정을 사용합니다. 서버 번역 사용자는 베르바 서버 플러그인도 업데이트해 주세요.</div>
                             <details><summary>영어 번역 프롬프트 보기</summary><pre class="verba-help" style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(DEEPSEEK_KOREAN_PROMPT)}</pre></details>
                         </div>

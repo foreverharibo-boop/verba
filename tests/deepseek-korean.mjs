@@ -2,150 +2,139 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT, buildDeepseekUserRules } from '../deepseek-korean.js';
-import { buildMinimalOutputPrompt, translateMinimalOutput } from '../minimal-output.js';
-import { segmentSource, buildOutputPrompt, buildSelectionPrompt, buildMultiSelectionPrompt, buildInputPrompt, normalizeBilingualMappedTranslation } from '../core.js';
+import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from '../deepseek-korean.js';
+import { minimalOutputEnabled } from '../minimal-output.js';
+import { segmentSource, buildOutputPrompt, buildScopedOutputPrompt, buildSelectionPrompt, buildMultiSelectionPrompt, buildInputPrompt, normalizeBilingualMappedTranslation } from '../core.js';
 import { createEngine } from '../server-plugin/engines/verba.mjs';
 
 const settings = {
     developerMode:true, developerDeepseekKoreanEnabled:true,
     profileId:'A', activeProfileSlot:'A', autoProfileFallback:false, serverRetryLimit:1,
     developerMinimalPromptEnabled:true, developerMinimalPrompt:'MINIMAL_SENTINEL',
-    customTranslatorEnabled:true,
-    customTranslatorTemplates:Object.fromEntries(['output','selection','mad','hongjin','quality','repair','other'].map(key=>[key,`CUSTOM_${key}_SENTINEL`])),
-    customTranslatorModified:Object.fromEntries(['output','selection','mad','hongjin','quality','repair','other'].map(key=>[key,true])),
-    baseTranslationCustom:{enabled:true,prompt:'BASE_SENTINEL'},
-    globalPromptEnabled:true, globalPrompt:'GLOBAL_SENTINEL', dialoguePromptEnabled:true, dialoguePrompt:'DIALOGUE_SENTINEL',
+    globalPromptEnabled:true, globalPrompt:'GLOBAL_SENTINEL',
+    allDialoguePromptEnabled:true, allDialoguePrompt:'ALL_DIALOGUE_SENTINEL',
+    dialoguePromptEnabled:true, dialoguePrompt:'CHARACTER_SENTINEL',
     otherDialoguePromptEnabled:true, otherDialoguePrompt:'OTHER_SENTINEL',
-    allDialoguePromptEnabled:true, allDialoguePrompt:'Translate dialogue in English and Korean. BILINGUAL_SENTINEL',
-    developerMadKoreanOutputEnabled:true, developerHongjinFlavorEnabled:true,
-    developerExtremeCompressedPromptEnabled:true, developerRelationshipExperimentEnabled:true,
-    developerTargetToUserAddress:'ADDRESS_SENTINEL', chuseokGalbwaeScope:'all',
-    qualityAuditEnabled:true, finalEnglishReviewEnabled:true, englishReviewEnabled:true,
-    bannedWords:'미소', translateTaggedContent:true,
+    englishFlavorEnabled:true, englishFlavorSlangDensity:'active',
+    koreanFlavorEnabled:true, koreanFlavorPronounOmission:'active',
+    relationTemperatureEnabled:true, relationTemperature:'intimate',
+    narrationLocalizationLevel:'naturalized', dialogueLocalizationLevel:'native',
+    dialogueEndingPreferred:'ENDING_SENTINEL', expressionEmphasisTaste:'active',
+    developerRelationshipExperimentEnabled:true,developerTargetToUserAddress:'ADDRESS_SENTINEL',
+    beginnerCharacterGuideEnabled:true,beginnerPersonalityCustom:'GUIDE_SENTINEL',
+    bannedWords:'금지표현', translateTaggedContent:true, aiPostReview:{},
 };
-const snapshot = () => ({settings:{...structuredClone(settings),aiPostReview:{}},profiles:{A:{}},nameLocks:[{source:'Dana',target:'다나'}],character:{name:'Chris'},context:{name1:'Dana',name2:'Chris'}});
-const source = 'Dana smiled.\n\n"Come here."\n\n`KEEP_CODE`\n\n<Info_panel>Sunny</Info_panel>';
-const segmented = segmentSource(source,[{source:'Dana',target:'다나'}]);
-function checkPrompt(prompt) {
+const identity={characterName:'Chris',sourceCharacterName:'Chris',userName:'다나',sourceUserName:'Dana'};
+const source='Dana smiled.\n\n"Come here."\n\n`KEEP_CODE`\n\n<Info_panel>Sunny</Info_panel>';
+const segmented=segmentSource(source,[{source:'Dana',target:'다나'}]);
+const off=s=>({...s,developerDeepseekKoreanEnabled:false,developerMinimalPromptEnabled:false});
+function regularPart(prompt) {
     assert.ok(prompt.startsWith(DEEPSEEK_KOREAN_PROMPT));
-    for (const value of ['GLOBAL_SENTINEL','DIALOGUE_SENTINEL','OTHER_SENTINEL','BILINGUAL_SENTINEL']) assert.ok(prompt.includes(value),value);
-    assert.doesNotMatch(prompt,/MINIMAL_SENTINEL|CUSTOM_\w+_SENTINEL|BASE_SENTINEL|ADDRESS_SENTINEL|ONETIME_SENTINEL|CHUSEOK GALBWAE|MAD KOREAN|HONG.JIN FLAVOR|PREVIOUS USER MESSAGE/);
+    const split=prompt.indexOf('\n',DEEPSEEK_KOREAN_PROMPT.length+1);
+    assert.match(prompt.slice(DEEPSEEK_KOREAN_PROMPT.length,split),/ACTIVE SETTINGS PRECEDENCE/);
+    return prompt.slice(split+1);
 }
+const selection=s=>({source:'"Come here."',translation:'"이리 와."',selected:'이리 와.',start:1,end:6,settings:s,oneTimeInstruction:'ONETIME_SENTINEL',speakerIdentity:identity});
+function builders(s) {
+    return [
+        buildOutputPrompt(segmented,s,'ONETIME_SENTINEL',identity),
+        buildScopedOutputPrompt({segments:segmented.segments,sourceContext:source,settings:s,scope:'target_dialogue',speakerIdentity:identity}),
+        buildSelectionPrompt(selection(s)),
+        buildSelectionPrompt({...selection(s),candidateCount:3}),
+        buildMultiSelectionPrompt({...selection(s),selections:[{id:'multi_0000',selected:'이리 와.',start:1,end:6}]}),
+    ];
+}
+const snapshot=s=>({settings:structuredClone(s),profiles:{A:{}},nameLocks:[{source:'Dana',target:'다나'}],character:{name:'Chris'},context:{name1:'Dana',name2:'Chris'}});
 function answer(prompt) {
-    const rows=JSON.parse(prompt.split('\nTARGETS\n').at(-1));
-    return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:row.type==='tagged_content'?'맑음':`${(row.text.match(/@@VERBA[^@]+@@/g)||[]).join(' ')} 미소 지었다.`.trim()}))})};
+    const rows=JSON.parse(prompt.split('\nSEGMENTS\n').at(-1).split('\n')[0]);
+    return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:row.type==='tagged_content'?'맑음':row.type==='dialogue_candidate'?'"이리 와."':`${(row.text.match(/@@VERBA[^@]+@@/g)||[]).join(' ')} 기다렸다.`.trim()}))})};
 }
 
-test('requires both developer access and the dedicated switch',()=>{
+test('dedicated toggle uses regular pipeline; minimal mode resumes when it is off',()=>{
     for(const dev of [false,true]) for(const toggle of [false,true]) {
-        assert.equal(deepseekKoreanEnabled({...settings,developerMode:dev,developerDeepseekKoreanEnabled:toggle}),dev&&toggle);
+        const s={...settings,developerMode:dev,developerDeepseekKoreanEnabled:toggle};
+        assert.equal(deepseekKoreanEnabled(s),dev&&toggle);
+        assert.equal(minimalOutputEnabled(s),dev&&!toggle);
     }
 });
-test('all output and selection builders include four scoped slots but exclude other experiment overrides',()=>{
-    const before=structuredClone(settings);
-    checkPrompt(buildMinimalOutputPrompt(segmented.segments,settings,segmented.nameTokens,'ONETIME_SENTINEL'));
-    checkPrompt(buildOutputPrompt(segmented,settings,'ONETIME_SENTINEL'));
-    const options={source:'He waited.',translation:'그는 기다렸다.',selected:'기다렸다.',start:3,end:8,settings,oneTimeInstruction:'ONETIME_SENTINEL'};
-    checkPrompt(buildSelectionPrompt(options));
-    assert.match(buildSelectionPrompt({...options,candidateCount:3}),/"candidates"/);
-    checkPrompt(buildMultiSelectionPrompt({...options,selections:[{id:'multi_0000',selected:'기다렸다.',start:3,end:8}]}));
-    assert.deepEqual(settings,before);
+for(const [name,extra] of [
+    ['ordinary tastes and four slots',{}],
+    ['custom translators',{customTranslatorEnabled:true,customTranslatorTemplates:{output:'CUSTOM_OUTPUT',selection:'CUSTOM_SELECTION'},customTranslatorModified:{output:true,selection:true}}],
+    ['custom base',{baseTranslationCustom:{enabled:true,prompt:'CUSTOM_BASE'}}],
+    ['Hongjin voice',{developerHongjinFlavorEnabled:true,developerHongjinProfanity:'high'}],
+    ['MAD exclusivity',{developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:true}],
+    ['Galbwae exclusivity',{chuseokGalbwaeScope:'all',developerMadKoreanOutputEnabled:true}],
+    ['all slots and tastes off',{globalPromptEnabled:false,allDialoguePromptEnabled:false,dialoguePromptEnabled:false,otherDialoguePromptEnabled:false,englishFlavorEnabled:false,koreanFlavorEnabled:false}],
+]) test(`all builders retain ordinary prompt composition: ${name}`,()=>{
+    const s={...settings,...extra}, before=structuredClone(s);
+    const actual=builders(s),expected=builders(off(s));
+    actual.forEach((prompt,index)=>assert.equal(regularPart(prompt),expected[index]));
+    assert.deepEqual(s,before);
 });
-test('browser pipeline includes the four slots with no extra translation or tagged retry',async()=>{
-    let calls=0;
-    const result=await translateMinimalOutput(segmented,settings,{oneTimeInstruction:'ONETIME_SENTINEL'}, {
-        requestSegments:async(prompt,rows)=>{calls++;checkPrompt(prompt);return new Map(rows.map(row=>[row.id,row.type==='tagged_content'?'The lantern flickers quietly.':`${(row.text.match(/@@VERBA[^@]+@@/g)||[]).join(' ')} 미소 지었다.`]));},
-        buildSourceMap:()=>[],
-        reviewEnglish:()=>{throw Error('Extra review must not run');},
-    });
-    assert.equal(calls,1);
-    assert.match(result.translation,/다나/);
-    assert.match(result.translation,/`KEEP_CODE`/);
-    assert.match(result.translation,/<Info_panel>The lantern flickers quietly\.<\/Info_panel>/);
-});
-test('bundled server engine composes four slots and preserves structure and selected profile',async()=>{
-    const original=snapshot();let calls=0;
-    const engine=createEngine(original,async(id,messages)=>{calls++;assert.equal(id,'A');assert.equal(messages.length,1);checkPrompt(messages[0].content);assert.match(messages[0].content,/\"character\":\"Chris\"/);return answer(messages[0].content);});
-    const out=await engine.output(source,{oneTimeInstruction:'ONETIME_SENTINEL',previousUserSource:'PREVIOUS_SENTINEL',speakerIdentity:{sourceUserName:'Dana',userName:'다나',characterName:'Chris'}});
-    assert.equal(calls,1);assert.match(out.translation,/다나/);assert.match(out.translation,/KEEP_CODE/);assert.match(out.translation,/<Info_panel>맑음<\/Info_panel>/);assert.doesNotMatch(out.translation,/@@VERBA/);
-    assert.deepEqual(original.settings,{...settings,aiPostReview:{}});
-});
-test('switching off restores existing prompt and input translation remains unchanged',()=>{
-    const off={...settings,developerDeepseekKoreanEnabled:false,chuseokGalbwaeScope:'off',customTranslatorEnabled:false};
-    assert.match(buildMinimalOutputPrompt(segmented.segments,off),/^MINIMAL_SENTINEL/);
-    assert.equal(buildInputPrompt('안녕.',settings),buildInputPrompt('안녕.',{...settings,developerDeepseekKoreanEnabled:false}));
-});
-test('experiment preserves model formatting without an extra forced bilingual wrapper',()=>{
-    const map=[{id:'seg_0000',source:'"Come here."',start:0,end:6}];
-    assert.deepEqual(normalizeBilingualMappedTranslation('"이리 와."',map,settings,'"Come here."'),{translation:'"이리 와."',sourceMap:map});
-});
-test('selection-only mode never falls back to the entire source',()=>{
-    const options={source:'FULL_SOURCE_SENTINEL',sourceContext:'',translation:'선택문',selected:'선택문',start:0,end:3,settings,contextMode:'selection'};
-    assert.doesNotMatch(buildSelectionPrompt(options),/FULL_SOURCE_SENTINEL/);
-    assert.doesNotMatch(buildMultiSelectionPrompt({...options,selections:[{id:'multi_0000',selected:'선택문',start:0,end:3,sourceContext:''}]}),/FULL_SOURCE_SENTINEL/);
-});
-test('server manifest and UI advertise the new mode and compatible engine version',()=>{
-    const index=fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
-    assert.match(index,/id="verba-developer-deepseek-korean-enabled"/);
-    assert.match(index,/target.id === 'verba-developer-deepseek-korean-enabled'/);
-    assert.match(index,/developerDeepseekKoreanEnabled: raw.developerDeepseekKoreanEnabled === true/);
-    const manifest=JSON.parse(fs.readFileSync(new URL('../server-plugin/engines/manifest.json',import.meta.url)));
-    assert.ok(index.includes(`const SERVER_ENGINE_VERSION = '${manifest.engines.verba.version}'`));
-    assert.match(manifest.engines['verba-deep'].version,/^0\.6\.\d+$/);
-    const deepBundle=fs.readFileSync(new URL('../server-plugin/engines/verba-deep.mjs',import.meta.url));
-    assert.equal(manifest.engines['verba-deep'].hash,createHash('sha256').update(deepBundle).digest('hex'));
-});
-
-
-test('each prompt slot respects OFF and empty values in every builder',()=>{
-    const calls = s => [buildOutputPrompt(segmented,s),buildMinimalOutputPrompt(segmented.segments,s),buildSelectionPrompt({source:'He waits.',translation:'기다린다.',selected:'기다린다.',start:0,end:5,settings:s}),buildMultiSelectionPrompt({source:'He waits.',translation:'기다린다.',selections:[{selected:'기다린다.',start:0,end:5}],settings:s})];
-    for(const key of ['globalPrompt','allDialoguePrompt','dialoguePrompt','otherDialoguePrompt']) {
-        for(const prompt of calls({...settings,[key+'Enabled']:false})) assert.ok(!prompt.includes(settings[key]));
-        for(const prompt of calls({...settings,[key]:'   '})) assert.ok(!prompt.includes(settings[key]));
+test('all active settings reach prompt; scopes and disabled switches remain effective',()=>{
+    const p=buildOutputPrompt(segmented,settings,'ONETIME_SENTINEL',identity);
+    for(const marker of ['GLOBAL_SENTINEL','ALL_DIALOGUE_SENTINEL','CHARACTER_SENTINEL','OTHER_SENTINEL','English-character taste','Korean-character taste','relation=intimate','ENDING_SENTINEL','ADDRESS_SENTINEL','GUIDE_SENTINEL','금지표현','ONETIME_SENTINEL']) assert.ok(p.includes(marker),marker);
+    for(const key of ['globalPrompt','allDialoguePrompt','dialoguePrompt','otherDialoguePrompt']) assert.ok(!buildOutputPrompt(segmented,{...settings,[key+'Enabled']:false}).includes(settings[key]));
+    for(const scope of ['narration','tagged_content','other_dialogue','target_dialogue']) {
+        const p=buildScopedOutputPrompt({segments:segmented.segments,settings,scope,speakerIdentity:identity});
+        assert.equal(p.includes('CHARACTER_SENTINEL'),scope==='target_dialogue');
+        assert.equal(p.includes('OTHER_SENTINEL'),scope==='other_dialogue');
     }
-    assert.equal(buildDeepseekUserRules({}), '');
 });
-test('user priority, identities and scope hints survive composition',()=>{
-    const rule=buildDeepseekUserRules({...settings,translationRuleOrder:['global','global','invalid','otherDialogue']},{characterName:'Chris',userName:'Dana'});
-    assert.ok(rule.indexOf('GLOBAL_SENTINEL')<rule.indexOf('OTHER_SENTINEL'));
-    assert.equal(rule.match(/GLOBAL_SENTINEL/g).length,1);
-    assert.match(rule,/ALL-DIALOGUE — direct speech by any speaker only/);
-    assert.match(rule,/TARGET-DIALOGUE — confirmed current-character direct speech only/);
-    assert.match(rule,/OTHER-DIALOGUE — USER, NPC, other or uncertain speakers only/);
-    const id=segmented.segments.find(x=>x.type==='dialogue_candidate').id;
-    const prompt=buildOutputPrompt(segmented,settings,'',{characterName:'Chris'},null,{[id]:'target_dialogue'});
-    assert.match(prompt, /"speaker_scope":"target_dialogue"/);
-    assert.match(buildSelectionPrompt({source:'"Wait."',translation:'"기다려."',selected:'기다려.',start:1,end:5,settings}), /"in_dialogue":true/);
+test('input prompt is byte-identical with experiment on/off',()=>{
+    assert.equal(buildInputPrompt('안녕.',settings,'male',identity),buildInputPrompt('안녕.',off(settings),'male',identity));
 });
-test('saved MAD mode cannot strip bilingual output from the DeepSeek experiment',async()=>{
-    const sample=segmentSource('"Wait here."');
-    const result=await translateMinimalOutput(sample,settings,{}, {
-        requestSegments:async(prompt,rows)=>new Map(rows.map(row=>[row.id,'"Wait here. [여기서 기다려.]"'])),
-        buildSourceMap:()=>[],
-    });
-    assert.equal(result.translation,'"Wait here. [여기서 기다려.]"');
+test('bilingual local formatter has ordinary behavior with experiment on/off',()=>{
+    const s={...settings,allDialoguePrompt:'대사 한영병기'};
+    const map=[{id:'seg_0000',source:'"Come here."',start:0,end:7}];
+    assert.deepEqual(normalizeBilingualMappedTranslation('"이리 와."',map,s,'"Come here."'),normalizeBilingualMappedTranslation('"이리 와."',map,off(s),'"Come here."'));
 });
-test('bundled review sees active bilingual rules without excluded MAD or custom rules',async()=>{
-    const original=snapshot();
-    original.settings.aiPostReview={bilingual:true};
-    original.settings.allDialoguePrompt='For dialogue, preserve English and include Korean in square brackets: "English [한국어]".';
-    let calls=0;
+test('server sends regular full composition, previous context and identity with no added style calls',async()=>{
+    const original=snapshot(settings);let calls=0;
     const engine=createEngine(original,async(id,messages)=>{
-        calls++;
+        calls++;assert.equal(id,'A');assert.equal(messages.length,1);
         const prompt=messages[0].content;
-        if(prompt.startsWith('UNIFIED OUTPUT POST REVIEW')) {
-            assert.match(prompt,/For dialogue, preserve English/);
-            assert.doesNotMatch(prompt,/MAD KOREAN-ONLY|CUSTOM_output_SENTINEL/);
-            const rows=JSON.parse(prompt.split('\nREVIEW_UNITS\n').at(-1));
+        for(const value of ['English-character taste','Korean-character taste','CHARACTER_SENTINEL','OTHER_SENTINEL','ONETIME_SENTINEL','PREVIOUS_CONTEXT_SENTINEL','Chris']) assert.ok(prompt.includes(value),value);
+        assert.ok(prompt.includes(DEEPSEEK_KOREAN_PROMPT));assert.ok(!prompt.includes('MINIMAL_SENTINEL'));
+        return answer(prompt);
+    });
+    const out=await engine.output(source,{oneTimeInstruction:'ONETIME_SENTINEL',previousUserSource:'PREVIOUS_CONTEXT_SENTINEL',speakerIdentity:identity});
+    assert.equal(calls,1);assert.match(out.translation,/다나/);assert.match(out.translation,/KEEP_CODE/);assert.match(out.translation,/<Info_panel>맑음<\/Info_panel>/);
+    assert.deepEqual(original,snapshot(settings));
+});
+test('server keeps ordinary MAD Korean-only enforcement',async()=>{
+    const s={...settings,developerMadKoreanOutputEnabled:true,allDialoguePrompt:'대사 한영병기'};
+    const engine=createEngine(snapshot(s),async(id,messages)=>{
+        assert.match(messages[0].content,/MAD KOREAN/);
+        return {content:JSON.stringify({segments:[{id:'seg_0000',translation:'"Wait here. [여기서 기다려.]"'}]})};
+    });
+    const out=await engine.output('"Wait here."',{speakerIdentity:identity});
+    assert.equal(out.translation,'"여기서 기다려."');
+});
+test('server unified review retains ordinary selected checks and custom format',async()=>{
+    const s={...settings,aiPostReview:{bilingual:true},customTranslatorEnabled:true,customTranslatorTemplates:{output:'For dialogue, preserve English and include Korean in square brackets: "English [한국어]".'},customTranslatorModified:{output:true}};
+    let calls=0;
+    const engine=createEngine(snapshot(s),async(id,messages)=>{
+        calls++;const p=messages[0].content;
+        if(p.startsWith('UNIFIED OUTPUT POST REVIEW')) {
+            assert.match(p,/For dialogue, preserve English/);
+            const rows=JSON.parse(p.split('\nREVIEW_UNITS\n').at(-1));
             assert.ok(rows.some(row=>row.checks.includes('bilingual')));
             return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:'"Wait here. [여기서 기다려.]"'}))})};
         }
-        const rows=JSON.parse(prompt.split('\nTARGETS\n').at(-1));
-        return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:'"여기서 기다려."'}))})};
+        return {content:JSON.stringify({segments:[{id:'seg_0000',translation:'"여기서 기다려."'}]})};
     });
-    const result=await engine.output('"Wait here."');
-    assert.equal(calls,2);
-    assert.match(result.translation,/Wait here/);
-    assert.match(result.translation,/여기서 기다려/);
+    const out=await engine.output('"Wait here."',{speakerIdentity:identity});
+    assert.equal(calls,2);assert.match(out.translation,/Wait here/);assert.match(out.translation,/여기서 기다려/);
+});
+test('selection-only context does not expose the entire source',()=>{
+    const options={...selection(settings),source:'FULL_SOURCE_SENTINEL',sourceContext:'',contextMode:'selection'};
+    assert.doesNotMatch(buildSelectionPrompt(options),/FULL_SOURCE_SENTINEL/);
+    assert.doesNotMatch(buildMultiSelectionPrompt({...options,selections:[{id:'multi_0000',selected:'이리 와.',start:1,end:6,sourceContext:''}]}),/FULL_SOURCE_SENTINEL/);
+});
+test('server version and unchanged Deep variant hash agree with manifests',()=>{
+    const index=fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
+    const manifest=JSON.parse(fs.readFileSync(new URL('../server-plugin/engines/manifest.json',import.meta.url)));
+    assert.ok(index.includes(`const SERVER_ENGINE_VERSION = '${manifest.engines.verba.version}'`));
+    assert.equal(manifest.engines['verba-deep'].hash,createHash('sha256').update(fs.readFileSync(new URL('../server-plugin/engines/verba-deep.mjs',import.meta.url))).digest('hex'));
 });

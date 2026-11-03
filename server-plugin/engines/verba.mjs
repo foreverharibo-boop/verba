@@ -1,4 +1,4 @@
-// hankae-patch/verba/translation-composer.js
+// translation-composer.js
 var COMPOSITION = /* @__PURE__ */ Symbol("verba translation composition");
 function customTranslationInstruction(settings = {}, key) {
   const value = settings.customTranslatorTemplates?.[key];
@@ -35,7 +35,7 @@ function collectTranslationProse(settings, key, build) {
   return [...new Set(context.collected)].join("\n\n");
 }
 
-// hankae-patch/verba/bilingual-intent.js
+// bilingual-intent.js
 var positiveCommands = [
   /(?:한\s*영|영\s*한)\s*병기(?:\s*(?:해|하라|해주세요|해줘|로\s*(?:출력|표기|번역)|적용|필수|요청|해야|하되))?/iu,
   /(?:원문|영어|영문)(?:\s*대사)?\s*[(/+·및과와]\s*(?:한국어|한글|번역)/iu,
@@ -221,7 +221,7 @@ async function resolveBilingualIntent(prompt, askOnce, signal = null) {
   return await awaitShared(job, signal);
 }
 
-// hankae-patch/verba/output-format.js
+// output-format.js
 function activeCustomOutput(settings = {}) {
   const exclusive = settings.developerMadKoreanOutputEnabled === true || settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== "off");
   return exclusive ? "" : customTranslationInstruction(settings, "output") || "";
@@ -358,7 +358,7 @@ function outputFormatReviewContext(settings = {}) {
   return OUTPUT_FORMAT_POLICY + "\nFORMAT REFERENCE (retain requested source copies; do not expand their scope):\n" + JSON.stringify(activeOutputFormatRules(settings));
 }
 
-// hankae-patch/verba/code-content.js
+// code-content.js
 var PROGRAM_LANGUAGES = /^(?:js|javascript|ts|typescript|jsx|tsx|css|scss|less|json|jsonc|python|py|sh|bash|shell|powershell|ps1|sql|java|c|cpp|csharp|cs|go|rust|ruby|rb|php|yaml|yml|toml|ini)$/i;
 var MACHINE_VALUE = /^(?:[\w]+[_./\\][\w./\\-]*|[a-z]+[A-Z][\w]*|https?:\/\/\S+|#[\da-f]{3,8}|\d+(?:\.\d+)?(?:px|em|rem|%|s|ms)?|true|false|null|undefined)$/;
 var CODE_LINE = /^\s*(?:(?:(?:const|let|var)\s+[\w$]+\s*=|(?:function|def|class)\s+[\w$]+\s*[(:{]|(?:if|while|for|switch|catch)\s*\(|(?:import|from)\s+[^\n]*\b(?:from|import)\b)|[\w.$]+\s*(?:\([^\n]*\)\s*[;{]?\s*$|(?:[+*/-]?=|=>))|[{}\[\]]\s*[,;]?\s*$|["'][^"']+["']\s*:|[.#][\w-]+\s*\{|[\w-]+\s*:\s*[^\n]*;)/;
@@ -497,7 +497,7 @@ function escapeCodeTranslation(text, quote) {
   return text.replace(/\\/g, "\\\\").replace(new RegExp(quote, "g"), "\\" + quote);
 }
 
-// hankae-patch/verba/deepseek-korean.js
+// deepseek-korean.js
 function deepseekKoreanEnabled(settings = {}) {
   return settings.developerMode === true && settings.developerDeepseekKoreanEnabled === true;
 }
@@ -622,62 +622,12 @@ STRUCTURE AND OUTPUT
 - Preserve protected tokens, macros, URLs, executable syntax, HTML tags and attributes, opening/closing order, and Markdown markers. Do not translate, modify, or duplicate protected elements.
 - Translate natural language supplied as a target inside backticks or code blocks without inventing enclosing markers or executable syntax.
 - Preserve information-panel dates, times, quantities, field count, and field order. Translate visible natural language; render Thought as that character's inner monologue. Do not add emotions, judgments, or plans.
-- Output Korean by default. Only an active GLOBAL or ALL-DIALOGUE instruction may request bilingual output, and only within its stated scope and format. Preserve each requested original-language half exactly once and its Korean translation exactly once. Do not add explanations, alternatives, or review commentary. Preserve English required by actual code, acronyms, and proper names.
+- Output Korean by default. Only an active GLOBAL, ALL-DIALOGUE or CUSTOM OUTPUT instruction may request bilingual output, and only within its stated scope and format. Preserve each requested original-language half exactly once and its Korean translation exactly once. Do not add explanations, alternatives, or review commentary. Preserve English required by actual code, acronyms, and proper names.
 
 FINAL CHECK
 Does the Korean read naturally on its own? Compared with the source, does it preserve facts, causality, uncertainty, speech intent, and character voice? Have you invented setting details or jokes in the name of fluency? Are particles, names, tags, ids, and protected tokens intact? Correct only the problematic passages and return the final translation in the required format.`;
-var contract = 'Translate only the supplied targets. JSON only: {"segments":[{"id":"seg_0000","translation":"Korean translation"}]}. Return every supplied id exactly once with a string translation. Preserve formatting, tag structure, code, URLs, macros and placeholders. Keep every @@VERBA...@@ token exactly once in its original target. Do not introduce line breaks within single-line targets. Korean only unless an active GLOBAL or ALL-DIALOGUE rule explicitly requests bilingual output for that source scope. Paired-tag interiors remain Korean-only. In bilingual output, use original source names in the original-language half and keep each name token only in the Korean half.';
-function deepseekPromptSlots(settings = {}) {
-  const result = { translationRuleOrder: settings.translationRuleOrder };
-  for (const key of ["globalPrompt", "allDialoguePrompt", "dialoguePrompt", "otherDialoguePrompt"]) {
-    result[key] = String(settings[key] || "");
-    result[`${key}Enabled`] = settings[`${key}Enabled`] !== false;
-  }
-  return result;
-}
-function buildDeepseekUserRules(settings = {}, identity = {}) {
-  const slots = {
-    global: ["globalPrompt", "GLOBAL \u2014 all translated prose"],
-    allDialogue: ["allDialoguePrompt", "ALL-DIALOGUE \u2014 direct speech by any speaker only"],
-    characterDialogue: ["dialoguePrompt", "TARGET-DIALOGUE \u2014 confirmed current-character direct speech only"],
-    otherDialogue: ["otherDialoguePrompt", "OTHER-DIALOGUE \u2014 USER, NPC, other or uncertain speakers only"]
-  };
-  const order = [.../* @__PURE__ */ new Set([...Array.isArray(settings.translationRuleOrder) ? settings.translationRuleOrder : [], "characterDialogue", "otherDialogue", "allDialogue", "global"])];
-  const active = order.filter((key) => slots[key] && settings[`${slots[key][0]}Enabled`] !== false && String(settings[slots[key][0]] || "").trim());
-  if (!active.length) return "";
-  return `ACTIVE USER RULES
-Apply these rules within their scopes; they override the base translation style on direct conflicts. Earlier groups win direct conflicts between user groups. Preserve facts, protected structure and the JSON contract. Never apply dialogue voice to narration or paired-tag interiors. Only GLOBAL and ALL-DIALOGUE control bilingual format within their requested source scopes; TARGET/OTHER rules control voice, not bilingual scope. Never infer a new bilingual scope from brackets used only in an output example.
-IDENTITY ${JSON.stringify({ character: identity.characterName || identity.sourceCharacterName || "", sourceCharacter: identity.sourceCharacterName || "", user: identity.userName || identity.sourceUserName || "", sourceUser: identity.sourceUserName || "" })}
-Resolve {{char}} as the current character and {{user}} as the user persona. Infer speakers from supplied context; use TARGET rules only when clearly that character, otherwise OTHER rules. Names never grant a new relationship or age.
-${active.map((key, index) => `${index + 1}. ${slots[key][1]}
-${String(settings[slots[key][0]]).trim()}`).join("\n")}`;
-}
-function buildDeepseekKoreanPrompt(segments, nameTokens = [], settings = {}, speakerIdentity = {}, speakerScopes = {}) {
-  const targets = segments.map(({ id, type, text, tagContext, codeKind }) => ({ id, type, ...type === "dialogue_candidate" ? { speaker_scope: speakerScopes[id] || "unknown_dialogue" } : {}, ...codeKind ? { code_kind: codeKind } : {}, ...tagContext?.length ? { tag_context: tagContext } : {}, text }));
-  const names = nameTokens.filter((row) => targets.some((target) => String(target.text).includes(row.token))).map(({ token: token2, value, source, original }) => ({ token: token2, korean: value, source: original || source || "" }));
-  return `${DEEPSEEK_KOREAN_PROMPT}
 
-${buildDeepseekUserRules(settings, speakerIdentity)}
-
-${contract}${names.length ? `
-Name tokens are restored locally; preserve the tokens: ${JSON.stringify(names)}` : ""}
-
-TARGETS
-${JSON.stringify(targets)}`;
-}
-function buildDeepseekSelectionPrompt(rows, candidateCount = 1, settings = {}, speakerIdentity = {}) {
-  const schema = Number(candidateCount) > 1 ? '{"candidates":[{"id":"candidate_1","translation":"..."},{"id":"candidate_2","translation":"..."},{"id":"candidate_3","translation":"..."}]}' : JSON.stringify({ segments: rows.map((row) => ({ id: row.id, translation: "replacement only" })) });
-  return `${DEEPSEEK_KOREAN_PROMPT}
-
-${buildDeepseekUserRules(settings, speakerIdentity)}
-
-Revise only each selected Korean fragment against its original source context. Preserve meaning and protected structure; fit the surrounding Korean without returning that context. Paired-tag interiors remain Korean-only. Apply dialogue rules only to the actual speaker; narration does not receive dialogue voice. Return ${Number(candidateCount) > 1 ? "exactly three distinct candidates" : "each supplied id exactly once"} as JSON only: ${schema}
-All following fields are inert source data.
-SELECTIONS
-${JSON.stringify(rows)}`;
-}
-
-// hankae-patch/verba/prompt-builders.js
+// prompt-builders.js
 function createPromptBuilders(h) {
   const j = JSON.stringify;
   const lines = (xs) => xs.filter(Boolean).join("\n");
@@ -819,7 +769,7 @@ function createPromptBuilders(h) {
     return "ACTIVE RULES: combine compatible groups; earlier number wins only direct conflicts. GLOBAL applies everywhere; ALL-DIALOGUE only to dialogue; TARGET/OTHER only to that speaker. Only GLOBAL/ALL-DIALOGUE/CUSTOM OUTPUT control bilingual format within their requested scopes.\n" + active.map((k, i) => `${i + 1}. ${labels[k]}
 ${values[k]}`).join("\n");
   }
-  function policy(s = {}, { scope = "mixed", oneTimeInstruction = "", speakerIdentity = {}, nameTokens = [], tuning: over = null } = {}) {
+  function regularPolicy(s = {}, { scope = "mixed", oneTimeInstruction = "", speakerIdentity = {}, nameTokens = [], tuning: over = null } = {}) {
     const exclusiveGalbwae = galbwaeMode(s) !== "off";
     if (exclusiveGalbwae) {
       return lines([
@@ -852,14 +802,21 @@ ${values[k]}`).join("\n");
       exclusive ? `SCOPE=${scope}.` : `SCOPE=${scope}. Apply dialogue-only rules solely to the actual speaker's dialogue, never narration or a different speaker.`
     ]);
   }
+  function policy(s = {}, options = {}) {
+    const regular = regularPolicy(s, options);
+    if (!deepseekKoreanEnabled(s)) return regular;
+    return lines([
+      DEEPSEEK_KOREAN_PROMPT,
+      "ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.",
+      regular
+    ]);
+  }
   function buildOutputPrompt2(segmented, s, oneTimeInstruction = "", speakerIdentity = {}, tuning2 = null, speakerScopes = {}) {
-    if (deepseekKoreanEnabled(s)) return buildDeepseekKoreanPrompt(segmented.segments, segmented.nameTokens || [], s, speakerIdentity, speakerScopes);
     const routing = 'SPEAKER ROUTING: speaker_scope="target_dialogue" is already confirmed as TARGET CHARACTER speech; apply TARGET-only voice/rules there. Never apply that voice to speaker_scope="other_dialogue". For speaker_scope="unknown_dialogue", identify the actual speaker from the supplied segment sequence, then apply TARGET rules only when clearly TARGET; otherwise use OTHER rules. Narration/tagged content never receives dialogue voice.';
     const rows = segmented.segments.map(({ id, type, text, tagContext, codeKind }) => ({ id, type, ...type === "dialogue_candidate" ? { speaker_scope: speakerScopes[id] || "unknown_dialogue" } : {}, ...tagContext?.length ? { tag_context: tagContext } : {}, ...codeKind ? { code_kind: codeKind } : {}, text }));
     return lines([policy(s, { oneTimeInstruction, speakerIdentity, nameTokens: segmented.nameTokens, tuning: tuning2 }), OUTPUT_FORMAT_POLICY, routing, `Return ${schema}`, "SEGMENTS", j(rows)]);
   }
   function buildScopedOutputPrompt2({ segments, sourceContext, settings, oneTimeInstruction = "", nameTokens = [], tuning: tuning2 = null, scope = "narration", speakerIdentity = {} }) {
-    if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens, settings, speakerIdentity);
     return lines([policy(settings, { scope, oneTimeInstruction, nameTokens, tuning: tuning2, speakerIdentity }), OUTPUT_FORMAT_POLICY, "Translate only TARGETS; SOURCE CONTEXT is reference only.", `Return ${schema}`, "SOURCE CONTEXT", j(h.boundReference(sourceContext, 3e4)), "TARGETS", j(segments.map(({ id, type, text, tagContext, codeKind }) => ({ id, type, ...tagContext?.length ? { tag_context: tagContext } : {}, ...codeKind ? { code_kind: codeKind } : {}, text })))]);
   }
   function buildInputPrompt2(source, s = {}, targetGender = "unknown", i = {}) {
@@ -939,7 +896,6 @@ ${values[k]}`).join("\n");
   const selectionTask = "Rephrase SELECTED only, beyond whitespace changes. Preserve source meaning, grammar/referents, force, consistent terms/tokens/format; fit LEFT/RIGHT when supplied, omit context from output. Apply dialogue voice only to its actual speaker, never narration.";
   function buildSelectionPrompt({ source, sourceContext, translation, selected, start, end, settings, oneTimeInstruction, speakerIdentity = {}, candidateCount = 1, contextMode = "standard", tuning: tuning2 = null }) {
     const { left, right } = selectionContext(translation, start, end, contextMode);
-    if (deepseekKoreanEnabled(settings)) return buildDeepseekSelectionPrompt([{ id: "seg_0000", selected_korean: selected, source_context: ["selection", "narrow"].includes(contextMode) ? str(sourceContext) : str(sourceContext || source), left_context: left, right_context: right, in_dialogue: h.selectionTouchesDialogue(translation, start, end), in_tagged_content: selectionTouchesTaggedContent(translation, start, end) }], candidateCount, settings, speakerIdentity);
     const inDialogue = h.selectionTouchesDialogue(translation, start, end);
     const inInnerInfo = selectionTouchesInnerInfo(translation, start, end);
     const inTaggedContent = selectionTouchesTaggedContent(translation, start, end);
@@ -948,10 +904,6 @@ ${values[k]}`).join("\n");
     return lines([policy(settings, { scope: inDialogue ? "dialogue_mixed" : inInnerInfo ? "inner_info" : inTaggedContent ? "tagged_content" : "narration", oneTimeInstruction, speakerIdentity, tuning: tuning2 }), translationProse(settings, "primary", selectionTask, ["Rephrase SELECTED only, beyond whitespace changes. ", ["/tokens/format", "Preserve tokens and formatting."], ["; fit LEFT/RIGHT when supplied, omit context from output.", "Fit LEFT/RIGHT when supplied; omit context from output."], " Apply dialogue voice only to its actual speaker, never narration."]), Number(candidateCount) > 1 ? 'Return exactly 3 meaning-equivalent distinct candidates: {"candidates":[{"id":"candidate_1","translation":"..."},{"id":"candidate_2","translation":"..."},{"id":"candidate_3","translation":"..."}]}' : `Return ${schema}`, "ORIGINAL SOURCE", j(h.boundReference(original)), "EXISTING KOREAN", j(reference), "LEFT", j(left), "SELECTED", j(selected), "RIGHT", j(right)]);
   }
   function buildMultiSelectionPrompt({ source, translation, selections, settings, oneTimeInstruction, speakerIdentity = {}, contextMode = "paragraph", tuning: tuning2 = null }) {
-    if (deepseekKoreanEnabled(settings)) return buildDeepseekSelectionPrompt((selections || []).map((row, index) => {
-      const { left, right } = selectionContext(translation, Number(row.start), Number(row.end), contextMode, true);
-      return { id: row.id || `multi_${String(index).padStart(4, "0")}`, selected_korean: row.selected, source_context: ["selection", "narrow"].includes(contextMode) ? str(row.sourceContext) : str(row.sourceContext || source), left_context: left, right_context: right, in_dialogue: h.selectionTouchesDialogue(translation, Number(row.start), Number(row.end)), in_tagged_content: selectionTouchesTaggedContent(translation, Number(row.start), Number(row.end)) };
-    }), 1, settings, speakerIdentity);
     const shared = contextMode === "message";
     const selectionOnly = contextMode === "selection" || contextMode === "narrow";
     const rows = (selections || []).map((x, index) => {
@@ -995,7 +947,7 @@ ${values[k]}`).join("\n");
   };
 }
 
-// hankae-patch/verba/response-parser.js
+// response-parser.js
 function segmentNumberKey(id) {
   const match = typeof id === "string" && /^seg_([0-9]+)$/.exec(id);
   return match ? match[1].replace(/^0+(?=\d)/, "") : null;
@@ -1229,7 +1181,7 @@ function collectSegmentResponse(raw, expectedSegments = []) {
   return { partial, parseError, missingIds, repairs: [...new Set(repairs)], issues: [...new Set(issues)] };
 }
 
-// hankae-patch/verba/core.js
+// core.js
 var PROTECTED_PATTERN = /<!--[\s\S]*?-->|<(thought|thinking|analysis|reasoning|scratchpad|start|starter)\b[^>]*>[\s\S]*?<\/\1\s*>|<style\b[^>]*>[\s\S]*?<\/style>|<script\b[^>]*>[\s\S]*?<\/script>|\{\{[\s\S]*?\}\}|https?:\/\/[^\s<]+|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
 var PROTECTED_TOKEN_PATTERN = /@@VERBA_(?:NAME_)?\d{4}@@/g;
 var PAIRED_TAG_SCANNER = /<\/?([\p{L}_][\p{L}\p{N}_.:-]*)(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/giu;
@@ -1935,7 +1887,6 @@ function ensureBilingualDialogueFormat(segment, translation, settings = {}, spea
   return `${translatedEnvelope.leading}${sourceEnvelope.open}${source} ${open}${korean2}${close}${sourceEnvelope.close}${translatedEnvelope.trailing}`;
 }
 function normalizeBilingualMappedTranslation(translation, sourceMap = [], settings = {}, source = "") {
-  if (deepseekKoreanEnabled(settings)) return { translation: String(translation || ""), sourceMap };
   let text = String(translation || "");
   const rows = (Array.isArray(sourceMap) ? sourceMap : []).flatMap((entry, index) => {
     const source2 = String(entry?.source || "").trim();
@@ -2919,7 +2870,7 @@ var promptBuilders = createPromptBuilders({
   bilingualDialogueBracketPair
 });
 
-// hankae-patch/verba/timing.js
+// timing.js
 var PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 var LABELS = [
   ["output-post-review", "\uD1B5\uD569 AI \uD6C4\uAC80\uC218"],
@@ -3075,7 +3026,7 @@ function summarize(job, status) {
   };
 }
 
-// hankae-patch/verba/output-splitting.js
+// output-splitting.js
 function outputSplitCount(settings = {}) {
   const count = Number(settings.developerOutputSplitCount);
   return [2, 3].includes(count) ? count : 1;
@@ -3169,7 +3120,7 @@ function createSplitRequestQueue(limit = 3) {
   });
 }
 
-// hankae-patch/verba/diagnostics.js
+// diagnostics.js
 var requestEvidence = /* @__PURE__ */ new WeakMap();
 var LIMIT = 1e4;
 function sanitizeDebugValue(value, limit = 6e3) {
@@ -3296,7 +3247,7 @@ function protectedRecoverySnapshot(invalid, segmented, translations) {
   return { problemSegmentCount: invalid.length, omittedSegments: Math.max(0, invalid.length - rows.length), segments: rows };
 }
 
-// hankae-patch/verba/mad-output.js
+// mad-output.js
 var pairs = [["[", "]"], ["(", ")"], ["\uFF08", "\uFF09"], ["\u3010", "\u3011"]];
 var quotes = [['"', '"'], ["\u201C", "\u201D"], ["\u2018", "\u2019"], ["'", "'"], ["\u300C", "\u300D"], ["\u300E", "\u300F"]];
 var token = /@@VERBA_(?:[A-Z]+_)*\d+@@/gu;
@@ -3404,7 +3355,7 @@ function enforceMadKoreanOnly(segmented, translations, settings = {}) {
   return stats;
 }
 
-// hankae-patch/verba/bilingual-review.js
+// bilingual-review.js
 var TOKEN = /@@VERBA_(?:[A-Z]+_)*\d+@@/gu;
 var LIMIT_TARGETS = 80;
 var LIMIT_TEXT = 32e3;
@@ -3585,7 +3536,7 @@ function validBilingualReplacement(target, value) {
   return stack.length === 0;
 }
 
-// hankae-patch/verba/bilingual-diagnostics.js
+// bilingual-diagnostics.js
 var KINDS = ["dialogue", "narration", "italic", "bold", "bracket", "code", "fenced"];
 var TYPES = ["dialogue_candidate", "narration", "tagged_content", "code_content"];
 var MODES = ["developerMode", "developerMadKoreanOutputEnabled", "developerHongjinFlavorEnabled", "developerMinimalPromptEnabled", "developerDeepseekKoreanEnabled", "developerCompressedPromptEnabled", "chuseokGalbwaeEnabled"];
@@ -3694,7 +3645,7 @@ function segmentTypeDiagnostic(segmented) {
   return Object.fromEntries(TYPES.map((type) => [type, (segmented.segments || []).filter((s) => s.type === type).length]));
 }
 
-// hankae-patch/verba/post-review.js
+// post-review.js
 var POST_REVIEW_CHECKS = Object.freeze([
   { key: "meaning", label: "\uC758\uBBF8\xB7\uB204\uB77D\xB7\uB0B4\uC6A9 \uCD94\uAC00", rule: "Check fidelity, omissions, invented facts/actions, numbers, negation, force and consent against SOURCE." },
   { key: "referent", label: "\uB300\uBA85\uC0AC\xB7\uC9C0\uCE6D\xB7\uC18C\uC720 \uAD00\uACC4", rule: "Check who did what to whom, pronoun referents and ownership against SOURCE." },
@@ -3879,7 +3830,7 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
   }
 }
 
-// hankae-patch/verba/output-comparison.js
+// output-comparison.js
 var STAGES = /* @__PURE__ */ new Set(["mad-korean-only", "mad-korean-only-final", "local-normalization", "output-post-review", "initial-parsed", "tag-normalization", "repairs", "dialogue-format", "english-review", "bilingual-review", "markup-integrity", "assembled", "received", "locked-segments", "display-normalization"]);
 var TYPES2 = /* @__PURE__ */ new Set(["narration", "dialogue_candidate", "tagged_content", "code_content"]);
 var METRICS = ["length", "latinLetters", "hangulLetters", "mixedLines", "koreanBracketPairs", "duplicateKoreanPairs"];
@@ -4076,10 +4027,10 @@ function createOutputComparison(segmented, enabled, settings = {}, binding = nul
   };
 }
 
-// hankae-patch/verba/minimal-output.js
+// minimal-output.js
 var POST_TRANSLATION_AI_REPAIR_ENABLED = false;
 function minimalOutputEnabled(settings = {}) {
-  return deepseekKoreanEnabled(settings) || settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
+  return !deepseekKoreanEnabled(settings) && settings.developerMode === true && settings.developerMinimalPromptEnabled === true;
 }
 function buildMinimalOutputPromptInternal(segments, settings = {}, nameTokens = [], oneTimeInstruction = "") {
   const instruction = String(settings.developerMinimalPrompt || "").trim() || "\uC790\uC5F0\uC2A4\uB7FD\uAC8C \uD55C\uAD6D\uC5B4\uB85C \uBC88\uC5ED\uD558\uB77C.";
@@ -4104,32 +4055,29 @@ Name tokens (restored locally; keep tokens): ${JSON.stringify(names)}` : ""}
 TARGETS
 ${JSON.stringify(payload)}`;
 }
-function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [], oneTimeInstruction = "", speakerIdentity = {}) {
-  if (deepseekKoreanEnabled(settings)) return buildDeepseekKoreanPrompt(segments, nameTokens, settings, speakerIdentity);
+function buildMinimalOutputPrompt(segments, settings = {}, nameTokens = [], oneTimeInstruction = "") {
   return withTranslationComposition(settings, "output", (current) => buildMinimalOutputPromptInternal(segments, current, nameTokens, oneTimeInstruction));
 }
 async function translateMinimalOutput(segmented, settings, options, { requestSegments, buildSourceMap, reviewOutput }) {
   const config = {
-    ...deepseekKoreanEnabled(settings) ? deepseekPromptSlots(settings) : {},
-    customTranslatorEnabled: deepseekKoreanEnabled(settings) ? false : settings.customTranslatorEnabled,
+    customTranslatorEnabled: settings.customTranslatorEnabled,
     customTranslatorTemplates: settings.customTranslatorTemplates,
     customTranslatorModified: settings.customTranslatorModified,
     developerMode: settings.developerMode === true,
     developerDeepseekKoreanEnabled: settings.developerDeepseekKoreanEnabled === true,
     developerMinimalPrompt: settings.developerMinimalPrompt,
-    chuseokGalbwaeScope: !deepseekKoreanEnabled(settings) && settings.developerMode === true && ["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) ? settings.chuseokGalbwaeScope : !deepseekKoreanEnabled(settings) && settings.developerMode === true && settings.chuseokGalbwaeEnabled === true ? "dialogueInner" : "off"
+    chuseokGalbwaeScope: settings.developerMode === true && ["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) ? settings.chuseokGalbwaeScope : settings.developerMode === true && settings.chuseokGalbwaeEnabled === true ? "dialogueInner" : "off"
   };
-  const effectiveSettings = deepseekKoreanEnabled(settings) ? { ...settings, ...config, developerMadKoreanOutputEnabled: false, developerHongjinFlavorEnabled: false, chuseokGalbwaeEnabled: false } : settings;
   const oneTime = String(options.oneTimeInstruction || "");
   let usedInitialFallback = false;
-  const comparison = createOutputComparison(segmented, settings.debugMode === true, effectiveSettings, options.diagnosticBinding || null, "minimal");
+  const comparison = createOutputComparison(segmented, settings.debugMode === true, settings, options.diagnosticBinding || null, "minimal");
   comparison.translationSettings(config);
   const firstTranslations = /* @__PURE__ */ new Map();
   const effectiveSplitCount = settings.translationEngine === "google-free" ? 1 : outputSplitCount(settings);
   const translations = await runOutputBatches(segmented, effectiveSplitCount, options, async (segments, batchOptions) => {
     const request = (targets, repair = "") => {
       batchOptions.signal.throwIfAborted();
-      let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime, options.speakerIdentity || {});
+      let prompt = buildMinimalOutputPrompt(targets, config, segmented.nameTokens || [], oneTime);
       if (repair === "tokens") prompt += "\nPrevious result damaged protected tokens. Retranslate these targets and preserve each original token exactly once.";
       if (repair === "names") prompt += "\nPrevious result left one or more source-language character names in Latin script. Retranslate these targets. Every clear human or fictional character name must use natural Hangul (fixed mapping first); never keep a character name in Latin script merely because it is a proper name. Keep genuine brands, acronyms, products, codes, URLs and handles unchanged.";
       return requestSegments(prompt, targets, {
@@ -4193,17 +4141,17 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
     if (segment.type === "tagged_content") translations.set(segment.id, normalizeStructuredMetadataTranslation(translations.get(segment.id)));
   }
   comparison.capture("tag-normalization", translations);
-  enforceMadKoreanOnly(segmented, translations, effectiveSettings);
+  enforceMadKoreanOnly(segmented, translations, settings);
   comparison.capture("mad-korean-only", translations);
   comparison.postReview(await reviewOutput?.({
     segmented,
     translations,
     speakerIdentity: options.speakerIdentity || {},
-    reviewSettings: effectiveSettings,
+    reviewSettings: settings,
     options
   }));
   comparison.capture("output-post-review", translations);
-  enforceMadKoreanOnly(segmented, translations, effectiveSettings);
+  enforceMadKoreanOnly(segmented, translations, settings);
   comparison.capture("mad-korean-only-final", translations);
   const translation = assembleTranslation(segmented, translations, {
     allowDamagedProtected: !POST_TRANSLATION_AI_REPAIR_ENABLED || usedInitialFallback
@@ -4217,7 +4165,7 @@ async function translateMinimalOutput(segmented, settings, options, { requestSeg
   };
 }
 
-// hankae-patch/verba/google-free.js
+// google-free.js
 var GOOGLE_FREE_ENDPOINT = "https://translate.googleapis.com/translate_a/single";
 var DEFAULT_MAX_ENCODED_CHARS = 4200;
 var PROTECTED_TOKEN_PATTERN2 = /@@VERBA_(?:NAME_)?[A-Z0-9_]*\d{4}@@|@@VERBA_[A-Z0-9_]+@@/gu;
@@ -4380,7 +4328,7 @@ var GOOGLE_FREE_LIMITS = Object.freeze({
   concurrency: 2
 });
 
-// hankae-patch/verba/retry-policy.js
+// retry-policy.js
 function normalizedServerRetryLimit(value = 5) {
   if (value === null || String(value).trim() === "") return 5;
   const number2 = Number(value);
@@ -4406,7 +4354,7 @@ function googleRetryHintSeconds(error) {
   return null;
 }
 
-// hankae-patch/verba/previous-user-context.js
+// previous-user-context.js
 function appendPreviousUserContext(prompt, source) {
   if (typeof source !== "string" || !source.trim()) return prompt;
   return `${prompt}
@@ -4418,7 +4366,7 @@ ${JSON.stringify(source)}
 END PREVIOUS USER REFERENCE`;
 }
 
-// hankae-patch/verba/taste-audit.js
+// taste-audit.js
 var galbwae2 = (settings) => settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true && !["off", "all", "dialogueInner"].includes(settings.chuseokGalbwaeScope));
 function tasteAuditScope(segment, speakerScopes = {}) {
   if (segment.type === "tagged_content") return "tagged_content";
@@ -4500,7 +4448,7 @@ async function runTasteQualityAudit({ enabled = false, segmented, translations, 
   }
 }
 
-// hankae-patch/verba/engine-entry.js
+// engine-entry.js
 var variant = "verba";
 function createEngine(snapshot, transport, report = () => {
 }) {
@@ -4952,7 +4900,6 @@ function createEngine(snapshot, transport, report = () => {
     return "other";
   }
   function applyCustomTranslatorPrompt(prompt, options = {}) {
-    if (deepseekKoreanEnabled(settings) && customTranslatorPromptKey(options.stage) !== "input") return String(prompt || "");
     const original = String(prompt || "");
     if (settings.customTranslatorEnabled !== true || options.stage === "connection-test") return original;
     const key = customTranslatorPromptKey(options.stage);
@@ -5115,7 +5062,7 @@ ${original}`;
     }
     const requestOptions = { ...options, signal: controller.signal };
     const customPrompt = applyCustomTranslatorPrompt(prompt, options);
-    const outgoingPrompt = options.previousUserSource && !(deepseekKoreanEnabled(settings) && customTranslatorPromptKey(options.stage) !== "input") ? appendPreviousUserContext(customPrompt, options.previousUserSource) : customPrompt;
+    const outgoingPrompt = options.previousUserSource ? appendPreviousUserContext(customPrompt, options.previousUserSource) : customPrompt;
     let lastError;
     try {
       for (let attempt = 0; maxRetries === 0 || attempt <= maxRetries; attempt += 1) {
@@ -5965,13 +5912,6 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     const before = new Map(translations);
     try {
       const config = { ...reviewSettings || settings, aiPostReview: normalizePostReview(settings.aiPostReview) };
-      if (deepseekKoreanEnabled(config)) {
-        config.customTranslatorEnabled = false;
-        config.developerMadKoreanOutputEnabled = false;
-        config.developerHongjinFlavorEnabled = false;
-        config.chuseokGalbwaeScope = "off";
-        config.chuseokGalbwaeEnabled = false;
-      }
       const selected = config.aiPostReview;
       const reference = selected.voice || selected.mad || selected.hongjin ? buildOutputPrompt(
         { ...segmented, segments: [], protectedText: "" },
@@ -6012,7 +5952,6 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
     }
   }
   async function planBilingualDialogueVerdicts(segmented, options = {}) {
-    if (deepseekKoreanEnabled(settings)) return;
     if (settings.translationEngine === "google-free") return;
     if (!segmented?.segments?.some((item) => item.type === "dialogue_candidate")) return;
     const pending = bilingualPromptsNeedingVerdict(settings).filter((prompt) => !hasExplicitNonDialogueBilingualScope(prompt));

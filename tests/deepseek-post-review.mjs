@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DEEPSEEK_KOREAN_PROMPT, DEEPSEEK_KOREAN_REVIEW_GUIDANCE } from '../deepseek-korean.js';
-import { normalizePostReview, planPostReview, reviewOutputOnce, postReviewSettingsMarkup } from '../post-review.js';
+import { normalizePostReview, buildPostReviewPrompt, planPostReview, reviewOutputOnce, postReviewSettingsMarkup } from '../post-review.js';
 import { segmentSource, assembleTranslation } from '../core.js';
 import { createOutputComparison, sanitizeOutputComparison } from '../output-comparison.js';
 import { reportedPrompt } from './fixtures/bilingual-inline-rules.js';
@@ -79,3 +79,16 @@ test('browser review setup includes active style reference for the selected dedi
  assert.match(index,/selected\.deepseekTranslationese && deepseekKoreanEnabled\(config\)/);
  assert.ok(planPostReview(fixture('He waited.',['기다렸다.']).segmented,new Map([['seg_0000','기다렸다.']]),cfg).selected.includes('deepseekTranslationese'));
 });
+
+ test('naturalness priority is appended only to an active dedicated review; ordinary fallback stays intact',()=>{
+  const data=fixture('He waited.',['그는 기다렸다.']);
+  for(const [extra,active] of [[{},true],[{developerMode:false},false],[{developerDeepseekKoreanEnabled:false},false],[{aiPostReview:{translationese:true}},false]]){
+   const settings={...cfg,aiPostReview:{translationese:true,deepseekTranslationese:true},...extra};
+   const plan=planPostReview(data.segmented,data.translations,settings);
+   const prompt=buildPostReviewPrompt(plan,data.segmented,settings);
+   assert.equal(prompt.includes('accurate meaning alone is not a reason to retain awkward wording'),active);
+   assert.equal(prompt.includes('Even when the meaning is accurate, correct unnatural Korean.'),active);
+   assert.equal(prompt.includes('If unsure, copy CURRENT exactly.'),!active);
+   assert.ok(plan.units.every(unit=>unit.checks.includes('deepseekTranslationese')===active));
+  }
+ });

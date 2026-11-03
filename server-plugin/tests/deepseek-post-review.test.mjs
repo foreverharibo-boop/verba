@@ -14,7 +14,7 @@ for(const [name,create] of [['verba',verba],['deep',deep]]){
   const engine=create(config,async(_id,messages)=>{
    const p=messages.map(m=>m.content).join('\n');
    if(p.startsWith('UNIFIED OUTPUT POST REVIEW')){
-    reviews++;assert.equal(initial,split);assert.ok(p.includes(DEEPSEEK_KOREAN_REVIEW_GUIDANCE));assert.match(p,/STYLE_SENTINEL/);
+    reviews++;assert.match(p,/accurate meaning alone is not a reason to retain awkward wording/);assert.equal(initial,split);assert.ok(p.includes(DEEPSEEK_KOREAN_REVIEW_GUIDANCE));assert.match(p,/STYLE_SENTINEL/);
     const targets=JSON.parse(p.split('\nREVIEW_UNITS\n')[1]);assert.ok(targets.every(r=>r.checks.includes('deepseekTranslationese')));
     assert.equal(targets.filter(r=>r.type==='bilingual').length,1);
     return reply(targets.map(r=>({id:r.id,translation:r.CURRENT.replace('척추를 대고','등을 대고').replace('좌석을 즐겨.','거기 앉아서 편히 쉬어.')})));

@@ -1,6 +1,70 @@
+// veereubaa/translation-composer.js
+var COMPOSITION = /* @__PURE__ */ Symbol("translation composition");
+var GENERAL_KEYS = /* @__PURE__ */ new Set(["output", "input", "selection", "mad", "hongjin"]);
+var INTERNAL_SENTENCE = /@@VERBA|\b(?:JSON|NAME LOCK|TARGET CHARACTER|TARGET-CHARACTER|TARGET ADDRESSEE GENDER|USER\/NPC|CURRENT USER|PRIMARY CAST REFERENCES|K→E input|segment id|editable id|between ids|protected (?:layout|structure|tokens)|required output format|identity spelling context|inert data)\b|Ignore every saved\/custom base instruction|This is the only E→K writing engine|Never apply this block to|Translation direction is always|User prompts may affect|LEFT CONTEXT|RIGHT CONTEXT|EXISTING KOREAN CONTEXT|Return exactly three distinct|Return a new Korean replacement for only|Preserve (?:Markdown|macros)|tags, attributes, code|Metadata keeps its existing number\/layout rules|^Handle /iu;
+function splitTranslationProse(value) {
+  const editable = [], internal = [];
+  for (const line of String(value || "").split("\n")) {
+    if (/^\s*(?:-\s*)?(?:Ignore every saved\/custom base instruction|This is the only E→K writing engine|TARGET ADDRESSEE GENDER is|"neutral" means|"unknown" means|Did a known TARGET CHARACTER|DEVELOPER KIM HONGJIN FLAVOR|SCENE FACTS AND OUTPUT CONTRACT)/u.test(line)) {
+      internal.push(line);
+      continue;
+    }
+    const sentences = line.split(/(?<=[.!?]) (?=[A-Z])/u);
+    const visible = [], fixed = [];
+    for (const sentence of sentences) {
+      (INTERNAL_SENTENCE.test(sentence) ? fixed : visible).push(sentence);
+    }
+    if (visible.length) editable.push(visible.join(" "));
+    if (fixed.length) internal.push(fixed.join(" "));
+  }
+  return { editable: editable.join("\n").replace(/\n{3,}/g, "\n\n").trim(), internal: internal.join("\n").trim() };
+}
+function customTranslationInstruction(settings = {}, key) {
+  if (settings.customTranslatorEnabled !== true) return null;
+  const value = settings.customTranslatorTemplates?.[key];
+  const modified = settings.customTranslatorModified?.[key];
+  if (modified === false || typeof value !== "string" || !value.trim()) return null;
+  return value;
+}
+function withTranslationComposition(settings = {}, key, build) {
+  if (settings[COMPOSITION]) return build(settings);
+  const context = { key, emitted: /* @__PURE__ */ new Set(), collected: null };
+  const galbwaeActive = key !== "input" && settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true);
+  context.disabled = galbwaeActive;
+  const active = !galbwaeActive && ((key !== "output" || settings.developerMadKoreanOutputEnabled !== true) && customTranslationInstruction(settings, key) !== null || key !== "input" && (settings.developerMadKoreanOutputEnabled === true && customTranslationInstruction(settings, "mad") !== null || settings.developerHongjinFlavorEnabled === true && customTranslationInstruction(settings, "hongjin") !== null));
+  const current = { ...settings, [COMPOSITION]: context };
+  if (active) {
+    current.developerCompressedPromptEnabled = false;
+    current.developerExtremeCompressedPromptEnabled = false;
+  }
+  return build(current);
+}
+function translationProse(settings, slot, original) {
+  const context = settings?.[COMPOSITION];
+  if (!context || context.disabled) return original;
+  const key = slot === "primary" ? context.key : slot;
+  if (!GENERAL_KEYS.has(key)) return original;
+  const custom = context.collected ? null : customTranslationInstruction(settings, key);
+  if (!context.collected && custom === null) return original;
+  const parts = splitTranslationProse(original);
+  if (context.collected) {
+    if (key === context.collectKey && parts.editable) context.collected.push(parts.editable);
+    return original;
+  }
+  const first = !context.emitted.has(key);
+  context.emitted.add(key);
+  return [first ? `[CUSTOM ${key.toUpperCase()} TRANSLATION RULES]
+${custom}
+[END CUSTOM TRANSLATION RULES]
+The current engine context, active setting scopes, protected structure and response contract supplied by this request remain authoritative; this block replaces translation prose only. A CUSTOM MAD or CUSTOM HONGJIN block is the active writing instruction for that enabled taste, not an excluded ordinary base prompt. CUSTOM HONGJIN applies only to confirmed TARGET dialogue; CUSTOM MAD follows the enabled MAD scope. Apply it only within the enabled taste and speaker scope.` : "", parts.internal].filter(Boolean).join("\n");
+}
+
 // veereubaa/deepseek-korean.js
 function deepseekKoreanEnabled(settings = {}) {
-  return settings.developerMode === true && settings.developerDeepseekKoreanEnabled === true;
+  return settings.developerDeepseekKoreanEnabled === true;
+}
+function deepseekKoreanPrompt(settings = {}) {
+  return customTranslationInstruction(settings, "deepseek") ?? DEEPSEEK_KOREAN_PROMPT;
 }
 var DEEPSEEK_KOREAN_PROMPT = `HIGHEST-PRIORITY TRANSLATION PRINCIPLE: Thoroughly eliminate translationese from the Korean translation while accurately preserving the source's meaning and scene. Do not allow awkward expressions caused by mechanically copying English word order, sentence structures, or word combinations. First understand the action, state, and speech intent conveyed by each sentence, then reconstruct it in natural Korean as if the fiction had originally been written in Korean. However, never delete source information or imagery, weaken or intensify the language, or add new meaning for the sake of fluency. This principle governs Korean expression; preserve the specified bilingual format and output structure.
 
@@ -150,7 +214,7 @@ Preserve the source's meaning and scene accurately while making the translation 
 Before output, read the Korean translation on its own and revise English-shaped phrasing, unnatural flow, and ambiguous modifier relationships. Compare every revision against the source again to ensure no meaning, detail, speech intent, or character voice was omitted, added, or altered. Check names, particles, tags, ids, and protected tokens as well. Keep this review internal; it does not remove any original-language text required by active bilingual settings. Return only the final translation in the requested structure and format, without the review process, explanations, or alternative versions.`;
 function withDeepseekKoreanPrompt(prompt, settings = {}) {
   if (!deepseekKoreanEnabled(settings)) return prompt;
-  return [DEEPSEEK_KOREAN_PROMPT, "ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.", prompt].join("\n");
+  return [deepseekKoreanPrompt(settings), "ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.", prompt].join("\n");
 }
 var DEEPSEEK_KOREAN_REVIEW_GUIDANCE = `DEEPSEEK-SPECIFIC TRANSLATIONESE REVIEW
 Apply this pass ONLY to units whose checks include deepseekTranslationese. Thoroughly eliminate translationese from the Korean translation. Read SOURCE in SOURCE_CONTEXT to understand the scene, then read CURRENT as Korean prose and actively reconstruct any English-shaped wording. Merely replacing individual words is insufficient when the sentence structure itself is unnatural. Prioritize preserving the source's meaning and scene, but do not treat the current translation's vocabulary or sentence structure as something that must be preserved. Even when the meaning is accurate, correct unnatural Korean. Reconstructing awkward Korean is a core task of this review, not an unnecessary stylistic change.
@@ -159,67 +223,6 @@ Treat each suspicious phrase as a meaning problem before a wording problem. Iden
 Rebuild word order, grammatical subjects, modifier attachment, collocations, idioms and speech intent in natural Korean. Split or combine sentences inside the same unit and existing line/markup boundaries when useful. Preserve complete narration with natural predicates; connect dangling modifiers to the correct action or state instead of attaching a generic ending. Resolve contextual senses of body-part expressions, physical actions and descriptive words rather than copying dictionary meanings. Correct awkward pronouns, particles, noun chains and English punctuation carried into Korean sentence endings. Retain already natural wording; do not impose decorative variation.
 Preserve the scene's participants, actions, targets, concrete images, quantities and units, negation, conditions, chronology, uncertainty, and degree of emotion or force. These constraints protect events and meaning, NOT English syntax or word-for-word correspondence. Never invent motives or actions to make a sentence flow. Respect active character-specific register and style only within their authorized speaker scopes.
 For bilingual units, rewrite only Korean prose and preserve the original-language half exactly once with its existing format unless the bilingual check separately authorizes format repair. Preserve every supplied id, lock, protected token, tag, macro, executable element and line boundary. Never move content between units. Use adjacent SOURCE_CONTEXT only to interpret the current unit. After revising, read the Korean on its own for naturalness, then compare it against SOURCE again to verify that no meaning was omitted, added or altered. Return corrected units in the unified review JSON schema; no explanations or review notes.`;
-
-// veereubaa/translation-composer.js
-var COMPOSITION = /* @__PURE__ */ Symbol("translation composition");
-var GENERAL_KEYS = /* @__PURE__ */ new Set(["output", "input", "selection", "mad", "hongjin"]);
-var INTERNAL_SENTENCE = /@@VERBA|\b(?:JSON|NAME LOCK|TARGET CHARACTER|TARGET-CHARACTER|TARGET ADDRESSEE GENDER|USER\/NPC|CURRENT USER|PRIMARY CAST REFERENCES|K→E input|segment id|editable id|between ids|protected (?:layout|structure|tokens)|required output format|identity spelling context|inert data)\b|Ignore every saved\/custom base instruction|This is the only E→K writing engine|Never apply this block to|Translation direction is always|User prompts may affect|LEFT CONTEXT|RIGHT CONTEXT|EXISTING KOREAN CONTEXT|Return exactly three distinct|Return a new Korean replacement for only|Preserve (?:Markdown|macros)|tags, attributes, code|Metadata keeps its existing number\/layout rules|^Handle /iu;
-function splitTranslationProse(value) {
-  const editable = [], internal = [];
-  for (const line of String(value || "").split("\n")) {
-    if (/^\s*(?:-\s*)?(?:Ignore every saved\/custom base instruction|This is the only E→K writing engine|TARGET ADDRESSEE GENDER is|"neutral" means|"unknown" means|Did a known TARGET CHARACTER|DEVELOPER KIM HONGJIN FLAVOR|SCENE FACTS AND OUTPUT CONTRACT)/u.test(line)) {
-      internal.push(line);
-      continue;
-    }
-    const sentences = line.split(/(?<=[.!?]) (?=[A-Z])/u);
-    const visible = [], fixed = [];
-    for (const sentence of sentences) {
-      (INTERNAL_SENTENCE.test(sentence) ? fixed : visible).push(sentence);
-    }
-    if (visible.length) editable.push(visible.join(" "));
-    if (fixed.length) internal.push(fixed.join(" "));
-  }
-  return { editable: editable.join("\n").replace(/\n{3,}/g, "\n\n").trim(), internal: internal.join("\n").trim() };
-}
-function customTranslationInstruction(settings = {}, key) {
-  if (settings.customTranslatorEnabled !== true) return null;
-  const value = settings.customTranslatorTemplates?.[key];
-  const modified = settings.customTranslatorModified?.[key];
-  if (modified === false || typeof value !== "string" || !value.trim()) return null;
-  return value;
-}
-function withTranslationComposition(settings = {}, key, build) {
-  if (settings[COMPOSITION]) return build(settings);
-  const context = { key, emitted: /* @__PURE__ */ new Set(), collected: null };
-  const galbwaeActive = key !== "input" && settings.developerMode === true && (["all", "dialogueInner"].includes(settings.chuseokGalbwaeScope) || settings.chuseokGalbwaeEnabled === true);
-  context.disabled = galbwaeActive;
-  const active = !galbwaeActive && ((key !== "output" || settings.developerMadKoreanOutputEnabled !== true) && customTranslationInstruction(settings, key) !== null || key !== "input" && (settings.developerMadKoreanOutputEnabled === true && customTranslationInstruction(settings, "mad") !== null || settings.developerHongjinFlavorEnabled === true && customTranslationInstruction(settings, "hongjin") !== null));
-  const current = { ...settings, [COMPOSITION]: context };
-  if (active) {
-    current.developerCompressedPromptEnabled = false;
-    current.developerExtremeCompressedPromptEnabled = false;
-  }
-  return build(current);
-}
-function translationProse(settings, slot, original) {
-  const context = settings?.[COMPOSITION];
-  if (!context || context.disabled) return original;
-  const key = slot === "primary" ? context.key : slot;
-  if (!GENERAL_KEYS.has(key)) return original;
-  const custom = context.collected ? null : customTranslationInstruction(settings, key);
-  if (!context.collected && custom === null) return original;
-  const parts = splitTranslationProse(original);
-  if (context.collected) {
-    if (key === context.collectKey && parts.editable) context.collected.push(parts.editable);
-    return original;
-  }
-  const first = !context.emitted.has(key);
-  context.emitted.add(key);
-  return [first ? `[CUSTOM ${key.toUpperCase()} TRANSLATION RULES]
-${custom}
-[END CUSTOM TRANSLATION RULES]
-The current engine context, active setting scopes, protected structure and response contract supplied by this request remain authoritative; this block replaces translation prose only. A CUSTOM MAD or CUSTOM HONGJIN block is the active writing instruction for that enabled taste, not an excluded ordinary base prompt. CUSTOM HONGJIN applies only to confirmed TARGET dialogue; CUSTOM MAD follows the enabled MAD scope. Apply it only within the enabled taste and speaker scope.` : "", parts.internal].filter(Boolean).join("\n");
-}
 
 // veereubaa/bilingual-intent.js
 var positiveCommands = [

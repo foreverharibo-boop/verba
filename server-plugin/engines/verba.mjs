@@ -499,7 +499,10 @@ function escapeCodeTranslation(text, quote) {
 
 // verba/deepseek-korean.js
 function deepseekKoreanEnabled(settings = {}) {
-  return settings.developerMode === true && settings.developerDeepseekKoreanEnabled === true;
+  return settings.developerDeepseekKoreanEnabled === true;
+}
+function deepseekKoreanPrompt(settings = {}) {
+  return customTranslationInstruction(settings, "deepseek") ?? DEEPSEEK_KOREAN_PROMPT;
 }
 var DEEPSEEK_KOREAN_PROMPT = `HIGHEST-PRIORITY TRANSLATION PRINCIPLE: Thoroughly eliminate translationese from the Korean translation while accurately preserving the source's meaning and scene. Do not allow awkward expressions caused by mechanically copying English word order, sentence structures, or word combinations. First understand the action, state, and speech intent conveyed by each sentence, then reconstruct it in natural Korean as if the fiction had originally been written in Korean. However, never delete source information or imagery, weaken or intensify the language, or add new meaning for the sake of fluency. This principle governs Korean expression; preserve the specified bilingual format and output structure.
 
@@ -833,7 +836,7 @@ ${values[k]}`).join("\n");
     const regular = regularPolicy(s, options);
     if (!deepseekKoreanEnabled(s)) return regular;
     return lines([
-      DEEPSEEK_KOREAN_PROMPT,
+      deepseekKoreanPrompt(s),
       "ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.",
       regular
     ]);
@@ -952,7 +955,7 @@ ${values[k]}`).join("\n");
     const selection = collectTranslationProse({}, "selection", (settings) => buildSelectionPrompt({ source: "", translation: "", selected: "", start: 0, end: 0, settings }));
     const mad2 = collectTranslationProse({ developerMadKoreanOutputEnabled: true }, "mad", (settings) => buildOutputPrompt2(sample, settings));
     const hongjin2 = collectTranslationProse({ developerHongjinFlavorEnabled: true }, "hongjin", (settings) => buildOutputPrompt2(sample, settings));
-    return { output, input, selection, mad: mad2, hongjin: hongjin2 };
+    return { output, input, selection, mad: mad2, hongjin: hongjin2, deepseek: DEEPSEEK_KOREAN_PROMPT };
   }
   return {
     defaultBaseTranslationPrompt,

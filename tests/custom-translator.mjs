@@ -11,8 +11,8 @@ return { defaults: DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES, visible: CUSTOM_TRANSLAT
  normalize: normalizeCustomTranslatorSettings, normalizeText: normalizeCustomTranslatorInstruction,
  normalizeGalbwae: normalizedChuseokGalbwaeScope, defs: CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS };`)(normalizePostReview,core.customTranslationDefaults);
 const {defaults,normalize}=api;
-assert.deepEqual(api.visible,['output','input','selection','mad','hongjin']);
-for(const key of api.visible) {
+assert.deepEqual(api.visible,['output','input','selection','mad','hongjin','deepseek']);
+for(const key of api.visible.filter(key => key !== 'deepseek')) {
  assert.ok(defaults[key].length>80,key);
  assert.doesNotMatch(defaults[key],/JSON|NAME LOCK|TARGET CHARACTER|TARGET dialogue only|within each id|LEFT|RIGHT|@@VERBA|PAIR SPEECH LOCK/);
 }
@@ -84,7 +84,7 @@ settings.chuseokGalbwaeScope='all';assert.equal(transport('GALBWAE REPAIR',{stag
 const escapeHtml=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const render=Function('settings','CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS','CUSTOM_TRANSLATOR_VISIBLE_KEYS','escapeHtml',slice('function customTranslatorInstructionPlaceholder(','function syncCustomTranslatorControls(')+'\nreturn customTranslatorSettingsMarkup();');
 const html=render(settings,api.defs,api.visible,escapeHtml);
-assert.equal((html.match(/data-verba-custom-translator-key=/g)||[]).length,5);
+assert.equal((html.match(/data-verba-custom-translator-key=/g)||[]).length,6);
 for(const key of ['name','consistency','repair','quality','flavor','other'])assert.ok(!html.includes(`data-verba-custom-translator-key="${key}"`));
 for(const label of ['채팅 번역','내가 보내는 글','선택한 부분 다시 번역','미친 한출의 맛','김홍진의 맛'])assert.ok(html.includes(label));
 assert.match(html,/자동으로 조립/);assert.doesNotMatch(html,/프롬프트를 완전히 대체/);

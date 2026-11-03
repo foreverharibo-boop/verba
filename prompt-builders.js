@@ -1,5 +1,5 @@
 import { OUTPUT_FORMAT_POLICY, outputFormatReviewContext } from './output-format.js';
-import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
+import { deepseekKoreanEnabled, deepseekKoreanPrompt, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { translationProse, withTranslationComposition, collectTranslationProse } from './translation-composer.js';
 // v0.5.61: user-approved concise flavors; disabled oppa sends no instruction.
 // Helpers are injected by core.js so parsing/identity/selection behavior stays shared.
@@ -185,7 +185,7 @@ export function createPromptBuilders(h) {
         const regular = regularPolicy(s, options);
         if (!deepseekKoreanEnabled(s)) return regular;
         return lines([
-            DEEPSEEK_KOREAN_PROMPT,
+            deepseekKoreanPrompt(s),
             'ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.',
             regular,
         ]);
@@ -295,7 +295,7 @@ export function createPromptBuilders(h) {
         const selection = collectTranslationProse({}, 'selection', settings => buildSelectionPrompt({source:'',translation:'',selected:'',start:0,end:0,settings}));
         const mad = collectTranslationProse({developerMadKoreanOutputEnabled:true}, 'mad', settings => buildOutputPrompt(sample,settings));
         const hongjin = collectTranslationProse({developerHongjinFlavorEnabled:true}, 'hongjin', settings => buildOutputPrompt(sample,settings));
-        return {output,input,selection,mad,hongjin};
+        return {output,input,selection,mad,hongjin,deepseek:DEEPSEEK_KOREAN_PROMPT};
     }
     return {defaultBaseTranslationPrompt,customTranslationDefaults,
         buildOutputPrompt: (segments,settings,...rest) => withTranslationComposition(settings,'output',s => buildOutputPrompt(segments,s,...rest)),

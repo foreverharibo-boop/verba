@@ -2037,7 +2037,7 @@
 }
 
 .verba-developer-lab {
-    border-style: dashed !important;
+    border-style: solid !important;
 }
 
 .verba-developer-lab > summary {
@@ -2186,7 +2186,7 @@
 
 .verba-developer-lab {
     margin: 6px 0 10px !important;
-    border-style: dashed !important;
+    border-style: solid !important;
 }
 
 @media (max-width: 600px) {
@@ -3428,4 +3428,8 @@
     white-space: nowrap;
     word-break: keep-all;
     writing-mode: horizontal-tb;
+}
+
+.verba-deepseek-settings {
+    border-style: solid !important;
 }

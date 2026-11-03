@@ -53,7 +53,7 @@ function answer(prompt) {
 test('dedicated toggle uses regular pipeline; minimal mode resumes when it is off',()=>{
     for(const dev of [false,true]) for(const toggle of [false,true]) {
         const s={...settings,developerMode:dev,developerDeepseekKoreanEnabled:toggle};
-        assert.equal(deepseekKoreanEnabled(s),dev&&toggle);
+        assert.equal(deepseekKoreanEnabled(s),toggle);
         assert.equal(minimalOutputEnabled(s),dev&&!toggle);
     }
 });

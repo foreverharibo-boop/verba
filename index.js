@@ -6,10 +6,10 @@ import { reviewBilingualOutput } from './bilingual-review.js';
 import { hasExplicitNonDialogueBilingualScope } from './output-format.js';
 import { createOutputComparison, appendOutputComparison, createOutputComparisonStore } from './output-comparison.js';
 import { escapeCodeTranslation } from './code-content.js';
-import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
+import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.103';
+import { createServerClient } from './server-client.js?v=0.6.104';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -22,7 +22,7 @@ import { runTasteQualityAudit } from './taste-audit.js';
 import { customTranslationDefaults } from './core.js';
 import { extension_settings, getContext } from '../../../../scripts/extensions.js';
 import { messageFormatting, showMoreMessages } from '../../../../script.js';
-import { normalizeBaseTranslationCustom, baseTranslationEditorMarkup, bindBaseTranslationEditor } from './base-editor.js';
+import { normalizeBaseTranslationCustom } from './base-editor.js';
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
 import { translateGoogleFreeSegments, translateGoogleFreeText } from './google-free.js';
@@ -73,13 +73,11 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.103';
+const EXTENSION_VERSION = '0.6.104';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.103';
+const SERVER_ENGINE_VERSION = '0.6.104';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
-const DEVELOPER_ACCESS_CODE = '130918';
-const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const TOUCH_SELECTION_CAPTURE_MS = 0;
 const STATE_KEY = 'verba_current_translation';
 const PEER_STATE_KEY = 'verba_deep_current_translation';
@@ -242,6 +240,7 @@ const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
 const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
 const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
+    { key: 'deepseek', label: '딥식플 전용 프롬프트', description: '딥식플 전용 프롬프트를 켰을 때 한국어 출력·재번역에 사용하는 지침이에요.' },
     { key: 'output', label: '채팅 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
     { key: 'input', label: '내가 보내는 글', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
     { key: 'selection', label: '선택한 부분 다시 번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
@@ -254,7 +253,7 @@ const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
     { key: 'flavor', label: '미친 한출·캐릭터 말투', description: '미친 한출의 맛이나 캐릭터 전용 말투 요청에 사용해요.' },
     { key: 'other', label: '그 밖의 내부 요청', description: '위 항목에 포함되지 않는 보조 AI 요청에 사용해요.' },
 ];
-const CUSTOM_TRANSLATOR_VISIBLE_KEYS = ['output', 'input', 'selection', 'mad', 'hongjin'];
+const CUSTOM_TRANSLATOR_VISIBLE_KEYS = ['output', 'input', 'selection', 'mad', 'hongjin', 'deepseek'];
 const DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES = Object.freeze({
     name: `Identify the exact source-language person name that corresponds to the selected Korean name. Exclude particles, titles, honorifics, punctuation, and surrounding words. Distinguish different people even when their names are similar, never guess when the evidence is insufficient, and output only the requested match in the required format.`,
     consistency: `Keep the same person's name, role, title, form of address, and recurring terms consistent throughout the supplied text, using the earliest accurate and natural Korean form as the reference. Keep genuinely different roles or people distinct. Correct only inconsistent terms or their attached particles and preserve all unrelated wording, meaning, tone, and formatting.`,
@@ -289,6 +288,7 @@ const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'dialogueEndings', label: '대사 말끝 취향', selector: '#verba-dialogue-ending-settings' },
     { key: 'expression', label: '표현 디테일', selector: '#verba-expression-detail' },
     { key: 'relationship', label: '말투·호칭 설정', selector: '#verba-developer-relationship-lab' },
+    { key: 'deepseek', label: '딥식플 전용 프롬프트', selector: '#verba-deepseek-settings' },
     { key: 'koreanFlavor', label: '한캐의 맛', selector: '#verba-korean-flavor' },
     { key: 'englishFlavor', label: '영캐의 맛', selector: '#verba-english-flavor' },
     { key: 'madKorean', label: '미친 한출의 맛', selector: '#verba-developer-mad-korean-lab' },
@@ -296,7 +296,6 @@ const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'beginner', label: '신입 챗시 전용', selector: '#verba-beginner-character-guide' },
     { key: 'postReview', label: 'AI 후검수 설정', selector: '#verba-post-review-settings' },
     { key: 'debug', label: '디버그', selector: '#verba-debug-settings' },
-    { key: 'developer', label: '개발자 모드', selector: '#verba-developer-settings' },
 ];
 const DEFAULT_SETTINGS_VISIBILITY = Object.freeze(Object.fromEntries(
     SETTINGS_VISIBILITY_DEFINITIONS.map(({ key }) => [key, true]),
@@ -514,17 +513,9 @@ const normalizedCustomTranslator = normalizeCustomTranslatorSettings(
 );
 settings.customTranslatorTemplates = normalizedCustomTranslator.templates;
 settings.customTranslatorModified = normalizedCustomTranslator.modified;
-settings.developerMode = settings.developerMode === true;
+// Retired developer experiments remain stored for compatibility, but cannot run.
+settings.developerMode = false;
 settings.baseTranslationCustom = normalizeBaseTranslationCustom(settings.baseTranslationCustom);
-settings.developerAccessFingerprint = String(settings.developerAccessFingerprint || '');
-if (
-    settings.developerMode
-    && settings.developerAccessFingerprint !== DEVELOPER_ACCESS_FINGERPRINT
-) {
-    // Lock older sessions without resetting any saved experiment or flavor values.
-    // Developer-only features remain gated by developerMode until re-unlocked.
-    settings.developerMode = false;
-}
 settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
 settings.developerOutputSplitCount = [2, 3].includes(Number(settings.developerOutputSplitCount)) ? Number(settings.developerOutputSplitCount) : 1;
 settings.developerMinimalPromptEnabled = settings.developerMinimalPromptEnabled === true;
@@ -2228,7 +2219,7 @@ function applyPromptPresetTranslationSettings(value) {
     setControlValue('#verba-developer-target-user-address-strength', settings.developerTargetToUserAddressStrength);
     setControlValue('#verba-developer-target-user-address-frequency', settings.developerTargetToUserAddressFrequency);
 
-    if (appliedDeveloperSettings) refreshSettingsPanelForDeveloperMode();
+    if (appliedDeveloperSettings) setCheckedValue('#verba-deepseek-enabled', settings.developerDeepseekKoreanEnabled);
     syncDeveloperQualityControls(document.querySelector('#verba-settings'));
     if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
 }
@@ -2516,7 +2507,7 @@ function renderCurrentAppliedRules() {
         <div class="verba-current-rules-note">현재 아웃풋 E→K 번역에 적용되는 사용자 규칙을 정리해서 보여줍니다. 인풋 K→E 자동번역 규칙은 포함하지 않으며 API 호출도 하지 않습니다.</div>
 
         ${deepseekKoreanEnabled(settings) ? currentRulesSimpleCard('딥식 번역 지침 · 일반 설정 함께 적용', [
-            ['기본 지침', DEEPSEEK_KOREAN_PROMPT],
+            ['번역 지침', deepseekKoreanPrompt(settings)],
             ['함께 적용', '일반 베르바의 활성 프롬프트·맛·미세조정·금지어·일회성 요구사항·AI 후검수'],
             ['우선순위', '기존 적용 범위와 우선순위 유지 · 미친 한출/갈봬의 한국어 전용 규칙도 유지'],
         ]) : ''}
@@ -6150,7 +6141,7 @@ async function translateMessage(messageId, options = {}) {
     const outputJobSlot = activeProfileSlot();
     const timing = outputTiming.begin({
         retranslation: options.force === true, slot: outputJobSlot, splitCount: outputSplitCount(settings),
-        mode: deepseekKoreanEnabled(settings) ? '딥식플한출' : minimalOutputEnabled(settings) ? '최소 프롬프트'
+        mode: deepseekKoreanEnabled(settings) ? '딥식플 전용 프롬프트' : minimalOutputEnabled(settings) ? '최소 프롬프트'
             : settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? '미친압축'
             : settings.developerMode && settings.developerCompressedPromptEnabled ? '압축' : '일반',
     });
@@ -10766,9 +10757,9 @@ function generalSplitSettingsMarkup() {
                             <select id="verba-developer-output-split-count" class="text_pole">
                                 ${[1, 2, 3].map(count => `<option value="${count}" ${Number(settings.developerOutputSplitCount) === count ? 'selected' : ''}>${count === 1 ? '분할 안 함' : `${count}분할`}</option>`).join('')}
                             </select>
-                            <div class="verba-help">최소 프롬프트와 독립 설정입니다. 한출·홍진 등 현재 적용 중인 지침을 유지하며 원문을 나눠 동시에 번역합니다. 최소 프롬프트를 켜면 그 모드의 지침을 사용합니다.</div>
+                            <div class="verba-help">한출·홍진 등 현재 적용 중인 지침을 유지하며 원문을 나눠 동시에 번역합니다.</div>
                             <div class="verba-help">구간 수가 적으면 더 적게 나눕니다. 서버에 따라 3분할이 더 느릴 수 있고, 묶음 사이의 말투·용어가 달라질 수 있습니다. 선택한 AI 후검수는 모든 분할 번역이 끝난 뒤 한 번에 실행됩니다.</div>
-                            <div class="verba-help">인풋·선택 재번역은 제외합니다. 개발자 모드와 관계없이 선택한 분할 수를 적용합니다.</div>
+                            <div class="verba-help">인풋·선택 재번역은 제외합니다. 선택한 분할 수를 적용합니다.</div>
                         </div>
                     </details>
 
@@ -10863,91 +10854,15 @@ function generalRelationshipSettingsMarkup() {
                     </details>`;
 }
 
-function developerChuseokGalbwaeMarkup() {
+function deepseekSettingsMarkup() {
     return `
-        <details id="verba-chuseok-galbwae" class="verba-tool-details verba-chuseok-galbwae">
-            <summary>🌕 추석 갈봬체 <small>개발자 · 기본 OFF</small></summary>
+        <details id="verba-deepseek-settings" class="verba-tool-details verba-deepseek-settings">
+            <summary>딥식플 전용 프롬프트</summary>
             <div class="verba-tool-details-content">
                 <label class="verba-check-row">
-                    <input type="checkbox" id="verba-chuseok-galbwae-all" ${settings.chuseokGalbwaeScope === 'all' ? 'checked' : ''}>
-                    <span>전체 갈봬체 <small>서술 + 대사 + **강조문**</small></span>
+                    <input type="checkbox" id="verba-deepseek-enabled" ${settings.developerDeepseekKoreanEnabled ? 'checked' : ''}>
+                    <span>딥식플 전용 프롬프트 사용</span>
                 </label>
-                <label class="verba-check-row">
-                    <input type="checkbox" id="verba-chuseok-galbwae-dialogue-inner" ${settings.chuseokGalbwaeScope === 'dialogueInner' ? 'checked' : ''}>
-                    <span>대사·**강조문**만 갈봬체 <small>그 외 서술 정상</small></span>
-                </label>
-                <div class="verba-help">개발자 모드에서만 작동합니다. 개발자 모드를 끄면 저장된 범위는 유지되지만 번역에는 적용되지 않아요. 둘 중 하나만 선택할 수 있으며, 켠 항목을 다시 끄면 갈봬체가 완전히 꺼집니다.</div>
-                <div class="verba-help">켜져 있는 동안 미친 한출의 맛·김홍진의 맛·입력 프롬프트·표현 디테일 등 다른 스타일 지시는 전송하지 않는 배타 모드로 작동합니다. 모든 &lt;짝태그&gt; 안의 글씨에는 갈봬체를 적용하지 않으며 Inner_Info도 예외가 아닙니다. Info_panel·날짜·날씨·장소·이름·숫자·코드·태그 구조와 속성은 어느 옵션에서도 바꾸지 않습니다.</div>
-                <div class="verba-help">대표 기준: “나 알아?” → “나를 아늕랴!!”처럼 죠캎식으로 발음·맞춤법·띄어쓰기·조사를 기괴하지만 읽히게 무너뜨립니다. 여기에 인터넷 처음 배운 할배 같은 결을 살짝 섞고, 씨발은 씨핤·씨핧·샤갈·쌱앐·쌰갈·시핣 계열로 바꿔요. 일부 요→료, 네·응→례와 ㄷㄷ·;;·ㅠㅠ도 랜덤하게 섞되 매번 도배하지 않습니다. **굵은 글씨**는 기호를 유지하고 안쪽 문장에 적용합니다.</div>
-            </div>
-        </details>`;
-}
-
-function developerSettingsMarkup() {
-    return `
-        <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings">
-            <summary>개발자 모드 <small>${settings.developerMode ? '품질 검수 실험실' : '번호 입력'}</small></summary>
-            <div class="verba-tool-details-content">
-                ${settings.developerMode ? `
-                    <div class="verba-developer-enabled-note">개발자 모드가 활성화되어 있어요.</div>
-                    <details id="verba-developer-deepseek-korean-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>딥식플한출 <small>영미권 문체 번역 실험</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-deepseek-korean-enabled" ${settings.developerDeepseekKoreanEnabled ? 'checked' : ''}>
-                                <span>딥식플한출 사용</span>
-                            </label>
-                            <div class="verba-help">한국어 출력·전체/선택 재번역에 전용 영어 번역 지침을 추가하고, 일반 베르바에서 켜둔 프롬프트·영캐/한캐의 맛·관계와 현지화·말투·커스텀 지침·금지어·일회성 요구사항을 기존 적용 범위대로 함께 사용합니다. 프롬프트 우선순위와 미친 한출/갈봬의 전용 규칙은 그대로 유지됩니다. 선택한 AI 후검수도 일반 번역과 동일하게 적용합니다.</div>
-                            <div class="verba-help">최소 프롬프트 실험이 함께 켜져 있어도 이 모드에서는 일반 번역 경로를 사용합니다. 원문·문맥·이름 고정·JSON·보호 요소 규칙도 유지합니다. AI 연결 프로필에서 테스트할 모델을 직접 선택해 주세요. 모델은 자동 변경되지 않으며 무료 구글 번역에는 적용되지 않습니다.</div>
-                            <div class="verba-help">끄면 저장된 기존 설정으로 돌아갑니다. 한국어→영어 인풋 번역은 기존 설정을 사용합니다. 서버 번역 사용자는 베르바 서버 플러그인도 업데이트해 주세요.</div>
-                            <details><summary>영어 번역 프롬프트 보기</summary><pre class="verba-help" style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(DEEPSEEK_KOREAN_PROMPT)}</pre></details>
-                        </div>
-                    </details>
-                    ${developerChuseokGalbwaeMarkup()}
-                    
-                    <details id="verba-developer-minimal-prompt-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>🧪 최소 프롬프트 실험 <small>출력·전체 재번역</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-minimal-prompt-enabled" ${settings.developerMinimalPromptEnabled ? 'checked' : ''}>
-                                <span>최소 프롬프트 사용</span>
-                            </label>
-                            <label for="verba-developer-minimal-prompt">실험용 번역 지침</label>
-                            <textarea id="verba-developer-minimal-prompt" class="text_pole" rows="4" spellcheck="false" placeholder="자연스럽게 한국어로 번역하라.">${escapeHtml(settings.developerMinimalPrompt)}</textarea>
-                            <div class="verba-help">입력한 지침은 자동 저장됩니다. 비우면 기본 한 줄을 사용합니다. 기존 프롬프트·한출/홍진·압축·미세조정·금지어·AI 검수는 이 실험에서 제외됩니다.</div>
-                            <div class="verba-help">원문과 최소 응답 규칙, 이름 고정에 필요한 정보만 함께 보냅니다. 전체 재번역 요구사항은 추가 적용하며, 형식·보호 요소 오류만 재요청합니다.</div>
-                            <div class="verba-help">인풋·선택 재번역은 기존 방식입니다. 토글을 끄면 보관된 설정으로 돌아갑니다. 개발자 모드를 끄면 실험도 해제됩니다.</div>
-                        </div>
-                    </details>
-                    ${baseTranslationEditorMarkup(settings.baseTranslationCustom)}
-
-                    <details id="verba-developer-compressed-prompt-lab" class="verba-tool-details verba-developer-lab">
-                        <summary>❌️개발자 테스트용 사용 금지❌️ <small>프롬프트 압축 실험</small></summary>
-                        <div class="verba-tool-details-content">
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-compressed-prompt-enabled" ${settings.developerCompressedPromptEnabled ? 'checked' : ''}>
-                                <span>압축 프롬프트 사용</span>
-                            </label>
-                            <div class="verba-help">베르바 내부의 반복 지침만 짧게 합칩니다. 직접 작성한 프롬프트는 줄이지 않으며 번역 품질이 달라질 수 있는 테스트 기능입니다.</div>
-                            <label class="verba-check-row">
-                                <input type="checkbox" id="verba-developer-extreme-compressed-prompt-enabled" ${settings.developerExtremeCompressedPromptEnabled ? 'checked' : ''}>
-                                <span>xxx미친압축xxx</span>
-                            </label>
-                            <div class="verba-help">한출·김홍진과 일반 출력·입력·재번역·복구·검수의 베르바 내부 지침을 극단적으로 줄입니다. 직접 작성한 지침 내용은 보존하며 결과 품질이 달라질 수 있습니다.</div>
-                        </div>
-                    </details>
-
-                    <div class="verba-help">AI 후검수는 디버그 위의 「AI 후검수 설정」에서 항목별로 선택합니다.</div>
-
-                    <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
-                ` : `
-                    <label for="verba-developer-code">개발자 번호</label>
-                    <div class="verba-developer-code-row">
-                        <input id="verba-developer-code" class="text_pole" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="번호 입력">
-                        <button type="button" id="verba-developer-mode-on" class="menu_button">활성화</button>
-                    </div>
-                    <div class="verba-help">개발자 번호를 입력한 뒤 활성화를 눌러 주세요. 배포본의 개발자 번호가 바뀌면 이전 활성화 상태는 자동으로 잠깁니다.</div>
-                `}
             </div>
         </details>`;
 }
@@ -11013,23 +10928,6 @@ function syncDeveloperQualityControls(root = document.querySelector('#verba-sett
             control.disabled = !englishFlavorEnabled;
         });
     }
-}
-
-function refreshSettingsPanelForDeveloperMode() {
-    const panel = document.querySelector('#verba-settings');
-    const current = panel?.querySelector('#verba-developer-settings');
-    if (!panel || !current) return;
-
-    const holder = document.createElement('div');
-    holder.innerHTML = developerSettingsMarkup().trim();
-    const replacement = holder.firstElementChild;
-    if (!replacement) return;
-
-    replacement.open = current.open;
-    current.replaceWith(replacement);
-    syncDeveloperQualityControls(panel);
-    applySettingsVisibility(panel);
-    renderQualityAuditStatus();
 }
 
 function enabledQualityAuditChecks() {
@@ -11788,6 +11686,7 @@ function injectSettingsPanel() {
 
 
                 ${generalRelationshipSettingsMarkup()}
+                ${deepseekSettingsMarkup()}
 
                 <details id="verba-korean-flavor" class="verba-tool-details verba-korean-flavor">
                         <summary>🍚 한캐의 맛 <small>한국어 말맛 커스텀</small></summary>
@@ -12026,7 +11925,7 @@ function injectSettingsPanel() {
                         </details>
                     </div>
                 </details>
-                ${developerSettingsMarkup()}
+
 
             </div>
         </div>`;
@@ -12035,7 +11934,6 @@ function injectSettingsPanel() {
     bindAutoInputSetting(panel);
     bindAutoOutputSetting(panel);
     bindServerTranslationSetting(panel);
-    bindBaseTranslationEditor(panel, settings, { save: saveSettings, notify });
     refreshProfileSelect();
     syncTranslationEngineUi(panel);
     renderNameLockManager();
@@ -12043,27 +11941,6 @@ function injectSettingsPanel() {
     renderTranslationRuleOrder();
     renderPromptConflictInspector();
     renderQualityAuditStatus();
-
-    const activateDeveloperMode = () => {
-        const input = panel.querySelector('#verba-developer-code');
-        const code = String(input?.value || '').trim();
-
-        if (code !== DEVELOPER_ACCESS_CODE) {
-            if (input) {
-                input.value = '';
-                input.focus();
-            }
-            notify('개발자 번호가 맞지 않아요.', 'error');
-            return;
-        }
-
-        settings.developerMode = true;
-        settings.developerAccessFingerprint = DEVELOPER_ACCESS_FINGERPRINT;
-        saveSettings();
-        lastQualityAuditSummary = '활성화됨 · 품질 검수는 기본 OFF';
-        refreshSettingsPanelForDeveloperMode();
-        notify('개발자 모드를 활성화했어요.', 'success');
-    };
 
     panel.addEventListener('click', event => {
         const target = event.target instanceof Element ? event.target : null;
@@ -12108,31 +11985,6 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.closest('#verba-developer-mode-on')) {
-            activateDeveloperMode();
-            return;
-        }
-
-        if (target.closest('#verba-developer-mode-off')) {
-            settings.developerMode = false;
-            settings.developerMinimalPromptEnabled = false;
-            settings.developerDeepseekKoreanEnabled = false;
-            settings.developerCompressedPromptEnabled = false;
-            settings.developerExtremeCompressedPromptEnabled = false;
-            settings.qualityAuditEnabled = false;
-            saveSettings();
-            lastQualityAuditSummary = '개발자 모드 비활성화';
-            refreshSettingsPanelForDeveloperMode();
-            notify('개발자 모드를 껐어요.', 'info');
-        }
-    });
-
-    panel.addEventListener('keydown', event => {
-        if (event.key !== 'Enter') return;
-        const target = event.target instanceof Element ? event.target : null;
-        if (!target?.matches('#verba-developer-code')) return;
-        event.preventDefault();
-        activateDeveloperMode();
     });
 
     panel.addEventListener('change', event => {
@@ -12172,47 +12024,10 @@ function injectSettingsPanel() {
             return;
         }
 
-        if (target.id === 'verba-developer-deepseek-korean-enabled' && target instanceof HTMLInputElement) {
+        if (target.id === 'verba-deepseek-enabled' && target instanceof HTMLInputElement) {
             settings.developerDeepseekKoreanEnabled = target.checked;
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
-            return;
-        }
-
-        if (target.id === 'verba-developer-minimal-prompt-enabled' && target instanceof HTMLInputElement) {
-            settings.developerMinimalPromptEnabled = target.checked;
-            saveSettings();
-            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
-            return;
-        }
-
-        if (target.id === 'verba-developer-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
-            settings.developerCompressedPromptEnabled = target.checked;
-            if (target.checked) {
-                settings.developerExtremeCompressedPromptEnabled = false;
-                setCheckedValue('#verba-developer-extreme-compressed-prompt-enabled', false);
-            }
-            saveSettings();
-            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
-            notify(
-                target.checked ? '개발자 테스트용 압축 프롬프트를 켰어요.' : '기존 전체 프롬프트로 돌아왔어요.',
-                'info',
-            );
-            return;
-        }
-
-        if (target.id === 'verba-developer-extreme-compressed-prompt-enabled' && target instanceof HTMLInputElement) {
-            settings.developerExtremeCompressedPromptEnabled = target.checked;
-            if (target.checked) {
-                settings.developerCompressedPromptEnabled = false;
-                setCheckedValue('#verba-developer-compressed-prompt-enabled', false);
-            }
-            saveSettings();
-            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
-            notify(
-                target.checked ? 'xxx미친압축xxx을 켰어요.' : '미친압축을 껐어요.',
-                'info',
-            );
             return;
         }
 
@@ -12543,22 +12358,6 @@ function injectSettingsPanel() {
         if (target.id === 'verba-english-flavor-referent-repeat' && target instanceof HTMLInputElement) {
             settings.englishFlavorReduceReferentRepetition = target.checked;
             saveSettings();
-            return;
-        }
-
-        if (target.id === 'verba-chuseok-galbwae-all' && target instanceof HTMLInputElement) {
-            settings.chuseokGalbwaeScope = target.checked ? 'all' : 'off';
-            setCheckedValue('#verba-chuseok-galbwae-dialogue-inner', false);
-            saveSettings();
-            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
-            return;
-        }
-
-        if (target.id === 'verba-chuseok-galbwae-dialogue-inner' && target instanceof HTMLInputElement) {
-            settings.chuseokGalbwaeScope = target.checked ? 'dialogueInner' : 'off';
-            setCheckedValue('#verba-chuseok-galbwae-all', false);
-            saveSettings();
-            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 
@@ -13154,10 +12953,6 @@ function injectSettingsPanel() {
                 saveSettings();
             }
             return;
-        }
-        if (target instanceof HTMLTextAreaElement && target.id === 'verba-developer-minimal-prompt') {
-            settings.developerMinimalPrompt = target.value;
-            saveSettings();
         }
     });
     panel.addEventListener('input', refreshCurrentRulesIfOpen);

@@ -24,8 +24,8 @@ test('existing checklist exposes a separate opt-in and preserves a checked prefe
  assert.match(ui,/딥식플 전용 직역투/);
  assert.match(ui,/API 요청이 1회 추가/);
 });
-test('both developer and DeepSeek gates are required; ordinary checks still work when inactive',async()=>{
- for(const extra of [{developerMode:false},{developerDeepseekKoreanEnabled:false},{aiPostReview:{}}]){
+test('DeepSeek toggle and review selection are required; ordinary checks still work when inactive',async()=>{
+ for(const extra of [{developerDeepseekKoreanEnabled:false},{aiPostReview:{}}]){
   const data=fixture('He lay on his back.',['그는 척추를 대고 누웠다.']);
   const stats=await reviewOutputOnce({...data,settings:{...cfg,...extra},request:()=>assert.fail('inactive review called')});
   assert.equal(stats.checked,0);assert.ok(!stats.checks.includes('deepseekTranslationese'));
@@ -86,7 +86,7 @@ test('browser review setup includes active style reference for the selected dedi
 
  test('naturalness priority is appended only to an active dedicated review; ordinary fallback stays intact',()=>{
   const data=fixture('He waited.',['그는 기다렸다.']);
-  for(const [extra,active] of [[{},true],[{developerMode:false},false],[{developerDeepseekKoreanEnabled:false},false],[{aiPostReview:{translationese:true}},false]]){
+  for(const [extra,active] of [[{},true],[{developerMode:false},true],[{developerDeepseekKoreanEnabled:false},false],[{aiPostReview:{translationese:true}},false]]){
    const settings={...cfg,aiPostReview:{translationese:true,deepseekTranslationese:true},...extra};
    const plan=planPostReview(data.segmented,data.translations,settings);
    const prompt=buildPostReviewPrompt(plan,data.segmented,settings);

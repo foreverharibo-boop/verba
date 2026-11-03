@@ -14,6 +14,8 @@ const render=Function('dev','escapeHtml',defs+`
     const EXTENSION_VERSION='0.6.24',lastQualityAuditSummary='',lastDebugDiagnostic=null;
     const outputTiming={latest:()=>null},outputTimingText=()=>'',normalizedPromptPresets=()=>[],normalizedPromptPresetBackups=()=>[],promptPresetSelectMarkup=()=>'',baseTranslationEditorMarkup=()=>'';
     const sourceChangeTracer={diagnostics:()=>({fullTextEnabled:false})};
+    const executionTrace={diagnostics:()=>({})};
+    const displayStateTrace={diagnostics:()=>({})};
     const normalizedProfileRaceTimeoutMinutes=()=>5,normalizedProfileRaceStaggerSeconds=()=>35,normalizedProfileFailureTimeoutSeconds=()=>120,normalizedProfileFailureTimeoutMinutes=()=>2;
 `+between('function serverTranslationSettingsMarkup(', 'function bindServerTranslationSetting(')
  +between('function tuningChoiceMarkup(', 'function normalizeTranslationRuleOrder(')
@@ -25,7 +27,8 @@ const escapeHtml=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;')
 const panels=[false,true].map(dev=>render(dev,escapeHtml));
 for(const html of panels){
     assert.match(html, /id="verba-server-settings"/);
-    assert.ok(html.indexOf('id="verba-server-settings"') < html.indexOf('id="verba-developer-settings"'));
+    assert.ok(html.indexOf('id="verba-server-settings"') < html.indexOf('id="verba-deepseek-settings"'));
+    assert.doesNotMatch(html, /id="verba-developer-settings"/);
     assert.match(html, /data-verba-visibility-key="serverTranslation"/);
     assert.doesNotMatch(html, /id="verba-server-translation" checked/);
     assert.doesNotMatch(html, /id="verba-server-settings"[^>]* open/);
@@ -38,13 +41,13 @@ for(const html of panels){
     assert.doesNotMatch(html,/<small>v\$?\{?EXTENSION_VERSION|<small>v0\.5\./);
     assert.match(html,/id="verba-prompt-conflict-settings"[\s\S]*?<\/details>\s*<details id="verba-developer-output-split-lab"/);
     assert.match(html,/id="verba-expression-detail"[\s\S]*?<\/details>\s*<details id="verba-developer-relationship-lab"/);
+    assert.match(html,/id="verba-developer-relationship-lab"[\s\S]*?<\/details>\s*<details id="verba-deepseek-settings"/);
     const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);
     assert.equal(new Set(ids).size,ids.length,'No duplicated IDs in complete settings markup');
     assert.equal(ids.filter(x=>x==='verba-developer-output-split-lab').length,1);
     assert.equal(ids.filter(x=>x==='verba-developer-relationship-lab').length,1);
 }
 assert.doesNotMatch(panels[0],/id="verba-chuseok-galbwae-(?:all|dialogue-inner)"/);
-assert.match(panels[1],/id="verba-developer-settings"[\s\S]*?id="verba-chuseok-galbwae-all"[\s\S]*?id="verba-chuseok-galbwae-dialogue-inner"/);
 assert.doesNotMatch(panels[1],/id="verba-chuseok-galbwae-(?:all|dialogue-inner)" checked/);
 const manifest=JSON.parse(fs.readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
 assert.equal(manifest.name,'verba');assert.equal(manifest.display_name,'베르바');

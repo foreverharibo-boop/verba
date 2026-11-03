@@ -26,8 +26,8 @@ for(const [name,create] of [['verba',verba],['deep',deep]]){
   assert.deepEqual(out.outputComparison.postReview.checks,['meaning','deepseekTranslationese']);
   assert.equal(out.translation,'그는 등을 대고 누웠다.\n\n"Enjoy the seat. (거기 앉아서 편히 쉬어.)"');
  });
- test(`${name}: disabled checkbox, disabled DeepSeek and developer gate add no review calls`,async()=>{
-  for(const extra of [{aiPostReview:{}},{developerMode:false},{developerDeepseekKoreanEnabled:false}]){
+ test(`${name}: disabled checkbox or disabled DeepSeek add no review calls`,async()=>{
+  for(const extra of [{aiPostReview:{}},{developerDeepseekKoreanEnabled:false}]){
    let calls=0;const engine=create(snapshot(extra),async(_id,messages)=>{
     calls++;const p=messages[0].content;assert.ok(!p.includes(DEEPSEEK_KOREAN_REVIEW_GUIDANCE));
     return reply(rows(p).map(r=>({id:r.id,translation:'그는 기다렸다.'})));

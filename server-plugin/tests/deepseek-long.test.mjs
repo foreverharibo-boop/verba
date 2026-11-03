@@ -30,8 +30,8 @@ test('long engine adds the exact released Verba baseline and retains settings/co
  const out=await engine.output('Dana waited.\n\n`KEEP_CODE`\n\n<Info_panel>Sunny</Info_panel>',{oneTimeInstruction:'ONETIME_SENTINEL',previousUserSource:'PREVIOUS_SENTINEL',speakerIdentity:identity});
  assert.equal(calls,1);assert.match(out.translation,/다나/);assert.match(out.translation,/KEEP_CODE/);assert.match(out.translation,/<Info_panel>맑음<\/Info_panel>/);assert.deepEqual(original,snapshot(settings));
 });
-test('disabled or locked developer gate retains the ordinary engine',async()=>{
- for(const extra of [{developerMode:false},{developerDeepseekKoreanEnabled:false}]){
+test('disabled DeepSeek toggle retains the ordinary engine',async()=>{
+ for(const extra of [{developerDeepseekKoreanEnabled:false}]){
   let calls=0;const engine=createEngine(snapshot({...settings,...extra,developerMinimalPromptEnabled:false}),async(_id,messages)=>{
    calls++;assert.ok(!messages[0].content.includes(DEEPSEEK_KOREAN_PROMPT));return answer(messages[0].content);
   });

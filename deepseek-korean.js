@@ -1,6 +1,12 @@
+import { customTranslationInstruction } from './translation-composer.js';
+
 // Verba-only base guidance composed through the regular output/selection policy.
 export function deepseekKoreanEnabled(settings = {}) {
-    return settings.developerMode === true && settings.developerDeepseekKoreanEnabled === true;
+    return settings.developerDeepseekKoreanEnabled === true;
+}
+
+export function deepseekKoreanPrompt(settings = {}) {
+    return customTranslationInstruction(settings, 'deepseek') ?? DEEPSEEK_KOREAN_PROMPT;
 }
 
 export const DEEPSEEK_KOREAN_PROMPT = `HIGHEST-PRIORITY TRANSLATION PRINCIPLE: Thoroughly eliminate translationese from the Korean translation while accurately preserving the source's meaning and scene. Do not allow awkward expressions caused by mechanically copying English word order, sentence structures, or word combinations. First understand the action, state, and speech intent conveyed by each sentence, then reconstruct it in natural Korean as if the fiction had originally been written in Korean. However, never delete source information or imagery, weaken or intensify the language, or add new meaning for the sake of fluency. This principle governs Korean expression; preserve the specified bilingual format and output structure.

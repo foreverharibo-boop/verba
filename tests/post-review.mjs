@@ -16,6 +16,7 @@ test('every general checkbox reaches only its selected instruction in a single r
  for(const check of POST_REVIEW_CHECKS.filter(x=>x.key!=='bilingual')) {
   const data=fixture('He waited.','그는 기다렸다.');let calls=0;
   const config={aiPostReview:{[check.key]:true},developerMadKoreanOutputEnabled:true,developerHongjinFlavorEnabled:true};
+  if(check.key==='deepseekTranslationese'){config.developerMode=true;config.developerDeepseekKoreanEnabled=true;}
   if(check.key==='hongjin'){data.segmented.segments[0].type='dialogue_candidate';}
   const stats=await reviewOutputOnce({...data,settings:config,speakerScopes:{[data.segmented.segments[0].id]:'target_dialogue'},request:async(p,rows)=>{
    calls++;assert.deepEqual(rows[0].checks,[check.key]); return new Map(rows.map(r=>[r.id,r.CURRENT]));

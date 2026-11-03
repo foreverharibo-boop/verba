@@ -8,7 +8,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.96';
+import { createServerClient } from './server-client.js?v=0.6.97';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -72,9 +72,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.96';
+const EXTENSION_VERSION = '0.6.97';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.96';
+const SERVER_ENGINE_VERSION = '0.6.97';
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -4995,7 +4995,7 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
     try {
         const config = { ...(reviewSettings || settings), aiPostReview: normalizePostReview(settings.aiPostReview) };
         const selected = config.aiPostReview;
-        const reference = selected.voice || selected.mad || selected.hongjin
+        const reference = selected.voice || selected.mad || selected.hongjin || (selected.deepseekTranslationese && deepseekKoreanEnabled(config))
             ? buildOutputPrompt({ ...segmented, segments: [], protectedText: '' }, config,
                 options.oneTimeInstruction || '', speakerIdentity, options.tuning || null, speakerScopes)
             : '';

@@ -41,11 +41,14 @@ test('all output and selection routes replace only dedicated prose, with indepen
  for(const prompt of requests({...settings,developerDeepseekKoreanEnabled:false}))assert.doesNotMatch(prompt,/CUSTOM_DEEPSEEK_SENTINEL|HIGHEST-PRIORITY TRANSLATION PRINCIPLE/);
  assert.doesNotMatch(core.buildInputPrompt('안녕.',settings,'unknown',{}),/CUSTOM_DEEPSEEK_SENTINEL|HIGHEST-PRIORITY TRANSLATION PRINCIPLE/);
 });
-test('upgrading retires developer experiments without changing the saved DeepSeek choice',()=>{
- const migrate=Function('settings','normalizeBaseTranslationCustom',extract('// Retired developer experiments','settings.developerCompressedPromptEnabled ='));
- for(const enabled of [false,true]) {
-  const s={developerMode:true,developerDeepseekKoreanEnabled:enabled,developerMinimalPromptEnabled:true,developerCompressedPromptEnabled:true,chuseokGalbwaeScope:'all',globalPrompt:'KEEP'};
-  migrate(s,normalizeBaseTranslationCustom);assert.equal(s.developerMode,false);assert.equal(deepseekKoreanEnabled(s),enabled);assert.equal(minimalOutputEnabled(s),false);assert.equal(s.globalPrompt,'KEEP');
+test('upgrade preserves DeepSeek and Galbwae but keeps retired developer experiments off',()=>{
+ const migrate=Function('settings','normalizeBaseTranslationCustom','DEVELOPER_ACCESS_FINGERPRINT','DEFAULT_SETTINGS',extract('// Developer access now exposes only Galbwae','settings.qualityAuditMeaning ='));
+ for(const enabled of [false,true]) for(const access of ['', 'current']) {
+  const s={developerMode:true,developerAccessFingerprint:access,developerDeepseekKoreanEnabled:enabled,developerMinimalPromptEnabled:true,developerCompressedPromptEnabled:true,developerExtremeCompressedPromptEnabled:true,qualityAuditEnabled:true,baseTranslationCustom:{enabled:true,prompt:'KEEP CUSTOM'},chuseokGalbwaeScope:'all',globalPrompt:'KEEP'};
+  migrate(s,normalizeBaseTranslationCustom,'current',{developerMinimalPrompt:'default'});
+  assert.equal(s.developerMode,access==='current');assert.equal(deepseekKoreanEnabled(s),enabled);assert.equal(minimalOutputEnabled(s),false);assert.equal(s.globalPrompt,'KEEP');assert.equal(s.chuseokGalbwaeScope,'all');
+  for(const key of ['developerCompressedPromptEnabled','developerExtremeCompressedPromptEnabled','qualityAuditEnabled']) assert.equal(s[key],false);
+  assert.equal(s.baseTranslationCustom.enabled,false);assert.equal(s.baseTranslationCustom.prompt,'KEEP CUSTOM');
  }
 });
 test('public control is directly below relationship settings, plain and independent of developer mode',()=>{
@@ -56,6 +59,23 @@ test('public control is directly below relationship settings, plain and independ
   assert.doesNotMatch(html,/영어 번역 프롬프트|help|<pre|개발자/);
  }
  assert.match(index,/\$\{generalRelationshipSettingsMarkup\(\)\}\s*\$\{deepseekSettingsMarkup\(\)\}/);
- assert.ok(!index.includes('function developerSettingsMarkup('));assert.ok(!index.includes('activateDeveloperMode'));
+ assert.ok(index.includes('function developerSettingsMarkup('));
  const css=fs.readFileSync(new URL('../style.css',import.meta.url),'utf8');assert.ok(css.includes(`.${prefix}-deepseek-settings {\n    border-style: solid !important;`));
+});
+
+test('developer panel restores only Galbwae; disabling access does not disable DeepSeek',()=>{
+ const render=Function('settings',extract('function developerChuseokGalbwaeMarkup(', 'function syncDeveloperQualityControls(')+';return developerSettingsMarkup();');
+ const locked=render({developerMode:false});assert.match(locked,/id="verba-developer-code"/);assert.doesNotMatch(locked,/id="verba-chuseok-galbwae-all"/);
+ const unlocked=render({developerMode:true,chuseokGalbwaeScope:'all'});assert.match(unlocked,/id="verba-chuseok-galbwae-all" checked/);assert.match(unlocked,/id="verba-chuseok-galbwae-dialogue-inner"/);
+ assert.doesNotMatch(unlocked,/최소 프롬프트|압축 프롬프트|기본 번역 편집|딥식플/);
+ const s={...settings,developerMode:true,chuseokGalbwaeScope:'all'};
+ const shutdown=extract("        if (target.closest('#verba-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');Function('settings',shutdown)(s);
+ assert.equal(s.developerMode,false);assert.equal(s.developerDeepseekKoreanEnabled,true);assert.equal(s.chuseokGalbwaeScope,'all');
+ class Input{};let saved=0;const branches=extract("        if (target.id === 'verba-chuseok-galbwae-all'", "        if (target.id === 'verba-english-flavor-conversation'");
+ const change=Function('target','settings','HTMLInputElement','setCheckedValue','saveSettings','document','renderCurrentAppliedRules',branches);
+ for(const [id,checked,expected] of [['all',true,'all'],['dialogue-inner',true,'dialogueInner'],['dialogue-inner',false,'off']]){
+  change(Object.assign(new Input(),{id:'verba-chuseok-galbwae-'+id,checked}),s,Input,()=>{},()=>saved++,{querySelector:()=>null},()=>{});assert.equal(s.chuseokGalbwaeScope,expected);
+ }
+ assert.equal(saved,3);
+ const css=fs.readFileSync(new URL('../style.css',import.meta.url),'utf8');assert.match(css,/\.verba-deepseek-settings > summary::after\s*\{\s*content: none;\s*display: none;/);
 });

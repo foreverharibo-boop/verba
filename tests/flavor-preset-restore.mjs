@@ -44,7 +44,7 @@ const code = between('const RELATION_TEMPERATURE_OPTIONS','const baseContext =')
  + between('function normalizedPromptPresetName(', 'function normalizedPromptPresets(')
  + between('function normalizeTranslationRuleOrder(', 'function renderTranslationRuleOrder(')
  + between('function setCheckedValue(', 'function defaultPromptPresetTranslationSettingsSnapshot(')
- + between('function syncDeveloperQualityControls(', 'function enabledQualityAuditChecks(')
+ + between('function syncDeveloperQualityControls(', 'function refreshSettingsPanelForDeveloperMode(')
  + between('function setPromptFieldsFromPreset(', 'function optionLabel(')
  + '\nreturn {settings, save:currentPromptPresetSaveSnapshot, apply:setPromptFieldsFromPreset};';
 const api=Function('normalizeBaseTranslationCustom','document','HTMLInputElement','HTMLSelectElement','HTMLTextAreaElement','renderTranslationRuleOrder','refreshSettingsPanelForDeveloperMode','renderCurrentAppliedRules','syncPromptSlotUi','saveSettings','renderPromptConflictInspector',code)(normalizeBaseTranslationCustom,document,Input,Select,Textarea,noop,noop,noop,noop,noop,noop);
@@ -85,7 +85,7 @@ for (const devMode of [false,true]) {
 }
 console.log('PASS: preset JSON roundtrip, ON/OFF, all 9 choices, visible controls and disabled states, re-save, legacy and prompt-only, developer locked/unlocked.');
 
-// Minimal experiment settings roundtrip through the same translation preset.
+// Retired minimal prompt text survives, but legacy presets cannot reactivate it.
 for(const dev of [false,true]) {
  api.settings.developerMode=dev;
  api.settings.developerMinimalPromptEnabled=true;
@@ -94,13 +94,13 @@ for(const dev of [false,true]) {
  api.settings.developerMinimalPromptEnabled=false;
  api.settings.developerMinimalPrompt='변경됨';
  api.apply(preset);
- assert.equal(api.settings.developerMinimalPromptEnabled,true);
+ assert.equal(api.settings.developerMinimalPromptEnabled,false);
  assert.equal(api.settings.developerMinimalPrompt,'직접 지침\n두 번째 줄 </textarea>');
  assert.equal(api.settings.developerMode,dev);
  const promptOnly=api.save('prompts');api.apply(promptOnly);
- assert.equal(api.settings.developerMinimalPromptEnabled,true);
+ assert.equal(api.settings.developerMinimalPromptEnabled,false);
 }
-console.log('PASS: minimal experiment flag/text persist in translation presets without unlocking developer mode.');
+console.log('PASS: retired minimal prompt text persists without reactivating the experiment.');
 
 // Split selection persists independently of minimal mode and developer access.
 for(const dev of [false,true])for(const minimal of [false,true])for(const count of [1,2,3]){
@@ -109,7 +109,7 @@ for(const dev of [false,true])for(const minimal of [false,true])for(const count 
  assert.equal(preset.translationSettings.developerSettings.developerOutputSplitCount,count);
  Object.assign(api.settings,{developerOutputSplitCount:1,developerMinimalPromptEnabled:!minimal});
  api.apply(preset);assert.equal(api.settings.developerOutputSplitCount,count);
- assert.equal(api.settings.developerMinimalPromptEnabled,minimal);assert.equal(api.settings.developerMode,dev);
+ assert.equal(api.settings.developerMinimalPromptEnabled,false);assert.equal(api.settings.developerMode,dev);
  api.apply(api.save('prompts'));assert.equal(api.settings.developerOutputSplitCount,count);
  const legacy=structuredClone(preset);delete legacy.translationSettings.developerSettings.developerOutputSplitCount;
  api.apply(legacy);assert.equal(api.settings.developerOutputSplitCount,1);

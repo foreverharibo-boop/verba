@@ -3433,3 +3433,9 @@
 .verba-deepseek-settings {
     border-style: solid !important;
 }
+
+/* The standalone DeepSeek section keeps its toggle without a disclosure arrow. */
+.verba-deepseek-settings > summary::after {
+    content: none;
+    display: none;
+}

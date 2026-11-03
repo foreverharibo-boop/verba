@@ -9,7 +9,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.104';
+import { createServerClient } from './server-client.js?v=0.6.105';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -73,9 +73,11 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.104';
+const EXTENSION_VERSION = '0.6.105';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.104';
+const DEVELOPER_ACCESS_CODE = '130918';
+const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
 globalThis.verbaToastTest = createNoticePreview({ prefix: EXTENSION_KEY, title: '베르바' });
 const TOUCH_SELECTION_CAPTURE_MS = 0;
@@ -296,6 +298,7 @@ const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'beginner', label: '신입 챗시 전용', selector: '#verba-beginner-character-guide' },
     { key: 'postReview', label: 'AI 후검수 설정', selector: '#verba-post-review-settings' },
     { key: 'debug', label: '디버그', selector: '#verba-debug-settings' },
+    { key: 'developer', label: '개발자 모드', selector: '#verba-developer-settings' },
 ];
 const DEFAULT_SETTINGS_VISIBILITY = Object.freeze(Object.fromEntries(
     SETTINGS_VISIBILITY_DEFINITIONS.map(({ key }) => [key, true]),
@@ -513,17 +516,19 @@ const normalizedCustomTranslator = normalizeCustomTranslatorSettings(
 );
 settings.customTranslatorTemplates = normalizedCustomTranslator.templates;
 settings.customTranslatorModified = normalizedCustomTranslator.modified;
-// Retired developer experiments remain stored for compatibility, but cannot run.
-settings.developerMode = false;
-settings.baseTranslationCustom = normalizeBaseTranslationCustom(settings.baseTranslationCustom);
-settings.developerCompressedPromptEnabled = settings.developerCompressedPromptEnabled === true;
+// Developer access now exposes only Galbwae; retired experiments stay disabled.
+settings.developerMode = settings.developerMode === true;
+settings.developerAccessFingerprint = String(settings.developerAccessFingerprint || '');
+if (settings.developerAccessFingerprint !== DEVELOPER_ACCESS_FINGERPRINT) settings.developerMode = false;
+settings.baseTranslationCustom = normalizeBaseTranslationCustom({ ...settings.baseTranslationCustom, enabled: false });
+settings.developerCompressedPromptEnabled = false;
 settings.developerOutputSplitCount = [2, 3].includes(Number(settings.developerOutputSplitCount)) ? Number(settings.developerOutputSplitCount) : 1;
-settings.developerMinimalPromptEnabled = settings.developerMinimalPromptEnabled === true;
+settings.developerMinimalPromptEnabled = false;
 settings.developerDeepseekKoreanEnabled = settings.developerDeepseekKoreanEnabled === true;
 settings.developerMinimalPrompt = typeof settings.developerMinimalPrompt === 'string' ? settings.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt;
-settings.developerExtremeCompressedPromptEnabled = settings.developerExtremeCompressedPromptEnabled === true;
+settings.developerExtremeCompressedPromptEnabled = false;
 if (settings.developerExtremeCompressedPromptEnabled) settings.developerCompressedPromptEnabled = false;
-settings.qualityAuditEnabled = settings.qualityAuditEnabled === true;
+settings.qualityAuditEnabled = false;
 settings.qualityAuditMeaning = settings.qualityAuditMeaning !== false;
 settings.qualityAuditReferent = settings.qualityAuditReferent !== false;
 settings.qualityAuditVoice = settings.qualityAuditVoice !== false;
@@ -2061,13 +2066,13 @@ function applyPromptPresetDeveloperSettings(value) {
     if (!next) return false;
 
     settings.developerOutputSplitCount = next.developerOutputSplitCount;
-    settings.developerMinimalPromptEnabled = next.developerMinimalPromptEnabled;
+    settings.developerMinimalPromptEnabled = false;
     settings.developerDeepseekKoreanEnabled = next.developerDeepseekKoreanEnabled;
     settings.developerMinimalPrompt = next.developerMinimalPrompt;
     settings.aiPostReview = normalizePostReview(next.aiPostReview);
-    settings.qualityAuditEnabled = next.qualityAuditEnabled;
-    settings.developerCompressedPromptEnabled = next.developerCompressedPromptEnabled;
-    settings.developerExtremeCompressedPromptEnabled = next.developerExtremeCompressedPromptEnabled;
+    settings.qualityAuditEnabled = false;
+    settings.developerCompressedPromptEnabled = false;
+    settings.developerExtremeCompressedPromptEnabled = false;
     if (settings.developerExtremeCompressedPromptEnabled) settings.developerCompressedPromptEnabled = false;
     settings.qualityAuditMeaning = next.qualityAuditMeaning;
     settings.qualityAuditReferent = next.qualityAuditReferent;
@@ -2103,7 +2108,7 @@ function applyPromptPresetDeveloperSettings(value) {
     ));
     settings.baseTranslationCustom = normalizeBaseTranslationCustom({
         ...currentBase,
-        enabled: next.baseTranslationCustom.enabled,
+        enabled: false,
         prompt: next.baseTranslationCustom.prompt,
         draft: next.baseTranslationCustom.draft,
         selectedId: matchingBasePreset?.id || '',
@@ -10867,6 +10872,45 @@ function deepseekSettingsMarkup() {
         </details>`;
 }
 
+function developerChuseokGalbwaeMarkup() {
+    return `
+        <details id="verba-chuseok-galbwae" class="verba-tool-details verba-chuseok-galbwae">
+            <summary>🌕 추석 갈봬체 <small>개발자 · 기본 OFF</small></summary>
+            <div class="verba-tool-details-content">
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-chuseok-galbwae-all" ${settings.chuseokGalbwaeScope === 'all' ? 'checked' : ''}>
+                    <span>전체 갈봬체 <small>서술 + 대사 + **강조문**</small></span>
+                </label>
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-chuseok-galbwae-dialogue-inner" ${settings.chuseokGalbwaeScope === 'dialogueInner' ? 'checked' : ''}>
+                    <span>대사·**강조문**만 갈봬체 <small>그 외 서술 정상</small></span>
+                </label>
+                <div class="verba-help">개발자 모드에서만 작동합니다. 개발자 모드를 끄면 저장된 범위는 유지되지만 번역에는 적용되지 않아요. 둘 중 하나만 선택할 수 있으며, 켠 항목을 다시 끄면 갈봬체가 완전히 꺼집니다.</div>
+                <div class="verba-help">켜져 있는 동안 미친 한출의 맛·김홍진의 맛·입력 프롬프트·표현 디테일 등 다른 스타일 지시는 전송하지 않는 배타 모드로 작동합니다. 모든 &lt;짝태그&gt; 안의 글씨에는 갈봬체를 적용하지 않으며 Inner_Info도 예외가 아닙니다. Info_panel·날짜·날씨·장소·이름·숫자·코드·태그 구조와 속성은 어느 옵션에서도 바꾸지 않습니다.</div>
+                <div class="verba-help">대표 기준: “나 알아?” → “나를 아늕랴!!”처럼 죠캎식으로 발음·맞춤법·띄어쓰기·조사를 기괴하지만 읽히게 무너뜨립니다. 여기에 인터넷 처음 배운 할배 같은 결을 살짝 섞고, 씨발은 씨핤·씨핧·샤갈·쌱앐·쌰갈·시핣 계열로 바꿔요. 일부 요→료, 네·응→례와 ㄷㄷ·;;·ㅠㅠ도 랜덤하게 섞되 매번 도배하지 않습니다. **굵은 글씨**는 기호를 유지하고 안쪽 문장에 적용합니다.</div>
+            </div>
+        </details>`;
+}
+
+function developerSettingsMarkup() {
+    return `
+        <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings">
+            <summary>개발자 모드 <small>${settings.developerMode ? '추석 갈봬체' : '번호 입력'}</small></summary>
+            <div class="verba-tool-details-content">
+                ${settings.developerMode ? `
+                    ${developerChuseokGalbwaeMarkup()}
+                    <button type="button" id="verba-developer-mode-off" class="menu_button verba-wide">개발자 모드 끄기</button>
+                ` : `
+                    <label for="verba-developer-code">개발자 번호</label>
+                    <div class="verba-developer-code-row">
+                        <input id="verba-developer-code" class="text_pole" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="번호 입력">
+                        <button type="button" id="verba-developer-mode-on" class="menu_button">활성화</button>
+                    </div>
+                `}
+            </div>
+        </details>`;
+}
+
 function syncDeveloperQualityControls(root = document.querySelector('#verba-settings')) {
     const qualityMaster = root?.querySelector('#verba-quality-audit-enabled');
     const qualityControls = root?.querySelector('#verba-quality-audit-controls');
@@ -10928,6 +10972,23 @@ function syncDeveloperQualityControls(root = document.querySelector('#verba-sett
             control.disabled = !englishFlavorEnabled;
         });
     }
+}
+
+function refreshSettingsPanelForDeveloperMode() {
+    const panel = document.querySelector('#verba-settings');
+    const current = panel?.querySelector('#verba-developer-settings');
+    if (!panel || !current) return;
+
+    const holder = document.createElement('div');
+    holder.innerHTML = developerSettingsMarkup().trim();
+    const replacement = holder.firstElementChild;
+    if (!replacement) return;
+
+    replacement.open = current.open;
+    current.replaceWith(replacement);
+    syncDeveloperQualityControls(panel);
+    applySettingsVisibility(panel);
+    renderQualityAuditStatus();
 }
 
 function enabledQualityAuditChecks() {
@@ -11925,7 +11986,7 @@ function injectSettingsPanel() {
                         </details>
                     </div>
                 </details>
-
+                ${developerSettingsMarkup()}
 
             </div>
         </div>`;
@@ -11942,6 +12003,26 @@ function injectSettingsPanel() {
     renderPromptConflictInspector();
     renderQualityAuditStatus();
 
+    const activateDeveloperMode = () => {
+        const input = panel.querySelector('#verba-developer-code');
+        const code = String(input?.value || '').trim();
+
+        if (code !== DEVELOPER_ACCESS_CODE) {
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+            notify('개발자 번호가 맞지 않아요.', 'error');
+            return;
+        }
+
+        settings.developerMode = true;
+        settings.developerAccessFingerprint = DEVELOPER_ACCESS_FINGERPRINT;
+        saveSettings();
+        refreshSettingsPanelForDeveloperMode();
+        notify('개발자 모드를 활성화했어요.', 'success');
+    };
+
     panel.addEventListener('click', event => {
         const target = event.target instanceof Element ? event.target : null;
         if (!target) return;
@@ -11953,6 +12034,19 @@ function injectSettingsPanel() {
 
         if (target.closest('#verba-visibility-hide-all')) {
             setAllSettingsVisibility(false, panel);
+            return;
+        }
+
+        if (target.closest('#verba-developer-mode-on')) {
+            activateDeveloperMode();
+            return;
+        }
+        if (target.closest('#verba-developer-mode-off')) {
+            settings.developerMode = false;
+            saveSettings();
+            refreshSettingsPanelForDeveloperMode();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            notify('개발자 모드를 껐어요.', 'info');
             return;
         }
 
@@ -11985,6 +12079,14 @@ function injectSettingsPanel() {
             return;
         }
 
+    });
+
+    panel.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target?.matches('#verba-developer-code')) return;
+        event.preventDefault();
+        activateDeveloperMode();
     });
 
     panel.addEventListener('change', event => {
@@ -12358,6 +12460,22 @@ function injectSettingsPanel() {
         if (target.id === 'verba-english-flavor-referent-repeat' && target instanceof HTMLInputElement) {
             settings.englishFlavorReduceReferentRepetition = target.checked;
             saveSettings();
+            return;
+        }
+
+        if (target.id === 'verba-chuseok-galbwae-all' && target instanceof HTMLInputElement) {
+            settings.chuseokGalbwaeScope = target.checked ? 'all' : 'off';
+            setCheckedValue('#verba-chuseok-galbwae-dialogue-inner', false);
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-chuseok-galbwae-dialogue-inner' && target instanceof HTMLInputElement) {
+            settings.chuseokGalbwaeScope = target.checked ? 'dialogueInner' : 'off';
+            setCheckedValue('#verba-chuseok-galbwae-all', false);
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;
         }
 

@@ -28,7 +28,7 @@ const panels=[false,true].map(dev=>render(dev,escapeHtml));
 for(const html of panels){
     assert.match(html, /id="verba-server-settings"/);
     assert.ok(html.indexOf('id="verba-server-settings"') < html.indexOf('id="verba-deepseek-settings"'));
-    assert.doesNotMatch(html, /id="verba-developer-settings"/);
+    assert.match(html, /id="verba-developer-settings"/);
     assert.match(html, /data-verba-visibility-key="serverTranslation"/);
     assert.doesNotMatch(html, /id="verba-server-translation" checked/);
     assert.doesNotMatch(html, /id="verba-server-settings"[^>]* open/);

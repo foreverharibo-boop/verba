@@ -1,3 +1,4 @@
+import { sourceMapSummary, createSourceViewDiagnostics } from './source-map-diagnostics.js';
 import { createCharacterTranslationReference } from './character-translation-reference.js';
 import { createDisplayStateTrace } from './display-state-trace.js';
 import { enforceMadKoreanOnly } from './mad-output.js';
@@ -75,7 +76,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.111';
+const EXTENSION_VERSION = '0.6.112';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.111';
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -841,6 +842,7 @@ let lastDesktopSelectionPlacement = null;
 let lastDesktopSelectionAt = 0;
 let lastDebugDiagnostic = null;
 const outputComparisonStore = createOutputComparisonStore();
+const sourceViewDiagnostics = createSourceViewDiagnostics({ enabled: () => settings.debugMode === true, hashText });
 const outputTiming = createOutputTiming();
 outputTiming.setEnabled(settings.debugMode);
 // Diagnostic-only runtime. It remains dormant unless debug mode is enabled.
@@ -1155,6 +1157,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             sourceHash: source ? hashText(source) : '',
             sourceLength: source.length,
             hasStoredTranslation: Boolean(currentRecord(latest.message, latest.id)),
+            ...(settings.debugMode === true ? { sourceMap: sourceMapSummary(currentRecord(latest.message, latest.id), hashText) } : {}),
             displayMatchesStored: Boolean(currentRecord(latest.message, latest.id)
                 && latest.message.extra?.display_text === currentRecord(latest.message, latest.id).translation),
             sourceViewRequested: Boolean(sourceViewRequested(latest.message, currentRecord(latest.message, latest.id))),
@@ -1166,6 +1169,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
         ...(settings.debugMode === true ? {currentBilingualSettings:bilingualSettingsDiagnostic(settings)} : {}),
         outputComparison: settings.debugMode && latest
             ? outputComparisonStore.get(latest.message, hashText(source), currentSwipeId(latest.message)) : null,
+        sourceViewTrace: sourceViewDiagnostics.diagnostics(),
         displayStateTrace: displayStateTrace.diagnostics(),
         sourceChangeTrace: recentDiagnosticEvents(sourceChangeTracer.diagnostics(), 16),
         settingsState: {
@@ -8561,6 +8565,7 @@ function hideSelectionButton() {
 
 function showSelectionSource(snapshot) {
     if (!snapshot) return;
+    if (settings.debugMode === true) sourceViewDiagnostics.record(snapshot, currentSelectionRecord(snapshot.message));
     const rows = normalizedSourceMap(snapshot.sourceMap);
     const matches = rows.filter(row => snapshot.start < row.end && snapshot.end > row.start);
     if (!matches.length) {

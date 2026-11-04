@@ -53,7 +53,7 @@ test('full assembly still rejects damaged protected structure',()=>{
 test('source viewer distinguishes absent metadata from an unmapped selection without blaming version',()=>{
  const start=code.indexOf('function showSelectionSource('),end=code.indexOf('\nfunction ',start+1);
  const notices=[];
- const show=Function('normalizedSourceMap','notify','hideSelectionButton',code.slice(start,end)+'\nreturn showSelectionSource;')(rows=>rows||[],text=>notices.push(text),()=>{});
+ const show=Function('settings','normalizedSourceMap','notify','hideSelectionButton',code.slice(start,end)+'\nreturn showSelectionSource;')({debugMode:false},rows=>rows||[],text=>notices.push(text),()=>{});
  show({sourceMap:[],start:0,end:2});
  show({sourceMap:[{start:10,end:20,source:'Original'}],start:0,end:2});
  assert.match(notices[0],/저장되어 있지/);assert.match(notices[1],/선택한 구간/);

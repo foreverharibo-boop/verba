@@ -18,9 +18,10 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) {
    const result=await engine.output('He waited.');assert.equal(calls,1);assert.equal(result.translation,'그는 기다렸다.');
   }
  });
- test(`${name}: dedicated review remains opt-in and works after developer mode removal`,async()=>{
+ test(`${name}: dedicated review requires developer mode while custom initial translation stays active`,async()=>{
+  for(const developerMode of [false,true]) {
   let calls=0;
-  const engine=create(snapshot({aiPostReview:{deepseekTranslationese:true}}),async(_id,messages)=>{
+  const engine=create(snapshot({developerMode,aiPostReview:{deepseekTranslationese:true}}),async(_id,messages)=>{
    calls++;const p=messages[0].content;
    if(p.startsWith('UNIFIED OUTPUT POST REVIEW')){
     assert.match(p,/DEEPSEEK-SPECIFIC TRANSLATIONESE REVIEW/);
@@ -29,6 +30,7 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) {
    }
    return reply(rows(p).map(r=>({id:r.id,translation:'그는 기다리는 것을 했다.'})));
   });
-  const result=await engine.output('He waited.');assert.equal(calls,2);assert.equal(result.translation,'그는 기다렸다.');
+  const result=await engine.output('He waited.');assert.equal(calls,developerMode?2:1);assert.equal(result.translation,developerMode?'그는 기다렸다.':'그는 기다리는 것을 했다.');
+  }
  });
 }

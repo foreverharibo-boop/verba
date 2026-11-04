@@ -63,11 +63,11 @@ test('public control is directly below relationship settings, plain and independ
  const css=fs.readFileSync(new URL('../style.css',import.meta.url),'utf8');assert.ok(css.includes(`.${prefix}-deepseek-settings {\n    border-style: solid !important;`));
 });
 
-test('developer panel restores only Galbwae; disabling access does not disable DeepSeek',()=>{
+test('developer panel includes the dedicated review; disabling access does not disable initial DeepSeek translation',()=>{
  const render=Function('settings',extract('function developerChuseokGalbwaeMarkup(', 'function syncDeveloperQualityControls(')+';return developerSettingsMarkup();');
  const locked=render({developerMode:false});assert.match(locked,/id="verba-developer-code"/);assert.doesNotMatch(locked,/id="verba-chuseok-galbwae-all"/);
  const unlocked=render({developerMode:true,chuseokGalbwaeScope:'all'});assert.match(unlocked,/<summary>개발자 모드<\/summary>/);assert.match(unlocked,/id="verba-chuseok-galbwae-all" checked/);assert.match(unlocked,/id="verba-chuseok-galbwae-dialogue-inner"/);
- assert.doesNotMatch(unlocked,/최소 프롬프트|압축 프롬프트|기본 번역 편집|딥식플/);
+ assert.doesNotMatch(unlocked,/최소 프롬프트|압축 프롬프트|기본 번역 편집/);
  const s={...settings,developerMode:true,chuseokGalbwaeScope:'all'};
  const shutdown=extract("        if (target.closest('#verba-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');Function('settings',shutdown)(s);
  assert.equal(s.developerMode,false);assert.equal(s.developerDeepseekKoreanEnabled,true);assert.equal(s.chuseokGalbwaeScope,'all');

@@ -38,7 +38,7 @@ const galbwae = s => s.developerMode === true && (['all','dialogueInner'].includ
 
 export function planPostReview(segmented, translations, settings = {}, speakerScopes = {}) {
     const checks = normalizePostReview(settings.aiPostReview);
-    if (!deepseekKoreanEnabled(settings)) checks.deepseekTranslationese = false;
+    if (settings.developerMode !== true || !deepseekKoreanEnabled(settings)) checks.deepseekTranslationese = false;
     if (settings.developerMadKoreanOutputEnabled === true) checks.bilingual = false;
     const selected = POST_REVIEW_CHECKS.filter(x => checks[x.key]).map(x => x.key);
     const found = bilingualReviewTargets(segmented, translations, settings);
@@ -234,8 +234,8 @@ export function postReviewSettingsMarkup(prefix, settings) {
     return `<details id="${prefix}-post-review-settings" class="${prefix}-tool-details">
         <summary>AI 후검수 설정 <small>출력 번역</small></summary>
         <div class="${prefix}-tool-details-content">
-        <div class="${prefix}-help">선택한 항목을 모아 번역 후 한 번에 AI로 검수합니다. 검수할 대상이 있으면 API 요청이 1회 추가되며 토큰과 시간이 더 사용됩니다. 모두 끄면 AI 후검수를 하지 않습니다.</div>
-        ${POST_REVIEW_CHECKS.map(x => `<label class="${prefix}-check-row"><input type="checkbox" data-post-review="${x.key}" ${checks[x.key] ? 'checked' : ''}><span>${x.label}</span></label>`).join('')}
-        <div class="${prefix}-help">병기는 번역 프롬프트에서 요청한 범위만 검사합니다. 맛 유지 검수는 해당 맛을 사용 중일 때만 적용됩니다. 딥식플 전용 직역투는 기본 OFF이며, 체크하고 딥식플 전용 프롬프트을 켰을 때만 다른 선택 항목과 함께 검수합니다. 검수 결과가 보호 조건을 어긴 구간은 기존 번역을 유지하고, 통과한 다른 구간의 수정은 반영합니다. 요청 실패·응답 형식 손상 시에는 검수 전 번역 전체를 유지합니다. 인풋·선택 재번역·무료 구글 번역에는 적용하지 않습니다.</div>
+        <div class="${prefix}-help">선택한 항목을 모아 번역 후 한 번에 AI로 검수합니다. 검수할 대상이 있으면 API 요청이 1회 추가되며 토큰과 시간이 더 사용됩니다. 모든 검수 항목을 끄면 AI 후검수를 하지 않습니다. 개발자 모드의 전용 검수도 켜져 있으면 같은 요청에 함께 적용됩니다.</div>
+        ${POST_REVIEW_CHECKS.filter(x => x.key !== 'deepseekTranslationese').map(x => `<label class="${prefix}-check-row"><input type="checkbox" data-post-review="${x.key}" ${checks[x.key] ? 'checked' : ''}><span>${x.label}</span></label>`).join('')}
+        <div class="${prefix}-help">병기는 번역 프롬프트에서 요청한 범위만 검사합니다. 맛 유지 검수는 해당 맛을 사용 중일 때만 적용됩니다. 검수 결과가 보호 조건을 어긴 구간은 기존 번역을 유지하고, 통과한 다른 구간의 수정은 반영합니다. 요청 실패·응답 형식 손상 시에는 검수 전 번역 전체를 유지합니다. 인풋·선택 재번역·무료 구글 번역에는 적용하지 않습니다.</div>
         </div></details>`;
 }

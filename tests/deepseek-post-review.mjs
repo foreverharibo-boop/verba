@@ -15,17 +15,18 @@ test('original highest-priority paragraph stays byte-identical and reconstructio
  assert.ok(DEEPSEEK_KOREAN_PROMPT.indexOf('FREEDOM TO RECONSTRUCT') < DEEPSEEK_KOREAN_PROMPT.indexOf('NATURAL KOREAN TRANSLATION OF'));
  assert.match(DEEPSEEK_KOREAN_PROMPT,/no obligation to preserve the source sentence structure/);
 });
-test('existing checklist exposes a separate opt-in and preserves a checked preference when mode is off',()=>{
+test('ordinary checklist omits the dedicated opt-in without deleting its saved preference',()=>{
  assert.equal(normalizePostReview().deepseekTranslationese,false);
  assert.equal(normalizePostReview({}).deepseekTranslationese,false);
  assert.equal(normalizePostReview({deepseekTranslationese:true}).deepseekTranslationese,true);
  const ui=postReviewSettingsMarkup('verba',{...cfg,developerDeepseekKoreanEnabled:false});
- assert.match(ui,/data-post-review="deepseekTranslationese" checked/);
- assert.match(ui,/딥식플 전용 직역투/);
+ assert.doesNotMatch(ui,/data-post-review="deepseekTranslationese"/);
+ assert.equal(normalizePostReview(cfg.aiPostReview).deepseekTranslationese,true);
+ assert.doesNotMatch(ui,/딥식플 전용 직역투/);
  assert.match(ui,/API 요청이 1회 추가/);
 });
 test('DeepSeek toggle and review selection are required; ordinary checks still work when inactive',async()=>{
- for(const extra of [{developerDeepseekKoreanEnabled:false},{aiPostReview:{}}]){
+ for(const extra of [{developerMode:false},{developerDeepseekKoreanEnabled:false},{aiPostReview:{}}]){
   const data=fixture('He lay on his back.',['그는 척추를 대고 누웠다.']);
   const stats=await reviewOutputOnce({...data,settings:{...cfg,...extra},request:()=>assert.fail('inactive review called')});
   assert.equal(stats.checked,0);assert.ok(!stats.checks.includes('deepseekTranslationese'));
@@ -86,7 +87,7 @@ test('browser review setup includes active style reference for the selected dedi
 
  test('naturalness priority is appended only to an active dedicated review; ordinary fallback stays intact',()=>{
   const data=fixture('He waited.',['그는 기다렸다.']);
-  for(const [extra,active] of [[{},true],[{developerMode:false},true],[{developerDeepseekKoreanEnabled:false},false],[{aiPostReview:{translationese:true}},false]]){
+  for(const [extra,active] of [[{},true],[{developerMode:false},false],[{developerDeepseekKoreanEnabled:false},false],[{aiPostReview:{translationese:true}},false]]){
    const settings={...cfg,aiPostReview:{translationese:true,deepseekTranslationese:true},...extra};
    const plan=planPostReview(data.segmented,data.translations,settings);
    const prompt=buildPostReviewPrompt(plan,data.segmented,settings);
@@ -96,3 +97,45 @@ test('browser review setup includes active style reference for the selected dedi
    assert.ok(plan.units.every(unit=>unit.checks.includes('deepseekTranslationese')===active));
   }
  });
+
+
+test('dedicated review control lives only in the unlocked developer panel and keeps its saved state',()=>{
+ const index=readFileSync(new URL('../index.js',import.meta.url),'utf8');
+ const start=index.indexOf('function developerChuseokGalbwaeMarkup(');
+ const end=index.indexOf('function syncDeveloperQualityControls(',start);
+ const render=Function('settings',index.slice(start,end)+';return developerSettingsMarkup();');
+ const settings={...cfg,aiPostReview:{meaning:true,deepseekTranslationese:true}};
+ const before=structuredClone(settings);
+ assert.match(render(settings),/data-post-review="deepseekTranslationese" checked/);
+ assert.doesNotMatch(render({...settings,developerMode:false}),/data-post-review="deepseekTranslationese"/);
+ assert.doesNotMatch(render({...settings,aiPostReview:{}}),/data-post-review="deepseekTranslationese" checked/);
+ for(const developerMode of [false,true]) {
+  const html=postReviewSettingsMarkup('test',{...settings,developerMode});
+  assert.doesNotMatch(html,/data-post-review="deepseekTranslationese"/);
+  assert.match(html,/data-post-review="meaning" checked/);
+ }
+ assert.deepEqual(settings,before);
+});
+
+test('delegated review changes handle newly rendered developer controls without losing other choices',()=>{
+ const index=readFileSync(new URL('../index.js',import.meta.url),'utf8');
+ const start=index.indexOf('// Developer controls are replaced when the mode changes;');
+ const end=index.indexOf('    const debugModeInput',start);
+ assert.ok(start>=0&&end>start);
+ let change,saved=0;
+ const panel={addEventListener(type,fn){assert.equal(type,'change');change=fn;}};
+ class Input { constructor(key,checked){this.dataset={postReview:key};this.checked=checked;} matches(selector){return selector==='[data-post-review]';} }
+ const settings={developerMode:false,aiPostReview:{meaning:true,deepseekTranslationese:true}};
+ Function('panel','settings','HTMLInputElement','POST_REVIEW_CHECKS','normalizePostReview','saveSettings',index.slice(start,end))(panel,settings,Input,[{key:'meaning'},{key:'deepseekTranslationese'}],normalizePostReview,()=>saved++);
+ change({target:new Input('deepseekTranslationese',false)});
+ assert.equal(saved,0);assert.equal(settings.aiPostReview.deepseekTranslationese,true);
+ settings.developerMode=true;
+ change({target:new Input('deepseekTranslationese',false)});
+ assert.equal(saved,1);assert.equal(settings.aiPostReview.deepseekTranslationese,false);assert.equal(settings.aiPostReview.meaning,true);
+ settings.developerMode=false;
+ change({target:new Input('meaning',false)});
+ assert.equal(saved,2);assert.equal(settings.aiPostReview.meaning,false);
+ settings.developerMode=true;
+ change({target:new Input('deepseekTranslationese',true)});
+ assert.equal(saved,3);assert.equal(settings.aiPostReview.deepseekTranslationese,true);
+});

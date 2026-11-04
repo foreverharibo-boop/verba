@@ -26,14 +26,28 @@ for(const [name,create] of [['verba',verba],['deep',deep]]){
   assert.deepEqual(out.outputComparison.postReview.checks,['meaning','deepseekTranslationese']);
   assert.equal(out.translation,'그는 등을 대고 누웠다.\n\n"Enjoy the seat. (거기 앉아서 편히 쉬어.)"');
  });
- test(`${name}: disabled checkbox or disabled DeepSeek add no review calls`,async()=>{
-  for(const extra of [{aiPostReview:{}},{developerDeepseekKoreanEnabled:false}]){
+ test(`${name}: disabled developer mode, checkbox or DeepSeek add no review calls`,async()=>{
+  for(const extra of [{developerMode:false},{aiPostReview:{}},{developerDeepseekKoreanEnabled:false}]){
    let calls=0;const engine=create(snapshot(extra),async(_id,messages)=>{
     calls++;const p=messages[0].content;assert.ok(!p.includes(DEEPSEEK_KOREAN_REVIEW_GUIDANCE));
     return reply(rows(p).map(r=>({id:r.id,translation:'그는 기다렸다.'})));
    });
    await engine.output('He waited.');assert.equal(calls,1);
   }
+ });
+ test(`${name}: developer mode off keeps ordinary review but excludes the saved dedicated check`,async()=>{
+  let reviews=0;
+  const engine=create(snapshot({developerMode:false,aiPostReview:{meaning:true,deepseekTranslationese:true}}),async(_id,messages)=>{
+   const p=messages[0].content;
+   if(p.startsWith('UNIFIED OUTPUT POST REVIEW')) {
+    reviews++;assert.ok(!p.includes(DEEPSEEK_KOREAN_REVIEW_GUIDANCE));
+    const targets=JSON.parse(p.split('\nREVIEW_UNITS\n')[1]);
+    assert.ok(targets.every(r=>r.checks.includes('meaning')&&!r.checks.includes('deepseekTranslationese')));
+    return reply(targets.map(r=>({id:r.id,translation:r.CURRENT})));
+   }
+   return reply(rows(p).map(r=>({id:r.id,translation:'그는 기다렸다.'})));
+  });
+  await engine.output('He waited.');assert.equal(reviews,1);
  });
  test(`${name}: input stays independent with dedicated checkbox selected`,async()=>{
   let calls=0;const engine=create(snapshot({}),async(_id,messages)=>{

@@ -1034,7 +1034,8 @@ export function normalizeBilingualMappedTranslation(translation, sourceMap = [],
         }
     }
 
-    return { translation: text, sourceMap: rows };
+    return { translation: text, sourceMap: rawSource
+        ? recoverSourceMapGaps(segmentSource(rawSource), text, rows) : rows };
 }
 
 /**
@@ -1904,6 +1905,62 @@ export function restoreTranslationSurface(value, segmented, options = {}) {
     // Critical final surface pass: malformed alternatives can become visible
     // only after an opaque NAME token is restored, which is AFTER AI QA.
     return repairRenderedKoreanParticleAlternatives(fullyRestored);
+}
+
+/**
+ * Recover an isolated missing narration row from the already verified adjacent
+ * rows and literal assembly separators. No semantic/text similarity matching.
+ * Unknown/merged IDs, changed source, multiple missing targets, or changed line
+ * structure are deliberately left unmapped. Existing rows are never rewritten.
+ */
+export function recoverSourceMapGaps(segmented, translation, sourceMap = []) {
+    if (!Array.isArray(sourceMap) || !sourceMap.length) return sourceMap;
+    const text = String(translation || '');
+    const parts = segmented?.parts || [];
+    const sourceNames = (segmented?.nameTokens || []).map(entry => ({ ...entry, value: entry.source }));
+    const original = value => restoreProtected(restoreProtected(value, sourceNames, { strict: false }), segmented.tokens, { strict: false });
+    const partIndexes = new Map(parts.flatMap((part, index) => part.id ? [[part.id, index]] : []));
+    const anchors = [];
+    let previousPart = -1;
+    let previousEnd = 0;
+    for (const row of sourceMap) {
+        const index = partIndexes.get(row?.id);
+        if (!Number.isInteger(index) || index <= previousPart
+            || !Number.isInteger(row.start) || !Number.isInteger(row.end)
+            || row.start < previousEnd || row.end <= row.start || row.end > text.length
+            || original(parts[index].text).trim() !== String(row.source || '').trim()) return sourceMap;
+        anchors.push({ index, start: row.start, end: row.end });
+        previousPart = index;
+        previousEnd = row.end;
+    }
+    const boundaries = [{ index: -1, end: 0 }, ...anchors, { index: parts.length, start: text.length }];
+    const recovered = [];
+    for (let i = 1; i < boundaries.length; i++) {
+        const left = boundaries[i - 1], right = boundaries[i];
+        const between = parts.slice(left.index + 1, right.index);
+        const targets = between.filter(part => part.type !== 'passthrough');
+        if (targets.length !== 1 || targets[0].type !== 'narration') continue;
+        const target = targets[0];
+        const targetIndex = between.indexOf(target);
+        // Only unchanged whitespace may surround a recovered narration row.
+        // Name-only text, markup, and custom containers require their own map.
+        const prefix = between.slice(0, targetIndex).map(part => part.text).join('');
+        const suffix = between.slice(targetIndex + 1).map(part => part.text).join('');
+        if (!/^\s*$/u.test(prefix) || !/^\s*$/u.test(suffix)) continue;
+        const gap = text.slice(left.end, right.start);
+        if (!gap.startsWith(prefix) || !gap.endsWith(suffix)
+            || gap.length <= prefix.length + suffix.length) continue;
+        const start = left.end + prefix.length;
+        const end = right.start - suffix.length;
+        const body = text.slice(start, end);
+        // The assembler keeps source newlines outside each target. An added
+        // newline means that this gap cannot be assigned to one target safely.
+        if (!body.trim() || /[\r\n\u0085\u2028\u2029]/u.test(body)) continue;
+        const source = original(target.text);
+        if (!source.trim()) continue;
+        recovered.push({ id: target.id, source, start, end });
+    }
+    return recovered.length ? [...sourceMap, ...recovered].sort((a, b) => a.start - b.start) : sourceMap;
 }
 
 export function assembleTranslation(segmented, translations, options = {}) {

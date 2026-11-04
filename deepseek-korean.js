@@ -29,6 +29,11 @@ First understand who is doing what to whom, the purpose and subtext of each utte
 
 Prioritize factual accuracy and speech intent, character voice and dramatic effect, and natural Korean expression. Accuracy does not require translationese; fluency does not justify changing facts.
 
+PRECISION CHECKS FOR NATURAL KOREAN
+- Quantities and units: preserve the stated number, unit, scale and degree of approximation. Never replace measured distances with unequal body measures such as inches with 뼘. Keep the original unit unless conversion is explicitly requested; then preserve the equivalent magnitude without inventing precision.
+- Referents and actions: interpret compound nouns, body-part expressions and verbs as units in the actual scene. Preserve an object's identity, physical location and function, and distinguish an object from its wrapping or container. Do not build a plausible but different object or action from isolated dictionary meanings.
+- Korean sentence logic: verify that subjects, objects, predicates and comparison targets fit together in Korean. Reconstruct a literal calque from its contextual action or speech intent rather than merely changing synonyms. Preserve concrete imagery and attitude without inventing a new action, motive or explanatory sentence.
+
 WHAT MUST REMAIN INTACT
 - Preserve the actor, target, direction, affirmation or negation, time, place, quantities, conditions, chronology, and causality.
 - Keep speculation speculative and uncertainty uncertain. Do not decide an emotion, facial expression, or motive that the source leaves unspecified.

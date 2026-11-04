@@ -569,6 +569,11 @@ First understand who is doing what to whom, the purpose and subtext of each utte
 
 Prioritize factual accuracy and speech intent, character voice and dramatic effect, and natural Korean expression. Accuracy does not require translationese; fluency does not justify changing facts.
 
+PRECISION CHECKS FOR NATURAL KOREAN
+- Quantities and units: preserve the stated number, unit, scale and degree of approximation. Never replace measured distances with unequal body measures such as inches with \uBF18. Keep the original unit unless conversion is explicitly requested; then preserve the equivalent magnitude without inventing precision.
+- Referents and actions: interpret compound nouns, body-part expressions and verbs as units in the actual scene. Preserve an object's identity, physical location and function, and distinguish an object from its wrapping or container. Do not build a plausible but different object or action from isolated dictionary meanings.
+- Korean sentence logic: verify that subjects, objects, predicates and comparison targets fit together in Korean. Reconstruct a literal calque from its contextual action or speech intent rather than merely changing synonyms. Preserve concrete imagery and attitude without inventing a new action, motive or explanatory sentence.
+
 WHAT MUST REMAIN INTACT
 - Preserve the actor, target, direction, affirmation or negation, time, place, quantities, conditions, chronology, and causality.
 - Keep speculation speculative and uncertainty uncertain. Do not decide an emotion, facial expression, or motive that the source leaves unspecified.
@@ -2123,7 +2128,7 @@ function normalizeBilingualMappedTranslation(translation, sourceMap = [], settin
       }
     }
   }
-  return { translation: text, sourceMap: rows };
+  return { translation: text, sourceMap: rawSource ? recoverSourceMapGaps(segmentSource(rawSource), text, rows) : rows };
 }
 function normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings = {}, speakerScopes = {}) {
   const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
@@ -2747,6 +2752,47 @@ function restoreTranslationSurface(value, segmented, options = {}) {
     strict: !fragment && options?.allowDamagedProtected !== true
   });
   return repairRenderedKoreanParticleAlternatives(fullyRestored);
+}
+function recoverSourceMapGaps(segmented, translation, sourceMap = []) {
+  if (!Array.isArray(sourceMap) || !sourceMap.length) return sourceMap;
+  const text = String(translation || "");
+  const parts = segmented?.parts || [];
+  const sourceNames = (segmented?.nameTokens || []).map((entry) => ({ ...entry, value: entry.source }));
+  const original = (value) => restoreProtected(restoreProtected(value, sourceNames, { strict: false }), segmented.tokens, { strict: false });
+  const partIndexes = new Map(parts.flatMap((part, index) => part.id ? [[part.id, index]] : []));
+  const anchors = [];
+  let previousPart = -1;
+  let previousEnd = 0;
+  for (const row of sourceMap) {
+    const index = partIndexes.get(row?.id);
+    if (!Number.isInteger(index) || index <= previousPart || !Number.isInteger(row.start) || !Number.isInteger(row.end) || row.start < previousEnd || row.end <= row.start || row.end > text.length || original(parts[index].text).trim() !== String(row.source || "").trim()) return sourceMap;
+    anchors.push({ index, start: row.start, end: row.end });
+    previousPart = index;
+    previousEnd = row.end;
+  }
+  const boundaries = [{ index: -1, end: 0 }, ...anchors, { index: parts.length, start: text.length }];
+  const recovered = [];
+  for (let i = 1; i < boundaries.length; i++) {
+    const left = boundaries[i - 1], right = boundaries[i];
+    const between = parts.slice(left.index + 1, right.index);
+    const targets = between.filter((part) => part.type !== "passthrough");
+    if (targets.length !== 1 || targets[0].type !== "narration") continue;
+    const target = targets[0];
+    const targetIndex = between.indexOf(target);
+    const prefix = between.slice(0, targetIndex).map((part) => part.text).join("");
+    const suffix = between.slice(targetIndex + 1).map((part) => part.text).join("");
+    if (!/^\s*$/u.test(prefix) || !/^\s*$/u.test(suffix)) continue;
+    const gap = text.slice(left.end, right.start);
+    if (!gap.startsWith(prefix) || !gap.endsWith(suffix) || gap.length <= prefix.length + suffix.length) continue;
+    const start = left.end + prefix.length;
+    const end = right.start - suffix.length;
+    const body = text.slice(start, end);
+    if (!body.trim() || /[\r\n\u0085\u2028\u2029]/u.test(body)) continue;
+    const source = original(target.text);
+    if (!source.trim()) continue;
+    recovered.push({ id: target.id, source, start, end });
+  }
+  return recovered.length ? [...sourceMap, ...recovered].sort((a, b) => a.start - b.start) : sourceMap;
 }
 function assembleTranslation(segmented, translations, options = {}) {
   const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));

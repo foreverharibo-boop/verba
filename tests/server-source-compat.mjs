@@ -1,3 +1,5 @@
+import { appendOutputComparison, createOutputComparisonStore } from '../output-comparison.js';
+import { deepseekKoreanEnabled } from '../deepseek-korean.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -9,7 +11,7 @@ const noop=()=>{};
 async function applyCase({before,after,oldSwipe=0,newSwipe=0,changeChat=false,translation='번역문',refreshBeforeResolve=false}) {
  let finish,requestOptions;const response=new Promise(r=>finish=r),applied=[],scheduled=[],diagnostics=[],errors=[];
  const message={mes:before,swipe_id:oldSwipe};let chat=[message];
- const env={reconcileCompletedResult,compatibleCompletedSource,executionTrace:{trace:noop},traceSourceForMessage:noop,sourceChangeTracer:{compare:noop},EXTENSION_KEY:'verba',isTranslationExtensionActive:()=>true,activateTranslationExtension:noop,
+ const env={appendOutputComparison,outputComparisonStore:createOutputComparisonStore(),deepseekKoreanEnabled,reconcileCompletedResult,compatibleCompletedSource,executionTrace:{trace:noop},traceSourceForMessage:noop,sourceChangeTracer:{compare:noop},EXTENSION_KEY:'verba',isTranslationExtensionActive:()=>true,activateTranslationExtension:noop,
   settings:{autoOutput:true,translationEngine:'google-free'},liveContext:()=>({chat}),isNameReplacementMessage:()=>true,
   messageSource:m=>m?.mes||'',currentSwipeId:m=>m?.swipe_id??null,isPredominantlyKorean:()=>false,hasForeignText:()=>true,currentRecord:()=>null,
   pendingOutputs:new Map(),failedOutputSignatures:new Map(),automaticOutputLifecycle:{started:noop},performance,AbortController,

@@ -55,7 +55,7 @@ test('public control is directly below relationship settings, plain and independ
  const markup=Function('settings',extract('function deepseekSettingsMarkup(','function syncDeveloperQualityControls(')+';return deepseekSettingsMarkup();');
  for(const developerMode of [false,true]) {
   const html=markup({...settings,developerMode});assert.ok(html.includes(`id="${prefix}-deepseek-enabled" checked`));
-  assert.match(html,/<summary>딥식플 전용 프롬프트<\/summary>/);
+  assert.match(html,/<summary>딥식 플래시 전용 <small>전용 프롬프트<\/small><\/summary>/);
   assert.doesNotMatch(html,/영어 번역 프롬프트|help|<pre|개발자/);
  }
  assert.match(index,/\$\{generalRelationshipSettingsMarkup\(\)\}\s*\$\{deepseekSettingsMarkup\(\)\}/);
@@ -66,7 +66,7 @@ test('public control is directly below relationship settings, plain and independ
 test('developer panel restores only Galbwae; disabling access does not disable DeepSeek',()=>{
  const render=Function('settings',extract('function developerChuseokGalbwaeMarkup(', 'function syncDeveloperQualityControls(')+';return developerSettingsMarkup();');
  const locked=render({developerMode:false});assert.match(locked,/id="verba-developer-code"/);assert.doesNotMatch(locked,/id="verba-chuseok-galbwae-all"/);
- const unlocked=render({developerMode:true,chuseokGalbwaeScope:'all'});assert.match(unlocked,/id="verba-chuseok-galbwae-all" checked/);assert.match(unlocked,/id="verba-chuseok-galbwae-dialogue-inner"/);
+ const unlocked=render({developerMode:true,chuseokGalbwaeScope:'all'});assert.match(unlocked,/<summary>개발자 모드<\/summary>/);assert.match(unlocked,/id="verba-chuseok-galbwae-all" checked/);assert.match(unlocked,/id="verba-chuseok-galbwae-dialogue-inner"/);
  assert.doesNotMatch(unlocked,/최소 프롬프트|압축 프롬프트|기본 번역 편집|딥식플/);
  const s={...settings,developerMode:true,chuseokGalbwaeScope:'all'};
  const shutdown=extract("        if (target.closest('#verba-developer-mode-off')) {",'            saveSettings();').split('\n').slice(1).join('\n');Function('settings',shutdown)(s);

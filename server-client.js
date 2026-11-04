@@ -137,7 +137,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 if(response.ok)throw Object.assign(Error('서버 응답을 끝까지 읽지 못했습니다.'),{code:'VERBA_SERVER_RESPONSE_INCOMPLETE'});
                 data={};
             }
-            if(!response.ok)throw Object.assign(Error(data.error||`서버 번역 HTTP ${response.status}`),{status:response.status});
+            if(!response.ok)throw Object.assign(Error(data.error||`서버 번역 HTTP ${response.status}`),{status:response.status,retryAfter:response.headers?.get?.('retry-after')});
             return data;
             })()]);
         } catch(error) {
@@ -177,9 +177,65 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             value.settings.profileId,value.settings.fallbackProfileId,value.settings.thirdProfileId]);
         return value;
     }
-    async function cancel(id){
-        const record=records.find(x=>x.id===id);if(record){record.cancel=true;save();}
-        try{await api('/jobs/'+id+'/cancel',{method:'POST',body:'{}'});if(record){record.cancel=false;save();}}catch{onNotice('중지 요청을 아직 전달하지 못했습니다. 연결이 돌아오면 다시 전달합니다.');}
+    // Cancellation has its own retry policy. Never change translation/API retries.
+    const cancelRequests=new Map();
+    let cancelTimer=null;
+    const canRetryCancel=()=>getSettings().serverTranslation===true && isActive()
+        && globalThis.navigator?.onLine!==false;
+    function scheduleCancelRetries(){
+        if(cancelTimer!==null){clearTimeout(cancelTimer);cancelTimer=null;}
+        if(!canRetryCancel())return;
+        const pending=records.filter(r=>r.cancel && !['blocked','sent'].includes(r.cancelState) && !cancelRequests.has(r.id));
+        if(!pending.length)return;
+        const next=Math.min(...pending.map(r=>Number(r.cancelRetryAt)||0));
+        cancelTimer=setTimeout(()=>{cancelTimer=null;flushCancellations();},Math.min(2147483647,Math.max(0,next-Date.now())));
+    }
+    function flushCancellations(){
+        if(canRetryCancel())for(const r of records){
+            if(r.cancel && !['blocked','sent'].includes(r.cancelState) && (Number(r.cancelRetryAt)||0)<=Date.now())void cancel(r.id);
+        }
+        scheduleCancelRetries();
+    }
+    function cancel(id){
+        if(cancelRequests.has(id))return cancelRequests.get(id);
+        let record=records.find(x=>x.id===id);
+        // Keep terminal failures as tombstones, not as successful cancellations.
+        // This also prevents aborted/blocked jobs from being reused as translations.
+        if(record && ['blocked','sent'].includes(record.cancelState))return Promise.resolve();
+        if(!record){record={id,scope:scopeKey(),kind:'cancel',at:Date.now()};remember(record);}
+        if(record.cancel && Number(record.cancelRetryAt)>Date.now()){scheduleCancelRetries();return Promise.resolve();}
+        record.cancel=true;record.cancelState='pending';save();
+        const request=Promise.resolve().then(async()=>{
+            try{
+                await api('/jobs/'+id+'/cancel',{method:'POST',body:'{}'});
+                record.cancel=false;record.cancelState='sent';record.cancelRetryAt=null;record.cancelHttpStatus=null;
+                trace('cancel-delivered',{jobId:id.slice(0,8)});
+            }catch(error){
+                const httpStatus=Number(error?.status)||null;
+                const transient=httpStatus!==null ? [429,500,502,503,504].includes(httpStatus)
+                    : error?.name==='TypeError' || ['VERBA_SERVER_CONNECTION_TIMEOUT','VERBA_SERVER_CONNECTION_INTERRUPTED','VERBA_SERVER_RESPONSE_INCOMPLETE'].includes(error?.code);
+                record.cancelHttpStatus=httpStatus;
+                record.cancelState=transient?'pending':'blocked';
+                record.cancelAttempts=Math.min(100,(Number(record.cancelAttempts)||0)+1);
+                let delay=Math.min(60000,3000*2**Math.min(5,record.cancelAttempts-1));
+                const hint=String(error?.retryAfter??'').trim();
+                if(hint){
+                    const hinted=/^\d+(?:\.\d+)?$/.test(hint)?Number(hint)*1000:Date.parse(hint)-Date.now();
+                    if(Number.isFinite(hinted))delay=Math.max(delay,hinted);
+                }
+                record.cancelRetryAt=transient?Date.now()+delay:null;
+                trace('cancel-failed',{jobId:id.slice(0,8),httpStatus,retryable:transient,nextRetryAt:record.cancelRetryAt});
+                // Persist the warning state so page reload/resume cannot repeat it.
+                if(!record.cancelNotified){
+                    record.cancelNotified=true;save();
+                    onNotice(transient
+                        ? '중지 요청을 아직 전달하지 못했습니다. 잠시 후 연결 상태에 따라 다시 시도합니다.'
+                        : `중지 요청을 전달하지 못해 자동 재시도를 멈췄습니다.${httpStatus?' (HTTP '+httpStatus+')':''}`);
+                }
+            }finally{save();cancelRequests.delete(id);scheduleCancelRetries();}
+        });
+        cancelRequests.set(id,request);
+        return request;
     }
     async function submit(envelope,signal){
         envelope.clientConfig ||= fingerprint(configurationKey());
@@ -289,7 +345,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                 resultHashMatch:!!resultHash&&j.resultHash===resultHash})),
             limitation:'Matches identify candidates, not proof of UI application. Hashes are non-cryptographic. An applied outputComparison.binding is the direct consumer trace.'
         }:null;
-        return {serverVersion,jobs,selectedMessage,events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length};
+        return {serverVersion,jobs,selectedMessage,cancellations:records.filter(r=>r.cancel || r.cancelState).map(r=>({jobId:r.id.slice(0,8),state:r.cancelState||'pending',httpStatus:r.cancelHttpStatus||null,nextRetryAt:r.cancelRetryAt||null})),events:history.map(row=>({...row})),pendingAutomatic:records.filter(r=>r.scope===scopeKey()&&r.kind==='generation').length};
     }
     async function output(source,options,local){
         // Only a generation in the same chat and with the EXACT final source is
@@ -460,7 +516,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         const flush=()=>{
             if(pendingReads.size)trace('result-read-resumed',{count:pendingReads.size});
             for(const restart of [...pendingReads])restart();
-            for(const r of records)if(r.cancel)void cancel(r.id);
+            flushCancellations();
         };
         window.addEventListener('online',flush);window.addEventListener('pageshow',flush);
         document.addEventListener('visibilitychange',()=>{if(!document.hidden)flush();});

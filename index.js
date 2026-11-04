@@ -10,7 +10,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.108';
+import { createServerClient } from './server-client.js?v=0.6.110';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -74,7 +74,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.109';
+const EXTENSION_VERSION = '0.6.110';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.108';
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -243,7 +243,7 @@ const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
 const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
 const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
-    { key: 'deepseek', label: '딥식플 전용 프롬프트', description: '딥식플 전용 프롬프트를 켰을 때 한국어 출력·재번역에 사용하는 지침이에요.' },
+    { key: 'deepseek', label: '딥식 플래시 전용', description: '딥식 플래시 전용 기능을 켰을 때 한국어 출력·재번역에 사용하는 지침이에요.' },
     { key: 'output', label: '채팅 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
     { key: 'input', label: '내가 보내는 글', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
     { key: 'selection', label: '선택한 부분 다시 번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
@@ -291,7 +291,7 @@ const SETTINGS_VISIBILITY_DEFINITIONS = [
     { key: 'dialogueEndings', label: '대사 말끝 취향', selector: '#verba-dialogue-ending-settings' },
     { key: 'expression', label: '표현 디테일', selector: '#verba-expression-detail' },
     { key: 'relationship', label: '말투·호칭 설정', selector: '#verba-developer-relationship-lab' },
-    { key: 'deepseek', label: '딥식플 전용 프롬프트', selector: '#verba-deepseek-settings' },
+    { key: 'deepseek', label: '딥식 플래시 전용', selector: '#verba-deepseek-settings' },
     { key: 'translationReference', label: '번역 참고 설정', selector: '#verba-translation-reference' },
     { key: 'koreanFlavor', label: '한캐의 맛', selector: '#verba-korean-flavor' },
     { key: 'englishFlavor', label: '영캐의 맛', selector: '#verba-english-flavor' },
@@ -6171,7 +6171,7 @@ async function translateMessage(messageId, options = {}) {
     const outputJobSlot = activeProfileSlot();
     const timing = outputTiming.begin({
         retranslation: options.force === true, slot: outputJobSlot, splitCount: outputSplitCount(settings),
-        mode: deepseekKoreanEnabled(settings) ? '딥식플 전용 프롬프트' : minimalOutputEnabled(settings) ? '최소 프롬프트'
+        mode: deepseekKoreanEnabled(settings) ? '딥식 플래시 전용' : minimalOutputEnabled(settings) ? '최소 프롬프트'
             : settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? '미친압축'
             : settings.developerMode && settings.developerCompressedPromptEnabled ? '압축' : '일반',
     });
@@ -10909,11 +10909,11 @@ function characterTranslationReferenceMarkup() {
 function deepseekSettingsMarkup() {
     return `
         <details id="verba-deepseek-settings" class="verba-tool-details verba-deepseek-settings">
-            <summary>딥식플 전용 프롬프트</summary>
+            <summary>딥식 플래시 전용 <small>전용 프롬프트</small></summary>
             <div class="verba-tool-details-content">
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-deepseek-enabled" ${settings.developerDeepseekKoreanEnabled ? 'checked' : ''}>
-                    <span>딥식플 전용 프롬프트 사용</span>
+                    <span>딥식 플래시 전용 프롬프트 사용</span>
                 </label>
             </div>
         </details>`;
@@ -10942,7 +10942,7 @@ function developerChuseokGalbwaeMarkup() {
 function developerSettingsMarkup() {
     return `
         <details id="verba-developer-settings" class="verba-tool-details verba-developer-settings">
-            <summary>개발자 모드 <small>${settings.developerMode ? '추석 갈봬체' : '번호 입력'}</small></summary>
+            <summary>개발자 모드${settings.developerMode ? '' : ' <small>번호 입력</small>'}</summary>
             <div class="verba-tool-details-content">
                 ${settings.developerMode ? `
                     ${developerChuseokGalbwaeMarkup()}

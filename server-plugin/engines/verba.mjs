@@ -2733,6 +2733,21 @@ function preserveSegmentMarkup(source, translated, markupTokens) {
   const signature = (text) => (canonicalizeProtectedTokenVariants(String(text || "")).match(/@@VERBA_(?:DEEP_)?\d{4}@@|<!--[\s\S]*?-->|<\/?[\p{L}_][\p{L}\p{N}_.:-]*(?=[\s/>])(?:[^>"']|"[^"]*"|'[^']*')*>/gu) || []).filter((value) => value.startsWith("<") || markupTokens.has(value));
   return JSON.stringify(signature(source)) === JSON.stringify(signature(translated)) ? translated : source;
 }
+function restoreTranslationSurface(value, segmented, options = {}) {
+  const fragment = options.fragment === true;
+  const markupEntries = (segmented.tokens || []).filter((entry) => /^<(?:!--|\/?[\p{L}_])/u.test(entry.value));
+  const markupTokens = new Set(markupEntries.map((entry) => entry.token));
+  const particlesRepaired = repairLockedTokenParticles(canonicalizeProtectedTokenVariants(value), segmented.nameTokens);
+  const namesRestored = stripLeakedNameTokens(restoreProtected(particlesRepaired, segmented.nameTokens, {
+    strict: !fragment,
+    allowMissing: true
+  }));
+  const markupRestored = restoreProtected(namesRestored, markupEntries, { strict: !fragment });
+  const fullyRestored = restoreProtected(markupRestored, (segmented.tokens || []).filter((entry) => !markupTokens.has(entry.token)), {
+    strict: !fragment && options?.allowDamagedProtected !== true
+  });
+  return repairRenderedKoreanParticleAlternatives(fullyRestored);
+}
 function assembleTranslation(segmented, translations, options = {}) {
   const map = translations instanceof Map ? translations : new Map(Object.entries(translations || {}));
   const markupEntries = (segmented.tokens || []).filter((entry) => /^<(?:!--|\/?[\p{L}_])/u.test(entry.value));
@@ -2748,16 +2763,7 @@ function assembleTranslation(segmented, translations, options = {}) {
     map.set(part.id, repaired);
     return escapeCodeTranslation(repaired, part.codeQuote);
   }).join("");
-  const particlesRepaired = repairLockedTokenParticles(canonicalizeProtectedTokenVariants(joined), segmented.nameTokens);
-  const namesRestored = stripLeakedNameTokens(restoreProtected(particlesRepaired, segmented.nameTokens, {
-    strict: true,
-    allowMissing: true
-  }));
-  const markupRestored = restoreProtected(namesRestored, markupEntries, { strict: true });
-  const fullyRestored = restoreProtected(markupRestored, (segmented.tokens || []).filter((entry) => !markupTokens.has(entry.token)), {
-    strict: options?.allowDamagedProtected !== true
-  });
-  return repairRenderedKoreanParticleAlternatives(fullyRestored);
+  return restoreTranslationSurface(joined, segmented, options);
 }
 function protectedTokenCounts(value) {
   const counts2 = /* @__PURE__ */ new Map();
@@ -5495,14 +5501,12 @@ STILL-MISSING IDS: ${JSON.stringify(missingIds)}` : "";
     throw finalError;
   }
   function restoredSegmentText(value, segmented, useSourceNames = false) {
+    if (!useSourceNames) return restoreTranslationSurface(value, segmented, { fragment: true });
     const nameTokens = (segmented.nameTokens || []).map((entry) => ({
       token: entry.token,
-      value: useSourceNames ? entry.source : entry.value
+      value: entry.source
     }));
-    const namesRestoredRaw = restoreProtected(value, nameTokens, { strict: false });
-    const namesRestored = useSourceNames ? namesRestoredRaw : namesRestoredRaw.replace(/@@VERBA_NAME_\d{4}@@/g, "");
-    const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: false });
-    return useSourceNames ? fullyRestored : repairKoreanParticleAlternatives(fullyRestored);
+    return restoreProtected(restoreProtected(value, nameTokens, { strict: false }), segmented.tokens, { strict: false });
   }
   function buildSourceMap(segmented, translations, completeTranslation) {
     const entries = [];
@@ -5512,7 +5516,6 @@ STILL-MISSING IDS: ${JSON.stringify(missingIds)}` : "";
       const source = restoredSegmentText(segment.text, segmented, true);
       if (!translated.trim() || !source.trim()) continue;
       let start = completeTranslation.indexOf(translated, cursor);
-      if (start < 0) start = completeTranslation.indexOf(translated);
       if (start < 0) continue;
       const end = start + translated.length;
       entries.push({ id: segment.id, source, start, end });

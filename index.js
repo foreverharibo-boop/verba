@@ -68,15 +68,16 @@ import {
     parseSelectionCandidateResponse,
     replaceOutsideProtected,
     restoreProtected,
+    restoreTranslationSurface,
     resolveOutputSpeakerIdentity,
     segmentSource,
     selectionTouchesDialogue,
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.110';
+const EXTENSION_VERSION = '0.6.111';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.108';
+const SERVER_ENGINE_VERSION = '0.6.111';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -3981,15 +3982,12 @@ Retry ${attempt}/${maxRetries}: correct invalid/incomplete JSON. Return exactly 
 }
 
 function restoredSegmentText(value, segmented, useSourceNames = false) {
+    if (!useSourceNames) return restoreTranslationSurface(value, segmented, { fragment: true });
     const nameTokens = (segmented.nameTokens || []).map(entry => ({
         token: entry.token,
-        value: useSourceNames ? entry.source : entry.value,
+        value: entry.source,
     }));
-    const namesRestoredRaw = restoreProtected(value, nameTokens, { strict: false });
-    // 원문 미리보기가 아니라면, 복원되지 않고 남은 이름 보호 토큰이 화면에 노출되지 않게 제거한다.
-    const namesRestored = useSourceNames ? namesRestoredRaw : namesRestoredRaw.replace(/@@VERBA_NAME_\d{4}@@/g, '');
-    const fullyRestored = restoreProtected(namesRestored, segmented.tokens, { strict: false });
-    return useSourceNames ? fullyRestored : repairKoreanParticleAlternatives(fullyRestored);
+    return restoreProtected(restoreProtected(value, nameTokens, { strict: false }), segmented.tokens, { strict: false });
 }
 
 function buildSourceMap(segmented, translations, completeTranslation) {
@@ -4000,7 +3998,6 @@ function buildSourceMap(segmented, translations, completeTranslation) {
         const source = restoredSegmentText(segment.text, segmented, true);
         if (!translated.trim() || !source.trim()) continue;
         let start = completeTranslation.indexOf(translated, cursor);
-        if (start < 0) start = completeTranslation.indexOf(translated);
         if (start < 0) continue;
         const end = start + translated.length;
         entries.push({ id: segment.id, source, start, end });
@@ -8564,10 +8561,10 @@ function hideSelectionButton() {
 
 function showSelectionSource(snapshot) {
     if (!snapshot) return;
-    const matches = normalizedSourceMap(snapshot.sourceMap)
-        .filter(row => snapshot.start < row.end && snapshot.end > row.start);
+    const rows = normalizedSourceMap(snapshot.sourceMap);
+    const matches = rows.filter(row => snapshot.start < row.end && snapshot.end > row.start);
     if (!matches.length) {
-        notify('이 번역에는 구간 원문 정보가 없어요. v0.2.0 이후 새로 번역한 메시지부터 사용할 수 있어요.', 'warning');
+        notify(rows.length ? '선택한 구간과 연결된 원문을 찾지 못했어요.' : '이 번역에 구간별 원문 연결 정보가 저장되어 있지 않아요.', 'warning');
         hideSelectionButton();
         return;
     }

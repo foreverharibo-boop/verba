@@ -74,7 +74,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.108';
+const EXTENSION_VERSION = '0.6.109';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.108';
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -10835,7 +10835,7 @@ function generalRelationshipSettingsMarkup() {
                                         ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerUserToTargetRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>
 
-                                    <label for="verba-developer-user-other-register">USER → 타인(NPC)</label>
+                                    <label for="verba-developer-user-other-register">USER → 타인</label>
                                     <select id="verba-developer-user-other-register" class="text_pole">
                                         ${DEVELOPER_AUDIENCE_REGISTER_OPTIONS.map(option => `<option value="${option.value}" ${settings.developerUserToOtherRegister === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                                     </select>

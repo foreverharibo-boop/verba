@@ -99,5 +99,5 @@ test('OTHER register reaches selection and custom prompts but does not override 
  for(const prompt of [core.buildSelectionPrompt(options),core.buildMultiSelectionPrompt(options),core.buildOutputPrompt(segmented,{...settings,customTranslatorEnabled:true,customTranslatorTemplates:{output:'MY_CUSTOM_RULE'},customTranslatorModified:{output:true}},'',identity)]) assert.match(prompt,/USER→OTHER=JONDAETMAL/);
  assert.equal(userToCharacterRegisterRule({...settings,developerMode:true,chuseokGalbwaeScope:'all'},identity),'');
  const index=fs.readFileSync(new URL('../index.js',import.meta.url),'utf8');
- for(const expected of ["developerUserToOtherRegister: 'unset'",'raw.developerUserToOtherRegister','developerUserToOtherRegister: source.developerUserToOtherRegister','settings.developerUserToOtherRegister = next.developerUserToOtherRegister','USER → 타인(NPC)'])assert.ok(index.includes(expected),expected);
+ for(const expected of ["developerUserToOtherRegister: 'unset'",'raw.developerUserToOtherRegister','developerUserToOtherRegister: source.developerUserToOtherRegister','settings.developerUserToOtherRegister = next.developerUserToOtherRegister','USER → 타인'])assert.ok(index.includes(expected),expected);
 });

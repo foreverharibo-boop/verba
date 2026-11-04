@@ -77,7 +77,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.119';
+const EXTENSION_VERSION = '0.6.120';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.119';
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -246,10 +246,10 @@ const PROMPT_PRESET_SCOPE_PROMPTS = 'prompts';
 const PROMPT_PRESET_SCOPE_TRANSLATION = 'prompts_translation';
 const PROFILE_STATS_STORAGE_KEY = 'verba.profileStats.v1';
 const CUSTOM_TRANSLATOR_PROMPT_DEFINITIONS = [
-    { key: 'deepseek', label: '딥식 플래시 전용', description: '딥식 플래시 전용 기능을 켰을 때 한국어 출력·재번역에 사용하는 지침이에요.' },
     { key: 'output', label: '채팅 번역', description: 'AI가 보낸 메시지를 한국어로 번역하거나 전체 재번역할 때 사용해요.' },
     { key: 'input', label: '내가 보내는 글', description: '내 한국어 입력을 영어로 바꿔 전송할 때 사용해요.' },
     { key: 'selection', label: '선택한 부분 다시 번역', description: '드래그한 부분만 다시 번역하거나 여러 후보를 만들 때 사용해요.' },
+    { key: 'deepseek', label: '딥식 플래시 전용', description: '딥식 플래시 전용 기능을 켰을 때 한국어 출력·재번역에 사용하는 지침이에요.' },
     { key: 'mad', label: '미친 한출의 맛', description: '미친 한출의 맛을 켰을 때 사용하는 번역 지침이에요.' },
     { key: 'hongjin', label: '김홍진의 맛', description: '김홍진의 맛을 켰을 때 캐릭터 대사에 사용하는 말투 지침이에요.' },
     { key: 'name', label: '이름 찾기·연결', description: '원문의 이름과 저장할 한국어 이름이 같은 인물인지 확인할 때 사용해요.' },

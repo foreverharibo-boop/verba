@@ -2,7 +2,7 @@ import { bilingualSettingsDiagnostic, sanitizeBilingualSettings, bilingualStageD
 import { POST_REVIEW_CHECKS } from './post-review.js';
 // No full source, prompts or responses. Banned rejections may include bounded matched terms only.
 // Each trace belongs to one output request, including split/batched requests.
-const STAGES = new Set(['mad-korean-only', 'mad-korean-only-final', 'local-normalization', 'output-post-review', 'initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'markup-integrity', 'assembled', 'received', 'locked-segments', 'display-normalization']);
+const STAGES = new Set(['second-translation', 'mad-korean-only', 'mad-korean-only-final', 'local-normalization', 'output-post-review', 'initial-parsed', 'tag-normalization', 'repairs', 'dialogue-format', 'english-review', 'bilingual-review', 'markup-integrity', 'assembled', 'received', 'locked-segments', 'display-normalization']);
 const TYPES = new Set(['narration', 'dialogue_candidate', 'tagged_content', 'code_content']);
 const METRICS = ['length', 'latinLetters', 'hangulLetters', 'mixedLines', 'koreanBracketPairs', 'duplicateKoreanPairs'];
 const MAX_ROWS = 32;

@@ -1,3 +1,4 @@
+import { secondTranslationEnabled, requestSecondTranslation } from './second-translation.js';
 import { sourceMapSummary, createSourceViewDiagnostics } from './source-map-diagnostics.js';
 import { createCharacterTranslationReference } from './character-translation-reference.js';
 import { createDisplayStateTrace } from './display-state-trace.js';
@@ -77,9 +78,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.125';
+const EXTENSION_VERSION = '0.6.126';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.125';
+const SERVER_ENGINE_VERSION = '0.6.126';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -384,6 +385,7 @@ const DEFAULT_SETTINGS = {
     developerOutputSplitCount: 1,
     developerMinimalPromptEnabled: false,
     developerDeepseekKoreanEnabled: false,
+    developerSecondTranslationEnabled: false,
     developerMinimalPrompt: '자연스럽게 한국어로 번역하라.',
     developerCompressedPromptEnabled: false,
     developerExtremeCompressedPromptEnabled: false,
@@ -532,6 +534,7 @@ settings.developerCompressedPromptEnabled = false;
 settings.developerOutputSplitCount = [2, 3].includes(Number(settings.developerOutputSplitCount)) ? Number(settings.developerOutputSplitCount) : 1;
 settings.developerMinimalPromptEnabled = false;
 settings.developerDeepseekKoreanEnabled = settings.developerDeepseekKoreanEnabled === true;
+settings.developerSecondTranslationEnabled = settings.developerSecondTranslationEnabled === true;
 settings.developerMinimalPrompt = typeof settings.developerMinimalPrompt === 'string' ? settings.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt;
 settings.developerExtremeCompressedPromptEnabled = false;
 if (settings.developerExtremeCompressedPromptEnabled) settings.developerCompressedPromptEnabled = false;
@@ -1445,6 +1448,7 @@ function normalizedPromptPresetDeveloperSettings(value = null) {
         developerOutputSplitCount: [2, 3].includes(Number(raw.developerOutputSplitCount)) ? Number(raw.developerOutputSplitCount) : 1,
         developerMinimalPromptEnabled: raw.developerMinimalPromptEnabled === true,
         developerDeepseekKoreanEnabled: raw.developerDeepseekKoreanEnabled === true,
+        developerSecondTranslationEnabled: raw.developerSecondTranslationEnabled === true,
         developerMinimalPrompt: typeof raw.developerMinimalPrompt === 'string' ? raw.developerMinimalPrompt : DEFAULT_SETTINGS.developerMinimalPrompt,
         developerCompressedPromptEnabled: raw.developerCompressedPromptEnabled === true && !extremeCompressed,
         developerExtremeCompressedPromptEnabled: extremeCompressed,
@@ -1494,6 +1498,7 @@ function currentPromptPresetDeveloperSettingsSnapshot(source = settings) {
         developerOutputSplitCount: source.developerOutputSplitCount,
         developerMinimalPromptEnabled: source.developerMinimalPromptEnabled,
         developerDeepseekKoreanEnabled: source.developerDeepseekKoreanEnabled,
+        developerSecondTranslationEnabled: source.developerSecondTranslationEnabled,
         developerMinimalPrompt: source.developerMinimalPrompt,
         developerCompressedPromptEnabled: source.developerCompressedPromptEnabled,
         developerExtremeCompressedPromptEnabled: source.developerExtremeCompressedPromptEnabled,
@@ -2095,6 +2100,7 @@ function applyPromptPresetDeveloperSettings(value) {
     settings.developerOutputSplitCount = next.developerOutputSplitCount;
     settings.developerMinimalPromptEnabled = false;
     settings.developerDeepseekKoreanEnabled = next.developerDeepseekKoreanEnabled;
+    settings.developerSecondTranslationEnabled = next.developerSecondTranslationEnabled;
     settings.developerMinimalPrompt = next.developerMinimalPrompt;
     settings.aiPostReview = normalizePostReview(next.aiPostReview);
     settings.qualityAuditEnabled = false;
@@ -2256,6 +2262,7 @@ function applyPromptPresetTranslationSettings(value) {
     setControlValue('#verba-developer-target-user-address-frequency', settings.developerTargetToUserAddressFrequency);
 
     if (appliedDeveloperSettings) setCheckedValue('#verba-deepseek-enabled', settings.developerDeepseekKoreanEnabled);
+    if (appliedDeveloperSettings) setCheckedValue('#verba-second-translation-enabled', settings.developerSecondTranslationEnabled);
     syncDeveloperQualityControls(document.querySelector('#verba-settings'));
     if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
 }
@@ -5034,6 +5041,10 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
     try {
         const config = { ...(reviewSettings || settings), aiPostReview: normalizePostReview(settings.aiPostReview) };
         const selected = config.aiPostReview;
+        if (options.secondTranslationCompleted === true) {
+            selected.translationese = false;
+            selected.deepseekTranslationese = false;
+        }
         const reference = selected.voice || selected.mad || selected.hongjin || (config.developerMode === true && selected.deepseekTranslationese && deepseekKoreanEnabled(config))
             ? buildOutputPrompt({ ...segmented, segments: [], protectedText: '' }, config,
                 options.oneTimeInstruction || '', { ...speakerIdentity, omitTranslationContext: true }, options.tuning || null, speakerScopes)
@@ -5191,6 +5202,20 @@ async function translateOutputText(source, options = {}) {
     // Deterministic cleanup is local and does not call the provider.
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
     comparison.capture('local-normalization', translations);
+
+    if (secondTranslationEnabled(settings)) {
+        const rewritten = await requestSecondTranslation({
+            segmented, translations,
+            basePrompt: buildOutputPrompt(segmented, settings, options.oneTimeInstruction || '', speakerIdentity, options.tuning || null, speakerScopes),
+            options: { ...options, speakerIdentity }, request: requestSegments,
+        });
+        translations.clear();
+        for (const [id, text] of rewritten) translations.set(id, text);
+        normalizeTaggedOutputTranslations(segmented, translations);
+        normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
+        options = { ...options, secondTranslationCompleted: true };
+        comparison.capture('second-translation', translations);
+    }
 
     // All optional AI output repairs are handled once by reviewFinalOutput.
     const initialSuccessfulTranslations = new Map(translations);
@@ -10923,6 +10948,11 @@ function deepseekSettingsMarkup() {
                     <input type="checkbox" id="verba-deepseek-enabled" ${settings.developerDeepseekKoreanEnabled ? 'checked' : ''}>
                     <span>딥식 플래시 전용 프롬프트 사용</span>
                 </label>
+                <label class="verba-check-row">
+                    <input type="checkbox" id="verba-second-translation-enabled" ${settings.developerSecondTranslationEnabled ? 'checked' : ''}>
+                    <span>2차 번역</span>
+                </label>
+                <small>딥식 전용 프롬프트 사용 시 원문과 초벌로 한 번 더 번역하고 최종본만 표시해요. 추가 시간과 API 사용량이 발생해요.</small>
             </div>
         </details>`;
 }
@@ -12186,6 +12216,13 @@ function injectSettingsPanel() {
 
         if (target.id === 'verba-developer-output-split-count' && target instanceof HTMLSelectElement) {
             settings.developerOutputSplitCount = [2, 3].includes(Number(target.value)) ? Number(target.value) : 1;
+            saveSettings();
+            if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
+            return;
+        }
+
+        if (target.id === 'verba-second-translation-enabled' && target instanceof HTMLInputElement) {
+            settings.developerSecondTranslationEnabled = target.checked;
             saveSettings();
             if (document.querySelector('#verba-current-rules')?.open) renderCurrentAppliedRules();
             return;

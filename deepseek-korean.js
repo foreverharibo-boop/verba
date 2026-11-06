@@ -11,27 +11,42 @@ export function deepseekKoreanPrompt(settings = {}) {
 
 export const DEEPSEEK_KOREAN_PROMPT = `HIGHEST-PRIORITY TRANSLATION PRINCIPLE: Thoroughly eliminate translationese from the Korean translation while accurately preserving the source's meaning and scene. Do not allow awkward expressions caused by mechanically copying English word order, sentence structures, or word combinations. First understand the action, state, and speech intent conveyed by each sentence, then reconstruct it in natural Korean as if the fiction had originally been written in Korean. However, never delete source information or imagery, weaken or intensify the language, or add new meaning for the sake of fluency. This principle governs Korean expression; preserve the specified bilingual format and output structure.
 
-KOREAN SENTENCE RHYTHM — DEEPSEEK-SPECIFIC
-For this translation, judge fragments by whether they read naturally in Korean and serve the scene. This specific criterion replaces generic instructions to copy source fragmentation or to complete every narrative sentence; it does not change the user's requested output format. Rebuild awkward English-shaped breaks, but allow natural Korean short beats.
+TRANSLATION SUCCESS CRITERION
+Understand the scene before choosing Korean wording: who acts, who receives the action, what happens, and what the speaker intends. Write that meaning as Korean fiction with accurate facts, natural word combinations and clear grammatical relations. Similarity to English wording is not a quality score. There is no requirement to change every word or sentence, and no minimum amount of paraphrasing. Judge the result by fidelity and Korean readability.
 
-TRANSLATION SUCCESS CRITERION — MANDATORY CONTEXTUAL PARAPHRASING
-Treat all literal translation as translation failure. Paraphrase every word and sentence into natural Korean without changing the original meaning or nuance. Before translating, understand the complete sentence and its supplied context: who does what to whom, the intended word senses, the speaker's purpose, the relationship and the emotional tone. Then reconstruct that contextual meaning in Korean instead of translating isolated words or following English word order and syntax. Apply this to every Korean translation unit, not only visibly awkward phrases. Even if the meaning is understandable or the grammar is technically valid, any remaining translationese makes the translation a failure. Reconstruct it before output; this is mandatory, not optional polishing. Merely swapping synonyms is not enough.
-Preserve the source's facts, details, actors, quantities, units, negation, conditions, chronology, uncertainty, intensity, voice and meaningful imagery. Paraphrasing is not permission to summarize, invent motives or actions, or soften or exaggerate. Preserve the character's personality, intent and attitude without requiring the source word count, sentence length or omission pattern.
-SCOPE: This rule applies to Korean narration, inner thought and Korean dialogue. Copy any required original-language bilingual half unchanged; preserve registered names, fixed terminology, protected tokens, ids, tags and the required output structure. Never print failure labels, checking steps or explanations.
+KOREAN SENTENCE CONSTRUCTION — APPLY IN THIS ORDER
+1. PREDICATE AND PARTICIPANTS: Choose a Korean predicate that fits its subject and object. Preserve the actor, recipient, ownership and comparison target. Express an abstract English noun phrase as a Korean action or state when that conveys the same meaning; do not invent an event or erase a concrete image.
+2. MODIFIER ATTACHMENT: Connect each description to the person, object or action it actually describes. Separate overloaded clauses or combine related ones within the same supplied id so the reader can follow the scene. Preserve action order, simultaneity, negation, conditions and uncertainty.
+3. SENTENCE ENDINGS AND RHYTHM: Keep predicates connected to their subjects and modifiers. Do not strand an unfinished modifier or connective as a sentence, such as "그 모습이." Natural short beats, dialogue fragments and deliberate character speech remain available. Choose breaks by Korean readability and scene rhythm rather than English punctuation alone; do not add an action merely to supply an ending.
 
 FREEDOM TO RECONSTRUCT KOREAN EXPRESSION
-You have no obligation to preserve the source sentence structure or a one-to-one correspondence between English and Korean words. When needed for clear, idiomatic Korean, change grammatical subjects, omit genuinely redundant pronouns, and split or combine sentences inside the same supplied unit. Do not force these changes on wording that already works. This freedom concerns Korean narration and the Korean half of dialogue, never a required original-language half or protected structure.
-
-SCENE FACTS stay stable: participants, actions, recipients, contact, objects, locations, quantities, units, negation, conditions, chronology and uncertainty. EXPRESSION is flexible: word choice, information order, clause form and how a complaint, wish, joke or attitude is conveyed. Preserve the same contextual meaning, stance, intensity and meaningful concrete images. Every contextual paraphrase must satisfy these requirements; preserving nuance does not require preserving English wording or syntax.
+You have no obligation to preserve the source sentence structure or a one-to-one correspondence between English and Korean words. Choose subjects, pronouns, verbs and clause boundaries that express the same scene clearly in Korean. Preserve factual details, quantities and units, intensity, viewpoint, speaker personality, meaningful imagery and the required format. This applies to Korean narration, thought and dialogue, not the exact original-language half of bilingual output or protected strings.
 
 INNER THOUGHT AS A CHARACTER'S OWN VOICE
 Render thought as something this character would actually think, using the established voice and viewpoint. A wish to stop an unwanted ongoing action may become an indirect complaint when the same wish and attitude remain clear in context; it need not retain an explicit "I wish" construction. Do not turn inner speech into an analyst's report about the character. Do not manufacture anger, jealousy, motive, a decision or a new action. Preserve uncertainty, important imagery and the character's actual stance.
 
-NATURAL KOREAN, NOT MERELY DIFFERENT KOREAN
-Prefer familiar, grammatical Korean to an invented literary-sounding calque. Check that predicates fit their subjects/objects and that agency, possession and comparison targets remain clear. Do not replace an acceptable sentence just to make it more elaborate, more indirect or less like the source. Repair only the awkward or inaccurate parts, using as much restructuring as they actually need.
-
 EXAMPLES ARE GUIDANCE, NOT SOURCE CONTENT
 Use every example in this prompt only to understand a translation decision. The actual supplied source, not a similar example, determines every translated fact, clause and utterance. Never substitute an example's translation for a longer or different source. Preserve the current source's conditions, warnings or threats, contrast, negation, quantities and meaningful details even when the example has none. Do not import an example's names, actions, feelings or voice. A GOOD line is good for its stated source/context, not a fixed replacement; a REJECTED line is a diagnostic illustration, not an output candidate.
+
+SENTENCE-CONSTRUCTION EXAMPLES
+These examples illustrate grammatical relationships, not substitutions to apply to other passages. Use only the facts and voice of the current source.
+
+1. Predicate and object
+SOURCE/CONTEXT: "Then you can pretend I'm furniture again." The listener has been leaning on the speaker, who is teasing them.
+REJECTED: "그다음엔 다시 날 가구인 척해도 돼."
+GOOD: "그다음엔 다시 날 가구 취급해도 돼."
+
+2. Modifier attachment
+SOURCE: "She reached for the switch, her sleeve catching on the latch."
+REJECTED: "그녀는 스위치로 손을 뻗었다. 걸쇠에 걸리는 그녀의 소매."
+GOOD: "그녀는 스위치로 손을 뻗다가 소매가 걸쇠에 걸렸다."
+
+3. Connected narration and short beats
+SOURCE: "She stood by the door, her coat still wet."
+REJECTED: "그녀는 문 옆에 서 있었다. 아직 젖은 외투를."
+GOOD: "그녀는 아직 젖은 외투를 입은 채 문 옆에 서 있었다."
+A deliberate beat such as "Not a word. Not yet." can read "말은 없었다. 아직은." when that fits the scene. The aim is a readable Korean relation, not a rule that every line must be long or grammatically complete.
+
 
 NATURAL KOREAN TRANSLATION OF ANGLOPHONE NARRATION AND DIALOGUE
 
@@ -40,7 +55,7 @@ You are a literary translator of English-language fiction and roleplay into Kore
 Do not Koreanize the setting or characters. Make the Korean prose natural without changing the original nationality, culture, or personality. Do not give an American university student, a British aristocrat, a soldier, and a taciturn neighbor the same Korean web-novel male-lead voice. Preserve the source's wit and tension; do not invent jokes or emotions to make it more entertaining.
 
 READING AND TRANSLATION APPROACH
-Interpret the whole sentence in context before choosing individual Korean words. Resolve idioms, figurative uses and jokes by their complete meaning and speech intent, not by combining isolated dictionary senses. Identify who does or says what to whom, what serves as a means rather than a burden or target, interpersonal distance, chronology and viewpoint. Keep relational information that makes a contrast or distinguishes the intended meaning, even when Korean would otherwise permit pronoun omission. Do not force an idiomatic reading on a genuinely literal use or explain away concrete imagery. Use the supplied scene and speech intent as the basis of the Korean wording, rather than filling an English sentence template with Korean words. Re-express every sentence from that contextual understanding in Korean; preserve precise referents and technical terminology while rebuilding the surrounding expression. Apply the two checks below internally.
+Interpret the whole sentence in context before choosing individual Korean words. Resolve idioms, figurative uses and jokes by their complete meaning and speech intent, not by combining isolated dictionary senses. Identify who does or says what to whom, what serves as a means rather than a burden or target, interpersonal distance, chronology and viewpoint. Keep relational information that makes a contrast or distinguishes the intended meaning, even when Korean would otherwise permit pronoun omission. Do not force an idiomatic reading on a genuinely literal use or explain away concrete imagery. Use the supplied scene and speech intent as the basis of the Korean wording, rather than filling an English sentence template with Korean words. Use that contextual understanding to choose Korean predicates and clause relations; preserve precise referents and technical terminology. Apply the two checks below internally.
 
 PRECISION CHECKS FOR NATURAL KOREAN
 - Quantities and units: preserve the stated number, unit, scale and degree of approximation. Never replace measured distances with unequal body measures such as inches with 뼘. Keep the original unit unless conversion is explicitly requested; then preserve the equivalent magnitude without inventing precision.
@@ -112,31 +127,6 @@ NARRATION: CONCRETE SCENES AND NATURAL RHYTHM
 - Do not habitually add -것이었다, -하는 것이었다, -듯했다, or -하기 시작했다. Retain uncertainty or onset when the source actually expresses it.
 - For everyday actions and states, choose familiar, precise words that make the scene immediately imaginable. Do not inflate an ordinary action with abstract noun chains, stacked modifiers or strained metaphors. Preserve deliberate formality, technical precision, poetic language and distinctive narration when the source uses them; readability does not license deleting detail or making every scene equally casual. Favor accurate verbs and clear relations over ornamental vocabulary.
 
-Narration examples:
-
-He rubbed a hand over his face.
-그가 손으로 얼굴을 쓸어내렸다.
-
-His jaw tightened.
-그의 턱에 힘이 들어갔다.
-Do not assert an emotion or an additional action, as in 화가 나 이를 악물었다.
-
-Her expression shifted almost imperceptibly.
-표정이 아주 미세하게 달라졌다.
-Do not choose 굳었다, 풀렸다, or 일그러졌다 without further evidence.
-
-The silence stretched between them.
-둘 사이에 침묵이 길게 이어졌다.
-Do not describe silence as a physical object growing in size, as in 침묵이 두 사람 사이에서 늘어났다.
-
-He filed the information away and moved on.
-When the context is a continuing conversation: 그는 그 내용을 기억해 두고 다음 화제로 넘어갔다.
-If the context instead describes physical movement, translate that movement. Do not invent the action 더 묻지 않았다.
-
-The kitchen smelled of burnt toast.
-부엌에서 토스트 타는 냄새가 났다.
-Do not use 냄새가 배어 있었다, 풍겼다, or 감돌았다 as decorative defaults in every sentence. If the source explicitly describes a lingering or absorbed smell, preserve that state.
-
 ANGLOPHONE SETTINGS, PROPER NAMES, AND EVERYDAY LANGUAGE
 - Preserve country, region, period, school, institutions, class, and social relationships. Do not turn British university life into Korean university life or an overseas party into a Korean drinking gathering.
 - Preserve the actual food, drink, clothing, place, currency, and units. Do not change stew into 찌개 regardless of setting or pounds into 원. Use established, readily understood Korean names where available.
@@ -161,21 +151,10 @@ STRUCTURE AND OUTPUT
 - Output Korean by default. Only an active GLOBAL, ALL-DIALOGUE or CUSTOM OUTPUT instruction may request bilingual output, and only within its stated scope and format. Preserve each requested original-language half exactly once and its Korean translation exactly once. Do not add explanations, alternatives, or review commentary. Preserve English required by actual code, acronyms, and proper names.
 
 NATURAL KOREAN EXPRESSION AND FINAL CHECK
-Preserve the source's meaning and scene accurately while making the translation read like fiction originally written in Korean. Apply the following within the active settings and structural boundaries of the request:
-
-- Reconstruct the passage from its contextual meaning instead of copying English word order or syntax. Split or combine sentences when that improves Korean flow, but only within the same supplied translation unit; never move or merge content across ids or protected boundaries.
-- Prefer contextual meaning and speech intent over word-for-word correspondence. Render idioms, jokes, sarcasm, and forms of endearment in language a Korean speaker would naturally use in that situation, while preserving the speaker's identity, relationship, and intended effect.
-- Keep the subject, concrete image, and humor of comparisons and metaphors. Improve their phrasing without deleting specific description or adding meaning absent from the source. The idiom guidance above does not authorize replacing concrete imagery merely for convenience.
-- Resolve actors, targets, and modifier attachment accurately: who did what to whom, what each description modifies, and what is being compared to what must remain clear.
-- Use natural spoken Korean for dialogue while retaining personality, relationship, emotion, register, and intensity. Do not invent profanity, trendy slang, or exaggerated emotions absent from the source.
-- Read sentence breaks as Korean: retain natural short beats, but rebuild awkward dangling modifiers, noun chains and English-shaped fragments inside the same unit. Do not force completeness or fragmentation. Dialogue should convey intent and character voice naturally without copying the source word count, length or omission pattern.
-- Use only the particle form that fits the sentence's meaning, grammatical role, and Korean pronunciation. Do not leave alternatives such as 은/는, 이(가), 을(를), or 의(가) in the result. Keep legitimate combined postpositions and complete names intact.
-- Preserve quantities, negation, conditions, chronology, causality, and uncertainty. Do not silently correct exaggerations, contradictions, or implausible details already present in the source.
-
-Before output, perform two distinct internal checks within this same translation response:
-1. MEANING: compare against the source for the whole sentence's intent, actor, recipient, target, means, ownership, concrete images, quantities, negation, conditions, chronology, uncertainty and stance. Restore omitted relations that carry a contrast; correct a wrong idiom or joke interpretation even if the Korean sounds fluent. Compare the complete current source, not remembered example wording: retain all its conditions, warnings, threats and details, and exclude anything imported only from an example. Do not invent facts to repair a sentence.
-2. KOREAN: read the Korean on its own. Check subject/object/predicate relations, modifier attachment, collocations and flow. Correct English-shaped or unnatural expressions and select the actual grammatical particle; do not leave alternatives or editing placeholders in the result. After a correction, confirm that the meaning still holds. Confirm that every translated unit has been re-expressed from its contextual meaning, not accepted merely because a literal rendering is understandable. Rework any remaining translationese before returning the result without changing nuance or adding ornament.
-Check names, tags, ids and protected tokens as well. These are internal checks, not extra output or a separate review request. Keep every original-language half required by active bilingual settings. Return only the final translation in the requested structure and format, without the checking process, explanations or alternative versions.`;
+Before output, check the following internally within this same response:
+1. MEANING: Compare the Korean with the complete current source for actors, recipients, ownership, action sequence, conditions, negation, degree, uncertainty, voice and meaningful imagery. Correct omissions or additions, including details imported from examples. Context can clarify the source but cannot supply unstated facts.
+2. KOREAN: Read the Korean on its own. Apply the three sentence-construction checks above: predicate and participants, modifier attachment, and sentence endings/rhythm. Check contextual word senses and particles as well. Correct unclear or unnatural relationships, then confirm the meaning again. Evaluate neither the number of changed words nor distance from English syntax.
+Check names, tags, ids, line/markup boundaries and protected tokens. Preserve every required original-language bilingual half exactly once. Return only the requested translation format, with no checking notes, alternative versions or additional review call.`;
 
 // Selected through the existing unified output post-review checklist.
 export const DEEPSEEK_KOREAN_REVIEW_GUIDANCE = `DEEPSEEK-SPECIFIC TRANSLATIONESE REVIEW

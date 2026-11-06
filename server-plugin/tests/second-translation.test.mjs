@@ -31,11 +31,10 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             if (p.startsWith('SECOND TRANSLATION')) {
                 rewrites++; assert.equal(initial, split);
                 assert.doesNotMatch(p, /HIGHEST-PRIORITY TRANSLATION PRINCIPLE|TRANSLATION SUCCESS CRITERION|ACTIVE SETTINGS PRECEDENCE/);
-                assert.match(p, /당신은 한국어 소설 전문 번역 편집자다/);
-                assert.match(p, /초안의 단어 선택·어순·문장 구조·끊는 위치는 보존 대상이 아니다/);
+                assert.match(p, /당신은 한국어 소설을 능숙하게 다듬는 편집자다/);
+                assert.match(p, /단어만 바꾸지 말고 어순과 문장 구조까지 다듬어라/);
                 assert.doesNotMatch(p, /좋은 표현은|정확하고 자연스러운 구간은|처음부터 다시 작성하라|영어의 문장 구조를 반드시 파괴/);
-                if (name === 'deep') assert.match(p, /His voice carried a hint of irritation/);
-                else assert.doesNotMatch(p, /His voice carried a hint of irritation/);
+                assert.doesNotMatch(p, /His voice carried a hint of irritation/);
                 for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL', 'PREVIOUS_CONTEXT_SENTINEL']) assert.ok(!p.includes(marker), marker);
                 for (const marker of ['first_translation', '기다리는 것을 했다.']) assert.ok(p.includes(marker), marker);
                 assert.equal(JSON.parse(p.split('\nSOURCE_CONTEXT\n')[1].split('\n')[0]), source);

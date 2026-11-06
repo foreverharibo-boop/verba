@@ -11,6 +11,7 @@ const deepOnly = process.argv[2] === '--deep-only';
 const roots = process.argv.slice(verbaOnly || deepOnly ? 3 : 2);
 if (roots.length !== (verbaOnly ? 1 : 2)) throw Error('Usage: build-server-engines.cjs VERBA_DIRECTORY DEEP_DIRECTORY | --verba-only VERBA_DIRECTORY | --deep-only SERVER_REPOSITORY DEEP_DIRECTORY');
 const overrides = {
+    rememberSecondTranslationTrace: "function rememberSecondTranslationTrace(record) { report({ kind: 'second-translation-trace', record }); }",
     rememberFirstTranslationDraft: "function rememberFirstTranslationDraft(record) { report({ kind: 'first-translation-draft', record }); }",
     settings: 'const settings = structuredClone(snapshot.settings);',
     liveContext: 'function liveContext() { return { ...snapshot.context, ConnectionManagerRequestService: { sendRequest: transport } }; }',

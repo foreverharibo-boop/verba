@@ -18,7 +18,13 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         if(!job) throw failure(404,'작업이 없거나 서버 재시작·보관 기간 만료로 사라졌습니다. 자동 재요청하지 않습니다.');
         return job;
     }
-    function report(job,event) { job.events.push({...event, seq: job.eventSequence++}); if(job.events.length>200) job.events.shift(); }
+    function report(job,event) {
+        // The trace is a cumulative snapshot. Keep only its latest revision,
+        // while preserving monotonic event sequence for polling/recovery.
+        if (event.kind === 'second-translation-trace') job.events = job.events.filter(e => e.kind !== event.kind);
+        job.events.push({...event, seq: job.eventSequence++});
+        if(job.events.length>200) job.events.shift();
+    }
     function lifecycle(job, stage) {
         // Fixed metadata only; never send prompts, names, translated text or provider errors to logs.
         if (!['generation','observed-generation','output'].includes(job.kind)) return;

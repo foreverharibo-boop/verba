@@ -1,6 +1,7 @@
 // In-memory output-job diagnostics. Never retain prompts, response bodies, or identities.
 const PRIMARY = /^output-(?:translation|retranslation)(?::(?:narration|target_dialogue|other_dialogue|tagged_content))?$/;
 const LABELS = [
+    ['output-second-translation-reedit', '미수정 서술 추가 편집'],
     ['output-second-translation', '2차 번역'],
     ['output-post-review', '통합 AI 후검수'],
     ['final-bilingual-review', '병기 AI 검수'],
@@ -14,7 +15,7 @@ function describe(options) {
     const retry = Number(options.retryAttempt) > 0 || Number(options.segmentAttempt) > 0 || options.fallback === true;
     const label = LABELS.find(([key]) => stage.includes(key))?.[1]
         || (stage.endsWith(':single') ? '누락 구간 개별 복구' : PRIMARY.test(stage) ? '1차 번역' : '보조 요청');
-    const kind = retry ? 'retry' : /repair|:single$/.test(stage) ? 'repair' : PRIMARY.test(stage) ? 'primary' : stage === 'output-second-translation' ? 'secondary' : 'aux';
+    const kind = retry ? 'retry' : /repair|:single$/.test(stage) ? 'repair' : PRIMARY.test(stage) ? 'primary' : stage.startsWith('output-second-translation') ? 'secondary' : 'aux';
     const reason = options.fallback ? '대체 프로필' : Number(options.retryAttempt) > 0 ? '요청 오류 재시도'
         : Number(options.segmentAttempt) > 0 ? '응답 형식·구간 누락 재시도' : '';
     const batch = [2, 3].includes(options.splitBatchCount) && Number.isInteger(options.splitBatchIndex) && options.splitBatchIndex >= 1 && options.splitBatchIndex <= options.splitBatchCount

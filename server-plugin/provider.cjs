@@ -88,6 +88,25 @@ function fillTemplate(template, prompt, token) {
     if (template && typeof template === 'object') return Object.fromEntries(Object.entries(template).map(([k,v])=>[k,fillTemplate(v,prompt,token)]));
     return template;
 }
+// Diagnostics expose text and a small set of generation parameters only.
+// Never pass captured profile settings, headers, proxy URLs or credentials.
+function diagnosticPayload(payload) {
+    const textContent = content => typeof content === 'string' ? content
+        : Array.isArray(content) ? content.filter(p => ['text', 'input_text', 'output_text'].includes(p?.type))
+            .map(p => ({type: p.type, text: String(p.text || '')})) : '';
+    const result = {};
+    for (const key of ['model', 'chat_completion_source', 'temperature', 'top_p', 'max_tokens', 'max_completion_tokens', 'stream'])
+        if (typeof payload[key] === 'string' || typeof payload[key] === 'number' || typeof payload[key] === 'boolean') result[key] = payload[key];
+    if (Array.isArray(payload.messages)) result.messages = payload.messages.map(m => ({role: String(m?.role || ''), content: textContent(m?.content)}));
+    for (const key of ['prompt', 'system']) if (typeof payload[key] === 'string' || Array.isArray(payload[key])) result[key] = textContent(payload[key]);
+    return result;
+}
+function diagnosticResponse(body) {
+    const raw = body.toString('utf8');
+    // Structured JSON lets the downstream sanitizer mask secret-valued fields.
+    // Assistant text itself is also captured separately before segment parsing.
+    try { return JSON.parse(raw); } catch { return raw; }
+}
 async function sendProfile(connection, profiles, id, messages, maxTokens, options = {}) {
     const profile = profiles[id];
     if (!profile || !PATHS.has(profile.path) || typeof profile.marker !== 'string' || !profile.marker.startsWith('VERBA_CAPTURE_'))
@@ -95,11 +114,15 @@ async function sendProfile(connection, profiles, id, messages, maxTokens, option
     const prompt = messages.map(m=>m.content).join('\n');
     const payload = fillTemplate(profile.payload, prompt, profile.marker);
     payload.stream = false;
+    const report = event => { try { options.onDiagnostic?.(event); } catch { /* diagnostic only */ } };
+    if (options.onDiagnostic) report({boundary: 'server-http-request', route: profile.path, payload: diagnosticPayload(payload),
+        note: '프로필 템플릿 적용 후 SillyTavern 내부 생성 API에 보낸 본문의 텍스트·생성 설정입니다. 헤더·자격 증명·이미지는 제외합니다.'});
     const response = await requestLocal(connection, profile.path, payload, { signal: options.signal });
+    if (options.onDiagnostic) report({boundary: 'server-http-response', status: response.status, contentType: response.type, body: diagnosticResponse(response.body)});
     if (response.status < 200 || response.status >= 300) {
         const error = failure(response.status, `HTTP ${response.status}: ${response.body.toString('utf8').slice(0,2000)}`);
         error.retryAfter = response.retryAfter; throw error;
     }
     return { content: extractReply(response.body, response.type) };
 }
-module.exports = { PATHS, MAX_BYTES, failure, ownConnection, requestLocal, extractReply, fillTemplate, sendProfile };
+module.exports = { PATHS, MAX_BYTES, failure, ownConnection, requestLocal, extractReply, fillTemplate, sendProfile, diagnosticPayload };

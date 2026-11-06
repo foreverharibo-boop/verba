@@ -282,7 +282,11 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         // retranslate, or deliver an extra notification.
         await Promise.all([
             api('/capabilities',{},3000).then(caps=>{serverVersion=/^\d+\.\d+\.\d+$/.test(caps.version)?caps.version:null;}).catch(()=>{}),
-            ...recent.map(r=>status(r.id,0,3000).catch(error=>trace('diagnostic-read-unavailable',{jobId:r.id.slice(0,8),httpStatus:Number(error.status)||null}))),
+            ...recent.map(r=>status(r.id,0,3000).then(state=>{
+                if(getSettings().debugMode===true)onProgress({id:r.id,
+                    events:(state.events||[]).filter(e=>['second-translation-trace','first-translation-draft'].includes(e.kind)),
+                    result:{secondTranslationTrace:state.result?.secondTranslationTrace,firstTranslationDraft:state.result?.firstTranslationDraft}});
+            }).catch(error=>trace('diagnostic-read-unavailable',{jobId:r.id.slice(0,8),httpStatus:Number(error.status)||null}))),
         ]);
     }
     async function reconnectStatus(id,signal){

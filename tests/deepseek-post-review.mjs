@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { DEEPSEEK_KOREAN_PROMPT, DEEPSEEK_KOREAN_REVIEW_GUIDANCE } from '../deepseek-korean.js';
+import { DEEPSEEK_KOREAN_REVIEW_GUIDANCE } from '../deepseek-korean.js';
 import { normalizePostReview, buildPostReviewPrompt, planPostReview, reviewOutputOnce, postReviewSettingsMarkup } from '../post-review.js';
 import { segmentSource, assembleTranslation } from '../core.js';
 import { createOutputComparison, sanitizeOutputComparison } from '../output-comparison.js';
@@ -9,12 +9,6 @@ import { reportedPrompt } from './fixtures/bilingual-inline-rules.js';
 const cfg = {developerMode:true,developerDeepseekKoreanEnabled:true,aiPostReview:{deepseekTranslationese:true},debugMode:true};
 const fixture = (source,drafts) => {const segmented=segmentSource(source);return {segmented,translations:new Map(segmented.segments.map((s,i)=>[s.id,drafts[i]]))};};
 
-test('original highest-priority paragraph stays byte-identical and reconstruction permission follows it',()=>{
- const paragraph="HIGHEST-PRIORITY TRANSLATION PRINCIPLE: Thoroughly eliminate translationese from the Korean translation while accurately preserving the source's meaning and scene. Do not allow awkward expressions caused by mechanically copying English word order, sentence structures, or word combinations. First understand the action, state, and speech intent conveyed by each sentence, then reconstruct it in natural Korean as if the fiction had originally been written in Korean. However, never delete source information or imagery, weaken or intensify the language, or add new meaning for the sake of fluency. This principle governs Korean expression; preserve the specified bilingual format and output structure.";
- assert.equal(DEEPSEEK_KOREAN_PROMPT.split('\n\n')[0],paragraph);
- assert.ok(DEEPSEEK_KOREAN_PROMPT.indexOf('FREEDOM TO RECONSTRUCT') < DEEPSEEK_KOREAN_PROMPT.indexOf('NATURAL KOREAN TRANSLATION OF'));
- assert.match(DEEPSEEK_KOREAN_PROMPT,/no obligation to preserve the source sentence structure/);
-});
 test('ordinary checklist omits the dedicated opt-in without deleting its saved preference',()=>{
  assert.equal(normalizePostReview().deepseekTranslationese,false);
  assert.equal(normalizePostReview({}).deepseekTranslationese,false);

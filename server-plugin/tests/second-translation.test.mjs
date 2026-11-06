@@ -30,11 +30,15 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             assert.doesNotMatch(p, /^UNIFIED OUTPUT POST REVIEW/);
             if (p.startsWith('SECOND TRANSLATION')) {
                 rewrites++; assert.equal(initial, split);
+                assert.doesNotMatch(p, /HIGHEST-PRIORITY TRANSLATION PRINCIPLE|TRANSLATION SUCCESS CRITERION|ACTIVE SETTINGS PRECEDENCE/);
+                assert.match(p, /초안은.*보조 자료/);
+                if (name === 'deep') assert.match(p, /His voice carried a hint of irritation/);
+                else assert.doesNotMatch(p, /His voice carried a hint of irritation/);
                 for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL', 'PREVIOUS_CONTEXT_SENTINEL', 'first_translation', '기다리는 것을 했다.']) assert.ok(p.includes(marker), marker);
                 assert.equal(rows(p).length, 3);
                 return answer(p, true);
             }
-            initial++; return answer(p, false);
+            initial++; assert.match(p, /HIGHEST-PRIORITY TRANSLATION PRINCIPLE/); return answer(p, false);
         });
         const out = await engine.output(source, { oneTimeInstruction: 'ONETIME_SENTINEL', previousUserSource: 'PREVIOUS_CONTEXT_SENTINEL' });
         assert.equal(rewrites, 1); assert.equal(initial, split);
@@ -46,6 +50,31 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
         assert.ok(out.sourceMap.length > 0);
         assert.ok(out.sourceMap.some(row => out.translation.slice(row.start, row.end).includes('기다렸다')));
         assert.ok(out.sourceMap.every(row => !out.translation.slice(row.start, row.end).includes('기다리는 것을 했다')));
+        assert.deepEqual(config, before);
+    });
+    for (const mad of [false, true]) test(`${name}: second pass keeps custom output/MAD and drops custom first-pass DeepSeek prose (${mad})`, async () => {
+        let calls = 0;
+        const config = snapshot({
+            developerMadKoreanOutputEnabled: mad,
+            customTranslatorEnabled: true,
+            customTranslatorTemplates: { deepseek: 'CUSTOM_DEEPSEEK_SENTINEL', output: 'CUSTOM_OUTPUT_SENTINEL', mad: 'CUSTOM_MAD_SENTINEL' },
+            customTranslatorModified: { deepseek: true, output: true, mad: true },
+            aiPostReview: {},
+        });
+        const before = structuredClone(config);
+        const engine = create(config, async (_id, messages) => {
+            const p = messages[0].content;
+            const second = p.startsWith('SECOND TRANSLATION');
+            calls++;
+            assert.equal(p.includes('CUSTOM_DEEPSEEK_SENTINEL'), !second);
+            assert.match(p, mad ? /CUSTOM_MAD_SENTINEL/ : /CUSTOM_OUTPUT_SENTINEL/);
+            assert.match(p, /PREVIOUS_CONTEXT_SENTINEL/);
+            if (!mad) for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL']) assert.ok(p.includes(marker));
+            return answer(p, second);
+        });
+        const out = await engine.output('Dana waited.', { oneTimeInstruction: 'ONETIME_SENTINEL', previousUserSource: 'PREVIOUS_CONTEXT_SENTINEL' });
+        assert.equal(calls, 2);
+        assert.match(out.translation, /다나.*기다렸다/);
         assert.deepEqual(config, before);
     });
     test(`${name}: disabling either checkbox preserves single-pass behavior`, async () => {

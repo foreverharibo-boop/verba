@@ -185,17 +185,17 @@ export function createPromptBuilders(h) {
     }
     function policy(s = {}, options = {}) {
         const regular = regularPolicy(s, options);
-        if (!deepseekKoreanEnabled(s)) return regular;
+        if (!deepseekKoreanEnabled(s) || options.omitDeepseekBaseline === true) return regular;
         return lines([
             deepseekKoreanPrompt(s),
             'ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.',
             regular,
         ]);
     }
-    function buildOutputPrompt(segmented,s,oneTimeInstruction='',speakerIdentity={},tuning=null,speakerScopes={}) {
+    function buildOutputPrompt(segmented,s,oneTimeInstruction='',speakerIdentity={},tuning=null,speakerScopes={},promptOptions={}) {
         const routing='SPEAKER ROUTING: speaker_scope="target_dialogue" is already confirmed as TARGET CHARACTER speech; apply TARGET-only voice/rules there. Never apply that voice to speaker_scope="other_dialogue". For speaker_scope="unknown_dialogue", identify the actual speaker from the supplied segment sequence, then apply TARGET rules only when clearly TARGET; otherwise use OTHER rules. Narration/tagged content never receives dialogue voice.';
         const rows=segmented.segments.map(({id,type,text,tagContext,codeKind})=>({id,type,...(type==='dialogue_candidate'?{speaker_scope:speakerScopes[id]||'unknown_dialogue'}:{}),...(tagContext?.length?{tag_context:tagContext}:{}),...(codeKind?{code_kind:codeKind}:{}),text}));
-        return lines([policy(s,{oneTimeInstruction,speakerIdentity,nameTokens:segmented.nameTokens,tuning}),translationContext(s,speakerIdentity),OUTPUT_FORMAT_POLICY,routing,`Return ${schema}`,'SEGMENTS',j(rows)]);
+        return lines([policy(s,{oneTimeInstruction,speakerIdentity,nameTokens:segmented.nameTokens,tuning,omitDeepseekBaseline:promptOptions.omitDeepseekBaseline}),translationContext(s,speakerIdentity),OUTPUT_FORMAT_POLICY,routing,`Return ${schema}`,'SEGMENTS',j(rows)]);
     }
     function buildScopedOutputPrompt({segments,sourceContext,settings,oneTimeInstruction='',nameTokens=[],tuning=null,scope='narration',speakerIdentity={}}) {
         return lines([policy(settings,{scope,oneTimeInstruction,nameTokens,tuning,speakerIdentity}),translationContext(settings,speakerIdentity,scope),OUTPUT_FORMAT_POLICY,'Translate only TARGETS; SOURCE CONTEXT is reference only.',`Return ${schema}`,'SOURCE CONTEXT',j(h.boundReference(sourceContext,30000)),'TARGETS',j(segments.map(({id,type,text,tagContext,codeKind})=>({id,type,...(tagContext?.length?{tag_context:tagContext}:{}),...(codeKind?{code_kind:codeKind}:{}),text})))]);

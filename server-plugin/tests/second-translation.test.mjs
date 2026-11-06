@@ -124,3 +124,40 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
         await assert.rejects(engine.output(source), /초벌 번역은 표시하지 않았습니다/);
     });
 }
+
+test('verba: debug records exact second-pass drafts across split requests and keeps completed snapshot', async () => {
+    for (const debugMode of [true, false]) {
+        const events = []; let actualDrafts, calls = 0;
+        const engine = verba(snapshot({debugMode,developerOutputSplitCount:3,aiPostReview:{}}), async (_id, messages) => {
+            calls++;
+            const p = messages[0].content, second = p.startsWith('SECOND TRANSLATION');
+            if (second) actualDrafts = rows(p).map(({id,first_translation})=>({id,first_translation}));
+            return answer(p, second);
+        }, event => events.push(event));
+        const out = await engine.output(source, {diagnosticMessageId:8,diagnosticSwipeId:2});
+        const captures = events.filter(event=>event.kind==='first-translation-draft');
+        assert.equal(calls,4);
+        assert.equal(captures.length,debugMode?1:0);
+        if (debugMode) {
+            assert.deepEqual(captures[0].record.segments,actualDrafts);
+            assert.deepEqual(out.firstTranslationDraft,captures[0].record);
+            assert.equal(out.firstTranslationDraft.binding.messageId,8);
+            assert.equal(out.firstTranslationDraft.binding.swipeId,2);
+            assert.match(out.translation,/기다렸다/);
+            assert.ok(out.firstTranslationDraft.segments.some(row=>row.first_translation.includes('기다리는 것을 했다')));
+        } else assert.equal(out.firstTranslationDraft,undefined);
+    }
+});
+
+test('verba: cancellation retains the already-reported draft without returning a final result', async () => {
+    const controller=new AbortController(), events=[];
+    const engine=verba(snapshot({aiPostReview:{}}),async(_id,messages)=>{
+        const p=messages[0].content,second=p.startsWith('SECOND TRANSLATION');
+        if(second)controller.abort();
+        return answer(p,second);
+    },event=>events.push(event));
+    await assert.rejects(engine.output(source,{signal:controller.signal}),{name:'AbortError'});
+    const captures=events.filter(event=>event.kind==='first-translation-draft');
+    assert.equal(captures.length,1);
+    assert.ok(captures[0].record.segments.some(row=>row.first_translation.includes('기다리는 것을 했다')));
+});

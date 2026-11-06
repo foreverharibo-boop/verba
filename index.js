@@ -1,5 +1,5 @@
 import { exportDebugText } from './debug-export.js';
-import { secondTranslationEnabled, requestSecondTranslation } from './second-translation.js';
+import { secondTranslationEnabled, requestSecondTranslation, firstTranslationDraftSnapshot, readFirstTranslationDraft, firstTranslationDraftText } from './second-translation.js?v=0.6.134';
 import { sourceMapSummary, createSourceViewDiagnostics } from './source-map-diagnostics.js';
 import { createCharacterTranslationReference } from './character-translation-reference.js';
 import { createDisplayStateTrace } from './display-state-trace.js';
@@ -13,7 +13,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.133';
+import { createServerClient } from './server-client.js?v=0.6.134';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -79,9 +79,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.133';
+const EXTENSION_VERSION = '0.6.134';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.133';
+const SERVER_ENGINE_VERSION = '0.6.134';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -898,6 +898,25 @@ function traceLatestAssistantSource(phase) {
         }
     }
 }
+let lastFirstTranslationDraft = null;
+
+function renderFirstTranslationDraft() {
+    const text = document.querySelector('#verba-first-translation-draft');
+    if (text) text.textContent = firstTranslationDraftText(lastFirstTranslationDraft);
+    const button = document.querySelector('#verba-copy-first-translation-draft');
+    if (button) button.disabled = !settings.debugMode || !lastFirstTranslationDraft;
+}
+
+function rememberFirstTranslationDraft(value) {
+    if (settings.debugMode !== true) return;
+    const record = readFirstTranslationDraft(value);
+    if (!record) return;
+    // A late server poll must not replace a newer captured draft.
+    if (lastFirstTranslationDraft && record.capturedAt < lastFirstTranslationDraft.capturedAt) return;
+    lastFirstTranslationDraft = record;
+    renderFirstTranslationDraft();
+}
+
 let lastPromptConflicts = [];
 
 
@@ -941,6 +960,7 @@ const verbaServer = createServerClient({
 function applyServerTranslationProgress(state) {
     const prefix = `server:${state.id}:`;
     for (const event of state.events || []) {
+        if (event.kind === 'first-translation-draft') rememberFirstTranslationDraft(event.record);
         if (event.kind === 'profile') recordProfileAttempt(event.slot, event);
         if (event.kind === 'notice') notify(event.message, event.type);
         if (event.kind === 'retry') {
@@ -952,6 +972,7 @@ function applyServerTranslationProgress(state) {
             });
         }
     }
+    if (state.result?.firstTranslationDraft) rememberFirstTranslationDraft(state.result.firstTranslationDraft);
     if (['completed', 'failed', 'cancelled'].includes(state.state)) {
         for (const key of serverRetryStates.keys()) if (typeof key === 'string' && key.startsWith(prefix)) serverRetryStates.delete(key);
     }
@@ -1208,6 +1229,8 @@ async function copyDebugDiagnostic(diagnostic = lastDebugDiagnostic, { fileOnly 
     traceLatestAssistantSource('log-copy');
     await verbaServer.refreshDiagnostics();
     const snapshot = createDebugDiagnostic('manual-status', null, '복사 시점의 번역 상태');
+    snapshot.firstTranslationDraft = lastFirstTranslationDraft;
+    snapshot.firstTranslationDraftNotice = '2차에 전달한 1차 초안 전체를 포함합니다. 구간별 보호 표식도 전달 당시 그대로입니다.';
     snapshot.activeWork = {
         outputMessageIds: [...pendingOutputs.keys()],
         scheduledMessageIds: [...automaticTranslationTimers.keys()],
@@ -5206,10 +5229,15 @@ async function translateOutputText(source, options = {}) {
     normalizeLocallyRecoverableProtectedTokens(segmented, translations, settings, speakerScopes);
     comparison.capture('local-normalization', translations);
 
+    let firstTranslationDraft = null;
     if (secondTranslationEnabled(settings)) {
         const rewritten = await requestSecondTranslation({
             segmented, translations,
             options: { ...options, speakerIdentity }, request: requestSegments,
+            onDraft: settings.debugMode === true ? drafts => {
+                firstTranslationDraft = firstTranslationDraftSnapshot(drafts, outputBinding(source, options, options.diagnosticRuntime || 'browser'));
+                rememberFirstTranslationDraft(firstTranslationDraft);
+            } : undefined,
         });
         translations.clear();
         for (const [id, text] of rewritten) translations.set(id, text);
@@ -5364,7 +5392,7 @@ async function translateOutputText(source, options = {}) {
     return {
         translation: result,
         sourceMap: buildSourceMap(segmented, translations, result),
-        ...(settings.debugMode === true ? { outputComparison: comparison.finish(result) } : {}),
+        ...(settings.debugMode === true ? { outputComparison: comparison.finish(result), ...(firstTranslationDraft ? { firstTranslationDraft } : {}) } : {}),
     };
 }
 
@@ -12059,7 +12087,7 @@ function injectSettingsPanel() {
 
                 ${postReviewSettingsMarkup('verba', settings)}
                 <details id="verba-debug-settings" class="verba-tool-details">
-                    <summary>디버그 <small>최근 오류·번역 시간</small></summary>
+                    <summary>디버그 <small>최근 오류·번역 시간·1차 초안</small></summary>
                     <div class="verba-tool-details-content">
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
@@ -12071,6 +12099,14 @@ function injectSettingsPanel() {
                             <span>원문 변경 전·후 전체 기록 (선택)</span>
                         </label>
                         <div class="verba-help">디버그를 켠 뒤 이 옵션까지 켜면 변경 전·후 본문과 삭제/추가된 문장이 로그에 포함됩니다. 실제 본문은 최근 변경 8건만 메모리에 보관하며, 체크 상태만 기기에 저장됩니다. 한 번 켜면 직접 끌 때까지 새로고침 후에도 유지됩니다. 외부 공유 전 RP 내용을 반드시 확인해 주세요.</div>
+                        <details class="verba-tool-details">
+                            <summary>2차에 전달한 1차 초안</summary>
+                            <div class="verba-tool-details-content">
+                                <div class="verba-help">디버그를 켠 상태에서 2차에 전달한 가장 최근 초안 1건을 기록해요. 2차 완료·실패·취소 후에도 남으며, 디버그를 끄거나 새로고침하면 지워집니다. 보호 표식은 전달 당시 그대로예요. 전체 초안이 로그에도 포함됩니다.</div>
+                                <pre id="verba-first-translation-draft" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;text-align:left;user-select:text">${escapeHtml(firstTranslationDraftText(lastFirstTranslationDraft))}</pre>
+                                <button type="button" id="verba-copy-first-translation-draft" class="menu_button verba-wide" ${settings.debugMode && lastFirstTranslationDraft ? '' : 'disabled'}>1차 초안 복사</button>
+                            </div>
+                        </details>
                         <button type="button" id="verba-copy-last-debug" class="menu_button verba-wide" ${settings.debugMode ? '' : 'disabled'}>로그 복사</button>
                         <button type="button" id="verba-save-debug-file" class="menu_button verba-wide" ${settings.debugMode ? '' : 'disabled'}>로그 파일 저장</button>
                         <div class="verba-help">로그가 길거나 클립보드 복사가 막히면 TXT 파일로 저장할 수 있어요. 로그 복사에 실패해도 파일 다운로드로 전환합니다.</div>
@@ -12752,15 +12788,17 @@ function injectSettingsPanel() {
             displayStateTrace.reset();
             executionTrace.clear({ dropTimer: true });
             lastDebugDiagnostic = null;
+            lastFirstTranslationDraft = null;
         } else {
             executionTrace.start();
             traceLatestAssistantSource('debug-enabled');
         }
         outputTiming.setEnabled(settings.debugMode);
         renderOutputTiming();
+        renderFirstTranslationDraft();
         saveSettings();
         syncDebugCopyButton();
-        notify(settings.debugMode ? '디버그를 켰어요. 다음 출력 번역 시간과 마지막 오류를 기록해요.' : '디버그를 끄고 오류·시간 기록을 지웠어요.', 'info');
+        notify(settings.debugMode ? '디버그를 켰어요. 다음 출력 번역 시간·마지막 오류·2차에 넘긴 1차 초안을 기록해요.' : '디버그를 끄고 오류·시간·초안 기록을 지웠어요.', 'info');
     });
     fullSourceInput?.addEventListener('change', event => {
         fullSourceSnapshotsEnabled = Boolean(event.target.checked)
@@ -12775,6 +12813,17 @@ function injectSettingsPanel() {
             ? '이제부터 원문 변경 전후 본문 전체를 기록합니다. 로그 공유 전 내용을 확인해 주세요.'
             : '원문 전체 기록을 끄고 저장된 본문 비교 로그를 지웠어요.',
             fullSourceSnapshotsEnabled ? 'warning' : 'info');
+    });
+    panel.querySelector('#verba-copy-first-translation-draft')?.addEventListener('click', async () => {
+        if (!settings.debugMode || !lastFirstTranslationDraft) return;
+        try {
+            const method = await exportDebugText(firstTranslationDraftText(lastFirstTranslationDraft), {
+                copy: copyText, filename: 'verba-first-draft-' + Date.now() + '.txt',
+            });
+            notify(method === 'file' ? '초안 파일 다운로드를 요청했어요.' : '2차에 전달한 1차 초안을 복사했어요.', 'success');
+        } catch {
+            notify('초안을 내보내지 못했어요. 클립보드·다운로드 허용 여부를 확인해 주세요.', 'warning');
+        }
     });
     debugCopyButton?.addEventListener('click', async () => {
         try {

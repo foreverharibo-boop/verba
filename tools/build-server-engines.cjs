@@ -11,6 +11,7 @@ const deepOnly = process.argv[2] === '--deep-only';
 const roots = process.argv.slice(verbaOnly || deepOnly ? 3 : 2);
 if (roots.length !== (verbaOnly ? 1 : 2)) throw Error('Usage: build-server-engines.cjs VERBA_DIRECTORY DEEP_DIRECTORY | --verba-only VERBA_DIRECTORY | --deep-only SERVER_REPOSITORY DEEP_DIRECTORY');
 const overrides = {
+    rememberFirstTranslationDraft: "function rememberFirstTranslationDraft(record) { report({ kind: 'first-translation-draft', record }); }",
     settings: 'const settings = structuredClone(snapshot.settings);',
     liveContext: 'function liveContext() { return { ...snapshot.context, ConnectionManagerRequestService: { sendRequest: transport } }; }',
     normalizedCharacterNameLocks: 'function normalizedCharacterNameLocks() { return snapshot.nameLocks || []; }',
@@ -51,7 +52,7 @@ async function build(root, variant) {
     const importsText=[...wanted].filter(n=>imports.has(n)).map(n=>{
         const {node,spec}=imports.get(n);
         if(!node.source.value.startsWith('./')) throw Error('Browser-only import '+n);
-        return `import { ${spec.imported.name}${spec.imported.name===n?'':' as '+n} } from ${JSON.stringify(path.join(root,node.source.value))};`;
+        return `import { ${spec.imported.name}${spec.imported.name===n?'':' as '+n} } from ${JSON.stringify(path.join(root,node.source.value.split('?')[0]))};`;
     }).join('\n');
     const defs=[...wanted].filter(n=>!imports.has(n)).sort((a,b)=>(definitions.get(a)?.node.start||0)-(definitions.get(b)?.node.start||0))
         .map(n=>overrides[n]||definitions.get(n).text).join('\n\n');

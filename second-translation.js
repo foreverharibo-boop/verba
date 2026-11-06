@@ -24,7 +24,7 @@ export const SECOND_TRANSLATION_INSTRUCTION = `SECOND TRANSLATION — rebuild Ko
 모든 요청 ID의 최종 번역만 {"segments":[{"id":"구간 ID","translation":"최종 번역"}]} 형식의 JSON으로 반환하라. 설명·검토 과정·대안은 출력하지 마라.`;
 
 // Work in a separate map: an incomplete/cancelled rewrite must never publish the draft.
-export async function requestSecondTranslation({ segmented, translations, options = {}, request }) {
+export async function requestSecondTranslation({ segmented, translations, options = {}, request, onDraft }) {
     const checkAbort = () => {
         if (options.signal?.aborted) throw Object.assign(new Error('번역이 취소되었습니다.'), { name: 'AbortError' });
     };
@@ -45,6 +45,9 @@ ${JSON.stringify(source)}
 
 SEGMENTS
 ${JSON.stringify(drafts)}`;
+    // Capture exactly the draft strings used above, without another provider call.
+    // Diagnostics must never interfere with the translation itself.
+    try { onDraft?.(drafts); } catch { /* diagnostic only */ }
     try {
         const result = await request(prompt, segmented.segments, {
             ...options, stage: 'output-second-translation', onOutputResponse: undefined,
@@ -61,4 +64,37 @@ ${JSON.stringify(drafts)}`;
         if (options.signal?.aborted || error?.name === 'AbortError') throw error;
         throw new Error('2차 번역을 완료하지 못했습니다. 초벌 번역은 표시하지 않았습니다. 다시 시도해 주세요.', { cause: error });
     }
+}
+
+// Only explicitly selected draft fields can enter the diagnostic. No settings,
+// prompts, source text or provider credentials are copied from the request.
+export function firstTranslationDraftSnapshot(drafts, binding = null) {
+    return {
+        version: 1,
+        capturedAt: new Date().toISOString(),
+        binding,
+        segments: drafts.map(row => ({ id: row.id, first_translation: row.first_translation })),
+    };
+}
+
+export function readFirstTranslationDraft(value) {
+    if (value?.version !== 1 || !Array.isArray(value.segments) || !value.segments.length
+        || !value.segments.every(row => typeof row?.id === 'string' && typeof row.first_translation === 'string')) return null;
+    return {
+        version: 1,
+        capturedAt: typeof value.capturedAt === 'string' ? value.capturedAt : '',
+        binding: value.binding ? {
+            messageId: Number.isInteger(value.binding.messageId) ? value.binding.messageId : null,
+            swipeId: Number.isInteger(value.binding.swipeId) ? value.binding.swipeId : null,
+            sourceHash: typeof value.binding.sourceHash === 'string' ? value.binding.sourceHash : '',
+            route: ['browser', 'server-engine', 'server-new', 'server-reused'].includes(value.binding.route) ? value.binding.route : 'browser',
+        } : null,
+        segments: value.segments.map(row => ({ id: row.id, first_translation: row.first_translation })),
+    };
+}
+
+export function firstTranslationDraftText(value) {
+    const record = readFirstTranslationDraft(value);
+    if (!record) return '아직 기록된 초안이 없어요. 디버그 모드와 2차 번역을 켜고 새로 번역해 주세요.';
+    return `2차에 전달한 1차 초안\n기록 시각: ${record.capturedAt}\n메시지: ${record.binding?.messageId ?? '서버 자동 번역'} · 스와이프: ${record.binding?.swipeId ?? '-'}\n원문 식별값: ${record.binding?.sourceHash || '-'}\n\n${record.segments.map(row => row.first_translation).join('\n\n')}`;
 }

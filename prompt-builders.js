@@ -77,12 +77,12 @@ export function createPromptBuilders(h) {
         const oppa = pick('developerHongjinOppaFrequency',{off:'off',rare:'0–1/full response',natural:'1–2 spaced/full response',often:'frequent, not every line'},'off');
         const controls = [['profanity','developerHongjinProfanity'],['teasing','developerHongjinTeasing'],['vulgarity','developerHongjinVulgarity'],['playfulness','developerHongjinPlayfulness']].filter(([,key])=>s[key] && s[key]!=='natural').map(([label,key])=>`${label}=${s[key]}`);
         if (s.developerHongjinAgeBand && s.developerHongjinAgeBand!=='unspecified') controls.push(`age=${age}`);
-        if (!mad(s)) controls.push(`rewrite=${rewrite}`);
+        controls.push(`rewrite=${rewrite}`);
         return lines([
             translationProse(s, 'hongjin', compact
                 ? 'MANDATORY AUTHORIZED VOICE OVERRIDE — TARGET dialogue only: apply KIM HONG-JIN VOICE visibly in the final wording. It may freely strengthen surface profanity, vulgarity, rough diction and teasing beyond literal source wording without changing events, facts, relationships, consent or emotional direction. Sly/shameless/playful, casually rough/crude. Add fitting swearing/teasing, never rage or trivialize serious emotion. No invented dialect/threats/accusations/sexual acts or age caricatures.'
                 : 'KIM HONG-JIN VOICE: TARGET dialogue only; sly, shameless, playful, colloquially rough/crude. Add fitting swearing/teasing naturally, never rage or trivialize serious emotion. Preserve register/facts; no invented dialect/threats/accusations/sexual acts or age caricatures.', compact ? [[' — TARGET dialogue only', 'KIM HONG-JIN VOICE applies to confirmed TARGET dialogue only.']] : [['TARGET dialogue only; ', 'KIM HONG-JIN VOICE applies to confirmed TARGET dialogue only.']]),
-            controls.length ? `${controls.join('; ')}. Low/light/restrained=subtle; high/active/open=strong.${compact ? '' : ' MAD reconstruction wins.'}` : '',
+            controls.length ? `${controls.join('; ')}. Low/light/restrained=subtle; high/active/open=strong.` : '',
             translationProse(s, 'hongjin', 'USER-DIRECTED PROFANITY GUARD: no profanity directed at USER; non-abusive rebukes and situation/self/NPC swearing allowed.'),
             oppa==='off' ? '' : `오빠: ${oppa}; self-reference by TARGET (male only)→USER exclusively, never you/NPC/group/uncertain listeners.`,
             translationProse(s, 'hongjin', compact ? 'Natural name+insult syntax; vocatives address listeners.' : 'Natural name+insult syntax; playful honorifics allowed; vocatives address actual listeners.')
@@ -139,7 +139,7 @@ export function createPromptBuilders(h) {
             if(address) rows.push(`TARGET→USER generic address=${j(address)}; strength=${s.developerTargetToUserAddressStrength || 'natural'} (natural=optional, prefer=prefer when needed, strict=only this explicit generic address); frequency=${s.developerTargetToUserAddressFrequency || 'natural'}. Explicit source pet names/titles outrank this; natural omission allowed; never apply to ambiguous/plural/OTHER listeners or every you.`);
         }
         if(t && s.beginnerCharacterGuideEnabled) rows.push(`TARGET dialogue guide: personality=${j(s.beginnerPersonalityTraits || [])}; speech=${j(s.beginnerSpeechStyles || [])}; attitude=${j(s.beginnerConversationAttitudes || [])}; age=${s.beginnerAgeBand || 'unspecified'}; notes=${j([s.beginnerPersonalityCustom || '',s.beginnerSpeechCustom || ''])}. Delivery only, no invented traits/events or age caricatures.`);
-        const voice=hongjin(s,scope); if(voice) rows.push(voice);
+        const voice=hongjin(s,scope,mad(s)); if(voice) rows.push(voice);
         return rows.length ? 'TUNING — surface only; preserve facts, force and scope.\n'+rows.join('\n') : '';
     }
     function userRules(s, oneTime, over, scope) {
@@ -173,14 +173,15 @@ export function createPromptBuilders(h) {
         const [bilingualOpen,bilingualClose]=bilingual ? h.bilingualDialogueBracketPair(s) : ['(',')'];
         return lines([
             exclusive ? translationProse(s, 'mad', 'TOP PRIORITY — NO MISOGYNY: ban misogyny/gender degradation over all voice settings; source profanity keeps its force in non-gendered wording.') : hongjinEnabled(s) ? (targetScope(scope) ? translationProse(s, 'hongjin', noMisogyny) : noMisogyny) : '',
-            exclusive ? lines([translationProse(s,'mad',madFidelity),names,madRules(s),madKoreanTaste(s,scope),hongjin(s,scope,true)]) : (custom ? translationProse(s,'primary',str(s.baseTranslationCustom.prompt)) : lines([translationProse(s,'primary',mode(s) === 2 ? 'E→K: idiomatic Korean; preserve intentional fragments, roughness and ambiguity.' : basic), translationProse(s,'primary',fidelity), names, translationProse(s,'primary',nameParticles)])),
+            custom ? translationProse(s,'primary',str(s.baseTranslationCustom.prompt)) : lines([translationProse(s,'primary',mode(s) === 2 ? 'E→K: idiomatic Korean; preserve intentional fragments, roughness and ambiguity.' : basic), translationProse(s,'primary',fidelity), names, translationProse(s,'primary',nameParticles)]),
+            exclusive ? lines([translationProse(s,'mad',madFidelity),madRules(s),'MAD COMPOSITION: apply MAD to the Korean translation alongside every enabled user/custom prompt and taste within its original scope. Do not suppress other settings or source-language halves required by active output-format rules.']) : '',
             exclusive ? madFormat : format,
             galbwae(s, scope),
-            exclusive ? 'Korean only.' : userRules(s,oneTimeInstruction,over,scope),
-            !exclusive && bilingual ? `BILINGUAL DIALOGUE IS REQUIRED: every direct-dialogue target must contain the exact source dialogue first, then one space and the Korean translation inside ${bilingualOpen}${bilingualClose}, all inside the same quotation marks. Korean-only dialogue is invalid. Narration remains Korean-only unless GLOBAL or CUSTOM OUTPUT explicitly says otherwise.` : '',
+            userRules(s,oneTimeInstruction,over,scope),
+            bilingual ? `BILINGUAL DIALOGUE IS REQUIRED: every direct-dialogue target must contain the exact source dialogue first, then one space and the Korean translation inside ${bilingualOpen}${bilingualClose}, all inside the same quotation marks. Korean-only dialogue is invalid. Narration remains Korean-only unless GLOBAL or CUSTOM OUTPUT explicitly says otherwise.` : '',
             identity(speakerIdentity,exclusive),lockBlock(nameTokens,speakerIdentity),banned(s),
-            scope==='tagged_content'?'TAGGED CONTENT: Korean-only visible text, including dates/weather/location; preserve metadata layout. No bilingual output or dialogue voice.':(!exclusive?'Korean only unless active GLOBAL/ALL-DIALOGUE/CUSTOM OUTPUT explicitly requests bilingual output for this scope.':''),
-            exclusive ? `SCOPE=${scope}.` : `SCOPE=${scope}. Apply dialogue-only rules solely to the actual speaker's dialogue, never narration or a different speaker.`
+            scope==='tagged_content'?'TAGGED CONTENT: Korean-only visible text, including dates/weather/location; preserve metadata layout. No bilingual output or dialogue voice.':'Korean only unless active GLOBAL/ALL-DIALOGUE/CUSTOM OUTPUT explicitly requests bilingual output for this scope.',
+            `SCOPE=${scope}. Apply dialogue-only rules solely to the actual speaker's dialogue, never narration or a different speaker.`
         ]);
     }
     function policy(s = {}, options = {}) {
@@ -188,7 +189,7 @@ export function createPromptBuilders(h) {
         if (!deepseekKoreanEnabled(s) || options.omitDeepseekBaseline === true) return regular;
         return lines([
             deepseekKoreanPrompt(s),
-            'ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.',
+            'ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. GALBWAE exclusive Korean-only rules override the baseline bilingual exception. MAD is an additive Korean writing style and does not suppress active prompts or bilingual formatting. Do not invent factual content.',
             regular,
         ]);
     }

@@ -1,3 +1,5 @@
+import { maskRequestedBilingualSource, bilingualScopeRequested } from './output-format.js';
+
 // Output-only deterministic guard. Never delete arbitrary Latin text: only an
 // exact source copy paired with a Korean counterpart can be removed.
 const pairs = [['[',']'],['(',')'],['（','）'],['【','】']];
@@ -88,8 +90,25 @@ export function enforceMadKoreanOnly(segmented, translations, settings={}) {
     for(const segment of segmented.segments||[]) {
         const current=translations.get(segment.id);
         if(typeof current!=='string') continue;
+        // An enabled output-format rule now remains active alongside MAD.
+        const restore = text => names.reduce((value, name) => value.split(name.token).join(name.original || name.source || name.value || ''), String(text));
+        const kind = segment.type === 'dialogue_candidate' ? 'dialogue'
+            : segment.type === 'code_content' ? (segment.codeKind === 'fenced' ? 'fenced' : 'code') : 'narration';
+        if (segment.type !== 'tagged_content' && bilingualScopeRequested(settings, kind)) continue;
+        const masked = maskRequestedBilingualSource(segment, current, settings, restore);
+        const protectedCopies = [];
+        let guarded = '';
+        for (let i = 0; i < current.length;) {
+            if (current[i] === masked[i]) { guarded += current[i++]; continue; }
+            const start = i;
+            while (i < current.length && current[i] !== masked[i]) i++;
+            let key = `@@VERBA_MAD_BILINGUAL_${String(protectedCopies.length).padStart(4, '0')}@@`;
+            while (current.includes(key)) key += '_';
+            protectedCopies.push([key, current.slice(start, i)]);
+            guarded += key;
+        }
         const units=sourceUnits(String(segment.text||''),names);
-        let next=reduceWrapped(current,units,names);
+        let next=reduceWrapped(guarded,units,names);
         next=next.split(/(\r?\n)/u).map(line=>reduceWrapped(line,units,names)).join('');
         // Inline emphasis can occur within a larger narration segment. Match
         // only emphasis, never HTML, links, executable code or their attributes.
@@ -99,6 +118,7 @@ export function enforceMadKoreanOnly(segmented, translations, settings={}) {
             const wrapper=[['**','**'],['__','__'],['*','*'],['_','_'],...quotes,['[',']']].find(p=>unwrap(source,...p)!==null);
             if(wrapper && unwrap(strip(next),...wrapper)===null) next=wrapper[0]+next.trim()+wrapper[1];
         }
+        for (const [key, value] of protectedCopies) next = next.split(key).join(value);
         if(next!==current && next.trim() && opaque(next)===opaque(current)) {
             translations.set(segment.id,next);stats.changedRows++;
         }

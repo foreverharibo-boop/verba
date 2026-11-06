@@ -15,8 +15,8 @@ test('received instructions, enabled state and exclusive-mode denial are distinc
  assert.equal(off.effectiveScopes.dialogue,false);
  const mad=bilingualSettingsDiagnostic({...settings,developerMadKoreanOutputEnabled:true});
  assert.equal(mad.slots.allDialogue.enabled,true);
- assert.equal(mad.effectiveScopes.dialogue,false);
- assert.equal(mad.blocker,'mad-exclusive');
+ assert.equal(mad.effectiveScopes.dialogue,true);
+ assert.equal(mad.blocker,'none');
  assert.doesNotMatch(JSON.stringify(active),/대사 한영병기/);
 });
 test('assembly and exact requested-English loss, not merely Latin counts, are tracked',()=>{

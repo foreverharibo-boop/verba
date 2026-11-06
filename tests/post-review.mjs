@@ -83,8 +83,8 @@ test('both English-first and Korean-first bilingual replacements are accepted',a
 test('settings section precedes Debug, binds persistence, and diagnostics whitelist check keys only',()=>{
  const source=readFileSync(new URL('../index.js',import.meta.url),'utf8');
  assert.ok(source.indexOf("${postReviewSettingsMarkup(")<source.indexOf('<details id="verba-debug-settings"'));
- assert.match(source,/settings.aiPostReview = \{.*\[key\]: event.target.checked \};\n\s*saveSettings\(\)/);
- assert.equal((postReviewSettingsMarkup('verba',{}).match(/data-post-review=/g)||[]).length,POST_REVIEW_CHECKS.length);
+ assert.match(source,/settings.aiPostReview = \{.*\[key\]: input.checked \};\n\s*saveSettings\(\)/);
+ assert.equal((postReviewSettingsMarkup('verba',{}).match(/data-post-review=/g)||[]).length,POST_REVIEW_CHECKS.filter(x => x.key !== 'deepseekTranslationese').length);
  const data=fixture('SECRET SOURCE','비밀');const report=createOutputComparison(data.segmented,true);
  report.postReview({checked:1,changed:0,status:'failed',checks:['meaning','SECRET'],prompt:'SECRET'});
  const output=sanitizeOutputComparison(report.finish('비밀'),{summaryOnly:true});

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { segmentSource,assembleTranslation } from '../core.js';
 import { enforceMadKoreanOnly } from '../mad-output.js';
 import { planPostReview,buildPostReviewPrompt } from '../post-review.js';
-const settings={developerMadKoreanOutputEnabled:true,allDialoguePrompt:'대사 한영병기',globalPrompt:'GLOBAL_BILINGUAL_SENTINEL'};
+const settings={developerMadKoreanOutputEnabled:true,allDialoguePromptEnabled:false,allDialoguePrompt:'대사 한영병기',globalPromptEnabled:false,globalPrompt:'GLOBAL_BILINGUAL_SENTINEL'};
 const cases=[
  ['He waited.','He waited.\n그는 기다렸다.','그는 기다렸다.'],
  ['He waited.','그는 기다렸다.\nHe waited.','그는 기다렸다.'],
@@ -40,8 +40,8 @@ const html=assembleTranslation(seg,map,{settings});
 assert.match(html,/<div class="card"><span>조용히 있어\.<\/span><\/div>/);
 assert.match(html,/const label = "문이 잠겼다\.";/);
 const plan=planPostReview(seg,map,settings);
-assert.ok(!plan.selected.includes('bilingual'));
+
 const prompt=buildPostReviewPrompt(plan,seg,settings);
 assert.ok(!prompt.includes('대사 한영병기')&&!prompt.includes('GLOBAL_BILINGUAL_SENTINEL'));
-assert.match(prompt,/MAD KOREAN-ONLY/);
+assert.doesNotMatch(prompt,/MAD KOREAN-ONLY/);
 console.log('PASS MAD output: pair orders, markers, off mode, idempotence, HTML/code safety, review authority');

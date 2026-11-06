@@ -3012,7 +3012,6 @@ export function findTranslationPromptConflicts({
     includeDialogue = true,
     includeCharacterDialogue = true,
 } = {}) {
-    if (madKoreanExclusiveEnabled(settings)) return [];
     const sources = [
         { key: 'oneTime', text: oneTimeInstruction },
         ...(includeCharacterDialogue ? [{ key: 'characterDialogue', text: enabledPromptValue(settings, 'dialoguePrompt', 'dialoguePromptEnabled') }] : []),

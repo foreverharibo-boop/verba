@@ -13,8 +13,7 @@ export function bilingualSettingsDiagnostic(settings = {}) {
     const slot = (text, enabled) => ({ enabled, length:String(text || '').length,
         requested: Object.fromEntries(KINDS.map(k=>[k,promptRequestsScope(text,k)])) });
     const effective = Object.fromEntries(KINDS.map(k=>[k,bilingualScopeRequested(settings,k)]));
-    const blocker = settings.developerMadKoreanOutputEnabled === true ? 'mad-exclusive'
-        : settings.developerMode === true && (['all','dialogueInner'].includes(settings.chuseokGalbwaeScope)
+    const blocker = settings.developerMode === true && (['all','dialogueInner'].includes(settings.chuseokGalbwaeScope)
             || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== 'off') ? 'galbwae-exclusive' : 'none';
     return { slots:{global:slot(settings.globalPrompt,settings.globalPromptEnabled!==false),
         allDialogue:slot(settings.allDialoguePrompt,settings.allDialoguePromptEnabled!==false),

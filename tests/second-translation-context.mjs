@@ -19,7 +19,7 @@ const base = {
     developerUserToTargetRegister: 'jondaetmal', translateTaggedContent: true,
     bannedWords: '금지표현', dialogueEndingPreferred: 'ENDING_SENTINEL',
 };
-const precedence = 'ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. MAD or GALBWAE exclusive Korean-only rules override the baseline bilingual exception. Do not invent factual content.';
+const precedence = 'ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. GALBWAE exclusive Korean-only rules override the baseline bilingual exception. MAD is an additive Korean writing style and does not suppress active prompts or bilingual formatting. Do not invent factual content.';
 
 for (const [name, extra] of [
     ['ordinary settings', {}],

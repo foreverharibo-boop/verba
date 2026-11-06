@@ -11,15 +11,15 @@ const translate=r=>{
  return out;
 };
 for(const [name,create] of [['verba',verba],['deep',deep]]) for(const [mode,extra] of [['normal',{}],['compressed',{developerMode:true,developerCompressedPromptEnabled:true}],['extreme',{developerMode:true,developerExtremeCompressedPromptEnabled:true}],['split',{developerMode:true,developerOutputSplitCount:2}],['minimal',{developerMode:true,developerMinimalPromptEnabled:true}]])for(const reviewMode of ['off','unchanged','failure','reintroduce']) {
- test(`${name}/${mode}/${reviewMode}: MAD excludes bilingual directives and strips only paired source`,async()=>{
+ test(`${name}/${mode}/${reviewMode}: MAD respects disabled bilingual directives and strips only paired source`,async()=>{
   let firstCalls=0,reviews=0;
-  const engine=create({settings:{profileId:'A',autoProfileFallback:false,serverRetryLimit:1,debugMode:true,developerMadKoreanOutputEnabled:true,allDialoguePromptEnabled:true,allDialoguePrompt:'대사 한영병기',globalPrompt:'GLOBAL_BILINGUAL_SENTINEL',...(reviewMode==='off'?{aiPostReview:{}}:{}),...extra},profiles:{A:{}},nameLocks:[],character:{},context:{}},async(_id,messages)=>{
+  const engine=create({settings:{profileId:'A',autoProfileFallback:false,serverRetryLimit:1,debugMode:true,developerMadKoreanOutputEnabled:true,allDialoguePromptEnabled:false,allDialoguePrompt:'대사 한영병기',globalPromptEnabled:false,globalPrompt:'GLOBAL_BILINGUAL_SENTINEL',...(reviewMode==='off'?{aiPostReview:{}}:{}),...extra},profiles:{A:{}},nameLocks:[],character:{},context:{}},async(_id,messages)=>{
    const p=messages.map(x=>x.content).join('\n');
    assert.doesNotMatch(p,/대사 한영병기|GLOBAL_BILINGUAL_SENTINEL/);
    if(p.includes('\nREVIEW_UNITS\n')){
     reviews++;
     const rows=JSON.parse(p.split('\nREVIEW_UNITS\n')[1]);
-    assert.ok(rows.every(r=>r.type!=='bilingual'&&!r.checks.includes('bilingual')));
+    assert.ok(rows.every(r=>r.type!=='bilingual'));
     if(reviewMode==='failure')throw Error('review intentionally unavailable');
     return {content:JSON.stringify({segments:rows.map(r=>({id:r.id,translation:reviewMode==='reintroduce'?r.CURRENT+' (Stay quiet.)':r.CURRENT}))})};
    }

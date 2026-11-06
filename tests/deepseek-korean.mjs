@@ -102,14 +102,14 @@ test('server sends regular full composition, previous context and identity with 
     assert.equal(calls,1);assert.match(out.translation,/다나/);assert.match(out.translation,/KEEP_CODE/);assert.match(out.translation,/<Info_panel>맑음<\/Info_panel>/);
     assert.deepEqual(original,snapshot(settings));
 });
-test('server keeps ordinary MAD Korean-only enforcement',async()=>{
+test('server retains requested bilingual output with MAD',async()=>{
     const s={...settings,developerMadKoreanOutputEnabled:true,allDialoguePrompt:'대사 한영병기'};
     const engine=createEngine(snapshot(s),async(id,messages)=>{
         assert.match(messages[0].content,/MAD KOREAN/);
         return {content:JSON.stringify({segments:[{id:'seg_0000',translation:'"Wait here. [여기서 기다려.]"'}]})};
     });
     const out=await engine.output('"Wait here."',{speakerIdentity:identity});
-    assert.equal(out.translation,'"여기서 기다려."');
+    assert.match(out.translation,/Wait here/); assert.match(out.translation,/여기서 기다려/);
 });
 test('server unified review retains ordinary selected checks and custom format',async()=>{
     const s={...settings,aiPostReview:{bilingual:true},customTranslatorEnabled:true,customTranslatorTemplates:{output:'For dialogue, preserve English and include Korean in square brackets: "English [한국어]".'},customTranslatorModified:{output:true}};

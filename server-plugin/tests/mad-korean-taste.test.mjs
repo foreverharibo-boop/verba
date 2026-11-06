@@ -25,10 +25,11 @@ for (const [name,create] of [['verba',createVerba],['verba-deep',createDeep]]) {
                 assert.ok(++calls<=2,'unexpected extra requests');
                 const p=messages.map(m=>m.content).join('\n');
                 assert.equal(id,'A');
-                assert.equal(p.includes('KOREAN CHARACTER ADD-ON:'),korean,name+' Korean toggle');
-                assert.doesNotMatch(p,/SENTINEL|English-character taste|ENGLISH-SPEAKING CHARACTER TASTE/);
+                assert.equal(/Korean-character taste|KOREAN-NATIVE CHARACTER TASTE/.test(p),korean,name+' Korean toggle');
+                for (const value of ['GLOBAL_SENTINEL','DIALOGUE_SENTINEL','ONETIME_SENTINEL']) assert.ok(p.includes(value),value);
+                assert.match(p,/English(?:-speaking)?-character taste|ENGLISH-SPEAKING CHARACTER TASTE/);
                 assert.equal(/KIM HONG-JIN VOICE|DEVELOPER KIM HONGJIN FLAVOR|KIM HONG-JIN FLAVOR — TARGET/.test(p),hongjin);
-                if(korean)assert.match(p,/PronounOmission=active|SUBJECT \/ PRONOUN EXPRESSION — ACTIVE/);
+                if(korean)assert.match(p,/pronoun omission=active|pronoun=active|PronounOmission=active|SUBJECT \/ PRONOUN EXPRESSION — ACTIVE/);
                 const marker='\nSEGMENTS\n';
                 const at=p.lastIndexOf(marker);assert.ok(at>=0);
                 const rows=JSON.parse(p.slice(at+marker.length));

@@ -60,8 +60,8 @@ const multi=core.buildMultiSelectionPrompt({...options,selections:[{id:'multi_00
 assert.match(multi,/CUSTOM_SELECTION/);assert.match(multi,/in_dialogue/);assert.match(multi,/source_context/);assert.match(multi,/multi_0000/);
 for(const mad of [false,true]) for(const hongjin of [false,true]) {
  const s={...settings,developerMadKoreanOutputEnabled:mad,developerHongjinFlavorEnabled:hongjin};const p=output(s);
- assert.equal(p.includes('CUSTOM_MAD'),mad);assert.equal(p.includes('CUSTOM_HONGJIN'),hongjin);assert.equal(p.includes('CUSTOM_OUTPUT'),!mad);
- if(mad){assert.match(p,/PAIR SPEECH LOCK: TARGET→USER=반말/);assert.doesNotMatch(p,/GLOBAL_SENTINEL/);}
+ assert.equal(p.includes('CUSTOM_MAD'),mad);assert.equal(p.includes('CUSTOM_HONGJIN'),hongjin);assert.equal(p.includes('CUSTOM_OUTPUT'),true);
+ if(mad){assert.match(p,/PAIR SPEECH LOCK: TARGET→USER=반말/);assert.match(p,/GLOBAL_SENTINEL/);}
  if(hongjin){assert.match(p,/profanity=high/);assert.match(p,/오빠: frequent/);assert.equal(p.split('CUSTOM_HONGJIN').length-1,1);}
  for(const scope of ['narration','tagged_content','other_dialogue','target_dialogue']) {
   const scoped=core.buildScopedOutputPrompt({segments:segmented.segments,sourceContext:source,settings:s,scope,speakerIdentity:identity,nameTokens:segmented.nameTokens});

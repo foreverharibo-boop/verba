@@ -67,9 +67,10 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             const second = p.startsWith('SECOND TRANSLATION');
             calls++;
             assert.equal(p.includes('CUSTOM_DEEPSEEK_SENTINEL'), !second);
-            assert.match(p, mad ? /CUSTOM_MAD_SENTINEL/ : /CUSTOM_OUTPUT_SENTINEL/);
+            assert.match(p, /CUSTOM_OUTPUT_SENTINEL/);
+            assert.equal(p.includes('CUSTOM_MAD_SENTINEL'),mad);
             assert.match(p, /PREVIOUS_CONTEXT_SENTINEL/);
-            if (!mad) for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL']) assert.ok(p.includes(marker));
+            for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL']) assert.ok(p.includes(marker));
             return answer(p, second);
         });
         const out = await engine.output('Dana waited.', { oneTimeInstruction: 'ONETIME_SENTINEL', previousUserSource: 'PREVIOUS_CONTEXT_SENTINEL' });

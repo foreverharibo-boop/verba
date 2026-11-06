@@ -12,7 +12,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.128';
+import { createServerClient } from './server-client.js?v=0.6.129';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -78,9 +78,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.128';
+const EXTENSION_VERSION = '0.6.129';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.128';
+const SERVER_ENGINE_VERSION = '0.6.129';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -2665,7 +2665,7 @@ function renderCurrentAppliedRules() {
                     ? (DEVELOPER_HONGJIN_OPPA_FREQUENCY_OPTIONS.find(option => option.value === settings.developerHongjinOppaFrequency)?.label || '사용 안 함')
                     : '적용 안 함'],
                 ['E→K 프롬프트 전송', madKoreanExclusiveMode()
-                    ? `미친 한출${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''}${settings.koreanFlavorEnabled ? ' + 한캐의 맛' : ''} · 나머지 설정 일시 제외${settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? ' · 미친압축' : settings.developerMode && settings.developerCompressedPromptEnabled ? ' · 압축 테스트' : ''}`
+                    ? `미친 한출${settings.developerHongjinFlavorEnabled ? ' + 김홍진의 맛' : ''}${settings.koreanFlavorEnabled ? ' + 한캐의 맛' : ''} · 체크된 프롬프트·설정 함께 적용${settings.developerMode && settings.developerExtremeCompressedPromptEnabled ? ' · 미친압축' : settings.developerMode && settings.developerCompressedPromptEnabled ? ' · 압축 테스트' : ''}`
                     : (settings.developerMode && (settings.developerCompressedPromptEnabled || settings.developerExtremeCompressedPromptEnabled)
                         ? `기존 설정 전체 적용 · ${settings.developerExtremeCompressedPromptEnabled ? '미친압축' : '압축 테스트'}`
                         : '기존 설정 전체 적용')],

@@ -2,8 +2,7 @@ import { customTranslationInstruction } from './translation-composer.js';
 import { bilingualPromptRequestsOutput, isBilingualFormatHeading, hasBilingualInstructionExclusion } from './bilingual-intent.js';
 
 export function activeCustomOutput(settings = {}) {
-    const exclusive = settings.developerMadKoreanOutputEnabled === true
-        || (settings.developerMode === true && (['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+    const exclusive = (settings.developerMode === true && (['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
             || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== 'off'));
     return exclusive ? '' : (customTranslationInstruction(settings, 'output') || '');
 }
@@ -98,8 +97,7 @@ export function hasExplicitNonDialogueBilingualScope(prompt) {
         && scopeKinds.some(kind => kind !== 'dialogue' && promptRequestsScope(prompt, kind));
 }
 export function bilingualScopeRequested(settings = {}, kind = 'narration') {
-    if (settings.developerMadKoreanOutputEnabled === true
-        || settings.developerMode === true && (['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
+    if (settings.developerMode === true && (['all', 'dialogueInner'].includes(settings.chuseokGalbwaeScope)
             || settings.chuseokGalbwaeEnabled === true && settings.chuseokGalbwaeScope !== 'off')) return false;
     return (settings.globalPromptEnabled !== false && promptRequestsScope(settings.globalPrompt, kind))
         || (kind === 'dialogue' && settings.allDialoguePromptEnabled !== false && promptRequestsScope(settings.allDialoguePrompt, kind))
@@ -164,13 +162,11 @@ export function maskRequestedBilingualSource(segment, translation, settings = {}
 }
 
 export function activeOutputFormatRules(settings = {}) {
-    if (settings.developerMadKoreanOutputEnabled === true) return {};
     return {global: settings.globalPromptEnabled !== false ? settings.globalPrompt || '' : '',
         dialogue: settings.allDialoguePromptEnabled !== false ? settings.allDialoguePrompt || '' : '',
         customOutput: activeCustomOutput(settings)};
 }
 export function outputFormatReviewContext(settings = {}) {
-    if (settings.developerMadKoreanOutputEnabled === true) return 'MAD KOREAN-ONLY: never add source-language copies. Preserve code, tags, tokens, URLs and genuine brands/acronyms.';
     return OUTPUT_FORMAT_POLICY + '\nFORMAT REFERENCE (retain requested source copies; do not expand their scope):\n'
         + JSON.stringify(activeOutputFormatRules(settings));
 }

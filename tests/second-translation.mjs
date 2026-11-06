@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { secondTranslationEnabled, requestSecondTranslation } from '../second-translation.js';
+import { SECOND_TRANSLATION_INSTRUCTION, secondTranslationEnabled, requestSecondTranslation } from '../second-translation.js';
 
 const segmented = { segments: [{ id: 'one', text: 'Stay.' }, { id: 'two', text: 'After.' }] };
 const translations = new Map([['one', '있어.'], ['two', '그다음.']]);
@@ -17,7 +17,7 @@ test('rewrite receives only source and draft, ignores stale first-pass prompt; r
     const before = [...translations];
     const result = await requestSecondTranslation({ segmented, translations, basePrompt: 'ACTIVE_SENTINEL', options: { splitBatchCount: 3, splitBatchIndex: 3, previousUserSource: 'PREVIOUS_SENTINEL' }, request: async (prompt, rows, options) => {
         assert.doesNotMatch(prompt, /ACTIVE_SENTINEL/);
-        assert.match(prompt, /단어만 바꾸지 말고 어순과 문장 구조까지 다듬어라/);
+        assert.ok(prompt.startsWith(SECOND_TRANSLATION_INSTRUCTION + '\n\nSOURCE_CONTEXT\n'));
         const drafts = JSON.parse(prompt.split('\nSEGMENTS\n')[1].split('\n')[0]);
         assert.deepEqual(drafts, [{ id: 'one', type: 'narration', text: 'Stay.', first_translation: '있어.' }, { id: 'two', type: 'narration', text: 'After.', first_translation: '그다음.' }]);
         assert.equal(options.stage, 'output-second-translation');

@@ -17,7 +17,7 @@ test('rewrite receives source, draft and active prompt; replaces all IDs atomica
     const before = [...translations];
     const result = await requestSecondTranslation({ segmented, translations, basePrompt: 'ACTIVE_SENTINEL', options: { splitBatchCount: 3, splitBatchIndex: 3 }, request: async (prompt, rows, options) => {
         assert.match(prompt, /ACTIVE_SENTINEL/);
-        assert.match(prompt, /not wording you must preserve/);
+        assert.match(prompt, /NO preservation priority/);
         const drafts = JSON.parse(prompt.split('\nSOURCE_AND_FIRST_TRANSLATION\n')[1].split('\n')[0]);
         assert.deepEqual(drafts, [{ id: 'one', source: 'Stay.', first_translation: '있어.' }, { id: 'two', source: 'After.', first_translation: '그다음.' }]);
         assert.equal(options.stage, 'output-second-translation');

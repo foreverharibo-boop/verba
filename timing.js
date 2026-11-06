@@ -13,8 +13,8 @@ function describe(options) {
     const stage = String(options.stage || '');
     const retry = Number(options.retryAttempt) > 0 || Number(options.segmentAttempt) > 0 || options.fallback === true;
     const label = LABELS.find(([key]) => stage.includes(key))?.[1]
-        || (stage.endsWith(':single') ? '누락 구간 개별 복구' : PRIMARY.test(stage) ? '본 번역' : '보조 요청');
-    const kind = retry ? 'retry' : /repair|:single$/.test(stage) ? 'repair' : PRIMARY.test(stage) ? 'primary' : 'aux';
+        || (stage.endsWith(':single') ? '누락 구간 개별 복구' : PRIMARY.test(stage) ? '1차 번역' : '보조 요청');
+    const kind = retry ? 'retry' : /repair|:single$/.test(stage) ? 'repair' : PRIMARY.test(stage) ? 'primary' : stage === 'output-second-translation' ? 'secondary' : 'aux';
     const reason = options.fallback ? '대체 프로필' : Number(options.retryAttempt) > 0 ? '요청 오류 재시도'
         : Number(options.segmentAttempt) > 0 ? '응답 형식·구간 누락 재시도' : '';
     const batch = [2, 3].includes(options.splitBatchCount) && Number.isInteger(options.splitBatchIndex) && options.splitBatchIndex >= 1 && options.splitBatchIndex <= options.splitBatchCount
@@ -39,7 +39,7 @@ export function createOutputTiming({ now = () => performance.now(), date = () =>
             if (!enabled) return null;
             return { id: ++sequence, epoch, start: now(), at: date(), retranslation,
                 splitCount: [2, 3].includes(splitCount) ? splitCount : 1,
-                mode: ['일반', '압축', '미친압축', '최소 프롬프트'].includes(mode) ? mode : '일반',
+                mode: ['일반', '압축', '미친압축', '최소 프롬프트', '딥식 플래시 전용'].includes(mode) ? mode : '일반',
                 slot: ['A', 'B', 'C'].includes(slot) ? slot : '?', requests: [], waits: [], finishAt: null, end: null };
         },
         enqueue(job, options = {}) {
@@ -66,6 +66,10 @@ export function createOutputTiming({ now = () => performance.now(), date = () =>
             try { return await action(); } finally { span.end = now(); }
         },
         applying(job) { if (valid(job)) job.finishAt = now(); },
+        attachServer(job, record, reused = false) {
+            if (!valid(job)) return;
+            job.server = { reused: reused === true, record: sanitizeOutputTiming(record) };
+        },
         finish(job, status) {
             if (!valid(job)) return;
             job.end = now();
@@ -91,7 +95,7 @@ function summarize(job, status) {
     if (job.finishAt != null) add(job.finishAt, job.end, 'apply');
     events.push([job.start, 'other', 0], [job.end, 'other', 0]);
     events.sort((a, b) => a[0] - b[0]);
-    const keys = ['repair', 'retry', 'primary', 'aux', 'queue', 'backoff', 'apply', 'other'];
+    const keys = ['repair', 'retry', 'primary', 'secondary', 'aux', 'queue', 'backoff', 'apply', 'other'];
     const durations = Object.fromEntries(keys.map(k => [k, 0]));
     const active = Object.fromEntries(keys.map(k => [k, 0]));
     let previous = job.start;
@@ -105,6 +109,7 @@ function summarize(job, status) {
     return {
         at: job.at, status, mode: job.mode, slot: job.slot, retranslation: job.retranslation, splitCount: job.splitCount,
         totalMs: job.end - job.start, durations,
+        ...(job.server ? { server: job.server } : {}),
         counts: { total: sent.length, repair: sent.filter(r => r.kind === 'repair').length,
             retry: sent.filter(r => r.kind === 'retry').length, aux: sent.filter(r => r.kind === 'aux').length },
         rows: job.requests.slice(0, 200).map(r => ({ label: r.label, reason: r.reason, slot: r.slot,
@@ -118,13 +123,26 @@ function summarize(job, status) {
 export function outputTimingText(record) {
     if (!record) return '디버그를 켠 뒤 출력 번역을 실행하면 마지막 소요 시간이 표시됩니다.';
     const seconds = ms => `${(Math.max(0, ms) / 1000).toFixed(1)}초`;
+    if (record.server) {
+        const server = record.server.record;
+        return [
+            `마지막 출력 ${record.retranslation ? '재번역' : '번역'} · ${record.status} · 화면 작업 ${seconds(record.totalMs)}`,
+            ...(server ? [
+                record.server.reused ? '기존 서버 작업 결과 수신 · 아래는 해당 서버 작업의 실행 기록입니다.' : '서버 실행 기록 · 아래 시간에 서버 내부 AI 요청을 포함합니다.',
+                `브라우저 마무리·화면 적용: ${seconds(record.durations.apply)}`,
+                '', outputTimingText(server),
+                '', '화면 작업 시간과 서버 작업 시간은 측정 범위가 달라 서로 합산하지 않습니다.',
+            ] : ['서버 요청별 시간 기록을 받지 못했습니다. 1차·2차 실행 여부와 AI 요청 횟수는 확인할 수 없습니다.']),
+        ].join('\n');
+    }
     const d = record.durations;
     return [
         `마지막 출력 ${record.retranslation ? '재번역' : '번역'} · ${record.status} · 총 ${seconds(record.totalMs)}`,
         `${record.at} · 프로필 ${record.slot} · ${record.mode}${record.splitCount > 1 ? ` · ${record.splitCount}분할` : ''}`,
         `요청 전 준비·기타 처리: ${seconds(d.other)}`,
         `베르바 요청 대기열: ${seconds(d.queue)}`,
-        `본 번역 응답 대기: ${seconds(d.primary)}`,
+        `1차 번역 응답 대기: ${seconds(d.primary)}`,
+        `2차 번역 응답 대기: ${seconds(d.secondary || 0)}${record.rows.some(r => r.label === '2차 번역') ? '' : ' · 실행 기록 없음'}`,
         `추가 복구 응답 대기: ${seconds(d.repair)} · ${record.counts.repair}회`,
         `재시도·대체 응답 대기: ${seconds(d.retry)} · ${record.counts.retry}회`,
         `보조·검수 응답 대기: ${seconds(d.aux)} · ${record.counts.aux}회`,
@@ -136,7 +154,50 @@ export function outputTimingText(record) {
         ...(record.omittedRows ? [`요청 상세 ${record.omittedRows}건 생략`] : []),
         '',
         '응답 대기에는 네트워크·서버 대기·모델 생성이 포함됩니다. 응답 수신은 번역 품질 성공을 뜻하지 않습니다.',
-        '합계는 병렬 중복을 제외한 실제 경과 시간입니다. 겹친 시간은 복구→재시도→본 번역→보조→대기열 순으로 배정하며, 요청별 시간은 서로 겹칠 수 있습니다.',
+        '합계는 병렬 중복을 제외한 실제 경과 시간입니다. 겹친 시간은 복구→재시도→1차→2차→보조→대기열 순으로 배정하며, 요청별 시간은 서로 겹칠 수 있습니다. 각 차수의 재시도 시간은 재시도 항목에 별도로 집계합니다.',
     ].join('\n');
+}
+
+// Server and browser use the same recorder. Only fixed structural metrics cross the transport.
+export async function runTimedOutput(recorder, settings, source, options, translate, report) {
+    recorder.setEnabled(settings.debugMode === true);
+    const timing = recorder.begin({ retranslation: options.stage === 'output-retranslation',
+        slot: settings.activeProfileSlot, splitCount: settings.developerOutputSplitCount,
+        mode: settings.developerDeepseekKoreanEnabled ? '딥식 플래시 전용' : '일반' });
+    let status = '실패';
+    try {
+        const result = await translate(source, { ...options, timing });
+        status = '완료';
+        return result;
+    } catch (error) {
+        if (options.signal?.aborted || error?.name === 'AbortError') status = '취소·전환';
+        throw error;
+    } finally {
+        recorder.finish(timing, status);
+        const record = recorder.latest();
+        if (record) report({ kind: 'output-timing', record });
+    }
+}
+
+export function sanitizeOutputTiming(value) {
+    if (!value || typeof value !== 'object' || !Number.isFinite(value.totalMs) || !value.durations || !value.counts || !Array.isArray(value.rows)) return null;
+    const number = n => Number.isFinite(n) ? Math.min(604800000, Math.max(0, n)) : 0;
+    const pick = (value, choices, fallback) => choices.includes(value) ? value : fallback;
+    const labels = ['1차 번역', ...LABELS.map(row => row[1]), '누락 구간 개별 복구', '보조 요청'];
+    return {
+        at: typeof value.at === 'string' && /^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(value.at) ? value.at : '',
+        status: pick(value.status, ['완료', '실패', '취소·전환'], '실패'),
+        mode: pick(value.mode, ['일반', '압축', '미친압축', '최소 프롬프트', '딥식 플래시 전용'], '일반'),
+        slot: pick(value.slot, ['A', 'B', 'C'], '?'), retranslation: value.retranslation === true,
+        splitCount: pick(value.splitCount, [1, 2, 3], 1), totalMs: number(value.totalMs),
+        durations: Object.fromEntries(['repair', 'retry', 'primary', 'secondary', 'aux', 'queue', 'backoff', 'apply', 'other'].map(key => [key, number(value.durations[key])])),
+        counts: Object.fromEntries(['total', 'repair', 'retry', 'aux'].map(key => [key, Math.floor(number(value.counts[key]))])),
+        rows: value.rows.slice(0, 200).map(row => ({
+            label: typeof row?.label === 'string' && labels.some(label => row.label === label || [2, 3].some(count => Array.from({length: count}, (_, i) => `${label} (${i+1}/${count})`).includes(row.label))) ? row.label : '보조 요청',
+            reason: pick(row?.reason, ['대체 프로필', '요청 오류 재시도', '응답 형식·구간 누락 재시도'], ''),
+            slot: pick(row?.slot, ['A', 'B', 'C'], '?'), status: pick(row?.status, ['대기', '응답 대기', '응답 수신', '오류', '취소'], '오류'),
+            sent: row?.sent === true, queueMs: number(row?.queueMs), responseMs: number(row?.responseMs),
+        })), omittedRows: Math.floor(number(value.omittedRows)),
+    };
 }
 

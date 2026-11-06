@@ -62,7 +62,7 @@ async function captureProfiles(context, ids) {
     }
     return result;
 }
-export function createServerClient({variant,version,getSettings,getContext,isActive,getSnapshot,getGenerationOptions,onProgress=()=>{},onNotice=()=>{}}) {
+export function createServerClient({variant,version,getSettings,getContext,isActive,getSnapshot,getGenerationOptions,onProgress=()=>{},onTiming=()=>{},onNotice=()=>{}}) {
     // Register during module evaluation, before ST announces APP_READY.
     installVertexModelCompatibility(getContext);
     const storageKey='verba-server-jobs:'+variant;
@@ -306,13 +306,15 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             }
         }finally{signal?.removeEventListener('abort',stop);}
     }
-    async function waitResult(id,signal){
+    async function waitResult(id,signal,timingOptions=null,reused=false){
         const stop=()=>void cancel(id);signal?.addEventListener('abort',stop,{once:true});
         try {
             while(true){
                 if(signal?.aborted){await cancel(id);throw abortError();}
                 let state;
                 try{state=await status(id);}catch(error){if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
+                const serverTiming=(state.events||[]).findLast(event=>event.kind==='output-timing');
+                if(timingOptions && serverTiming) onTiming(serverTiming.record,timingOptions,reused);
                 const record=records.find(r=>r.id===id);
             const events=(state.events||[]).filter(e=>e.seq>(record?.eventSeq??-1));
             onProgress({...state,events});
@@ -368,7 +370,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             source=options.refreshSource?.() ?? source;
             if(!state.generationDone||!compatibleCompletedSource(state.source,source)){trace('reuse-skipped',{reason:!state.generationDone?'generation-pending':'source-changed',...describeSourceChange(state.source,source)});continue;}
             if(['failed','cancelled'].includes(state.state))throw Error(state.error);
-            const done=await waitResult(record.id,options.signal);
+            onTiming(null,options,true);
+            const done=await waitResult(record.id,options.signal,options,true);
             source=options.refreshSource?.() ?? source;
             const result=reconcileCompletedResult(done.source,source,done.result);
             if(!result){trace('reuse-skipped',{reason:'result-cleanup-unsafe',...describeSourceChange(done.source,source)});continue;}
@@ -395,10 +398,11 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             // finished result never reaches this branch and cannot notify again.
             if(marker)notification={...marker,candidates:Object.fromEntries(Object.entries(marker.candidates).map(([key,value])=>[key,{...value,generationId:`verba:${variant}:${id}`}]))};
         }
+        if(kind==='output')onTiming(null,options,false);
         const envelope={id,kind,source,snapshot:await snapshot(),options:clean({...options,signal:undefined,timing:undefined}),...(notification?{notification}:{}),...(segments?{segments}: {})};
         if(options.signal?.aborted)throw abortError();
         await submit(envelope,options.signal);
-        const state=await waitResult(id,options.signal);
+        const state=await waitResult(id,options.signal,kind==='output'?options:null);
         return kind==='output'?attachOutputTrace(state.result,source,options,id,'server-new'):state.result;
     }
     async function input(source,options,local){return await available()?run('input',source,options):local();}

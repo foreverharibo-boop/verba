@@ -1,3 +1,4 @@
+import { deepseekKoreanEnabled } from '../deepseek-korean.js';
 import { normalizedServerRetryLimit, serverRetryBackoffMs, googleRetryHintSeconds } from '../retry-policy.js';
 import { previousUserSource } from '../previous-user-context.js';
 import assert from 'node:assert/strict';
@@ -143,8 +144,8 @@ time=100;deliveries[1]();await new Promise(resolve=>setImmediate(resolve));
 time=200;deliveries[0]();await splitWork;recorder.finish(splitJob,'완료');
 r=recorder.latest();assert.equal(r.counts.total,2);assert.equal(r.durations.primary,200);
 assert.equal(r.rows.reduce((sum,row)=>sum+row.responseMs,0),300);
-assert.match(outputTimingText(r),/본 번역 \(1\/2\)/);
-assert.match(outputTimingText(r),/본 번역 \(2\/2\)/);
+assert.match(outputTimingText(r),/1차 번역 \(1\/2\)/);
+assert.match(outputTimingText(r),/1차 번역 \(2\/2\)/);
 // Three-part transport actually starts all three, with correct diagnostics.
 const thirdSource=segmentSource('First part.\n\nSecond part.\n\nThird part.');
 time=0;deliveries=[];
@@ -155,7 +156,7 @@ time=100;deliveries[2]();time=200;deliveries[1]();time=300;deliveries[0]();
 await tripleWork;recorder.finish(tripleJob,'완료');
 assert.equal(recorder.latest().counts.total,3);assert.equal(recorder.latest().durations.primary,300);
 const tripleLog=outputTimingText(recorder.latest());assert.match(tripleLog,/최소 프롬프트 · 3분할/);
-for(const i of [1,2,3])assert.ok(tripleLog.includes(`본 번역 (${i}/3)`));
+for(const i of [1,2,3])assert.ok(tripleLog.includes(`1차 번역 (${i}/3)`));
 // Bad JSON in half 1 retries only half 1; half 2's result is reused.
 let halfCalls = [0,0];
 provider=async(_profile,messages)=>{
@@ -201,7 +202,9 @@ const context = { chat: [message] };
 let applied = true;
 let seenTrace, seenReference;
 const lifecycleEnv = { previousUserSource, automaticOutputLifecycle: { started() {} },
-    minimalOutputEnabled, outputSplitCount,
+    minimalOutputEnabled, outputSplitCount, deepseekKoreanEnabled,
+    traceSourceForMessage() {}, executionTrace: { trace() {} },
+    appendOutputComparison: () => null, outputComparisonStore: { set() {} },
     EXTENSION_KEY: 'verba',
     isTranslationExtensionActive: () => true,
     activateTranslationExtension: () => 'verba',
@@ -278,12 +281,14 @@ const element = id => {
 };
 let copied = '';
 const uiEnv = {
+    sourceChangeTracer: { diagnostics: () => ({fullTextEnabled:false}), reset() {} },
+    displayStateTrace: { reset() {} }, executionTrace: { clear() {}, start() {} }, traceLatestAssistantSource() {},
     settings: env.settings, outputTiming: recorder, outputTimingText,
     document: { querySelector: element }, panel: { querySelector: element },
     saveSettings: () => {}, notify: () => {}, copyText: async v => { copied = v; },
     copyDebugDiagnostic: async () => {}, EXTENSION_VERSION: 'test', console,
 };
-const uiBody = 'let lastDebugDiagnostic = null;\n'
+const uiBody = 'let lastDebugDiagnostic = null; let fullSourceSnapshotsEnabled = false;\n'
     + slice('function renderOutputTiming(', 'function storeDebugDiagnostic(')
     + slice('    const debugModeInput = panel.querySelector', "    panel.querySelector('#verba-reset-profile-stats')")
     + '\nrenderOutputTiming();';

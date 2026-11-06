@@ -13,16 +13,17 @@ test('second translation is opt-in, requires DeepSeek prompt, and excludes free 
     for (const override of [{ developerSecondTranslationEnabled: false }, { developerDeepseekKoreanEnabled: false }, { translationEngine: 'google-free' }])
         assert.equal(secondTranslationEnabled({ ...cfg, ...override }), false);
 });
-test('rewrite receives source, draft and active prompt; replaces all IDs atomically', async () => {
+test('rewrite receives only source and draft, ignores stale first-pass prompt; replaces all IDs atomically', async () => {
     const before = [...translations];
-    const result = await requestSecondTranslation({ segmented, translations, basePrompt: 'ACTIVE_SENTINEL', options: { splitBatchCount: 3, splitBatchIndex: 3 }, request: async (prompt, rows, options) => {
-        assert.match(prompt, /ACTIVE_SENTINEL/);
-        assert.match(prompt, /초안은 내용의 누락을 확인하는 보조 자료/);
-        const drafts = JSON.parse(prompt.split('\nSOURCE_AND_FIRST_TRANSLATION\n')[1].split('\n')[0]);
-        assert.deepEqual(drafts, [{ id: 'one', source: 'Stay.', first_translation: '있어.' }, { id: 'two', source: 'After.', first_translation: '그다음.' }]);
+    const result = await requestSecondTranslation({ segmented, translations, basePrompt: 'ACTIVE_SENTINEL', options: { splitBatchCount: 3, splitBatchIndex: 3, previousUserSource: 'PREVIOUS_SENTINEL' }, request: async (prompt, rows, options) => {
+        assert.doesNotMatch(prompt, /ACTIVE_SENTINEL/);
+        assert.match(prompt, /영어의 문장 구조를 반드시 파괴/);
+        const drafts = JSON.parse(prompt.split('\nSEGMENTS\n')[1].split('\n')[0]);
+        assert.deepEqual(drafts, [{ id: 'one', type: 'narration', text: 'Stay.', first_translation: '있어.' }, { id: 'two', type: 'narration', text: 'After.', first_translation: '그다음.' }]);
         assert.equal(options.stage, 'output-second-translation');
         assert.equal(options.splitBatchCount, undefined);
         assert.equal(options.onOutputResponse, undefined);
+        assert.equal(options.previousUserSource, undefined);
         return new Map([['one', '여기 있어.'], ['two', '끝나고도.']]);
     }});
     assert.deepEqual([...translations], before);

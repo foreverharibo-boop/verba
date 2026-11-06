@@ -31,10 +31,13 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             if (p.startsWith('SECOND TRANSLATION')) {
                 rewrites++; assert.equal(initial, split);
                 assert.doesNotMatch(p, /HIGHEST-PRIORITY TRANSLATION PRINCIPLE|TRANSLATION SUCCESS CRITERION|ACTIVE SETTINGS PRECEDENCE/);
-                assert.match(p, /초안은.*보조 자료/);
+                assert.match(p, /초안은.*참고 자료/);
                 if (name === 'deep') assert.match(p, /His voice carried a hint of irritation/);
                 else assert.doesNotMatch(p, /His voice carried a hint of irritation/);
-                for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL', 'PREVIOUS_CONTEXT_SENTINEL', 'first_translation', '기다리는 것을 했다.']) assert.ok(p.includes(marker), marker);
+                for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL', 'PREVIOUS_CONTEXT_SENTINEL']) assert.ok(!p.includes(marker), marker);
+                for (const marker of ['first_translation', '기다리는 것을 했다.']) assert.ok(p.includes(marker), marker);
+                assert.equal(JSON.parse(p.split('\nSOURCE_CONTEXT\n')[1].split('\n')[0]), source);
+                assert.ok(rows(p).some(row => row.first_translation.includes('Stay. (있어.)')));
                 assert.equal(rows(p).length, 3);
                 return answer(p, true);
             }
@@ -52,7 +55,7 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
         assert.ok(out.sourceMap.every(row => !out.translation.slice(row.start, row.end).includes('기다리는 것을 했다')));
         assert.deepEqual(config, before);
     });
-    for (const mad of [false, true]) test(`${name}: second pass keeps custom output/MAD and drops custom first-pass DeepSeek prose (${mad})`, async () => {
+    for (const mad of [false, true]) test(`${name}: first pass keeps custom rules; second pass omits every first-pass instruction (${mad})`, async () => {
         let calls = 0;
         const config = snapshot({
             developerMadKoreanOutputEnabled: mad,
@@ -67,10 +70,10 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             const second = p.startsWith('SECOND TRANSLATION');
             calls++;
             assert.equal(p.includes('CUSTOM_DEEPSEEK_SENTINEL'), !second);
-            assert.match(p, /CUSTOM_OUTPUT_SENTINEL/);
-            assert.equal(p.includes('CUSTOM_MAD_SENTINEL'),mad);
-            assert.match(p, /PREVIOUS_CONTEXT_SENTINEL/);
-            for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL']) assert.ok(p.includes(marker));
+            assert.equal(p.includes('CUSTOM_OUTPUT_SENTINEL'), !second);
+            assert.equal(p.includes('CUSTOM_MAD_SENTINEL'), mad && !second);
+            assert.equal(p.includes('PREVIOUS_CONTEXT_SENTINEL'), !second);
+            for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL']) assert.equal(p.includes(marker), !second);
             return answer(p, second);
         });
         const out = await engine.output('Dana waited.', { oneTimeInstruction: 'ONETIME_SENTINEL', previousUserSource: 'PREVIOUS_CONTEXT_SENTINEL' });

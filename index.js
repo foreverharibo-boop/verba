@@ -13,7 +13,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.132';
+import { createServerClient } from './server-client.js?v=0.6.133';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -79,9 +79,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.132';
+const EXTENSION_VERSION = '0.6.133';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.132';
+const SERVER_ENGINE_VERSION = '0.6.133';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -5209,7 +5209,6 @@ async function translateOutputText(source, options = {}) {
     if (secondTranslationEnabled(settings)) {
         const rewritten = await requestSecondTranslation({
             segmented, translations,
-            basePrompt: buildOutputPrompt(segmented, settings, options.oneTimeInstruction || '', speakerIdentity, options.tuning || null, speakerScopes, { omitDeepseekBaseline: true }),
             options: { ...options, speakerIdentity }, request: requestSegments,
         });
         translations.clear();
@@ -10955,7 +10954,7 @@ function deepseekSettingsMarkup() {
                     <input type="checkbox" id="verba-second-translation-enabled" ${settings.developerSecondTranslationEnabled ? 'checked' : ''}>
                     <span>2차 번역</span>
                 </label>
-                <small>딥식 전용 프롬프트 사용 시 원문과 초벌로 한 번 더 번역하고 최종본만 표시해요. 추가 시간과 API 사용량이 발생해요.</small>
+                <small>원문·초안·2차 재작성 지시만 보내 한 번 더 번역하고 최종본만 표시해요. 사용자 프롬프트와 취향 설정은 1차에서 적용하며, 2차에는 다시 보내지 않아요. 추가 시간과 API 사용량이 발생해요.</small>
             </div>
         </details>`;
 }

@@ -14,7 +14,7 @@ for (const [variant,engine,makeClient] of [['verba',verba,createServerClient],['
             calls++;
             await new Promise(resolve=>setTimeout(resolve,10));
             const p=messages[0].content;
-            if(p.startsWith('SECOND TRANSLATION')) assert.match(p,/보조 자료/);
+            if(p.startsWith('SECOND TRANSLATION')) assert.match(p,/참고 자료/);
             const rows=JSON.parse(p.split('\nSEGMENTS\n').at(-1).split('\n')[0]);
             return {content:JSON.stringify({segments:rows.map(row=>({id:row.id,translation:'그는 기다렸다.'}))})};
         }});

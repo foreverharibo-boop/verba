@@ -22,8 +22,8 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) for(const second of 
     return {content:JSON.stringify({segments:rows.map(r=>({id:r.id,translation:r.CURRENT}))})};
    }
    translations++;
-   if(p.startsWith('SECOND TRANSLATION'))rewrites++;
-   for(const marker of ['GLOBAL_MARKER','ALL_MARKER','TARGET_MARKER','OTHER_MARKER','CUSTOM_OUTPUT_MARKER','CUSTOM_MAD_MARKER','ONETIME_MARKER'])assert.ok(p.includes(marker),marker);
+   const rewrite=p.startsWith('SECOND TRANSLATION');if(rewrite)rewrites++;
+   for(const marker of ['GLOBAL_MARKER','ALL_MARKER','TARGET_MARKER','OTHER_MARKER','CUSTOM_OUTPUT_MARKER','CUSTOM_MAD_MARKER','ONETIME_MARKER'])assert.equal(p.includes(marker),!rewrite,marker);
    const rows=JSON.parse(p.slice(p.lastIndexOf('\nSEGMENTS\n')+'\nSEGMENTS\n'.length));
    return {content:JSON.stringify({segments:rows.map(r=>({id:r.id,translation:r.type==='dialogue_candidate'?'"Stay here. [여기 있어.]"':r.type==='tagged_content'?'맑음':'그는 기다렸다.'}))})};
   });

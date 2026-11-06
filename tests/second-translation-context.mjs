@@ -19,7 +19,6 @@ const base = {
     developerUserToTargetRegister: 'jondaetmal', translateTaggedContent: true,
     bannedWords: '금지표현', dialogueEndingPreferred: 'ENDING_SENTINEL',
 };
-const precedence = 'ACTIVE SETTINGS PRECEDENCE: The preceding text is baseline translation guidance. Apply the same active user prompts, custom translation instructions, tastes, localization, register, one-time instructions, protected structure and output format as an ordinary Verba request below. Explicit active style/format settings override conflicting baseline wording only within their authorized scopes; preserve the ordinary priority and exclusive-mode rules. Never broaden a speaker or bilingual scope. GALBWAE exclusive Korean-only rules override the baseline bilingual exception. MAD is an additive Korean writing style and does not suppress active prompts or bilingual formatting. Do not invent factual content.';
 
 for (const [name, extra] of [
     ['ordinary settings', {}],
@@ -31,22 +30,31 @@ for (const [name, extra] of [
         customTranslatorTemplates: { mad: 'CUSTOM_MAD_SENTINEL' }, customTranslatorModified: { mad: true } }],
     ['Hongjin', { developerHongjinFlavorEnabled: true }],
     ['Galbwae', { developerMode: true, chuseokGalbwaeScope: 'all' }],
-]) test(`second-pass base removes only DeepSeek prose and wrapper: ${name}`, async () => {
+]) test(`second-pass request is independent of first-pass instructions: ${name}`, async () => {
     const settings = { ...base, ...extra };
     const before = structuredClone(settings);
     const args = [segmented, settings, 'ONETIME_SENTINEL', identity, null, {}];
     const first = buildOutputPrompt(...args);
-    const second = buildOutputPrompt(...args, { omitDeepseekBaseline: true });
-    const prefix = deepseekKoreanPrompt(settings) + '\n' + precedence + '\n';
-    assert.equal(first, prefix + second, 'all non-DeepSeek prompt bytes must remain unchanged');
-    assert.ok(!second.includes(deepseekKoreanPrompt(settings)));
-    const translations = new Map(segmented.segments.map(row => [row.id, '초안']));
-    await requestSecondTranslation({ segmented, translations, basePrompt: second, request: async (prompt, rows) => {
-        assert.ok(prompt.endsWith(second));
-        assert.ok(!prompt.includes(deepseekKoreanPrompt(settings)));
+    assert.ok(first.includes(deepseekKoreanPrompt(settings)));
+    const translations = new Map(segmented.segments.map(row => [row.id, row.type === 'dialogue_candidate' ? '"Stay. (있어.)"' : '초안']));
+    // Even an obsolete caller supplying basePrompt cannot inject it into pass 2.
+    await requestSecondTranslation({ segmented, translations, basePrompt: first, request: async (prompt, rows) => {
+        assert.doesNotMatch(prompt, /SENTINEL|ACTIVE TRANSLATION INSTRUCTIONS|HIGHEST-PRIORITY TRANSLATION PRINCIPLE/);
+        const fullSource = JSON.parse(prompt.split('\nSOURCE_CONTEXT\n')[1].split('\n')[0]);
+        assert.equal(fullSource, segmented.source);
+        const drafts = JSON.parse(prompt.split('\nSEGMENTS\n')[1]);
+        assert.equal(drafts.length, rows.length);
+        for (const [i, draft] of drafts.entries()) {
+            assert.equal(draft.id, rows[i].id);
+            assert.equal(draft.text, rows[i].text);
+            assert.equal(draft.type, rows[i].type);
+            assert.equal(draft.first_translation, translations.get(draft.id));
+            if (rows[i].tagContext?.length) assert.deepEqual(draft.tag_context, rows[i].tagContext);
+        }
+        assert.ok(drafts.some(row => row.first_translation.includes('Stay. (있어.)')));
         assert.deepEqual(rows, segmented.segments);
         return new Map(rows.map(row => [row.id, '완성된 번역이다.']));
     } });
-    assert.deepEqual(settings, before, 'request construction must not disable or change saved settings');
-    assert.equal(buildOutputPrompt(...args), first, 'later first-pass requests must retain the baseline');
+    assert.deepEqual(settings, before, 'construction must not disable or change saved settings');
+    assert.equal(buildOutputPrompt(...args), first, 'later first-pass requests retain the same settings');
 });

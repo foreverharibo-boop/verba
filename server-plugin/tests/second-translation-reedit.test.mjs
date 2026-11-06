@@ -14,44 +14,46 @@ const edited='비가 그치기를 기다리며 그는 오래된 도서관 창가
 const snapshot=debugMode=>({settings:{developerDeepseekKoreanEnabled:true,developerSecondTranslationEnabled:true,profileId:'A',activeProfileSlot:'A',autoProfileFallback:false,serverRetryLimit:1,debugMode,aiPostReview:{}},profiles:{A:{}},nameLocks:[],character:{},context:{}});
 const rows=p=>JSON.parse(p.split('\nSEGMENTS\n').at(-1).split('\n')[0]);
 for(const [name,create] of [['verba',verba],['deep',deep]]){
-    for(const debug of [false,true])test(`${name}: complete three-step run, raw trace opt-in, final assembly uses extra edit (${debug})`,async()=>{
+    for(const debug of [false,true])test(`${name}: unchanged long narration completes in two steps with opt-in raw trace (${debug})`,async()=>{
         const events=[],calls=[];
         const engine=create(snapshot(debug),async(id,messages,max,options)=>{
             const p=messages[0].content;calls.push(p);
             const second=p.startsWith('SECOND TRANSLATION');
             assert.equal(typeof options.onDiagnostic==='function',debug&&second);
             options.onDiagnostic?.({boundary:'server-http-request',payload:{model:'test-model',system:'PROFILE_SYSTEM',messages,api_key:'private-fixture-key'}});
-            const text=JSON.stringify({segments:rows(p).map(row=>({id:row.id,translation:p.startsWith('SECOND TRANSLATION REEDIT')?edited:draft}))});
+            const text=JSON.stringify({segments:rows(p).map(row=>({id:row.id,translation:draft}))});
             options.onDiagnostic?.({boundary:'server-http-response',status:200,body:{choices:[{message:{content:text}}]}});
             return {content:text};
         },event=>events.push(event));
         const out=await engine.output(source,{diagnosticMessageId:7,diagnosticSwipeId:1});
-        assert.equal(calls.length,3);assert.equal(out.translation,edited);
+        assert.equal(calls.length,2);assert.equal(out.translation,draft);
+        assert.ok(calls.every(p=>!p.startsWith('SECOND TRANSLATION REEDIT')));
         const captures=events.filter(e=>e.kind==='second-translation-trace');
         if(!debug){assert.equal(captures.length,0);assert.equal(out.secondTranslationTrace,undefined);return;}
         assert.ok(captures.length>4);
         const trace=out.secondTranslationTrace;
         assert.deepEqual(trace,captures.at(-1).record);
         assert.equal(trace.binding.messageId,7);assert.equal(trace.binding.swipeId,1);
-        assert.deepEqual(trace.outcome.summary,{reeditPasses:1,targetCount:1,acceptedCount:1,retainedCount:0});
+        assert.deepEqual(trace.outcome.summary,{reeditEnabled:false,reeditPasses:0});
         const wire=trace.events.filter(e=>e.kind==='transport');
-        assert.equal(wire.filter(e=>e.data.boundary==='connection-manager-input').length,2);
-        assert.equal(wire.filter(e=>e.data.boundary==='assistant-text-before-segment-parser').length,2);
+        assert.equal(wire.filter(e=>e.data.boundary==='connection-manager-input').length,1);
+        assert.equal(wire.filter(e=>e.data.boundary==='assistant-text-before-segment-parser').length,1);
         assert.ok(JSON.stringify(trace).includes('PROFILE_SYSTEM'));assert.ok(!JSON.stringify(trace).includes('private-fixture-key'));
         assert.equal(trace.events.find(e=>e.kind==='second-result').data.segments[0].translation,draft);
-        assert.equal(trace.events.find(e=>e.kind==='final-result').data.segments[0].translation,edited);
+        assert.equal(trace.events.find(e=>e.kind==='final-result').data.segments[0].translation,draft);
         const timing=events.findLast(e=>e.kind==='output-timing').record;
-        assert.ok(timing.rows.some(r=>r.label==='미수정 서술 추가 편집'));
+        assert.ok(!timing.rows.some(r=>r.label==='미수정 서술 추가 편집'));
+        assert.equal(timing.counts.total,2);
     });
-    test(`${name}: cancellation during optional editing retains trace but never publishes a result`,async()=>{
+    test(`${name}: cancellation during second pass retains trace but never publishes a result`,async()=>{
         const controller=new AbortController(),events=[];let calls=0;
         const engine=create(snapshot(true),async(id,messages)=>{
             const p=messages[0].content;calls++;
-            if(p.startsWith('SECOND TRANSLATION REEDIT'))controller.abort();
+            if(p.startsWith('SECOND TRANSLATION'))controller.abort();
             return {content:JSON.stringify({segments:rows(p).map(r=>({id:r.id,translation:draft}))})};
         },e=>events.push(e));
         await assert.rejects(engine.output(source,{signal:controller.signal}),{name:'AbortError'});
-        assert.equal(calls,3);assert.equal(events.findLast(e=>e.kind==='second-translation-trace').record.outcome.kind,'cancelled');
+        assert.equal(calls,2);assert.equal(events.findLast(e=>e.kind==='second-translation-trace').record.outcome.kind,'cancelled');
     });
 }
 

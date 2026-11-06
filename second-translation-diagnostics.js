@@ -46,7 +46,7 @@ export function createSecondTranslationTrace({ binding = null, onUpdate } = {}) 
     const state = { version: 1, capturedAt: new Date().toISOString(), revision: 0,
         binding: cleanSecondTranslationDiagnostic(binding), events: [], omittedEvents: 0,
         limits: { textCharacters: TEXT_LIMIT, totalCharacters: TOTAL_LIMIT, events: EVENT_LIMIT },
-        notice: '원문·1차 초안·2차 요청·응답·추가 편집 결과가 포함됩니다. 민감값을 마스킹하며 생략 한도는 limits에 표시됩니다. 변경 감지는 품질 판정이 아닙니다.' };
+        notice: '원문·1차 초안·2차 요청·응답·2차 결과가 포함됩니다. 민감값을 마스킹하며 생략 한도는 limits에 표시됩니다.' };
     let size = 0;
     return { enabled, add(kind, data) {
         if (!enabled) return;

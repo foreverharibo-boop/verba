@@ -1,6 +1,6 @@
 import { createSecondTranslationAttempt } from './second-translation-diagnostics.js';
 import { exportDebugText } from './debug-export.js';
-import { secondTranslationEnabled, requestSecondTranslation, firstTranslationDraftSnapshot, readFirstTranslationDraft, firstTranslationDraftText } from './second-translation.js?v=0.6.137';
+import { secondTranslationEnabled, requestSecondTranslation, firstTranslationDraftSnapshot, readFirstTranslationDraft, firstTranslationDraftText } from './second-translation.js?v=0.6.138';
 import { sourceMapSummary, createSourceViewDiagnostics } from './source-map-diagnostics.js';
 import { createCharacterTranslationReference } from './character-translation-reference.js';
 import { createDisplayStateTrace } from './display-state-trace.js';
@@ -14,7 +14,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.137';
+import { createServerClient } from './server-client.js?v=0.6.138';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -80,9 +80,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.137';
+const EXTENSION_VERSION = '0.6.138';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.137';
+const SERVER_ENGINE_VERSION = '0.6.138';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -11007,7 +11007,7 @@ function deepseekSettingsMarkup() {
                     <input type="checkbox" id="verba-second-translation-enabled" ${settings.developerSecondTranslationEnabled ? 'checked' : ''}>
                     <span>2차 번역</span>
                 </label>
-                <small>원문·초안·2차 재작성 지시만 보내 한 번 더 번역하고 최종본만 표시해요. 사용자 프롬프트와 취향 설정은 1차에서 적용하며, 2차에는 다시 보내지 않아요. 2차에서도 거의 그대로인 긴 서술은 모아서 한 번 더 편집해요. 추가 시간과 API 사용량이 발생해요.</small>
+                <small>원문·초안·2차 재작성 지시만 보내 한 번 더 번역하고 최종본만 표시해요. 사용자 프롬프트와 취향 설정은 1차에서 적용하며, 2차에는 다시 보내지 않아요. 추가 시간과 API 사용량이 발생해요.</small>
             </div>
         </details>`;
 }
@@ -12118,7 +12118,7 @@ function injectSettingsPanel() {
                             <input type="checkbox" id="verba-debug-mode" ${settings.debugMode ? 'checked' : ''}>
                             <span>디버그 모드</span>
                         </label>
-                        <div class="verba-help">오류가 없어도 로그 복사로 현재 번역 대기·재시도 상태와 백그라운드 전환 기록을 확인할 수 있어요. 마지막 오류·응답 형식·보호 표식 복구 1건도 함께 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 2차 번역을 사용하면 원문·1차 초안·2차 요청/응답·추가 편집 결과도 로그에 포함돼요. 브라우저 기록은 끄거나 새로고침하면 지워지며, 서버 작업 기록은 로그 저장 시 다시 읽어올 수 있어요. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
+                        <div class="verba-help">오류가 없어도 로그 복사로 현재 번역 대기·재시도 상태와 백그라운드 전환 기록을 확인할 수 있어요. 마지막 오류·응답 형식·보호 표식 복구 1건도 함께 기록합니다. 복구에 성공해도 원인과 결과를 복사할 수 있어요. 2차 번역을 사용하면 원문·1차 초안·2차 요청/응답·2차 결과도 로그에 포함돼요. 브라우저 기록은 끄거나 새로고침하면 지워지며, 서버 작업 기록은 로그 저장 시 다시 읽어올 수 있어요. 공유 전에 확인해 주세요. 서버 터미널 로그는 제외합니다.</div>
                         <label class="verba-check-row">
                             <input type="checkbox" id="verba-debug-full-source" ${sourceChangeTracer.diagnostics().fullTextEnabled ? 'checked' : ''} ${settings.debugMode ? '' : 'disabled'}>
                             <span>원문 변경 전·후 전체 기록 (선택)</span>

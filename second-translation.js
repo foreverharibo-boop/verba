@@ -1,4 +1,4 @@
-import { deepseekKoreanEnabled } from './deepseek-korean.js';
+import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { createSecondTranslationTrace } from './second-translation-diagnostics.js';
 
 export function secondTranslationEnabled(settings = {}) {
@@ -7,18 +7,9 @@ export function secondTranslationEnabled(settings = {}) {
         && settings.translationEngine !== 'google-free';
 }
 
-export const SECOND_TRANSLATION_INSTRUCTION = `SECOND TRANSLATION
-당신은 한국어 소설의 번역 편집자다. 영어 원문과 한국어 초안을 대조하여, 의미가 정확하고 자연스럽게 읽히는 한국어 완성본을 작성하라. 초안을 작업본으로 삼되, 초안의 해석과 표현이 정확하다고 가정하지 마라.
-
-각 구간을 주변 문맥과 함께 읽고 다음을 수행하라.
-
-1. 의미 확인: 누가 무엇을 하고 느끼는지, 행동의 대상과 수식 대상이 무엇인지 확인하라. 초안에서 빠진 내용은 복구하고, 원문에 없는 내용이나 잘못 해석한 관계는 바로잡아라. 부정·조건·정도·불확실성·시간 순서와 비유의 구체적인 이미지를 보존하라.
-
-2. 한국어 편집: 초안을 한국어 문장으로 읽어라. 주어와 서술어가 맞지 않는 표현, 문맥에 맞지 않는 단어, 어색한 단어 결합, 길게 얽힌 수식어, 연결어미에서 잘못 끊긴 서술을 고쳐라. 필요하면 해당 ID 안에서 문장을 나누거나 합치고, 어순과 서술어를 다시 구성하라. 동의어만 교체하는 것으로 편집을 끝내지 마라.
-
-3. 수정 확인: 수정문을 원문과 다시 대조하여 내용이 빠지거나 새로 생기지 않았는지 확인하라. 캐릭터의 의도적인 짧은 말, 머뭇거림, 반복과 서술의 강조는 일반적인 문법 오류와 구분하라. 근거 없이 존댓말·반말이나 감정의 강도를 바꾸지 마라.
-
-수정량이나 초안과의 차이를 목표로 삼지 마라. 최종 문장의 정확성과 한국어의 자연스러움을 기준으로 판단하라. 위 과정은 내부적으로 수행하고, 지정된 형식의 최종 번역만 출력하라.
+export const SECOND_TRANSLATION_INSTRUCTION = `SECOND-PASS EDITING TASK
+아래 한국어 초안에 위 번역 기준과 활성 설정을 적용하여 최종 번역을 작성하라. 영어 원문을 의미 판단의 기준으로 삼고, 초안의 오역·누락·어색한 한국어를 수정하라. 초안의 문장 구조를 유지할 의무는 없다. 원문에 없는 내용은 추가하지 마라.
+이 요청은 제공된 초안을 편집하는 한 번의 작업이다. 위 지시의 번역 기준·말투·화자별 범위·한영 병기 설정을 유지하되, 초안이나 검수 설명을 별도로 출력하지 마라.
 
 출력 규칙:
 - 한영 병기의 영어 원문과 배치를 보존하고, 영어를 수정·누락·중복하지 마라.
@@ -28,24 +19,35 @@ export const SECOND_TRANSLATION_INSTRUCTION = `SECOND TRANSLATION
 
 
 // Work in a separate map: an incomplete/cancelled rewrite must never publish the draft.
-export async function requestSecondTranslation({ segmented, translations, options = {}, request, onDraft, onDiagnostic, binding = null }) {
+export async function requestSecondTranslation({ segmented, translations, basePrompt = '', options = {}, request, onDraft, onDiagnostic, binding = null }) {
     const checkAbort = () => {
         if (options.signal?.aborted) throw Object.assign(new Error('번역이 취소되었습니다.'), { name: 'AbortError' });
     };
     checkAbort();
     const trace = createSecondTranslationTrace({ binding, onUpdate: onDiagnostic });
     const requestOptions = { ...options, onSecondTranslationWire: trace.enabled ? event => trace.add('transport', event) : undefined,
-        onOutputResponse: undefined, previousUserSource: undefined, splitBatchCount: undefined, splitBatchIndex: undefined };
-    // Only source data and draft text belong here; first-pass settings/prompts
-    // must not be composed again for this rewrite.
+        onOutputResponse: undefined, splitBatchCount: undefined, splitBatchIndex: undefined };
+    // Reuse this variant's composed first-pass rules, including active settings.
+    // Replace its target array so the source and draft occur together once per ID.
+    const marker = '\nSEGMENTS\n';
+    const boundary = basePrompt.lastIndexOf(marker);
+    const firstPassRules = boundary >= 0 ? basePrompt.slice(0, boundary) : (basePrompt || deepseekKoreanPrompt());
+    const firstPassRows = boundary >= 0 ? JSON.parse(basePrompt.slice(boundary + marker.length)) : [];
+    const scopes = new Map(firstPassRows.map(row => [row.id, row.speaker_scope]));
     const drafts = segmented.segments.map(segment => ({
         id: segment.id, type: segment.type || 'narration', text: segment.text,
+        ...(scopes.get(segment.id) ? { speaker_scope: scopes.get(segment.id) } : {}),
         ...(segment.tagContext?.length ? { tag_context: segment.tagContext } : {}),
         ...(segment.codeKind ? { code_kind: segment.codeKind } : {}),
         first_translation: translations.get(segment.id) || '',
     }));
     const source = segmented.source || segmented.segments.map(segment => segment.text).join('\n\n');
-    const prompt = `${SECOND_TRANSLATION_INSTRUCTION}
+    const prompt = `SECOND TRANSLATION
+
+FIRST_PASS_TRANSLATION_RULES
+${firstPassRules}
+
+${SECOND_TRANSLATION_INSTRUCTION}
 
 SOURCE_CONTEXT
 ${JSON.stringify(source)}

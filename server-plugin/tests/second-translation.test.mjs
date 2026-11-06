@@ -30,13 +30,14 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             assert.doesNotMatch(p, /^UNIFIED OUTPUT POST REVIEW/);
             if (p.startsWith('SECOND TRANSLATION')) {
                 rewrites++; assert.equal(initial, split);
-                assert.doesNotMatch(p, /HIGHEST-PRIORITY TRANSLATION PRINCIPLE|TRANSLATION SUCCESS CRITERION|ACTIVE SETTINGS PRECEDENCE/);
-                assert.match(p, /당신은 한국어 소설의 번역 편집자다/);
-                assert.match(p, /1\. 의미 확인:[\s\S]*2\. 한국어 편집:[\s\S]*3\. 수정 확인:/);
-                assert.equal(p.includes('추가 편집 기준:'), name === 'deep');
+                assert.match(p, /HIGHEST-PRIORITY TRANSLATION PRINCIPLE/);
+                assert.equal(p.includes("CONTRASTIVE EXAMPLES FOR THE RECONSTRUCTION RULES"), name === "deep");
+                assert.match(p, /아래 한국어 초안에 위 번역 기준과 활성 설정을 적용/);
+                assert.match(p, /초안의 문장 구조를 유지할 의무는 없다/);
+                assert.doesNotMatch(p, /추가 편집 기준:/);
                 assert.doesNotMatch(p, /좋은 표현은|정확하고 자연스러운 구간은|처음부터 다시 작성하라|영어의 문장 구조를 반드시 파괴/);
                 assert.doesNotMatch(p, /His voice carried a hint of irritation/);
-                for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL', 'PREVIOUS_CONTEXT_SENTINEL']) assert.ok(!p.includes(marker), marker);
+                for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL', 'PREVIOUS_CONTEXT_SENTINEL']) assert.ok(p.includes(marker), marker);
                 for (const marker of ['first_translation', '기다리는 것을 했다.']) assert.ok(p.includes(marker), marker);
                 assert.equal(JSON.parse(p.split('\nSOURCE_CONTEXT\n')[1].split('\n')[0]), source);
                 assert.ok(rows(p).some(row => row.first_translation.includes('Stay. (있어.)')));
@@ -57,7 +58,7 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
         assert.ok(out.sourceMap.every(row => !out.translation.slice(row.start, row.end).includes('기다리는 것을 했다')));
         assert.deepEqual(config, before);
     });
-    for (const mad of [false, true]) test(`${name}: first pass keeps custom rules; second pass omits every first-pass instruction (${mad})`, async () => {
+    for (const mad of [false, true]) test(`${name}: both passes keep custom rules and previous-user context (${mad})`, async () => {
         let calls = 0;
         const config = snapshot({
             developerMadKoreanOutputEnabled: mad,
@@ -71,11 +72,11 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             const p = messages[0].content;
             const second = p.startsWith('SECOND TRANSLATION');
             calls++;
-            assert.equal(p.includes('CUSTOM_DEEPSEEK_SENTINEL'), !second);
-            assert.equal(p.includes('CUSTOM_OUTPUT_SENTINEL'), !second);
-            assert.equal(p.includes('CUSTOM_MAD_SENTINEL'), mad && !second);
-            assert.equal(p.includes('PREVIOUS_CONTEXT_SENTINEL'), !second);
-            for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL']) assert.equal(p.includes(marker), !second);
+            assert.equal(p.split('CUSTOM_DEEPSEEK_SENTINEL').length, 2);
+            assert.equal(p.includes('CUSTOM_OUTPUT_SENTINEL'), true);
+            assert.equal(p.includes('CUSTOM_MAD_SENTINEL'), mad);
+            assert.equal(p.split('PREVIOUS_CONTEXT_SENTINEL').length, 2);
+            for (const marker of ['STYLE_SENTINEL', 'ONETIME_SENTINEL']) assert.equal(p.includes(marker), true);
             return answer(p, second);
         });
         const out = await engine.output('Dana waited.', { oneTimeInstruction: 'ONETIME_SENTINEL', previousUserSource: 'PREVIOUS_CONTEXT_SENTINEL' });

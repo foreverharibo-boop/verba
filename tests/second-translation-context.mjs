@@ -30,16 +30,20 @@ for (const [name, extra] of [
         customTranslatorTemplates: { mad: 'CUSTOM_MAD_SENTINEL' }, customTranslatorModified: { mad: true } }],
     ['Hongjin', { developerHongjinFlavorEnabled: true }],
     ['Galbwae', { developerMode: true, chuseokGalbwaeScope: 'all' }],
-]) test(`second-pass request is independent of first-pass instructions: ${name}`, async () => {
+]) test(`second-pass request preserves the composed first-pass instructions: ${name}`, async () => {
     const settings = { ...base, ...extra };
     const before = structuredClone(settings);
-    const args = [segmented, settings, 'ONETIME_SENTINEL', identity, null, {}];
+    const speakerScopes = Object.fromEntries(segmented.segments.filter(row => row.type === 'dialogue_candidate').map(row => [row.id, 'target_dialogue']));
+    const args = [segmented, settings, 'ONETIME_SENTINEL', identity, null, speakerScopes];
     const first = buildOutputPrompt(...args);
     assert.ok(first.includes(deepseekKoreanPrompt(settings)));
     const translations = new Map(segmented.segments.map(row => [row.id, row.type === 'dialogue_candidate' ? '"Stay. (있어.)"' : '초안']));
-    // Even an obsolete caller supplying basePrompt cannot inject it into pass 2.
+    // The full instruction prefix is retained while the target array is replaced.
     await requestSecondTranslation({ segmented, translations, basePrompt: first, request: async (prompt, rows) => {
-        assert.doesNotMatch(prompt, /SENTINEL|ACTIVE TRANSLATION INSTRUCTIONS|HIGHEST-PRIORITY TRANSLATION PRINCIPLE/);
+        const prefix = first.slice(0, first.lastIndexOf('\nSEGMENTS\n'));
+        assert.ok(prompt.includes('FIRST_PASS_TRANSLATION_RULES\n' + prefix + '\n\n'));
+        assert.equal(prompt.split('\nSEGMENTS\n').length, 2);
+        assert.equal(prompt.split(deepseekKoreanPrompt(settings)).length, 2);
         const fullSource = JSON.parse(prompt.split('\nSOURCE_CONTEXT\n')[1].split('\n')[0]);
         assert.equal(fullSource, segmented.source);
         const drafts = JSON.parse(prompt.split('\nSEGMENTS\n')[1]);
@@ -48,6 +52,7 @@ for (const [name, extra] of [
             assert.equal(draft.id, rows[i].id);
             assert.equal(draft.text, rows[i].text);
             assert.equal(draft.type, rows[i].type);
+            if (rows[i].type === 'dialogue_candidate') assert.equal(draft.speaker_scope, 'target_dialogue');
             assert.equal(draft.first_translation, translations.get(draft.id));
             if (rows[i].tagContext?.length) assert.deepEqual(draft.tag_context, rows[i].tagContext);
         }

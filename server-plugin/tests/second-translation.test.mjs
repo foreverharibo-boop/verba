@@ -9,7 +9,7 @@ const snapshot = extra => ({ settings: {
     developerMode: true, profileId: 'A', activeProfileSlot: 'A', autoProfileFallback: false,
     serverRetryLimit: 1, debugMode: true, globalPromptEnabled: true, globalPrompt: 'STYLE_SENTINEL',
     allDialoguePromptEnabled: true, allDialoguePrompt: reportedPrompt,
-    translateTaggedContent: true, aiPostReview: { translationese: true, deepseekTranslationese: true }, ...extra,
+    translateTaggedContent: true, aiPostReview: { deepseekTranslationese: true }, ...extra,
 }, profiles: { A: {} }, nameLocks: [{ source: 'Dana', target: '다나' }], character: {}, context: {} });
 const source = 'Dana waited.\n\n"Stay."\n\n`KEEP_CODE`\n\n<Info_panel>Sunny</Info_panel>';
 const rows = p => JSON.parse(p.split('\nSEGMENTS\n').at(-1).split('\n')[0]);
@@ -87,14 +87,14 @@ for (const [name, create] of [['verba', verba], ['deep', deep]]) {
             await engine.output('He waited.'); assert.equal(calls, 1);
         }
     });
-    test(`${name}: unrelated selected checks review the rewritten result`, async () => {
+    test(`${name}: general fluency and other selected checks review the rewritten result`, async () => {
         let reviews = 0;
         const engine = create(snapshot({ aiPostReview: { meaning: true, translationese: true, deepseekTranslationese: true } }), async (_id, messages) => {
             const p = messages[0].content;
             if (p.startsWith('UNIFIED OUTPUT POST REVIEW')) {
                 reviews++;
                 const targets = JSON.parse(p.split('\nREVIEW_UNITS\n')[1]);
-                assert.ok(targets.every(row => row.checks.includes('meaning') && !row.checks.includes('translationese') && !row.checks.includes('deepseekTranslationese')));
+                assert.ok(targets.every(row => row.checks.includes('meaning') && row.checks.includes('translationese') && !row.checks.includes('deepseekTranslationese')));
                 assert.ok(targets.some(row => row.CURRENT.includes('기다렸다')));
                 return reply(targets.map(row => ({ id: row.id, translation: row.CURRENT })));
             }

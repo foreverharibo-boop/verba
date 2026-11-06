@@ -13,7 +13,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.130';
+import { createServerClient } from './server-client.js?v=0.6.131';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -79,9 +79,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.130';
+const EXTENSION_VERSION = '0.6.131';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.129';
+const SERVER_ENGINE_VERSION = '0.6.131';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -5045,7 +5045,7 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
         const config = { ...(reviewSettings || settings), aiPostReview: normalizePostReview(settings.aiPostReview) };
         const selected = config.aiPostReview;
         if (options.secondTranslationCompleted === true) {
-            selected.translationese = false;
+            // General Korean fluency review still applies to the rewritten result.
             selected.deepseekTranslationese = false;
         }
         const reference = selected.voice || selected.mad || selected.hongjin || (config.developerMode === true && selected.deepseekTranslationese && deepseekKoreanEnabled(config))

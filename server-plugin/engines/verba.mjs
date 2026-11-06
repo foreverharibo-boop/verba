@@ -4094,7 +4094,6 @@ async function reviewOutputOnce({ segmented, translations, settings = {}, speake
     return stats;
   }
   const prompt = buildPostReviewPrompt(plan, segmented, settings, reference);
-  if (plan.units.length > 300 || prompt.length > 12e4) return { ...stats, ...settings.debugMode === true ? { reviewReason: "limit" } : {}, status: "limit", skipped: stats.skipped + plan.units.length };
   const startedAt = performance.now();
   try {
     options.signal?.throwIfAborted();
@@ -6358,7 +6357,6 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
       const config = { ...reviewSettings || settings, aiPostReview: normalizePostReview(settings.aiPostReview) };
       const selected = config.aiPostReview;
       if (options.secondTranslationCompleted === true) {
-        selected.translationese = false;
         selected.deepseekTranslationese = false;
       }
       const reference = selected.voice || selected.mad || selected.hongjin || config.developerMode === true && selected.deepseekTranslationese && deepseekKoreanEnabled(config) ? buildOutputPrompt(

@@ -59,8 +59,8 @@ test('network, malformed IDs, and invalid bilingual unit keep first result; neve
   assert.equal(calls,1);assert.equal(stats.status,'failed');assert.deepEqual([...data.translations],before);
  }
 });
-test('all off/free engine/taste disabled/oversize prompt do not call provider',async()=>{
- for(const config of [{aiPostReview:{}},{translationEngine:'google-free'},{aiPostReview:{mad:true,hongjin:true}},{aiPostReview:{meaning:true},globalPrompt:'x'.repeat(130000)}]){
+test('all off/free engine/taste disabled do not call provider',async()=>{
+ for(const config of [{aiPostReview:{}},{translationEngine:'google-free'},{aiPostReview:{mad:true,hongjin:true}}]){
   const data=fixture('Hello.','안녕.');await reviewOutputOnce({...data,settings:config,request:()=>assert.fail('unexpected call')});
  }
 });

@@ -141,8 +141,8 @@ export async function reviewOutputOnce({ segmented, translations, settings = {},
     if (settings.debugMode === true) stats.units = {general:plan.units.filter(u=>u.type==='general').length,bilingual:plan.units.filter(u=>u.type==='bilingual').length,lockedTargets:plan.groups.reduce((n,g)=>n+g.spans.length,0)};
     if (!plan.units.length) { if(settings.debugMode===true && !plan.selected.length)stats.reviewReason='all-off'; return stats; }
     const prompt = buildPostReviewPrompt(plan, segmented, settings, reference);
-    // Never silently truncate source/rules or split a review into more calls.
-    if (plan.units.length > 300 || prompt.length > 120000) return { ...stats, ...(settings.debugMode===true?{reviewReason:'limit'}:{}), status:'limit', skipped:stats.skipped + plan.units.length };
+    // Send every selected unit and the complete instructions in one request.
+    // Do not silently skip review based on local prompt length or unit count.
     const startedAt = performance.now();
     try {
         options.signal?.throwIfAborted();

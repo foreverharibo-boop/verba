@@ -2,12 +2,12 @@
   "protocol": 1,
   "engines": {
     "verba": {
-      "hash": "8e989142d9aed261c9da8e3dac56b5e889edf9bfd7e9954dfbeaa0d0287a27ee",
-      "version": "0.6.134"
+      "hash": "96cbb3e181667871e9fdcce17a1708a2e4e7ea40929353f2e075fdc582dcdd79",
+      "version": "0.6.135"
     },
     "verba-deep": {
-      "hash": "0cbe9d12eeee3cf9575e08fef8815f524555737c341682cea7b9e12b784233af",
-      "version": "0.6.103"
+      "hash": "d68ba99be330d74b50628c44c4d20541a39c52eeca9dfaa25812738eb40a00fe",
+      "version": "0.6.104"
     }
   }
 }

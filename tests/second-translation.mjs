@@ -17,7 +17,7 @@ test('rewrite receives only source and draft, ignores stale first-pass prompt; r
     const before = [...translations];
     const result = await requestSecondTranslation({ segmented, translations, basePrompt: 'ACTIVE_SENTINEL', options: { splitBatchCount: 3, splitBatchIndex: 3, previousUserSource: 'PREVIOUS_SENTINEL' }, request: async (prompt, rows, options) => {
         assert.doesNotMatch(prompt, /ACTIVE_SENTINEL/);
-        assert.match(prompt, /영어의 문장 구조를 반드시 파괴/);
+        assert.match(prompt, /초안의 단어 선택·어순·문장 구조·끊는 위치는 보존 대상이 아니다/);
         const drafts = JSON.parse(prompt.split('\nSEGMENTS\n')[1].split('\n')[0]);
         assert.deepEqual(drafts, [{ id: 'one', type: 'narration', text: 'Stay.', first_translation: '있어.' }, { id: 'two', type: 'narration', text: 'After.', first_translation: '그다음.' }]);
         assert.equal(options.stage, 'output-second-translation');

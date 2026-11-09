@@ -1,3 +1,52 @@
+// verba/speaker-attribution-guards.js
+var speechVerb = "(?:said|says|say|saying|asked|asks|replied|replies|answered|answers|called|calls|shouted|shouts|whispered|whispers|muttered|mutters|added|adds|continued|continues|snapped|snaps|growled|growls|told|tells)";
+var knownActorMarker = "@@VERBA_SCOPE_KNOWN@@";
+var namedActor = "(?:@@VERBA_SCOPE_KNOWN@@|@@VERBA_(?:DEEP_)?NAME_\\d{4}@@|\\p{Lu}[\\p{L}\u2019'-]*(?:\\s+\\p{Lu}[\\p{L}\u2019'-]*){0,3})";
+function hasUnrecognizedSpeechActor(text, aliases, atStart = false) {
+  let value = String(text || "").trim();
+  const known = new Set([
+    ...aliases.targetNames,
+    ...aliases.userNames,
+    ...aliases.targetTokens,
+    ...aliases.otherTokens
+  ].map((name) => String(name).toLocaleLowerCase()));
+  for (const name of [...known].filter(Boolean).sort((a, b) => b.length - a.length)) {
+    const escaped3 = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    value = value.replace(new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped3}(?=$|[^\\p{L}\\p{N}_])`, "giu"), `$1${knownActorMarker}`);
+  }
+  known.add(knownActorMarker.toLocaleLowerCase());
+  const prefix = atStart ? "^" : "(?:^|[\\s,;:\u2014])";
+  const matches = [...value.matchAll(new RegExp(`${prefix}(${namedActor})\\s+(?:(?:quietly|softly|loudly|calmly)\\s+)?${speechVerb}\\b`, "gu"))];
+  const inverted = value.match(new RegExp(`^${speechVerb}\\s+(${namedActor})(?=$|[^\\p{L}\\p{N}_])`, "u"));
+  const actor = matches.at(-1)?.[1] || inverted?.[1];
+  if (!actor || /^(?:he|she|they|i|you|we|it)$/iu.test(actor)) return false;
+  return !known.has(actor.toLocaleLowerCase());
+}
+function introducesIndirectSpeech(text) {
+  const value = String(text || "").trim();
+  let sentence = value.split(/(?<=[.!?])\s+/u).at(-1) || "";
+  const aside = sentence.search(/,\s*(?:remembering|recalling|imagining)\b/iu);
+  if (aside >= 0 && /\b(?:said|says|asked|asks|replied|replies|answered|answers)\b/iu.test(sentence.slice(0, aside))) {
+    sentence = sentence.slice(0, aside);
+  }
+  const live = sentence.match(/,\s*(?:then|and then)\s+(?:said|says|asked|asks|replied|replies|answered|answers)\s*[:,]?\s*$/iu);
+  if (live) sentence = sentence.slice(live.index);
+  const memory = /\b(?:remember(?:ed|s|ing)?|recall(?:ed|s|ing)?|imagin(?:ed|es|ing))\b/iu.exec(sentence);
+  if (memory) {
+    const tail = sentence.slice(memory.index + memory[0].length);
+    if (new RegExp(`\\b${speechVerb}\\b|\\b(?:words|voice|quotation)\\b|^\\s*[:,]\\s*$`, "iu").test(tail)) return true;
+  }
+  return /\b(?:quoted|quotes|quoting|imitated|imitates|imitating)\b/iu.test(sentence) || /\b(?:read|reads|reading|repeated|repeats|repeating|echoed|echoes|echoing)\b[^.!?]*\b(?:words|note|letter|message|quotation|line)\b/iu.test(sentence);
+}
+function hasAttachedSpeechTag(dialogue, text) {
+  return /[,?!]["”」』]\s*$/u.test(String(dialogue || "")) || new RegExp(`^${speechVerb}\\s`, "u").test(String(text || "").trim());
+}
+function hasUncertainPostQuoteTag(dialogue, text, aliases) {
+  if (!hasAttachedSpeechTag(dialogue, text)) return false;
+  const firstSentence = String(text || "").trim().split(/(?<=[.!?])\s+/u)[0] || "";
+  return hasUnrecognizedSpeechActor(firstSentence, aliases, true) || introducesIndirectSpeech(firstSentence) || /^(?:he|she|they)\s+(?:remembered|recalled|imagined)\b/iu.test(firstSentence);
+}
+
 // verba/user-character-register.js
 function userToTargetRegister(settings = {}) {
   return settings.developerRelationshipExperimentEnabled === true && ["banmal", "jondaetmal"].includes(settings.developerUserToTargetRegister) ? settings.developerUserToTargetRegister : "unset";
@@ -2353,6 +2402,10 @@ function leadingSpeakerActor(text, aliases, targetGender, fallback = "unknown") 
   for (const rawSentence of sentences) {
     const sentence = rawSentence.trim();
     if (!sentence) continue;
+    if (hasUnrecognizedSpeechActor(sentence, aliases) || introducesIndirectSpeech(sentence)) {
+      actor = "uncertain";
+      continue;
+    }
     const firstToken = sentence.match(/^(@@VERBA_NAME_\d{4}@@)/u)?.[1] || "";
     if (firstToken && aliases.targetTokens.has(firstToken)) {
       actor = "target";
@@ -2384,18 +2437,19 @@ function leadingSpeakerActor(text, aliases, targetGender, fallback = "unknown") 
 }
 function postDialogueSpeaker(text, aliases, targetGender, activeActor) {
   const lead = String(text || "").trim().slice(0, 240);
-  const speechVerb = "(?:said|asked|replied|answered|called|shouted|whispered|muttered|added|continued|snapped|growled|told)";
-  const token2 = lead.match(new RegExp(`^(@@VERBA_NAME_\\d{4}@@)(?:\\s+[^.!?]{0,50})?\\s+${speechVerb}\\b`, "iu"))?.[1] || lead.match(new RegExp(`^${speechVerb}\\s+(@@VERBA_NAME_\\d{4}@@)\\b`, "iu"))?.[1] || "";
+  const speechVerb2 = "(?:said|asked|replied|answered|called|shouted|whispered|muttered|added|continued|snapped|growled|told)";
+  const token2 = lead.match(new RegExp(`^(@@VERBA_NAME_\\d{4}@@)(?:\\s+[^.!?]{0,50})?\\s+${speechVerb2}\\b`, "iu"))?.[1] || lead.match(new RegExp(`^${speechVerb2}\\s+(@@VERBA_NAME_\\d{4}@@)\\b`, "iu"))?.[1] || "";
   if (token2 && aliases.targetTokens.has(token2)) return "target";
   if (token2 && aliases.otherTokens.has(token2)) return "other";
   const namedSpeechRole = (names, role) => names.some((name) => {
     const escaped3 = escapeRegExp(name);
-    return new RegExp(`^${escaped3}(?:\\s+[^.!?]{0,50})?\\s+${speechVerb}\\b`, "iu").test(lead) || new RegExp(`^${speechVerb}\\s+${escaped3}(?=$|[^\\p{L}\\p{N}_])`, "iu").test(lead);
+    return new RegExp(`^${escaped3}(?:\\s+[^.!?]{0,50})?\\s+${speechVerb2}\\b`, "iu").test(lead) || new RegExp(`^${speechVerb2}\\s+${escaped3}(?=$|[^\\p{L}\\p{N}_])`, "iu").test(lead);
   }) ? role : "";
   const directRole = namedSpeechRole(aliases.targetNames, "target") || namedSpeechRole(aliases.userNames, "other");
   if (directRole) return directRole;
-  const pronoun = lead.match(new RegExp(`^(he|she|they)\\s+${speechVerb}\\b`, "iu"))?.[1]?.toLocaleLowerCase();
+  const pronoun = lead.match(new RegExp(`^(he|she|they)\\s+${speechVerb2}\\b`, "iu"))?.[1]?.toLocaleLowerCase();
   const gender = String(targetGender || "unknown").toLocaleLowerCase();
+  if (pronoun && activeActor === "uncertain") return "uncertain";
   if (pronoun === "he") {
     if (gender === "female") return "other";
     if (gender === "male") return activeActor === "other" ? "other" : "target";
@@ -2419,10 +2473,13 @@ function inferLocalTargetDialogueScopes(segmented, identity = {}) {
       continue;
     }
     const next = segments[index + 1];
-    const tagged = next?.type === "narration" ? postDialogueSpeaker(next.text, aliases, identity.characterGender, activeActor) : "unknown";
-    const actor = tagged === "unknown" ? activeActor : tagged;
+    const tagged = next?.type === "narration" && (activeActor !== "uncertain" || hasAttachedSpeechTag(segment.text, next.text)) ? postDialogueSpeaker(next.text, aliases, identity.characterGender, activeActor) : "unknown";
+    const previous = segments[index - 1];
+    const needsReview = previous?.type === "narration" && introducesIndirectSpeech(previous.text) || next?.type === "narration" && hasUncertainPostQuoteTag(segment.text, next.text, aliases);
+    const actor = needsReview ? "uncertain" : tagged === "unknown" ? activeActor : tagged;
     scopes2[segment.id] = actor === "target" ? "target_dialogue" : actor === "other" || actor === "user" ? "other_dialogue" : "unknown_dialogue";
-    if (tagged !== "unknown") activeActor = tagged;
+    if (needsReview) activeActor = "uncertain";
+    else if (tagged !== "unknown") activeActor = tagged;
   }
   return scopes2;
 }

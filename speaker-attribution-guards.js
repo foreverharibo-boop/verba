@@ -31,7 +31,18 @@ export function introducesIndirectSpeech(text) {
     const value = String(text || '').trim();
     // Inspect only the latest sentence. Remembering an unrelated event in an
     // earlier sentence must not invalidate the following live dialogue.
-    const sentence = value.split(/(?<=[.!?])\s+/u).at(-1) || '';
+    let sentence = value.split(/(?<=[.!?])\s+/u).at(-1) || '';
+    // A trailing memory aside does not turn an explicit live speech tag into
+    // recalled dialogue: 'Shin said, remembering John's words.'
+    const aside = sentence.search(/,\s*(?:remembering|recalling|imagining)\b/iu);
+    if (aside >= 0 && /\b(?:said|says|asked|asks|replied|replies|answered|answers)\b/iu.test(sentence.slice(0, aside))) {
+        sentence = sentence.slice(0, aside);
+    }
+    // An explicit new speaking action after a comma ends the earlier action.
+    // 'Shin quoted a price, then said, ...' is still live dialogue.
+    const live = sentence.match(/,\s*(?:then|and then)\s+(?:said|says|asked|asks|replied|replies|answered|answers)\s*[:,]?\s*$/iu);
+    if (live) sentence = sentence.slice(live.index);
+
     const memory = /\b(?:remember(?:ed|s|ing)?|recall(?:ed|s|ing)?|imagin(?:ed|es|ing))\b/iu.exec(sentence);
     if (memory) {
         const tail = sentence.slice(memory.index + memory[0].length);

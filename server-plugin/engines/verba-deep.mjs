@@ -24,7 +24,13 @@ function hasUnrecognizedSpeechActor(text, aliases, atStart = false) {
 }
 function introducesIndirectSpeech(text) {
   const value = String(text || "").trim();
-  const sentence = value.split(/(?<=[.!?])\s+/u).at(-1) || "";
+  let sentence = value.split(/(?<=[.!?])\s+/u).at(-1) || "";
+  const aside = sentence.search(/,\s*(?:remembering|recalling|imagining)\b/iu);
+  if (aside >= 0 && /\b(?:said|says|asked|asks|replied|replies|answered|answers)\b/iu.test(sentence.slice(0, aside))) {
+    sentence = sentence.slice(0, aside);
+  }
+  const live = sentence.match(/,\s*(?:then|and then)\s+(?:said|says|asked|asks|replied|replies|answered|answers)\s*[:,]?\s*$/iu);
+  if (live) sentence = sentence.slice(live.index);
   const memory = /\b(?:remember(?:ed|s|ing)?|recall(?:ed|s|ing)?|imagin(?:ed|es|ing))\b/iu.exec(sentence);
   if (memory) {
     const tail = sentence.slice(memory.index + memory[0].length);

@@ -1,5 +1,8 @@
 const T = 'target_dialogue', O = 'other_dialogue', U = 'unknown_dialogue';
 export const speakerGuardCases = [
+    { source: `Shin smiled. "Hello," Shin said, remembering John's words. "Stay."`, expected: [T, T], unchanged: true },
+    { source: `Shin smiled. "Hello," he said, remembering John's words.`, expected: [T], unchanged: true },
+    { source: 'Shin quoted a price, then said, "That is all."', expected: [T], unchanged: true },
     { source: 'Shin smiled. "Hello."', expected: [T], unchanged: true },
     { source: 'Dana smiled. "Hello."', expected: [O], unchanged: true },
     { source: 'Shin smiled. "Hello," he said. "Come in."', expected: [T, T], unchanged: true },

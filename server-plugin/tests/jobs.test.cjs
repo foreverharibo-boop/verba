@@ -127,3 +127,25 @@ test('both server generation routes translate after excluding a verified Ttotto 
             'original generation reply must remain intact for Ttotto scene collection');
     }
 });
+
+test('observed response buffer is released after translation but result remains recoverable',async()=>{
+ const jobs=createJobs({engines:{verba:{createEngine:()=>({shouldTranslate:()=>true,output:async source=>({translation:source+' translated'})})}}});
+ const job=jobs.start('alice',{id,kind:'observed-generation',snapshot,generation:{}},{});
+ jobs.observed('alice',id,{state:'completed',status:200,type:'application/json',body:Buffer.from('{"choices":[{"message":{"content":"hello"}}]}')});
+ await job.done;assert.equal(job.response,undefined);assert.equal(job.receive,undefined);
+ assert.equal(jobs.status(jobs.lookup('alice',id)).result.translation,'hello translated');jobs.stopAll();
+});
+test('retained payload pressure blocks new work without deleting an unread result',async()=>{
+ const jobs=createJobs({engines:{verba:{createEngine:()=>({output:async()=>({translation:'x'.repeat(64*1024*1024)})})}}});
+ const first=jobs.start('alice',{id,kind:'output',snapshot,source:'original'},{});await first.done;
+ assert.throws(()=>jobs.start('alice',{id:'b'.repeat(32),kind:'output',snapshot,source:'new'},{}),e=>e.status===429);
+ assert.equal(jobs.lookup('alice',id).result.translation.length,64*1024*1024);jobs.stopAll();
+});
+test('expired job payloads are removed by idle timer without a new request',async t=>{
+ t.mock.timers.enable({apis:['setInterval']});let clock=1;
+ const jobs=createJobs({now:()=>clock,retention:100,engines:{verba:{createEngine:()=>({output:async()=>({translation:'kept until expiration'})})}}});
+ const old=jobs.start('alice',{id,kind:'output',snapshot,source:'original'},{});await old.done;
+ clock=1000;t.mock.timers.tick(60000);
+ // Move fake time backwards so lookup itself cannot expire an unpruned job.
+ clock=2;assert.throws(()=>jobs.lookup('alice',id),e=>e.status===404);jobs.stopAll();
+});

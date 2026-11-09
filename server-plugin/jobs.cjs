@@ -5,6 +5,17 @@ const { excludeVerifiedSceneReports } = require('./scene-report-compat.cjs');
 const { selectNotification, routeGeneration } = require('./notification-routing.cjs');
 const ID = /^[a-f0-9]{32}$/;
 const MAX_SNAPSHOT = 4 * 1024 * 1024;
+// Approximate retained payload without stringifying every old result on admission.
+function retainedBytes(job) {
+    let bytes=job.raw.length;const pending=[job.source,job.result,job.events],seen=new Set();
+    while(pending.length){const value=pending.pop();
+        if(typeof value==='string')bytes+=value.length*2;
+        else if(value && typeof value==='object' && !seen.has(value)){
+            seen.add(value);for(const key of Object.keys(value)){bytes+=key.length*2;pending.push(value[key]);}
+        }else if(typeof value==='number')bytes+=8;
+    }
+    return bytes;
+}
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function createJobs({ engines, request, profileRequest, versions, now = Date.now, retention = 86400000, maxJobs = 32, maxActive = 4, prepareNotification = () => null, onLifecycle = () => {} }) {
     const jobs = new Map();
@@ -12,6 +23,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
     function prune() {
         for(const [k,j] of jobs) if(j.finishedAt && now()-j.finishedAt>retention) jobs.delete(k);
     }
+    const pruneTimer=setInterval(prune,60000);pruneTimer.unref?.();
     function lookup(owner,id) {
         if (!ID.test(String(id))) throw failure(400,'잘못된 작업 번호');
         prune(); const job=jobs.get(key(owner,id));
@@ -54,7 +66,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
             if([...jobs.values()].filter(j=>j.owner===owner).length<maxJobs)break; jobs.delete(key(owner,old.id));
         }
         const own=[...jobs.values()].filter(j=>j.owner===owner);
-        if(own.filter(j=>!j.finishedAt).length>=maxActive || own.length>=maxJobs || jobs.size>=128)
+        if(own.filter(j=>!j.finishedAt).length>=maxActive || own.length>=maxJobs || jobs.size>=128 || [...jobs.values()].reduce((sum,j)=>sum+retainedBytes(j),0)>=64*1024*1024)
             throw failure(429,'서버 작업·보관 한도에 도달했습니다. 완료 작업을 확인하거나 삭제해 주세요.');
         const controller=new AbortController();
         const job={id,owner,kind,digest:hash,createdAt:now(),finishedAt:null,state:'queued',events:[],eventSequence:0,
@@ -124,7 +136,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
                 // Raw provider errors may echo secrets/prompts. Keep public errors structural.
                 job.error=controller.signal.aborted?'사용자가 작업을 중지했습니다.':`서버 작업 실패${error.status?' (HTTP '+error.status+')':''}. 진단 단계와 연결 프로필을 확인해 주세요.`;
                 report(job,{kind:'failure',code:String(error.code||error.name||'Error'),httpStatus:Number(error.status)||null});
-            } finally { job.finishedAt=now(); job.generationDone=true; }
+            } finally { job.finishedAt=now(); job.generationDone=true; delete job.response; delete job.receive; }
             lifecycle(job, job.result?.skipped ? 'skipped' : job.state);
             // Translation is committed to server memory before any notification.
             // Delivery failure must never fail/retry the translation or charge another AI call.
@@ -155,7 +167,7 @@ function createJobs({ engines, request, profileRequest, versions, now = Date.now
         if(response.state!=='completed'){job.controller.abort();return true;}
         job.receive(response);return true;
     }
-    function stopAll(){for(const j of jobs.values())if(!j.finishedAt)j.controller.abort();}
+    function stopAll(){clearInterval(pruneTimer);for(const j of jobs.values())if(!j.finishedAt)j.controller.abort();jobs.clear();}
     return {start,lookup,status,cancel,remove,stopAll,observed};
 }
 module.exports={createJobs};

@@ -164,7 +164,7 @@ for(const [name,create] of [['verba',verba],['deep',deep]]) {
   });
   const result=await engine.output('She waited.');
   const stats=result.outputComparison.postReview;
-  assert.equal(calls,1);assert.equal(stats.requestTimeoutSeconds,60);assert.equal(stats.requestedUnits,1);
+  assert.equal(calls,1);assert.equal(stats.requestTimeoutSeconds,null);assert.equal(stats.requestedUnits,1);
   assert.equal(stats.checked,failure==='ok'?1:0);assert.equal(stats.receivedUnits,failure==='ok'?1:0);
   assert.equal(stats.reviewReason,({timeout:'timeout',http:'http-error',format:'response-format',missing:'incomplete-response',empty:'empty-response',ok:'completed'})[failure]);
   assert.equal(result.translation,'그녀는 기다렸다.');assert.doesNotMatch(JSON.stringify(result.outputComparison),/PRIVATE/);

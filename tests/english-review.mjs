@@ -80,7 +80,7 @@ const finalReview = Function('reviewEnglishLeftovers', 'settings', 'configuredPr
         transportCalls++;
         assert.equal(options.profileId, 'profile-B');
         assert.equal(options.profileSlot, 'B');
-        assert.equal(options.timeoutSecondsOverride, 60);
+        assert.equal(options.timeoutSecondsOverride, undefined);
         assert.equal(options.stage, 'final-english-review');
         return JSON.stringify({ segments: [{ id: 'english_0000', translation: '다나는' }] });
     }, () => 180, collectSegmentResponse, value => value, { warn() {} },

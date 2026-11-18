@@ -117,19 +117,19 @@ async function translateGoogleFreeChunk(text, {
     targetLanguage = 'ko',
     signal = null,
     fetchImpl = globalThis.fetch,
-    timeoutMs = 45000,
 } = {}) {
     if (signal?.aborted) throw signal.reason || abortError();
     if (typeof fetchImpl !== 'function') throw new Error('이 환경에서는 무료 Google 번역 요청을 보낼 수 없습니다.');
 
     const controller = new AbortController();
-    let timedOut = false;
     const forwardAbort = () => controller.abort(signal?.reason || abortError());
     signal?.addEventListener?.('abort', forwardAbort, { once: true });
-    const timeout = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-    }, Math.max(1000, Number(timeoutMs) || 45000));
+    let removeAbortListener;
+    const cancelled = new Promise((_, reject) => {
+        const onAbort = () => reject(signal?.reason || abortError());
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        removeAbortListener = () => controller.signal.removeEventListener('abort', onAbort);
+    });
 
     const url = new URL(GOOGLE_FREE_ENDPOINT);
     url.searchParams.set('client', 'gtx');
@@ -139,24 +139,23 @@ async function translateGoogleFreeChunk(text, {
     url.searchParams.set('q', text);
 
     try {
-        const response = await fetchImpl(url.toString(), {
+        const response = await Promise.race([fetchImpl(url.toString(), {
             method: 'GET',
             signal: controller.signal,
             credentials: 'omit',
             cache: 'no-store',
             headers: { Accept: 'application/json,text/plain,*/*' },
-        });
+        }), cancelled]);
         if (!response?.ok) {
             const status = Number(response?.status) || 0;
             throw new Error(`무료 Google 번역 요청 실패${status ? ` (HTTP ${status})` : ''}`);
         }
-        return parseGoogleFreeResponse(await response.json());
+        return parseGoogleFreeResponse(await Promise.race([response.json(), cancelled]));
     } catch (error) {
         if (signal?.aborted) throw signal.reason || abortError();
-        if (timedOut) throw new Error('무료 Google 번역 응답 대기 시간이 초과되었습니다.');
         throw error;
     } finally {
-        clearTimeout(timeout);
+        removeAbortListener();
         signal?.removeEventListener?.('abort', forwardAbort);
     }
 }

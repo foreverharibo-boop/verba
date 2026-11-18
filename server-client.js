@@ -117,16 +117,18 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     function save(){try{localStorage.setItem(storageKey,JSON.stringify(records.slice(-32)));}catch{}}
     function remember(row){records=records.filter(x=>x.id!==row.id);records.push(row);save();}
     function forget(id){records=records.filter(x=>x.id!==id);save();}
-    async function api(path,init={},timeoutMs=20000) {
+    async function api(path,init={}) {
         // This controller belongs only to one HTTP exchange. It never means
         // the user cancelled the server-owned generation/translation job.
-        const controller=new AbortController();let timedOut=false;
+        const controller=new AbortController();
         let interrupt;
         const interrupted=new Promise((_,reject)=>{interrupt=error=>{reject(error);controller.abort();};});
         const restart=()=>{pendingReads.delete(restart);interrupt(resumedRead());};
         const resumable=path.startsWith('/jobs/')&&(!init.method||init.method==='GET');
         if(resumable)pendingReads.add(restart);
-        const timer=setTimeout(()=>{timedOut=true;interrupt(new DOMException('서버 통신 시간 초과','AbortError'));},timeoutMs);
+        const onAbort=()=>interrupt(abortError());
+        init.signal?.addEventListener('abort',onAbort,{once:true});
+        if(init.signal?.aborted)onAbort();
         try {
             return await Promise.race([interrupted,(async()=>{
             const response=await fetchBase(API+path,{...init,headers:getContext().getRequestHeaders(),signal:controller.signal,cache:'no-store'});
@@ -141,17 +143,14 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
             return data;
             })()]);
         } catch(error) {
-            if(timedOut||error?.name==='AbortError') {
-                // Do not retain an AbortError cause: legacy isAbort also walks
-                // causes, and would misclassify a connection timeout as cancel.
-                throw Object.assign(Error(timedOut
-                    ? '서버 통신 대기 시간을 초과했습니다. 서버 작업의 취소를 뜻하지 않습니다.'
-                    : '서버와의 통신이 끊겼습니다. 서버 작업의 취소를 뜻하지 않습니다.'),{
-                    code:timedOut?'VERBA_SERVER_CONNECTION_TIMEOUT':'VERBA_SERVER_CONNECTION_INTERRUPTED',
+            if(init.signal?.aborted)throw abortError();
+            if(error?.name==='AbortError') {
+                throw Object.assign(Error('서버와의 통신이 끊겼습니다. 서버 작업의 취소를 뜻하지 않습니다.'),{
+                    code:'VERBA_SERVER_CONNECTION_INTERRUPTED',
                 });
             }
             throw error;
-        } finally{clearTimeout(timer);pendingReads.delete(restart);}
+        } finally{init.signal?.removeEventListener('abort',onAbort);pendingReads.delete(restart);}
     }
     const relayActive=()=>{try{return globalThis.sillyRelayReplies?.apiVersion===1 && localStorage.getItem('silly-relay-enabled-v1')==='true';}catch{return false;}};
     async function check(){
@@ -240,13 +239,13 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
     async function submit(envelope,signal){
         envelope.clientConfig ||= fingerprint(configurationKey());
         if (!notificationRouting && envelope.notification?.routing === true) envelope.notification = envelope.notification.candidates.apk;
-        // Retain the ID before sending. An ambiguous timeout never falls back to
+        // Retain the ID before sending. An interrupted submission never falls back to
         // another translation request. Only the exact same ID/body is retried.
         remember({id:envelope.id,scope:scopeKey(),kind:envelope.kind==='observed-generation'?'generation':envelope.kind,config:fingerprint(configurationKey()),notificationRequested:envelope.notification?.translationEnabled===true,automaticOutput:envelope.kind==='output'&&envelope.options?.automatic===true&&envelope.options?.stage==='output-translation',at:Date.now(),...(getSettings().debugMode===true && envelope.snapshot?.settings ? {submittedBilingualSettings:bilingualSettingsDiagnostic(envelope.snapshot.settings)} : {})});
         for(let i=0;;i++){
-            if(signal?.aborted){await cancel(envelope.id);throw abortError();}
-            try{return await api('/jobs',{method:'POST',body:JSON.stringify(envelope)});}
-            catch(error){if(error.status){forget(envelope.id);throw error;}if(i===0)onNotice('접수 여부 확인 중입니다. 같은 작업 번호로 재연결합니다.');await pause(2000);}
+            if(signal?.aborted){void cancel(envelope.id);throw abortError();}
+            try{return await api('/jobs',{method:'POST',body:JSON.stringify(envelope),signal});}
+            catch(error){if(signal?.aborted){void cancel(envelope.id);throw abortError();}if(error.status){forget(envelope.id);throw error;}if(i===0)onNotice('접수 여부 확인 중입니다. 같은 작업 번호로 재연결합니다.');await pause(2000);}
         }
     }
     function observeStatus(id,state) {
@@ -271,18 +270,18 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         });
         if(jobDiagnostics.size>16)jobDiagnostics.delete(jobDiagnostics.keys().next().value);
     }
-    async function status(id,cursor=0,timeoutMs=20000){
-        const state=await api('/jobs/'+id+'?cursor='+cursor,{},timeoutMs);
+    async function status(id,cursor=0,signal){
+        const state=await api('/jobs/'+id+'?cursor='+cursor,{signal});
         observeStatus(id,state);return state;
     }
     async function refreshDiagnostics(){
         if(getSettings().serverTranslation!==true||!isActive())return;
         const recent=records.filter(r=>r.scope===scopeKey()).slice(-3);
-        // Read-only and bounded: copying a diagnostic cannot generate, cancel,
+        // Read-only: copying a diagnostic cannot generate, cancel,
         // retranslate, or deliver an extra notification.
         await Promise.all([
-            api('/capabilities',{},3000).then(caps=>{serverVersion=/^\d+\.\d+\.\d+$/.test(caps.version)?caps.version:null;}).catch(()=>{}),
-            ...recent.map(r=>status(r.id,0,3000).then(state=>{
+            api('/capabilities').then(caps=>{serverVersion=/^\d+\.\d+\.\d+$/.test(caps.version)?caps.version:null;}).catch(()=>{}),
+            ...recent.map(r=>status(r.id).then(state=>{
                 if(getSettings().debugMode===true)onProgress({id:r.id,
                     events:(state.events||[]).filter(e=>['second-translation-trace','first-translation-draft'].includes(e.kind)),
                     result:{secondTranslationTrace:state.result?.secondTranslationTrace,firstTranslationDraft:state.result?.firstTranslationDraft}});
@@ -295,9 +294,9 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         signal?.addEventListener('abort',stop,{once:true});
         try{
             while(true){
-                if(signal?.aborted){await cancel(id);throw abortError();}
+                if(signal?.aborted){void cancel(id);throw abortError();}
                 try{
-                    const state=await status(id);
+                    const state=await status(id,0,signal);
                     if(signal?.aborted)throw abortError();
                     return state;
                 }catch(error){
@@ -314,9 +313,9 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         const stop=()=>void cancel(id);signal?.addEventListener('abort',stop,{once:true});
         try {
             while(true){
-                if(signal?.aborted){await cancel(id);throw abortError();}
+                if(signal?.aborted){void cancel(id);throw abortError();}
                 let state;
-                try{state=await status(id);}catch(error){if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
+                try{state=await status(id,0,signal);}catch(error){if(signal?.aborted)throw abortError();if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
                 const serverTiming=(state.events||[]).findLast(event=>event.kind==='output-timing');
                 if(timingOptions && serverTiming) onTiming(serverTiming.record,timingOptions,reused);
                 const record=records.find(r=>r.id===id);
@@ -437,8 +436,8 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         signal?.addEventListener('abort',stop,{once:true});
         try{
             while(true){
-                if(signal?.aborted){await cancel(id);throw abortError();}
-                try{state=await status(id);}catch(error){if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
+                if(signal?.aborted){void cancel(id);throw abortError();}
+                try{state=await status(id,0,signal);}catch(error){if(signal?.aborted)throw abortError();if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
                 if(state.status)break;
                 if(['failed','cancelled'].includes(state.state))throw Error(state.error);
                 await pause(200);
@@ -450,7 +449,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
                     while(true){
                         if(signal?.aborted)throw abortError();
                         if(state.cursor!==cursor){
-                            try{state=await status(id,cursor);}catch(error){if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
+                            try{state=await status(id,cursor,signal);}catch(error){if(signal?.aborted)throw abortError();if(error.status)throw error;if(error.code!=='VERBA_SERVER_READ_RESUMED')await pause(2000);continue;}
                         }
                         if(state.next>cursor){
                             const bytes=Uint8Array.from(atob(state.data),c=>c.charCodeAt(0));

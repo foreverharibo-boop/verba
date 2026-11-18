@@ -1,6 +1,6 @@
 import { createSecondTranslationAttempt } from './second-translation-diagnostics.js';
 import { exportDebugText } from './debug-export.js';
-import { secondTranslationEnabled, requestSecondTranslation, firstTranslationDraftSnapshot, readFirstTranslationDraft, firstTranslationDraftText } from './second-translation.js?v=0.6.143';
+import { secondTranslationEnabled, requestSecondTranslation, firstTranslationDraftSnapshot, readFirstTranslationDraft, firstTranslationDraftText } from './second-translation.js?v=0.6.144';
 import { sourceMapSummary, createSourceViewDiagnostics } from './source-map-diagnostics.js';
 import { createCharacterTranslationReference } from './character-translation-reference.js';
 import { createDisplayStateTrace } from './display-state-trace.js';
@@ -14,7 +14,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.143';
+import { createServerClient } from './server-client.js?v=0.6.144';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -30,7 +30,7 @@ import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom } from './base-editor.js';
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
-import { translateGoogleFreeSegments, translateGoogleFreeText } from './google-free.js';
+import { translateGoogleFreeSegments, translateGoogleFreeText } from './google-free.js?v=0.6.144';
 import { bindPromptExpandEditors } from './prompt-editor.js';
 import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, selectionEllipsisReference } from './response-parser.js';
 import { minimalOutputEnabled, POST_TRANSLATION_AI_REPAIR_ENABLED, translateMinimalOutput } from './minimal-output.js';
@@ -80,9 +80,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.143';
+const EXTENSION_VERSION = '0.6.144';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.143';
+const SERVER_ENGINE_VERSION = '0.6.144';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -380,7 +380,6 @@ const DEFAULT_SETTINGS = {
     autoProfileFallback: true,
     profileRaceEnabled: false,
     profileRaceStaggerSeconds: 35,
-    profileRaceTimeoutMinutes: 5,
     debugMode: false,
     developerMode: false,
     developerAccessFingerprint: '',
@@ -475,7 +474,6 @@ const DEFAULT_SETTINGS = {
     retranslationInstructionHistory: [],
     bannedWords: '',
     maxTokens: 15000,
-    timeoutSeconds: 120,
     serverRetryLimit: 5,
     customTranslatorEnabled: false,
     customTranslatorTemplates: DEFAULT_CUSTOM_TRANSLATOR_TEMPLATES,
@@ -513,10 +511,10 @@ let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
 settings.translationEngine = settings.translationEngine === 'google-free' ? 'google-free' : 'ai';
-settings.timeoutSeconds = Math.min(3600, Math.max(60, Number(settings.timeoutSeconds) || 120));
+delete settings.timeoutSeconds;
+delete settings.profileRaceTimeoutMinutes;
 settings.profileRaceEnabled = settings.profileRaceEnabled === true;
 settings.profileRaceStaggerSeconds = Math.min(180, Math.max(5, Math.round(Number(settings.profileRaceStaggerSeconds) || 35)));
-settings.profileRaceTimeoutMinutes = Math.min(1440, Math.max(1, Number(settings.profileRaceTimeoutMinutes) || 5));
 settings.serverRetryLimit = normalizedServerRetryLimit(settings.serverRetryLimit);
 settings.translateTaggedContent = settings.translateTaggedContent !== false;
 settings.settingsVisibility = normalizedSettingsVisibility(settings.settingsVisibility);
@@ -1223,7 +1221,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             narrationLocalizationLevel: String(settings.narrationLocalizationLevel || ''),
             dialogueLocalizationLevel: String(settings.dialogueLocalizationLevel || ''),
             maxTokens: VERBA_MAX_TOKENS,
-            timeoutSeconds: Number(settings.timeoutSeconds) || 0,
+            timeoutSeconds: null,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
         privacy: error?.verbaProtectedRecovery ? '보호 표식 문제 구간의 원문·번역 일부를 포함합니다. 민감값 마스킹·길이 제한을 적용하며 공유 전 확인하세요.' : '2차 번역 진단에는 원문·초안·실제 요청과 응답 본문이 포함됩니다. 공유 전 내용을 확인하세요. 후검수 금지어 거부 진단에는 검출된 표현·조건부 규칙의 원문 단어·판정 방식·수정 전 존재 여부가 포함됩니다. 전달된 서버 오류는 민감값을 마스킹하고 길이를 제한함. 서버가 오류에 본문 일부를 포함할 수 있으므로 공유 전 확인하세요.',
@@ -3368,30 +3366,13 @@ async function sendProfileRequest(prompt, options = {}) {
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
     outerSignal?.addEventListener?.('abort', forwardAbort, { once: true });
-    const timeoutOverride = Number(options.timeoutSecondsOverride);
-    const timeoutSeconds = Number.isFinite(timeoutOverride) && timeoutOverride > 0
-        ? Math.min(3600, Math.max(20, timeoutOverride))
-        : normalizedProfileFailureTimeoutSeconds();
-    let timedOut = false;
-    let timer = null;
-    let removeHardStopAbort = null;
-
-    const hardStop = new Promise((_, reject) => {
-        const onAbort = () => {
-            if (timedOut) {
-                const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
-                timeoutError.code = 'VERBA_TIMEOUT';
-                reject(timeoutError);
-                return;
-            }
-            reject(abortError());
-        };
+    let removeAbortListener = null;
+    // Cancellation must settle even when the provider ignores AbortSignal.
+    // Elapsed time never cancels an in-flight or queued translation.
+    const cancelled = new Promise((_, reject) => {
+        const onAbort = () => reject(abortError());
         controller.signal.addEventListener('abort', onAbort, { once: true });
-        removeHardStopAbort = () => controller.signal.removeEventListener('abort', onAbort);
-        timer = setTimeout(() => {
-            timedOut = true;
-            controller.abort();
-        }, timeoutSeconds * 1000);
+        removeAbortListener = () => controller.signal.removeEventListener('abort', onAbort);
     });
 
     try {
@@ -3400,11 +3381,7 @@ async function sendProfileRequest(prompt, options = {}) {
             const service = liveContext().ConnectionManagerRequestService;
             if (!service?.sendRequest) throw new Error('실리태번 연결 관리자 요청 기능을 찾을 수 없습니다.');
 
-            // Some ConnectionManager/provider implementations do not actually
-            // settle their Promise when AbortSignal is aborted. In that case a
-            // plain `await sendRequest()` can leave Verba stuck on "번역 중"
-            // forever. Race against Verba's own hard-stop Promise so each
-            // attempt always returns or fails within the configured timeout.
+            // Race only against explicit cancellation, never a deadline.
             const request = Promise.resolve().then(() => {
                 if (controller.signal.aborted) throw abortError();
                 outputTiming.sent(options.timing, timingRequest);
@@ -3416,7 +3393,7 @@ async function sendProfileRequest(prompt, options = {}) {
                     { signal: controller.signal, ...(wire ? { onDiagnostic: wire.provider } : {}) },
                 );
             });
-            const response = await Promise.race([request, hardStop]);
+            const response = await Promise.race([request, cancelled]);
             outputTiming.received(options.timing, timingRequest);
             wire?.response(extractResponseText(response));
 
@@ -3442,18 +3419,10 @@ async function sendProfileRequest(prompt, options = {}) {
         // Also race while the request is still waiting in Verba's queue.
         // Otherwise a cancelled queued translation would keep showing
         // "취소 중" until every earlier request had finished.
-        return await Promise.race([queuedRequest, hardStop]);
+        return await Promise.race([queuedRequest, cancelled]);
     } catch (error) {
         wire?.error(error);
         outputTiming.received(options.timing, timingRequest);
-        if (timedOut) {
-            const timeoutError = new Error(`응답 대기 시간 ${timeoutSeconds}초를 초과했습니다.`);
-            timeoutError.code = 'VERBA_TIMEOUT';
-            timeoutError.cause = error;
-            if (settings.debugMode) rememberRequestError(timeoutError, { ...options, profileSlot });
-            attemptError = timeoutError;
-            throw timeoutError;
-        }
         if (controller.signal.aborted) {
             attemptError = abortError();
             throw attemptError;
@@ -3473,8 +3442,7 @@ async function sendProfileRequest(prompt, options = {}) {
     } finally {
         outputTiming.settled(options.timing, timingRequest,
             attemptSucceeded ? '응답 수신' : outerSignal?.aborted ? '취소' : '오류');
-        if (timer) clearTimeout(timer);
-        removeHardStopAbort?.();
+        removeAbortListener?.();
         outerSignal?.removeEventListener?.('abort', forwardAbort);
         // A user/internal abort is neither a provider success nor a provider
         // failure, so keep it out of the connection performance statistics.
@@ -3531,32 +3499,14 @@ function configuredProfileCycle() {
     };
 }
 
-function normalizedProfileRaceTimeoutMinutes(value = settings.profileRaceTimeoutMinutes) {
-    return Math.min(1440, Math.max(1, Number(value) || 5));
-}
-
 function normalizedProfileRaceStaggerSeconds(value = settings.profileRaceStaggerSeconds) {
     return Math.min(180, Math.max(5, Math.round(Number(value) || 35)));
-}
-
-function normalizedProfileFailureTimeoutSeconds(value = settings.timeoutSeconds) {
-    return Math.min(3600, Math.max(60, Number(value) || 120));
-}
-
-function normalizedProfileFailureTimeoutMinutes(value = Number(settings.timeoutSeconds) / 60) {
-    return Math.min(60, Math.max(1, Math.round(Number(value) || 2)));
 }
 
 function profileRaceActive() {
     return settings.profileRaceEnabled === true
         && settings.autoProfileFallback !== false
         && configuredProfiles().length > 1;
-}
-
-function profileRaceTimeoutError(minutes = normalizedProfileRaceTimeoutMinutes()) {
-    const error = new Error(`지연 경주 전체 제한 시간 ${minutes}분을 초과했습니다.`);
-    error.code = 'VERBA_PROFILE_RACE_TIMEOUT';
-    return error;
 }
 
 function profileDisplayName(profileId) {
@@ -3611,21 +3561,18 @@ function applyCustomTranslatorPrompt(prompt, options = {}) {
     return `[LEGACY CUSTOM AUXILIARY INSTRUCTION]\n${instruction}\n[END LEGACY CUSTOM AUXILIARY INSTRUCTION]\nThe current task, identity, settings, scopes and response contract below remain authoritative.\n\n${original}`;
 }
 
-function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfileCycle(), retryAttempt = 0, deadlineAt = Date.now() + 300000) {
+function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfileCycle(), retryAttempt = 0) {
     const candidates = [
         { slot: profiles.slot, id: profiles.active },
         ...(profiles.fallbacks || []),
     ].filter(profile => profile?.id);
     if (candidates.length < 2) {
-        const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1000));
-        const attemptTimeoutSeconds = Math.min(normalizedProfileFailureTimeoutSeconds(), remainingSeconds);
         return sendProfileRequest(prompt, {
             ...options,
             profileId: candidates[0]?.id || profiles.active,
             profileSlot: candidates[0]?.slot || profiles.slot,
             retryAttempt,
             fallback: false,
-            timeoutSecondsOverride: attemptTimeoutSeconds,
         });
     }
 
@@ -3667,16 +3614,11 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
         const scheduleNext = () => {
             clearStagger();
             if (finished || nextIndex >= candidates.length) return;
-            const remaining = deadlineAt - Date.now();
-            if (remaining <= 0) {
-                finishFailure(profileRaceTimeoutError());
-                return;
-            }
             const staggerMs = normalizedProfileRaceStaggerSeconds() * 1000;
             staggerTimer = setTimeout(() => {
                 staggerTimer = null;
                 launchNext();
-            }, Math.min(staggerMs, remaining));
+            }, staggerMs);
         };
 
         const launchNext = () => {
@@ -3690,8 +3632,6 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
             childControllers.set(index, child);
             const abortChild = () => child.abort();
             outerSignal?.addEventListener?.('abort', abortChild, { once: true });
-            const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1000) + 1);
-            const attemptTimeoutSeconds = Math.min(normalizedProfileFailureTimeoutSeconds(), remainingSeconds);
 
             sendProfileRequest(prompt, {
                 ...options,
@@ -3701,7 +3641,6 @@ function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfi
                 retryAttempt,
                 fallback: index > 0,
                 profileRaceRequest: true,
-                timeoutSecondsOverride: attemptTimeoutSeconds,
             }).then(response => {
                 if (finished) return;
                 finished = true;
@@ -3759,20 +3698,10 @@ async function sendWithRetry(prompt, options = {}) {
     const outerSignal = options.signal || null;
     const controller = new AbortController();
     const raceEnabled = profileRaceActive();
-    const raceTimeoutMinutes = normalizedProfileRaceTimeoutMinutes();
-    const raceDeadlineAt = raceEnabled ? Date.now() + raceTimeoutMinutes * 60 * 1000 : 0;
-    let raceTimedOut = false;
-    let raceDeadlineTimer = null;
     const forwardAbort = () => controller.abort();
     if (outerSignal) {
         if (outerSignal.aborted) forwardAbort();
         else outerSignal.addEventListener('abort', forwardAbort, { once: true });
-    }
-    if (raceEnabled) {
-        raceDeadlineTimer = setTimeout(() => {
-            raceTimedOut = true;
-            controller.abort();
-        }, Math.max(1, raceDeadlineAt - Date.now()));
     }
 
     const requestOptions = { ...options, signal: controller.signal };
@@ -3796,7 +3725,6 @@ async function sendWithRetry(prompt, options = {}) {
                         requestOptions,
                         profiles,
                         attempt,
-                        raceDeadlineAt,
                     )
                     : await sendProfileRequest(outgoingPrompt, {
                         ...requestOptions,
@@ -3807,7 +3735,6 @@ async function sendWithRetry(prompt, options = {}) {
                     });
             } catch (primaryError) {
                 if (isAbort(primaryError, controller.signal)) {
-                    if (raceTimedOut) throw profileRaceTimeoutError(raceTimeoutMinutes);
                     throw primaryError;
                 }
 
@@ -3850,9 +3777,6 @@ async function sendWithRetry(prompt, options = {}) {
                 // by sending the same paid request again.
                 if (!transient) throw cycleError;
                 if (maxRetries > 0 && attempt === maxRetries) break;
-                if (raceEnabled && Date.now() >= raceDeadlineAt) {
-                    throw profileRaceTimeoutError(raceTimeoutMinutes);
-                }
 
                 const fallbackDelay = serverRetryBackoffMs(attempt);
                 const delay = retryAfterMs(cycleError) || fallbackDelay;
@@ -3873,13 +3797,7 @@ async function sendWithRetry(prompt, options = {}) {
                     cycleError,
                 );
 
-                const boundedDelay = raceEnabled
-                    ? Math.min(delay, Math.max(1, raceDeadlineAt - Date.now()))
-                    : delay;
-                await outputTiming.wait(options.timing, () => wait(boundedDelay, controller.signal));
-                if (raceTimedOut || (raceEnabled && Date.now() >= raceDeadlineAt)) {
-                    throw profileRaceTimeoutError(raceTimeoutMinutes);
-                }
+                await outputTiming.wait(options.timing, () => wait(delay, controller.signal));
                 state.delayMs = 0;
                 state.updatedAt = Date.now();
                 updateServerRetryIndicator();
@@ -3891,7 +3809,6 @@ async function sendWithRetry(prompt, options = {}) {
             { cause: lastError || undefined },
         );
     } finally {
-        if (raceDeadlineTimer) clearTimeout(raceDeadlineTimer);
         serverRetryStates.delete(token);
         updateServerRetryIndicator();
         outerSignal?.removeEventListener?.('abort', forwardAbort);
@@ -5080,7 +4997,7 @@ async function runExperimentalQualityAudit({
     }
 }
 
-// All selected output checks share one bounded request, never the retry/race loop.
+// All selected output checks share one cancellable request, never the retry/race loop.
 async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}, speakerScopes = inferLocalTargetDialogueScopes(segmented, speakerIdentity), reviewSettings, options = {} }) {
     const before = new Map(translations);
     try {
@@ -5094,14 +5011,12 @@ async function reviewFinalOutput({ segmented, translations, speakerIdentity = {}
             ? buildOutputPrompt({ ...segmented, segments: [], protectedText: '' }, config,
                 options.oneTimeInstruction || '', { ...speakerIdentity, omitTranslationContext: true }, options.tuning || null, speakerScopes)
             : '';
-        const postReviewTimeoutSeconds = Math.min(60, normalizedProfileFailureTimeoutSeconds());
-        const result = await reviewOutputOnce({ segmented, translations, settings: config, speakerScopes, reference, options:{...options,postReviewTimeoutSeconds},
+        const result = await reviewOutputOnce({ segmented, translations, settings: config, speakerScopes, reference, options,
             request: async (prompt, targets, requestOptions) => {
                 const profiles = configuredProfileCycle();
                 const response = await sendProfileRequest(prompt, {
                     ...requestOptions, profileId: profiles.active, profileSlot: profiles.slot,
                     stage: 'output-post-review',
-                    timeoutSecondsOverride: postReviewTimeoutSeconds,
                 });
                 const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
                 if (parsed.parseError || parsed.partial.size !== targets.length) {
@@ -5136,7 +5051,6 @@ async function reviewFinalBilingual({ segmented, translations, options = {} }) {
                 profileId: profiles.active,
                 profileSlot: profiles.slot,
                 stage: 'final-bilingual-review',
-                timeoutSecondsOverride: Math.min(60, normalizedProfileFailureTimeoutSeconds()),
             });
             const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
             if (parsed.parseError || parsed.partial.size !== targets.length) {
@@ -5160,7 +5074,6 @@ async function reviewFinalEnglish({ segmented, translations, speakerIdentity = {
                 profileId: profiles.active,
                 profileSlot: profiles.slot,
                 stage: 'final-english-review',
-                timeoutSecondsOverride: Math.min(60, normalizedProfileFailureTimeoutSeconds()),
             });
             const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
             if (parsed.parseError || parsed.partial.size !== targets.length) {
@@ -5195,7 +5108,6 @@ async function planBilingualDialogueVerdicts(segmented, options = {}) {
                 profileSlot: profiles.slot,
                 signal: sharedSignal,
                 stage: 'bilingual-check',
-                timeoutSecondsOverride: 20,
                 timing: options.timing,
             });
             const result = collectPartialSegmentTranslations(extractResponseText(response), expected);
@@ -11562,21 +11474,13 @@ function injectSettingsPanel() {
                     <span>회</span>
                 </div>
                 <div class="verba-help">최초 요청을 제외한 추가 재시도 횟수예요. 기본 5회, 0은 무제한이며 다음 번역 요청부터 적용돼요. 429·일시적 서버·연결 오류만 재시도하고, API 키·결제 오류는 중단해요.</div>
-                <div class="verba-help">약 3→5→8→12→20초로 대기를 늘리며 이후에는 최대 20초씩 기다려요. 서버가 대기 시간을 알려주면 그 시간을 우선해요. 취소 버튼으로 중단할 수 있고, 지연 경주의 전체 강제 종료 시간은 그대로 적용돼요.</div>
+                <div class="verba-help">약 3→5→8→12→20초로 대기를 늘리며 이후에는 최대 20초씩 기다려요. 서버가 대기 시간을 알려주면 그 시간을 우선해요. 시간이 오래 걸려도 자동 종료하지 않으며, 취소 버튼으로 중단할 수 있어요.</div>
 
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-auto-profile-fallback" ${settings.autoProfileFallback !== false ? 'checked' : ''}>
                     <span>번역 실패 시 다른 프로필 자동 사용</span>
                 </label>
                 <div class="verba-help">켜면 현재 프로필에 일시적 서버·네트워크·속도 제한 오류가 생겼을 때 나머지 프로필을 순서대로 임시 사용해요. 끄면 현재 선택한 프로필만 자동 재시도하고 B/C로 넘어가지 않습니다.</div>
-                <div id="verba-profile-fallback-options" class="verba-profile-fallback-options" ${settings.autoProfileFallback !== false ? '' : 'hidden'}>
-                    <label for="verba-profile-failure-timeout-minutes">프로필 실패 판정 시간</label>
-                    <div class="verba-profile-fallback-time-row">
-                        <input type="number" inputmode="numeric" min="1" max="60" step="1" id="verba-profile-failure-timeout-minutes" class="text_pole" value="${normalizedProfileFailureTimeoutMinutes()}">
-                        <span>분</span>
-                    </div>
-                    <div class="verba-help">한 프로필이 이 시간 안에 응답을 끝내지 못하면 시간초과 실패로 처리해요. 자동 전환이 켜져 있으면 다음 프로필로 넘어가며, 지연 경주 중에도 각 프로필에 적용됩니다.</div>
-                </div>
 
                 <label class="verba-check-row">
                     <input type="checkbox" id="verba-profile-race-enabled" ${settings.profileRaceEnabled === true ? 'checked' : ''}>
@@ -11590,12 +11494,7 @@ function injectSettingsPanel() {
                         <span>초</span>
                     </div>
                     <div class="verba-help">A 요청 후 입력한 시간이 지나면 B를, 다시 같은 시간이 지나면 C를 시작해요. 명확한 일시적 오류가 나면 기다리지 않고 다음 프로필을 즉시 호출합니다.</div>
-                    <label for="verba-profile-race-timeout-minutes">전체 강제 종료 시간</label>
-                    <div class="verba-profile-race-time-row">
-                        <input type="number" inputmode="decimal" min="1" max="1440" step="1" id="verba-profile-race-timeout-minutes" class="text_pole" value="${normalizedProfileRaceTimeoutMinutes()}">
-                        <span>분</span>
-                    </div>
-                    <div class="verba-help">최초 프로필 호출부터 계산해 입력한 시간이 지나면 경주 중인 A·B·C 요청을 모두 종료해요. 마지막 입력값은 저장됩니다.</div>
+                    <div class="verba-help">전체 시간 제한 없이 먼저 정상 완료되는 응답을 기다려요. 취소 버튼으로 중단할 수 있어요.</div>
                 </div>
                 </div>
                 <button type="button" id="verba-test-profile" class="menu_button verba-wide">현재 번역 엔진 테스트</button>
@@ -12746,15 +12645,11 @@ function injectSettingsPanel() {
         saveSettings();
     });
     const profileFallbackInput = panel.querySelector('#verba-auto-profile-fallback');
-    const profileFallbackOptions = panel.querySelector('#verba-profile-fallback-options');
-    const profileFailureTimeoutInput = panel.querySelector('#verba-profile-failure-timeout-minutes');
     const profileRaceInput = panel.querySelector('#verba-profile-race-enabled');
     const profileRaceOptions = panel.querySelector('#verba-profile-race-options');
     const profileRaceStaggerInput = panel.querySelector('#verba-profile-race-stagger-seconds');
-    const profileRaceMinutesInput = panel.querySelector('#verba-profile-race-timeout-minutes');
     const syncProfileRaceUi = () => {
         const fallbackEnabled = settings.autoProfileFallback !== false;
-        if (profileFallbackOptions) profileFallbackOptions.hidden = !fallbackEnabled;
         if (profileRaceInput) profileRaceInput.disabled = !fallbackEnabled;
         if (profileRaceOptions) profileRaceOptions.hidden = !(fallbackEnabled && settings.profileRaceEnabled === true);
     };
@@ -12768,20 +12663,9 @@ function injectSettingsPanel() {
         syncProfileRaceUi();
         saveSettings();
     });
-    profileFailureTimeoutInput.addEventListener('change', event => {
-        const minutes = normalizedProfileFailureTimeoutMinutes(event.target.value);
-        settings.timeoutSeconds = minutes * 60;
-        event.target.value = String(minutes);
-        saveSettings();
-    });
     profileRaceStaggerInput.addEventListener('change', event => {
         settings.profileRaceStaggerSeconds = normalizedProfileRaceStaggerSeconds(event.target.value);
         event.target.value = String(settings.profileRaceStaggerSeconds);
-        saveSettings();
-    });
-    profileRaceMinutesInput.addEventListener('change', event => {
-        settings.profileRaceTimeoutMinutes = normalizedProfileRaceTimeoutMinutes(event.target.value);
-        event.target.value = String(settings.profileRaceTimeoutMinutes);
         saveSettings();
     });
     syncProfileRaceUi();

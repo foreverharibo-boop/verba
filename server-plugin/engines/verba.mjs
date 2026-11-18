@@ -4798,19 +4798,19 @@ async function translateGoogleFreeChunk(text, {
   sourceLanguage = "auto",
   targetLanguage = "ko",
   signal = null,
-  fetchImpl = globalThis.fetch,
-  timeoutMs = 45e3
+  fetchImpl = globalThis.fetch
 } = {}) {
   if (signal?.aborted) throw signal.reason || abortError();
   if (typeof fetchImpl !== "function") throw new Error("\uC774 \uD658\uACBD\uC5D0\uC11C\uB294 \uBB34\uB8CC Google \uBC88\uC5ED \uC694\uCCAD\uC744 \uBCF4\uB0BC \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
   const controller = new AbortController();
-  let timedOut = false;
   const forwardAbort = () => controller.abort(signal?.reason || abortError());
   signal?.addEventListener?.("abort", forwardAbort, { once: true });
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, Math.max(1e3, Number(timeoutMs) || 45e3));
+  let removeAbortListener;
+  const cancelled = new Promise((_, reject) => {
+    const onAbort = () => reject(signal?.reason || abortError());
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    removeAbortListener = () => controller.signal.removeEventListener("abort", onAbort);
+  });
   const url = new URL(GOOGLE_FREE_ENDPOINT);
   url.searchParams.set("client", "gtx");
   url.searchParams.set("sl", sourceLanguage || "auto");
@@ -4818,24 +4818,23 @@ async function translateGoogleFreeChunk(text, {
   url.searchParams.set("dt", "t");
   url.searchParams.set("q", text);
   try {
-    const response = await fetchImpl(url.toString(), {
+    const response = await Promise.race([fetchImpl(url.toString(), {
       method: "GET",
       signal: controller.signal,
       credentials: "omit",
       cache: "no-store",
       headers: { Accept: "application/json,text/plain,*/*" }
-    });
+    }), cancelled]);
     if (!response?.ok) {
       const status = Number(response?.status) || 0;
       throw new Error(`\uBB34\uB8CC Google \uBC88\uC5ED \uC694\uCCAD \uC2E4\uD328${status ? ` (HTTP ${status})` : ""}`);
     }
-    return parseGoogleFreeResponse(await response.json());
+    return parseGoogleFreeResponse(await Promise.race([response.json(), cancelled]));
   } catch (error) {
     if (signal?.aborted) throw signal.reason || abortError();
-    if (timedOut) throw new Error("\uBB34\uB8CC Google \uBC88\uC5ED \uC751\uB2F5 \uB300\uAE30 \uC2DC\uAC04\uC774 \uCD08\uACFC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
     throw error;
   } finally {
-    clearTimeout(timeout);
+    removeAbortListener();
     signal?.removeEventListener?.("abort", forwardAbort);
   }
 }
@@ -5362,27 +5361,11 @@ function createEngine(snapshot, transport, report = () => {
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
     outerSignal?.addEventListener?.("abort", forwardAbort, { once: true });
-    const timeoutOverride = Number(options.timeoutSecondsOverride);
-    const timeoutSeconds = Number.isFinite(timeoutOverride) && timeoutOverride > 0 ? Math.min(3600, Math.max(20, timeoutOverride)) : normalizedProfileFailureTimeoutSeconds();
-    let timedOut = false;
-    let timer = null;
-    let removeHardStopAbort = null;
-    const hardStop = new Promise((_, reject) => {
-      const onAbort = () => {
-        if (timedOut) {
-          const timeoutError = new Error(`\uC751\uB2F5 \uB300\uAE30 \uC2DC\uAC04 ${timeoutSeconds}\uCD08\uB97C \uCD08\uACFC\uD588\uC2B5\uB2C8\uB2E4.`);
-          timeoutError.code = "VERBA_TIMEOUT";
-          reject(timeoutError);
-          return;
-        }
-        reject(abortError2());
-      };
+    let removeAbortListener = null;
+    const cancelled = new Promise((_, reject) => {
+      const onAbort = () => reject(abortError2());
       controller.signal.addEventListener("abort", onAbort, { once: true });
-      removeHardStopAbort = () => controller.signal.removeEventListener("abort", onAbort);
-      timer = setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, timeoutSeconds * 1e3);
+      removeAbortListener = () => controller.signal.removeEventListener("abort", onAbort);
     });
     try {
       const executeRequest = async () => {
@@ -5400,7 +5383,7 @@ function createEngine(snapshot, transport, report = () => {
             { signal: controller.signal, ...wire ? { onDiagnostic: wire.provider } : {} }
           );
         });
-        const response = await Promise.race([request, hardStop]);
+        const response = await Promise.race([request, cancelled]);
         outputTiming.received(options.timing, timingRequest);
         wire?.response(extractResponseText(response));
         if (!extractResponseText(response).trim()) {
@@ -5413,18 +5396,10 @@ function createEngine(snapshot, transport, report = () => {
         return response;
       };
       const queuedRequest = options.profileRaceRequest === true ? enqueueProfileRaceRequest(executeRequest) : options.splitRequest === true ? enqueueSplitOutputRequest(executeRequest) : options.parallelRequest === true ? enqueueScopedParallelRequest(executeRequest) : enqueueRequest(executeRequest);
-      return await Promise.race([queuedRequest, hardStop]);
+      return await Promise.race([queuedRequest, cancelled]);
     } catch (error) {
       wire?.error(error);
       outputTiming.received(options.timing, timingRequest);
-      if (timedOut) {
-        const timeoutError = new Error(`\uC751\uB2F5 \uB300\uAE30 \uC2DC\uAC04 ${timeoutSeconds}\uCD08\uB97C \uCD08\uACFC\uD588\uC2B5\uB2C8\uB2E4.`);
-        timeoutError.code = "VERBA_TIMEOUT";
-        timeoutError.cause = error;
-        if (settings.debugMode) rememberRequestError(timeoutError, { ...options, profileSlot });
-        attemptError = timeoutError;
-        throw timeoutError;
-      }
       if (controller.signal.aborted) {
         attemptError = abortError2();
         throw attemptError;
@@ -5444,8 +5419,7 @@ function createEngine(snapshot, transport, report = () => {
         timingRequest,
         attemptSucceeded ? "\uC751\uB2F5 \uC218\uC2E0" : outerSignal?.aborted ? "\uCDE8\uC18C" : "\uC624\uB958"
       );
-      if (timer) clearTimeout(timer);
-      removeHardStopAbort?.();
+      removeAbortListener?.();
       outerSignal?.removeEventListener?.("abort", forwardAbort);
       if (!outerSignal?.aborted) {
         recordProfileAttempt(profileSlot, {
@@ -5491,22 +5465,11 @@ function createEngine(snapshot, transport, report = () => {
       fallbacks: settings.autoProfileFallback !== false ? ordered.slice(1) : []
     };
   }
-  function normalizedProfileRaceTimeoutMinutes(value = settings.profileRaceTimeoutMinutes) {
-    return Math.min(1440, Math.max(1, Number(value) || 5));
-  }
   function normalizedProfileRaceStaggerSeconds(value = settings.profileRaceStaggerSeconds) {
     return Math.min(180, Math.max(5, Math.round(Number(value) || 35)));
   }
-  function normalizedProfileFailureTimeoutSeconds(value = settings.timeoutSeconds) {
-    return Math.min(3600, Math.max(60, Number(value) || 120));
-  }
   function profileRaceActive() {
     return settings.profileRaceEnabled === true && settings.autoProfileFallback !== false && configuredProfiles().length > 1;
-  }
-  function profileRaceTimeoutError(minutes = normalizedProfileRaceTimeoutMinutes()) {
-    const error = new Error(`\uC9C0\uC5F0 \uACBD\uC8FC \uC804\uCCB4 \uC81C\uD55C \uC2DC\uAC04 ${minutes}\uBD84\uC744 \uCD08\uACFC\uD588\uC2B5\uB2C8\uB2E4.`);
-    error.code = "VERBA_PROFILE_RACE_TIMEOUT";
-    return error;
   }
   function profileDisplayName(profileId) {
     return profileList().find((profile) => profile.id === String(profileId))?.name || "\uBCF4\uC870 \uD504\uB85C\uD544";
@@ -5553,21 +5516,18 @@ The current task, identity, settings, scopes and response contract below remain 
 
 ${original}`;
   }
-  function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfileCycle(), retryAttempt = 0, deadlineAt = Date.now() + 3e5) {
+  function sendProfileRaceAttempt(prompt, options = {}, profiles = configuredProfileCycle(), retryAttempt = 0) {
     const candidates = [
       { slot: profiles.slot, id: profiles.active },
       ...profiles.fallbacks || []
     ].filter((profile) => profile?.id);
     if (candidates.length < 2) {
-      const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1e3));
-      const attemptTimeoutSeconds = Math.min(normalizedProfileFailureTimeoutSeconds(), remainingSeconds);
       return sendProfileRequest(prompt, {
         ...options,
         profileId: candidates[0]?.id || profiles.active,
         profileSlot: candidates[0]?.slot || profiles.slot,
         retryAttempt,
-        fallback: false,
-        timeoutSecondsOverride: attemptTimeoutSeconds
+        fallback: false
       });
     }
     const outerSignal = options.signal || null;
@@ -5605,16 +5565,11 @@ ${original}`;
       const scheduleNext = () => {
         clearStagger();
         if (finished || nextIndex >= candidates.length) return;
-        const remaining = deadlineAt - Date.now();
-        if (remaining <= 0) {
-          finishFailure(profileRaceTimeoutError());
-          return;
-        }
         const staggerMs = normalizedProfileRaceStaggerSeconds() * 1e3;
         staggerTimer = setTimeout(() => {
           staggerTimer = null;
           launchNext();
-        }, Math.min(staggerMs, remaining));
+        }, staggerMs);
       };
       const launchNext = () => {
         if (finished || nextIndex >= candidates.length) return;
@@ -5626,8 +5581,6 @@ ${original}`;
         childControllers.set(index, child);
         const abortChild = () => child.abort();
         outerSignal?.addEventListener?.("abort", abortChild, { once: true });
-        const remainingSeconds = Math.max(20, Math.ceil((deadlineAt - Date.now()) / 1e3) + 1);
-        const attemptTimeoutSeconds = Math.min(normalizedProfileFailureTimeoutSeconds(), remainingSeconds);
         sendProfileRequest(prompt, {
           ...options,
           signal: child.signal,
@@ -5635,8 +5588,7 @@ ${original}`;
           profileSlot: profile.slot,
           retryAttempt,
           fallback: index > 0,
-          profileRaceRequest: true,
-          timeoutSecondsOverride: attemptTimeoutSeconds
+          profileRaceRequest: true
         }).then((response) => {
           if (finished) return;
           finished = true;
@@ -5683,20 +5635,10 @@ ${original}`;
     const outerSignal = options.signal || null;
     const controller = new AbortController();
     const raceEnabled = profileRaceActive();
-    const raceTimeoutMinutes = normalizedProfileRaceTimeoutMinutes();
-    const raceDeadlineAt = raceEnabled ? Date.now() + raceTimeoutMinutes * 60 * 1e3 : 0;
-    let raceTimedOut = false;
-    let raceDeadlineTimer = null;
     const forwardAbort = () => controller.abort();
     if (outerSignal) {
       if (outerSignal.aborted) forwardAbort();
       else outerSignal.addEventListener("abort", forwardAbort, { once: true });
-    }
-    if (raceEnabled) {
-      raceDeadlineTimer = setTimeout(() => {
-        raceTimedOut = true;
-        controller.abort();
-      }, Math.max(1, raceDeadlineAt - Date.now()));
     }
     const requestOptions = { ...options, signal: controller.signal };
     const customPrompt = applyCustomTranslatorPrompt(prompt, options);
@@ -5712,8 +5654,7 @@ ${original}`;
             outgoingPrompt,
             requestOptions,
             profiles,
-            attempt,
-            raceDeadlineAt
+            attempt
           ) : await sendProfileRequest(outgoingPrompt, {
             ...requestOptions,
             profileId: primaryProfileId,
@@ -5723,7 +5664,6 @@ ${original}`;
           });
         } catch (primaryError) {
           if (isAbort(primaryError, controller.signal)) {
-            if (raceTimedOut) throw profileRaceTimeoutError(raceTimeoutMinutes);
             throw primaryError;
           }
           let cycleError = primaryError;
@@ -5756,9 +5696,6 @@ ${original}`;
           const transient = transientError(cycleError);
           if (!transient) throw cycleError;
           if (maxRetries > 0 && attempt === maxRetries) break;
-          if (raceEnabled && Date.now() >= raceDeadlineAt) {
-            throw profileRaceTimeoutError(raceTimeoutMinutes);
-          }
           const fallbackDelay = serverRetryBackoffMs(attempt);
           const delay = retryAfterMs(cycleError) || fallbackDelay;
           const state = {
@@ -5775,11 +5712,7 @@ ${original}`;
             `[\uBCA0\uB974\uBC14] \uBC88\uC5ED \uC694\uCCAD \uC2E4\uD328 \u2014 ${state.retryCount}/${state.maxRetries || "\uBB34\uC81C\uD55C"}\uD68C \uC7AC\uC2DC\uB3C4 \uC608\uC815`,
             cycleError
           );
-          const boundedDelay = raceEnabled ? Math.min(delay, Math.max(1, raceDeadlineAt - Date.now())) : delay;
-          await outputTiming.wait(options.timing, () => wait(boundedDelay, controller.signal));
-          if (raceTimedOut || raceEnabled && Date.now() >= raceDeadlineAt) {
-            throw profileRaceTimeoutError(raceTimeoutMinutes);
-          }
+          await outputTiming.wait(options.timing, () => wait(delay, controller.signal));
           state.delayMs = 0;
           state.updatedAt = Date.now();
           updateServerRetryIndicator();
@@ -5790,7 +5723,6 @@ ${original}`;
         { cause: lastError || void 0 }
       );
     } finally {
-      if (raceDeadlineTimer) clearTimeout(raceDeadlineTimer);
       serverRetryStates.delete(token2);
       updateServerRetryIndicator();
       outerSignal?.removeEventListener?.("abort", forwardAbort);
@@ -6559,22 +6491,20 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
         options.tuning || null,
         speakerScopes
       ) : "";
-      const postReviewTimeoutSeconds = Math.min(60, normalizedProfileFailureTimeoutSeconds());
       const result = await reviewOutputOnce({
         segmented,
         translations,
         settings: config,
         speakerScopes,
         reference,
-        options: { ...options, postReviewTimeoutSeconds },
+        options,
         request: async (prompt, targets, requestOptions) => {
           const profiles = configuredProfileCycle();
           const response = await sendProfileRequest(prompt, {
             ...requestOptions,
             profileId: profiles.active,
             profileSlot: profiles.slot,
-            stage: "output-post-review",
-            timeoutSecondsOverride: postReviewTimeoutSeconds
+            stage: "output-post-review"
           });
           const parsed = collectPartialSegmentTranslations(extractResponseText(response), targets);
           if (parsed.parseError || parsed.partial.size !== targets.length) {
@@ -6613,7 +6543,6 @@ ${settings.allDialoguePrompt || ""}`.toLocaleLowerCase();
           profileSlot: profiles.slot,
           signal: sharedSignal,
           stage: "bilingual-check",
-          timeoutSecondsOverride: 20,
           timing: options.timing
         });
         const result = collectPartialSegmentTranslations(extractResponseText(response), expected);

@@ -97,13 +97,15 @@ test('interrupted first result lookup reconnects to the completed job without an
  await client.output('Hello.',{stage:'output-retranslation'},()=>{});assert.equal(translations,2);
 });
 
-test('the actual 20-second transport timer is a connection timeout, not user cancellation',async t=>{
+test('transport waits past the old 20-second deadline and accepts the response',async t=>{
  t.mock.timers.enable({apis:['setTimeout']});
- environment((_url,{signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true})));
- const client=createServerClient({variant:'verba',version:'0.6.51',getSettings:()=>({}),getContext:()=>({getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings:{}}),getGenerationOptions:()=>({options:{}})});
- const pending=client.check();
- const checked=assert.rejects(pending,error=>error.name!=='AbortError'&&error.code==='VERBA_SERVER_CONNECTION_TIMEOUT'&&error.cause?.name!=='AbortError');
- t.mock.timers.tick(20000);await checked;
+ let release,requestSignal;
+ environment((_url,{signal})=>{requestSignal=signal;return new Promise(resolve=>{release=resolve;});});
+ const client=createServerClient({variant:'verba',version:'fixture',getSettings:()=>({}),getContext:()=>({getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings:{}}),getGenerationOptions:()=>({options:{}})});
+ let settled=false;const pending=client.check().finally(()=>{settled=true;});
+ t.mock.timers.tick(3600000);await Promise.resolve();
+ assert.equal(requestSignal.aborted,false);assert.equal(settled,false);
+ release(Response.json({protocol:1,engines:{verba:{version:'fixture'}}}));await pending;
 });
 
 test('an interrupted JSON body is not swallowed as an empty successful response',async()=>{
@@ -268,4 +270,33 @@ test('new client preserves the legacy APK notification envelope with an older se
  const client=createServerClient({variant:'verba',version:'fixture',getSettings:()=>settings,getContext:()=>({chatId:'one',getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings}),getGenerationOptions:()=>({options:{}})});
  await client.output('Hello',{automatic:true,stage:'output-translation'},()=>{throw Error('unexpected local');});
  assert.equal(sent.notification.protocol,1);assert.equal(sent.notification.routing,undefined);assert.match(sent.notification.generationId,/^verba:verba:/);
+});
+
+test('user cancellation settles a stalled submission even when fetch ignores abort', {timeout:1000},async()=>{
+ const controller=new AbortController();let started,accepted=0,cancellations=0;
+ const submitted=new Promise(resolve=>{started=resolve;});
+ environment(async(url)=>{
+  if(url.endsWith('/cancel')){cancellations++;return Response.json({state:'cancelled'});}
+  if(url.endsWith('/jobs')){accepted++;started();return new Promise(()=>{});}
+  throw Error('unexpected polling');
+ });
+ const settings={translationEngine:'google-free'};
+ const client=createServerClient({variant:'verba',version:'fixture',getSettings:()=>settings,getContext:()=>({getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings}),getGenerationOptions:()=>({options:{}})});
+ const pending=client.run('output','Hello',{signal:controller.signal});
+ await submitted;controller.abort();await assert.rejects(pending,{name:'AbortError'});
+ assert.equal(accepted,1);assert.equal(cancellations,1);
+});
+
+test('user cancellation settles a stalled status read even when fetch ignores abort', {timeout:1000},async()=>{
+ const controller=new AbortController();let started,cancellations=0;
+ const reading=new Promise(resolve=>{started=resolve;});
+ environment(async(url)=>{
+  if(url.endsWith('/cancel')){cancellations++;return Response.json({state:'cancelled'});}
+  if(url.endsWith('/jobs'))return Response.json({state:'queued'});
+  started();return new Promise(()=>{});
+ });
+ const settings={translationEngine:'google-free'};
+ const client=createServerClient({variant:'verba',version:'fixture',getSettings:()=>settings,getContext:()=>({getRequestHeaders:()=>({})}),isActive:()=>true,getSnapshot:()=>({settings}),getGenerationOptions:()=>({options:{}})});
+ const pending=client.run('output','Hello',{signal:controller.signal});
+ await reading;controller.abort();await assert.rejects(pending,{name:'AbortError'});assert.equal(cancellations,1);
 });

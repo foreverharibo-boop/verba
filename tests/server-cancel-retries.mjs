@@ -123,10 +123,11 @@ test('in-flight cancellation is shared across abort handlers and resume events',
     release({status:200});await a;assert.equal(h.records()[0].cancelState,'sent');assert.equal(h.notices.length,0);
 });
 
-test('timeout retries rather than claiming user cancellation; different jobs stay independent',async()=>{
-    const h=harness({rows:[storedRow(),storedRow(secondId)],responses:[()=>new Promise(()=>{}),{status:404},{status:200}]});
+test('slow cancellation waits without a deadline; different jobs stay independent',async()=>{
+    let release;
+    const h=harness({rows:[storedRow(),storedRow(secondId)],responses:[()=>new Promise(resolve=>{release=resolve;}),{status:404}]});
     h.client.install();await h.settle();assert.equal(h.calls.length,2);
-    await h.tick(20000);assert.equal(h.records()[0].cancelState,'pending');
-    assert.equal(h.records()[1].cancelState,'blocked');
-    await h.tick(3000);assert.equal(h.records()[0].cancelState,'sent');assert.equal(h.calls.length,3);
+    await h.tick(3600000);assert.equal(h.records()[0].cancelState,'pending');
+    assert.equal(h.records()[1].cancelState,'blocked');assert.equal(h.calls.length,2);
+    release({status:200});await h.settle();assert.equal(h.records()[0].cancelState,'sent');
 });

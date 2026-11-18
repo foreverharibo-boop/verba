@@ -1,6 +1,7 @@
+import { normalizedTranslationMaxTokens } from './output-tokens.js';
 import { createSecondTranslationAttempt } from './second-translation-diagnostics.js';
 import { exportDebugText } from './debug-export.js';
-import { secondTranslationEnabled, requestSecondTranslation, firstTranslationDraftSnapshot, readFirstTranslationDraft, firstTranslationDraftText } from './second-translation.js?v=0.6.144';
+import { secondTranslationEnabled, requestSecondTranslation, firstTranslationDraftSnapshot, readFirstTranslationDraft, firstTranslationDraftText } from './second-translation.js?v=0.6.145';
 import { sourceMapSummary, createSourceViewDiagnostics } from './source-map-diagnostics.js';
 import { createCharacterTranslationReference } from './character-translation-reference.js';
 import { createDisplayStateTrace } from './display-state-trace.js';
@@ -14,7 +15,7 @@ import { escapeCodeTranslation } from './code-content.js';
 import { deepseekKoreanEnabled, deepseekKoreanPrompt } from './deepseek-korean.js';
 import { buildBilingualVerdictPrompt, bilingualPromptsNeedingVerdict, resolveBilingualIntent } from './bilingual-intent.js';
 import { reconcileCompletedResult, compatibleCompletedSource, hasVerifiedSceneReport } from './server-result-compat.js?v=2';
-import { createServerClient } from './server-client.js?v=0.6.144';
+import { createServerClient } from './server-client.js?v=0.6.145';
 import { createAutomaticOutputLifecycle } from './automatic-output.js?v=0.6.61';
 import { createSourceChangeTracer } from './source-change-tracer.js?v=0.6.66';
 import { createBrowserExecutionDiagnostics } from './browser-execution-diagnostics.js?v=0.6.66';
@@ -30,7 +31,7 @@ import { messageFormatting, showMoreMessages } from '../../../../script.js';
 import { normalizeBaseTranslationCustom } from './base-editor.js';
 import { sanitizeDebugValue, debugErrorChain, classifyDebugError, rememberRequestError, readErrorResponse, protectedRecoverySnapshot } from './diagnostics.js';
 import { createOutputTiming, outputTimingText } from './timing.js';
-import { translateGoogleFreeSegments, translateGoogleFreeText } from './google-free.js?v=0.6.144';
+import { translateGoogleFreeSegments, translateGoogleFreeText } from './google-free.js?v=0.6.145';
 import { bindPromptExpandEditors } from './prompt-editor.js';
 import { collectSegmentResponse, repairUnexpectedProseBreaks, repairSourceEllipses, selectionEllipsisReference } from './response-parser.js';
 import { minimalOutputEnabled, POST_TRANSLATION_AI_REPAIR_ENABLED, translateMinimalOutput } from './minimal-output.js';
@@ -80,9 +81,9 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.144';
+const EXTENSION_VERSION = '0.6.145';
 // Browser and server must use the same isolated translation prompt pipeline.
-const SERVER_ENGINE_VERSION = '0.6.144';
+const SERVER_ENGINE_VERSION = '0.6.145';
 const DEVELOPER_ACCESS_CODE = '130918';
 const DEVELOPER_ACCESS_FINGERPRINT = `verba-dev-${hashText(DEVELOPER_ACCESS_CODE)}`;
 const noticeUI = createNoticeUI({ prefix: EXTENSION_KEY, title: '베르바' });
@@ -511,6 +512,7 @@ let profileStatsState = loadLocalProfileStats(legacyProfileStats);
 
 settings.autoProfileFallback = settings.autoProfileFallback !== false;
 settings.translationEngine = settings.translationEngine === 'google-free' ? 'google-free' : 'ai';
+settings.maxTokens = normalizedTranslationMaxTokens(settings.maxTokens);
 delete settings.timeoutSeconds;
 delete settings.profileRaceTimeoutMinutes;
 settings.profileRaceEnabled = settings.profileRaceEnabled === true;
@@ -767,7 +769,6 @@ delete settings.preserveNumbers;
 delete settings.preservePerspective;
 delete settings.preserveFormatting;
 settings.debugMode = settings.debugMode === true;
-const VERBA_MAX_TOKENS = 15000;
 
 const pendingOutputs = new Map();
 const pendingSelectionTranslations = new Set();
@@ -1220,7 +1221,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             relationTemperature: String(settings.relationTemperature || ''),
             narrationLocalizationLevel: String(settings.narrationLocalizationLevel || ''),
             dialogueLocalizationLevel: String(settings.dialogueLocalizationLevel || ''),
-            maxTokens: VERBA_MAX_TOKENS,
+            maxTokens: normalizedTranslationMaxTokens(settings.maxTokens),
             timeoutSeconds: null,
             mountedMessageCount: document.querySelectorAll('.mes[mesid]').length,
         },
@@ -3389,7 +3390,7 @@ async function sendProfileRequest(prompt, options = {}) {
                 return service.sendRequest(
                     profileId,
                     [{ role: 'user', content: prompt }],
-                    options.stage === 'bilingual-check' ? 512 : VERBA_MAX_TOKENS,
+                    options.stage === 'bilingual-check' ? 512 : normalizedTranslationMaxTokens(settings.maxTokens),
                     { signal: controller.signal, ...(wire ? { onDiagnostic: wire.provider } : {}) },
                 );
             });
@@ -11468,6 +11469,10 @@ function injectSettingsPanel() {
                 <select id="verba-third-profile" class="text_pole"></select>
                 <div class="verba-help">입력창 옆 ⇄ᴬ/⇄ᴮ/⇄ᶜ 버튼으로 설정된 프로필을 순서대로 직접 바꿀 수 있어요.</div>
 
+                <label for="verba-max-tokens">번역 최대 출력 토큰</label>
+                <input type="number" inputmode="numeric" min="1" step="1" id="verba-max-tokens" class="text_pole" value="${normalizedTranslationMaxTokens(settings.maxTokens)}">
+                <div class="verba-help">번역 결과의 최대 길이예요. 기본 15,000이며 긴 번역이 잘릴 때 늘려주세요. 1차·2차와 서버 번역에 적용돼요.</div>
+
                 <label for="verba-server-retry-limit">서버 오류 자동 재시도 횟수</label>
                 <div class="verba-profile-fallback-time-row">
                     <input type="number" inputmode="numeric" min="0" step="1" id="verba-server-retry-limit" class="text_pole" value="${normalizedServerRetryLimit(settings.serverRetryLimit)}">
@@ -12638,6 +12643,12 @@ function injectSettingsPanel() {
     });
     panel.querySelector('#verba-refresh-profiles').addEventListener('click', refreshProfileSelect);
     panel.querySelector('#verba-test-profile').addEventListener('click', event => testConnection(event.currentTarget));
+    const maxTokensInput = panel.querySelector('#verba-max-tokens');
+    maxTokensInput.addEventListener('change', event => {
+        settings.maxTokens = normalizedTranslationMaxTokens(event.target.value);
+        event.target.value = String(settings.maxTokens);
+        saveSettings();
+    });
     const serverRetryLimitInput = panel.querySelector('#verba-server-retry-limit');
     serverRetryLimitInput.addEventListener('change', event => {
         settings.serverRetryLimit = normalizedServerRetryLimit(event.target.value);

@@ -1,3 +1,4 @@
+import { normalizedTranslationMaxTokens } from '../output-tokens.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +9,8 @@ const requestSource = source.slice(source.indexOf('async function sendProfileReq
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 function boundary(transport, enqueue = fn => fn()) {
     const env = {
-        settings: { profileId: 'a', timeoutSeconds: 1, debugMode: false },
+        settings: { profileId: 'a', timeoutSeconds: 1, debugMode: false, maxTokens: 32000 },
+        normalizedTranslationMaxTokens,
         profileSlotForId: () => 'A', profileList: () => [{ id: 'a' }],
         createSecondTranslationAttempt: () => null,
         performance, AbortController, Promise,
@@ -27,6 +29,7 @@ for (const stage of ['output-translation', 'second-translation', 'output-post-re
         t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
         let release, signal;
         const send = boundary((_id, _messages, _tokens, options) => {
+            assert.equal(_tokens, stage === 'bilingual-check' ? 512 : 32000);
             signal = options.signal;
             return new Promise(resolve => { release = resolve; });
         });

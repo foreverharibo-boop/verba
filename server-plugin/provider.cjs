@@ -113,6 +113,13 @@ async function sendProfile(connection, profiles, id, messages, maxTokens, option
         throw failure(400, '서버용 연결 프로필 준비가 필요합니다.');
     const prompt = messages.map(m=>m.content).join('\n');
     const payload = fillTemplate(profile.payload, prompt, profile.marker);
+    // Capture uses the configured translation budget. Honor per-request budgets
+    // too (e.g. the short bilingual classifier) without changing other presets.
+    if (Number.isSafeInteger(maxTokens) && maxTokens > 0) {
+        for (const key of ['max_tokens', 'max_completion_tokens', 'max_new_tokens', 'n_predict', 'num_predict', 'max_length']) {
+            if (Object.hasOwn(payload, key)) payload[key] = maxTokens;
+        }
+    }
     payload.stream = false;
     const report = event => { try { options.onDiagnostic?.(event); } catch { /* diagnostic only */ } };
     if (options.onDiagnostic) report({boundary: 'server-http-request', route: profile.path, payload: diagnosticPayload(payload),

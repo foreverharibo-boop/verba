@@ -1,3 +1,4 @@
+import { normalizedTranslationMaxTokens } from './output-tokens.js';
 import { bilingualSettingsDiagnostic, sanitizeBilingualSettings, outputBinding } from './bilingual-diagnostics.js';
 import { hashText } from './core.js';
 import { sanitizeOutputComparison } from './output-comparison.js';
@@ -27,16 +28,17 @@ function replyDifference(expected, actual) {
 // short, non-network capture so nested wrappers cannot restore each other in
 // the wrong order. Translation requests themselves still run concurrently.
 const CAPTURE_QUEUE = Symbol.for('verba.profile-capture.queue.v1');
-export function captureConnectionProfiles(context, ids) {
+export function captureConnectionProfiles(context, ids, maxTokens) {
     const selected = [...ids];
+    const tokenLimit = normalizedTranslationMaxTokens(maxTokens);
     const previous = globalThis[CAPTURE_QUEUE] || Promise.resolve();
-    const request = previous.then(() => captureProfiles(context, selected));
+    const request = previous.then(() => captureProfiles(context, selected, tokenLimit));
     const tail = request.then(() => undefined, () => undefined);
     globalThis[CAPTURE_QUEUE] = tail;
     void tail.then(() => { if (globalThis[CAPTURE_QUEUE] === tail) delete globalThis[CAPTURE_QUEUE]; });
     return request;
 }
-async function captureProfiles(context, ids) {
+async function captureProfiles(context, ids, maxTokens) {
     const result={};
     for(const id of [...new Set(ids.filter(Boolean))]) {
         const marker='VERBA_CAPTURE_'+newId();
@@ -55,7 +57,7 @@ async function captureProfiles(context, ids) {
         try {
             if(!restores.length)throw Error('실리태번 연결 서비스가 서버 번역 준비를 지원하지 않습니다.');
             // Native profile AND preset construction, stopped before any AI request.
-            await context.ConnectionManagerRequestService.sendRequest(id,[{role:'user',content:marker}],15000,{stream:false});
+            await context.ConnectionManagerRequestService.sendRequest(id,[{role:'user',content:marker}],maxTokens,{stream:false});
             if(!capture)throw Error('연결 프로필 요청 구성을 가져오지 못했습니다.');
             result[id]=capture;
         } finally {for(const restore of restores.reverse())restore();}
@@ -173,7 +175,7 @@ export function createServerClient({variant,version,getSettings,getContext,isAct
         value.variant=variant;
         value.version=version;
         value.profiles=value.settings.translationEngine==='google-free'?{}:await captureConnectionProfiles(getContext(),[
-            value.settings.profileId,value.settings.fallbackProfileId,value.settings.thirdProfileId]);
+            value.settings.profileId,value.settings.fallbackProfileId,value.settings.thirdProfileId],value.settings.maxTokens);
         return value;
     }
     // Cancellation has its own retry policy. Never change translation/API retries.

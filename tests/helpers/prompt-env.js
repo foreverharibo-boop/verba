@@ -1,3 +1,4 @@
+import { normalizedTranslationMaxTokens } from '../../output-tokens.js';
 import { outputBinding } from '../../bilingual-diagnostics.js';
 import { normalizePostReview, postReviewSettingsMarkup } from '../../post-review.js';
 import { escapeCodeTranslation } from '../../code-content.js';
@@ -8,6 +9,6 @@ import { normalizedServerRetryLimit } from '../../retry-policy.js';
 // Extracted index.js functions need the same imported prompt-default provider
 // as the real extension. Inject it without changing the assertions or globals.
 export function promptTestFunction(...args) {
-    return globalThis.Function('postReviewSettingsMarkup', 'deepseekKoreanPrompt', 'outputBinding', 'normalizePostReview', 'escapeCodeTranslation', 'deepseekKoreanEnabled', 'DEEPSEEK_KOREAN_PROMPT', 'verbaServer', 'customTranslationDefaults', 'POST_TRANSLATION_AI_REPAIR_ENABLED', 'normalizedServerRetryLimit', ...args).bind(null, postReviewSettingsMarkup, deepseekKoreanPrompt, outputBinding, normalizePostReview, escapeCodeTranslation, deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT, { hasPendingGeneration: () => false }, customTranslationDefaults, POST_TRANSLATION_AI_REPAIR_ENABLED, normalizedServerRetryLimit);
+    return globalThis.Function('normalizedTranslationMaxTokens', 'postReviewSettingsMarkup', 'deepseekKoreanPrompt', 'outputBinding', 'normalizePostReview', 'escapeCodeTranslation', 'deepseekKoreanEnabled', 'DEEPSEEK_KOREAN_PROMPT', 'verbaServer', 'customTranslationDefaults', 'POST_TRANSLATION_AI_REPAIR_ENABLED', 'normalizedServerRetryLimit', ...args).bind(null, normalizedTranslationMaxTokens, postReviewSettingsMarkup, deepseekKoreanPrompt, outputBinding, normalizePostReview, escapeCodeTranslation, deepseekKoreanEnabled, DEEPSEEK_KOREAN_PROMPT, { hasPendingGeneration: () => false }, customTranslationDefaults, POST_TRANSLATION_AI_REPAIR_ENABLED, normalizedServerRetryLimit);
 }
 

@@ -5830,6 +5830,13 @@ function createSplitRequestQueue(limit = 3) {
   });
 }
 
+// veereubaa/output-tokens.js
+var DEFAULT_TRANSLATION_MAX_TOKENS = 15e3;
+function normalizedTranslationMaxTokens(value) {
+  const tokens2 = Math.floor(Number(value));
+  return Number.isSafeInteger(tokens2) && tokens2 > 0 ? tokens2 : DEFAULT_TRANSLATION_MAX_TOKENS;
+}
+
 // veereubaa/diagnostics.js
 var requestEvidence = /* @__PURE__ */ new WeakMap();
 var LIMIT = 1e4;
@@ -7361,7 +7368,6 @@ function createEngine(snapshot, transport, report = () => {
   function galbwaeExclusiveMode() {
     return settings.developerMode === true && normalizedChuseokGalbwaeScope(settings.chuseokGalbwaeScope, settings.chuseokGalbwaeEnabled) !== "off";
   }
-  const VERBA_DEEP_MAX_TOKENS = 15e3;
   const serverRetryStates = /* @__PURE__ */ new Map();
   const roleTermPlanCache = /* @__PURE__ */ new Map();
   const SCOPED_PARALLEL_REQUEST_LIMIT = 2;
@@ -7649,7 +7655,7 @@ function createEngine(snapshot, transport, report = () => {
           return service.sendRequest(
             profileId,
             [{ role: "user", content: prompt }],
-            options.stage === "bilingual-check" ? 512 : VERBA_DEEP_MAX_TOKENS,
+            options.stage === "bilingual-check" ? 512 : normalizedTranslationMaxTokens(settings.maxTokens),
             { signal: controller.signal, ...wire ? { onDiagnostic: wire.provider } : {} }
           );
         });

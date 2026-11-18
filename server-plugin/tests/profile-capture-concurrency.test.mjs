@@ -18,8 +18,8 @@ for (const failFirst of [false, true]) test(`overlapping profile snapshots resto
             return service.sendRequest({ model: 'gemini-4-argon', messages, max_tokens: maxTokens });
         },
     } };
-    const first = captureConnectionProfiles(context, ['A']);
-    const second = captureOther(context, ['B']);
+    const first = captureConnectionProfiles(context, ['A'], 32000);
+    const second = captureOther(context, ['B'], 24000);
     const settled = Promise.allSettled([first, second]);
     await tick();
     gates.get('A')();
@@ -29,6 +29,8 @@ for (const failFirst of [false, true]) test(`overlapping profile snapshots resto
     const results = await settled;
     assert.equal(results[0].status, failFirst ? 'rejected' : 'fulfilled');
     assert.equal(results[1].value.B.payload.model, 'gemini-4-argon');
+    assert.equal(results[1].value.B.payload.max_tokens, 24000);
+    if (!failFirst) assert.equal(results[0].value.A.payload.max_tokens, 32000);
     assert.equal(paid, 0);
     assert.equal(service.sendRequest, original, 'temporary capture wrapper must not remain installed');
     await service.sendRequest({ messages: [] });

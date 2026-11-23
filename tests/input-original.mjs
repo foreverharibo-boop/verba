@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import { INPUT_ORIGINAL_KEY, createPendingInputOriginal, saveInputOriginal, renderInputOriginal } from '../input-original.js';
+import { INPUT_ORIGINAL_KEY, createPendingInputOriginal, saveInputOriginal, syncInputOriginalDisplay } from '../input-original.js';
 
 const index = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const source = '  나는 집에 가고 싶어.\n<img src=x onerror=alert(1)> {{user}}  ';
@@ -48,7 +48,7 @@ for (const enabled of [false, true]) {
             await env.translateSentInputMessage(0);
             const message = f.context.chat[0];
             assert.equal(message.mes, translation);
-            assert.equal(message.extra.display_text, undefined);
+            assert.equal(message.extra.display_text, enabled ? `${translation}\n\n---\n\n${source}` : undefined);
             assert.equal(message.extra.unrelated, 1);
             assert.equal(message.extra[INPUT_ORIGINAL_KEY]?.source, enabled ? source : undefined);
             // A serialized chat reload retains exactly the source typed, while
@@ -108,8 +108,8 @@ test('checkbox persists display preference and refreshes existing messages', () 
     let handler, saves = 0, renders = 0;
     const input = { checked: false, addEventListener: (_, fn) => { handler = fn; } };
     const settings = { showInputOriginal: true };
-    Function('panel', 'settings', 'pendingInputOriginal', 'saveSettings', 'refreshTranslationClasses', index.slice(start, end))(
-        { querySelector: () => input }, settings, createPendingInputOriginal(), () => saves++, () => renders++,
+    Function('panel', 'settings', 'pendingInputOriginal', 'saveSettings', 'refreshTranslationClasses', 'syncInputOriginalChat', index.slice(start, end))(
+        { querySelector: () => input }, settings, createPendingInputOriginal(), () => saves++, () => renders++, () => {},
     );
     handler();
     assert.equal(settings.showInputOriginal, false);
@@ -132,92 +132,75 @@ test('a translated message with a Korean proper name retains the first source', 
     assert.equal(f.context.chat[0].extra[INPUT_ORIGINAL_KEY].source, source);
 });
 
-// Minimal DOM adapter; validates renderer behavior without a browser dependency.
-class Element {
-    constructor() { this.children = []; this.parent = null; this.className = ''; this.content = ''; this.writes = 0; }
-    get ownerDocument() { return { createElement: () => new Element() }; }
-    get textContent() { return this.content + this.children.map(c => c.textContent).join(''); }
-    set textContent(value) { this.writes++; this.content = value; this.children = []; }
-    get innerHTML() { return this.html ?? this.content; }
-    set innerHTML(value) { this.writes++; this.html = value; this.content = ''; this.children = []; }
-    get lastElementChild() { return this.children.at(-1); }
-    get nextElementSibling() { return this.parent?.children[this.parent.children.indexOf(this) + 1]; }
-    append(...children) { children.forEach(c => { c.remove(); c.parent = this; this.children.push(c); }); }
-    remove() { if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; }
-    after(child) { child.remove(); child.parent = this.parent; this.parent.children.splice(this.parent.children.indexOf(this) + 1, 0, child); }
-    querySelector(selector) {
-        for (const child of this.children) {
-            if (child.className === selector.slice(1)) return child;
-            const nested = child.querySelector(selector);
-            if (nested) return nested;
-        }
-        return null;
-    }
-}
-
-test('fallback is display-only, idempotent, and restored inside the native body after toggle/remount', () => {
-    const element = new Element();
-    const text = new Element(); text.className = 'mes_text'; text.textContent = translation; element.append(text);
-    const message = { is_user: true, mes: translation };
-    saveInputOriginal(message, source, translation);
-    const before = JSON.stringify(message);
-    const options = { prefix: 'test', enabled: true };
-    const draw = () => renderInputOriginal(element, message, options);
-    draw();
-    const block = text.lastElementChild;
-    assert.equal(block.textContent, source, 'HTML and macros are literal text');
-    assert.equal(text.content, translation, 'English content is not replaced');
-    const writes = block.writes;
-    for (let i = 0; i < 10; i++) draw();
-    assert.equal(block.writes, writes, 'no observer feedback loop');
-    assert.equal(text.children.length, 1, 'one original block in the existing message body');
-    assert.equal(element.children.length, 1, 'no second .mes_text/editor target');
-    assert.equal(JSON.stringify(message), before, 'rendering cannot mutate API text or metadata');
-    options.enabled = false; draw(); assert.equal(text.children.length, 0);
-    options.enabled = true; draw(); assert.equal(text.children.length, 1);
-    const editor = new Element(); editor.className = 'edit_textarea'; element.append(editor);
-    draw(); assert.equal(element.querySelector('.test-input-original'), null); editor.remove();
-    message.mes = 'Edited English'; draw(); assert.equal(element.querySelector('.test-input-original'), null);
-    message.mes = translation;
-    renderInputOriginal(element, JSON.parse(before), options);
-    assert.equal(text.lastElementChild.textContent, source);
-    text.lastElementChild.remove(); draw(); assert.equal(text.children.length, 1);
-});
-
-
-test('native formatter output is used once without changing stored source or English payload', () => {
-    const element = new Element();
-    const text = new Element(); text.className = 'mes_text'; text.textContent = translation; element.append(text);
+test('native display survives serialization, toggles idempotently, and never changes prompt text', () => {
     const message = { is_user: true, name: 'Vivi', mes: translation };
-    saveInputOriginal(message, source, translation);
-    const before = JSON.stringify(message);
-    let calls = 0;
-    const formatted = '<p><em>원문 서술</em></p><p><q>"원문 대사"</q></p>';
-    const options = { prefix: 'test', enabled: true, formatMessage: (raw, input) => {
-        calls++; assert.equal(raw, source); assert.equal(input, message); return formatted;
-    } };
-    for (let i = 0; i < 10; i++) renderInputOriginal(element, message, options);
-    assert.equal(calls, 1);
-    assert.equal(text.lastElementChild.innerHTML, formatted, 'only formatter output is inserted as HTML');
-    assert.equal(text.content, translation);
-    assert.equal(JSON.stringify(message), before);
-    // Native message rerenders remove the attached source; it must be restored.
-    text.lastElementChild.remove();
-    renderInputOriginal(element, message, options);
-    assert.equal(calls, 2);
-    assert.equal(text.lastElementChild.innerHTML, formatted);
-    const failed = new Element(); const failedText = new Element(); failedText.className = 'mes_text'; failed.append(failedText);
-    renderInputOriginal(failed, message, { ...options, formatMessage() { throw Error('formatter failed'); } });
-    assert.equal(failedText.lastElementChild.textContent, source, 'formatter failure falls back to literal text');
+    assert.equal(saveInputOriginal(message, source, translation), true);
+    const expected = `${translation}\n\n---\n\n${source}`;
+    assert.equal(message.extra.display_text, expected);
+    const loaded = JSON.parse(JSON.stringify(message));
+    assert.equal(loaded.mes, translation);
+    assert.equal(loaded.extra.display_text, expected);
+    for (let i = 0; i < 10; i++) assert.equal(syncInputOriginalDisplay(loaded, true), false);
+    assert.equal(syncInputOriginalDisplay(loaded, false), true);
+    assert.equal(loaded.extra.display_text, undefined);
+    assert.equal(loaded.extra[INPUT_ORIGINAL_KEY].source, source);
+    assert.equal(syncInputOriginalDisplay(loaded, false), false);
+    assert.equal(syncInputOriginalDisplay(loaded, true), true);
+    assert.equal(loaded.extra.display_text, expected);
+    assert.equal(loaded.mes, translation);
 });
 
-test('message rendering invokes the native formatter as a user message with its real index', () => {
-    const start = index.indexOf('            formatMessage: (source, inputMessage) => messageFormatting(');
-    const end = index.indexOf('            ),', start);
-    assert.ok(start >= 0 && end > start);
-    const property = index.slice(start, end + '            ),'.length);
-    let args;
-    const options = Function('messageFormatting', 'id', `return ({${property}})`)((...values) => { args = values; return '<p>native</p>'; }, 9);
-    assert.equal(options.formatMessage(source, {name:'Vivi',is_user:true}), '<p>native</p>');
-    assert.deepEqual(args, [source, 'Vivi', false, true, 9, {}, false]);
+test('old original metadata migrates; edited English hides stale original; new translation replaces owned display', () => {
+    const message = { is_user: true, mes: translation, extra: { [INPUT_ORIGINAL_KEY]: {source, translation} } };
+    assert.equal(syncInputOriginalDisplay(message, true), true);
+    message.mes = 'Edited English.';
+    assert.equal(syncInputOriginalDisplay(message, true), true);
+    assert.equal(message.extra.display_text, undefined);
+    assert.equal(message.mes, 'Edited English.');
+    message.mes = translation;
+    syncInputOriginalDisplay(message, true);
+    message.mes = 'New English.';
+    saveInputOriginal(message, '새 인풋', 'New English.');
+    assert.equal(message.extra.display_text, 'New English.\n\n---\n\n새 인풋');
+    assert.equal(message.mes, 'New English.');
+});
+
+test('unrelated display fields and assistant messages are never overwritten', () => {
+    const message = {is_user:true,mes:translation,extra:{display_text:'Other extension view'}};
+    saveInputOriginal(message,source,translation);
+    assert.equal(message.extra.display_text,'Other extension view');
+    assert.equal(syncInputOriginalDisplay(message,false),false);
+    delete message.extra.display_text;
+    assert.equal(syncInputOriginalDisplay(message,true),true);
+    message.extra.display_text='Replacement from another extension';
+    syncInputOriginalDisplay(message,false);
+    assert.equal(message.extra.display_text,'Replacement from another extension');
+    const assistant={is_user:false,mes:translation,extra:{display_text:'AI 번역', [INPUT_ORIGINAL_KEY]:{source,translation}}};
+    assert.equal(syncInputOriginalDisplay(assistant,true),false);
+    assert.equal(assistant.extra.display_text,'AI 번역');
+});
+
+test('opening or toggling a chat migrates offscreen originals, redraws mounted messages, saves once', () => {
+    const chat=Array.from({length:3},()=>({is_user:true,mes:translation,extra:{[INPUT_ORIGINAL_KEY]:{source,translation}}}));
+    let saves=0, active=true;
+    const redraw=[];
+    const context={chat};
+    const env={settings:{showInputOriginal:true},EXTENSION_KEY:'verba',syncInputOriginalDisplay,
+        isTranslationExtensionActive:()=>active,liveContext:()=>context,
+        document:{querySelector:selector=>selector.includes('"0"')?{querySelector:()=>null}:null},
+        updateMessageBlock:id=>redraw.push(id),scheduleChatSave:reference=>{assert.equal(reference,chat);saves++;}};
+    vm.createContext(env);
+    const start=index.indexOf('function syncInputOriginalChat() {');
+    const end=index.indexOf('function refreshTranslationClasses()',start);
+    vm.runInContext(index.slice(start,end),env);
+    env.syncInputOriginalChat();
+    assert.equal(saves,1);assert.deepEqual(redraw,[0]);
+    assert.ok(chat.every(m=>m.extra.display_text.includes(source)));
+    env.syncInputOriginalChat();assert.equal(saves,1);
+    env.settings.showInputOriginal=false;env.syncInputOriginalChat();
+    assert.equal(saves,2);assert.ok(chat.every(m=>m.extra.display_text===undefined));
+    assert.ok(chat.every(m=>m.extra[INPUT_ORIGINAL_KEY].source===source));
+    active=false;env.settings.showInputOriginal=true;env.syncInputOriginalChat();assert.equal(saves,2);
+    assert.ok(index.includes('function restoreSavedTranslationsAfterChatOpen() {\n    if (!isTranslationExtensionActive(EXTENSION_KEY)) return;\n    syncInputOriginalChat();'));
+    assert.ok(!index.includes('renderInputOriginal('),'no duplicate DOM-only original renderer');
 });

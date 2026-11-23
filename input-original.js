@@ -1,5 +1,5 @@
 // Shared metadata lets either member of the translation pair display saved inputs.
-// Never write the original to mes or display_text: both can enter prompt pipelines.
+// mes remains the English prompt. display_text is the native display-only field.
 export const INPUT_ORIGINAL_KEY = 'verba_input_original';
 
 export function saveInputOriginal(message, source, translation) {
@@ -7,7 +7,9 @@ export function saveInputOriginal(message, source, translation) {
         || typeof translation !== 'string' || !translation.trim()
         || message.mes !== translation) return false;
     message.extra ??= {};
+    syncInputOriginalDisplay(message, false);
     message.extra[INPUT_ORIGINAL_KEY] = { source, translation };
+    syncInputOriginalDisplay(message, true);
     return true;
 }
 
@@ -29,43 +31,46 @@ export function createPendingInputOriginal() {
     };
 }
 
-const renderedOriginals = new WeakMap();
-
-export function renderInputOriginal(element, message, { prefix, enabled, formatMessage }) {
-    const className = `${prefix}-input-original`;
-    const existing = element.querySelector(`.${className}`);
-    const record = message?.extra?.[INPUT_ORIGINAL_KEY];
-    const text = element.querySelector('.mes_text');
-    const visible = enabled && message?.is_user && text
-        && !element.querySelector('.edit_textarea')
-        && typeof record?.source === 'string' && record.source.trim()
-        && record.translation === message.mes;
-    if (!visible) {
-        existing?.remove();
-        return;
-    }
-    // Use the existing message body so theme typography, padding and quote
-    // styles apply equally to English and the original. Do not create another
-    // .mes_text: SillyTavern would create a second editor when editing a message.
-    // Only DOM presentation changes; mes and display_text remain untouched.
-    const block = existing || element.ownerDocument.createElement('div');
-    if (!existing) {
-        block.className = className;
-    }
-    const key = JSON.stringify([record.source, message.name, Boolean(message.is_system)]);
-    if (renderedOriginals.get(block) !== key) {
-        if (typeof formatMessage === 'function') {
-            // The caller supplies SillyTavern's native formatter, including its
-            // Markdown, user-message regex, quote markup and DOMPurify stages.
-            try {
-                block.innerHTML = String(formatMessage(record.source, message) ?? '');
-            } catch {
-                block.textContent = record.source;
-            }
-        } else {
-            block.textContent = record.source;
+/** Synchronize the native saved display field; never change prompt text. */
+export function syncInputOriginalDisplay(message, enabled) {
+    const extra = message?.extra;
+    const record = extra?.[INPUT_ORIGINAL_KEY];
+    if (!message?.is_user || !record || typeof record !== 'object') return false;
+    const owned = typeof record.displayText === 'string' ? record.displayText : null;
+    const valid = typeof record.source === 'string' && record.source.trim()
+        && typeof record.translation === 'string' && record.translation === message.mes;
+    let changed = false;
+    if (!enabled || !valid) {
+        // Restore the normal English view only while we still own this field.
+        // A different extension's replacement must never be erased.
+        if (owned !== null && extra.display_text === owned) {
+            delete extra.display_text;
+            changed = true;
         }
-        renderedOriginals.set(block, key);
+        if (Object.hasOwn(record, 'displayText')) {
+            delete record.displayText;
+            changed = true;
+        }
+        return changed;
     }
-    if (text.lastElementChild !== block) text.append(block);
+    const current = extra.display_text;
+    if (current != null && current !== message.mes && current !== owned) {
+        if (Object.hasOwn(record, 'displayText')) {
+            delete record.displayText;
+            return true;
+        }
+        return false;
+    }
+    // Markdown, rather than already rendered HTML, lets SillyTavern and other
+    // readers apply their own normal formatting, regex and sanitization.
+    const displayText = `${message.mes}\n\n---\n\n${record.source}`;
+    if (current !== displayText) {
+        extra.display_text = displayText;
+        changed = true;
+    }
+    if (owned !== displayText) {
+        record.displayText = displayText;
+        changed = true;
+    }
+    return changed;
 }

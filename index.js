@@ -1,4 +1,4 @@
-import { createPendingInputOriginal, saveInputOriginal, renderInputOriginal } from './input-original.js?v=2';
+import { createPendingInputOriginal, saveInputOriginal, syncInputOriginalDisplay } from './input-original.js?v=3';
 import { normalizedTranslationMaxTokens } from './output-tokens.js';
 import { createSecondTranslationAttempt } from './second-translation-diagnostics.js';
 import { exportDebugText } from './debug-export.js';
@@ -82,7 +82,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.147';
+const EXTENSION_VERSION = '0.6.148';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.145';
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -10201,17 +10201,28 @@ function setupMessageCopyHold() {
     }, true);
 }
 
+function syncInputOriginalChat() {
+    if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
+    const context = liveContext();
+    let changed = false;
+    for (const [id, message] of (context.chat || []).entries()) {
+        if (!syncInputOriginalDisplay(message, Boolean(settings.showInputOriginal))) continue;
+        changed = true;
+        const element = document.querySelector(`.mes[mesid="${id}"]`);
+        if (element && !element.querySelector('.edit_textarea')) updateMessageBlock(id, message);
+    }
+    if (changed) scheduleChatSave(context.chat);
+}
+
 function refreshTranslationClasses() {
     document.querySelectorAll('#chat .mes[mesid]').forEach(element => {
         const id = Number(element.getAttribute('mesid'));
         const message = liveContext().chat?.[id];
-        renderInputOriginal(element, message, {
-            prefix: EXTENSION_KEY,
-            enabled: settings.showInputOriginal && isTranslationExtensionActive(EXTENSION_KEY),
-            formatMessage: (source, inputMessage) => messageFormatting(
-                source, String(inputMessage.name || ''), Boolean(inputMessage.is_system), true, id, {}, false,
-            ),
-        });
+        if (isTranslationExtensionActive(EXTENSION_KEY)
+            && syncInputOriginalDisplay(message, Boolean(settings.showInputOriginal))) {
+            if (!element.querySelector('.edit_textarea')) updateMessageBlock(id, message);
+            scheduleChatSave(liveContext().chat);
+        }
         syncMessageTranslationButton(element, id, message);
         const record = message && currentRecord(message);
         const active = Boolean(record && message.extra?.display_text === record.translation);
@@ -12095,6 +12106,7 @@ function injectSettingsPanel() {
         settings.showInputOriginal = showInputOriginal.checked;
         pendingInputOriginal.reset();
         saveSettings();
+        syncInputOriginalChat();
         refreshTranslationClasses();
     });
     characterTranslationReference.bind(panel);
@@ -13921,6 +13933,7 @@ function restoreTranslationAfterMessageUpdate(payload) {
  */
 function restoreSavedTranslationsAfterChatOpen() {
     if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
+    syncInputOriginalChat();
     const context = liveContext();
     const chat = Array.isArray(context.chat) ? context.chat : [];
     let changed = false;

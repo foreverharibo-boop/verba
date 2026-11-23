@@ -3439,10 +3439,3 @@
     content: none;
     display: none;
 }
-
-/* Original input shares the native message body's typography and padding. */
-.mes_text > .verba-input-original {
-    margin-top: 1em;
-    padding-top: 1em;
-    border-top: 1px solid var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.3));
-}

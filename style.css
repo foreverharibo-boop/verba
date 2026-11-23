@@ -3439,3 +3439,21 @@
     content: none;
     display: none;
 }
+
+/* Display-only source for translated user inputs. */
+.verba-input-original {
+    margin-top: 0.75em;
+    padding-top: 0.65em;
+    border-top: 1px solid var(--SmartThemeBorderColor, rgba(128, 128, 128, 0.3));
+    overflow-wrap: anywhere;
+}
+.verba-input-original > small {
+    display: block;
+    margin-bottom: 0.35em;
+    opacity: 0.65;
+}
+.verba-input-original > div {
+    white-space: pre-wrap;
+    font-size: 0.95em;
+    line-height: 1.6;
+}

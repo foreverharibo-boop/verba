@@ -1,3 +1,4 @@
+import { createPendingInputOriginal, saveInputOriginal, renderInputOriginal } from './input-original.js';
 import { normalizedTranslationMaxTokens } from './output-tokens.js';
 import { createSecondTranslationAttempt } from './second-translation-diagnostics.js';
 import { exportDebugText } from './debug-export.js';
@@ -81,7 +82,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.145';
+const EXTENSION_VERSION = '0.6.146';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.145';
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -445,6 +446,7 @@ const DEFAULT_SETTINGS = {
     beginnerConversationAttitudes: [],
     beginnerAgeBand: 'unspecified',
     autoInput: false,
+    showInputOriginal: false,
     autoOutput: true,
     translateTaggedContent: true,
     settingsVisibility: DEFAULT_SETTINGS_VISIBILITY,
@@ -773,6 +775,7 @@ settings.debugMode = settings.debugMode === true;
 const pendingOutputs = new Map();
 const pendingSelectionTranslations = new Set();
 const pendingSentInputs = new WeakMap();
+const pendingInputOriginal = createPendingInputOriginal();
 const automaticTranslationTimers = new Map();
 const automaticOutputLifecycle = createAutomaticOutputLifecycle({
     getChat: () => liveContext().chat,
@@ -1215,6 +1218,7 @@ function createDebugDiagnostic(stage = 'unknown', error = null, displayMessage =
             developerDeepseekKoreanEnabled: settings.developerDeepseekKoreanEnabled === true,
             developerSecondTranslationEnabled: settings.developerSecondTranslationEnabled === true,
             autoInput: Boolean(settings.autoInput),
+            showInputOriginal: Boolean(settings.showInputOriginal),
             autoOutput: settings.autoOutput !== false,
             selectionCandidates: Boolean(settings.selectionCandidates),
             relationTemperatureEnabled: settings.relationTemperatureEnabled !== false,
@@ -8139,18 +8143,22 @@ function setTextareaValue(textarea, value) {
 async function translateInputAndSend(textarea, sendButton, source) {
     if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
     if (inputBusy) return;
+    const inputChat = liveContext().chat;
     inputBusy = true;
     const controller = new AbortController();
     trackInputTranslation(controller);
     const toast = showInputProgress(controller);
     try {
         const translated = await translateInputText(source, { signal: controller.signal });
-        if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
+        if (controller.signal.aborted || liveContext().chat !== inputChat
+            || !isTranslationExtensionActive(EXTENSION_KEY)) return;
         if (document.querySelector('#send_textarea') !== textarea || textarea.value !== source) {
             notify('번역 중 입력 내용이 바뀌어 전송하지 않았어요.', 'warning');
             return;
         }
         setTextareaValue(textarea, translated);
+        pendingInputOriginal.reset();
+        if (settings.showInputOriginal) pendingInputOriginal.stage(inputChat, source, translated);
         bypassSendClick = true;
         sendButton.click();
     } catch (error) {
@@ -8187,18 +8195,22 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
         blockGenerationAndRestore(textarea, source);
         return;
     }
+    const inputChat = liveContext().chat;
     inputBusy = true;
     const controller = new AbortController();
     trackInputTranslation(controller);
     const toast = showInputProgress(controller);
     try {
         const translated = await translateInputText(source, { signal: controller.signal });
-        if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
+        if (controller.signal.aborted || liveContext().chat !== inputChat
+            || !isTranslationExtensionActive(EXTENSION_KEY)) return;
         if (textarea.value !== source) {
             blockGenerationAndRestore(textarea, source);
             return;
         }
         setTextareaValue(textarea, translated);
+        pendingInputOriginal.reset();
+        if (settings.showInputOriginal) pendingInputOriginal.stage(inputChat, source, translated);
     } catch (error) {
         if (!isAbort(error)) {
             console.error('[베르바] 생성 전 인풋 번역 실패', error);
@@ -8214,9 +8226,13 @@ async function translateInputBeforeGeneration(type, _options, dryRun) {
 
 async function translateSentInputMessage(payload) {
     if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
-    if (!settings.autoInput) return;
     const id = normalizedMessageId(payload);
     const context = liveContext();
+    if (pendingInputOriginal.attach(context.chat, id)) {
+        scheduleChatSave(context.chat);
+        return; // Already translated before sending; preserve the first source.
+    }
+    if (!settings.autoInput) return;
     const message = context.chat?.[id];
     if (!message?.is_user || pendingSentInputs.has(message)) return;
     const source = String(message.mes || '');
@@ -8231,6 +8247,7 @@ async function translateSentInputMessage(payload) {
             if (!isTranslationExtensionActive(EXTENSION_KEY)) return;
             if (liveContext().chat !== context.chat || context.chat?.[id] !== message || message.mes !== source) return;
             message.mes = translated;
+            if (settings.showInputOriginal) saveInputOriginal(message, source, translated);
             updateMessageBlock(id, message);
             scheduleChatSave(context.chat);
         } catch (error) {
@@ -8258,6 +8275,9 @@ async function translateSentInputMessage(payload) {
 }
 
 function setupAutoInput() {
+    document.addEventListener('input', event => {
+        if (event.isTrusted && event.target?.matches?.('#send_textarea')) pendingInputOriginal.reset();
+    }, true);
     document.addEventListener('click', event => {
         const sendButton = event.target?.closest?.('#send_but');
         if (!sendButton) return;
@@ -10185,6 +10205,10 @@ function refreshTranslationClasses() {
     document.querySelectorAll('#chat .mes[mesid]').forEach(element => {
         const id = Number(element.getAttribute('mesid'));
         const message = liveContext().chat?.[id];
+        renderInputOriginal(element, message, {
+            prefix: EXTENSION_KEY,
+            enabled: settings.showInputOriginal && isTranslationExtensionActive(EXTENSION_KEY),
+        });
         syncMessageTranslationButton(element, id, message);
         const record = message && currentRecord(message);
         const active = Boolean(record && message.extra?.display_text === record.translation);
@@ -11432,6 +11456,11 @@ function injectSettingsPanel() {
                         <span>전송 시 인풋 자동번역 <small>(한국어 → 영어)</small></span>
                         <small id="verba-auto-input-status" aria-live="polite">${settings.autoInput ? 'ON' : 'OFF'}</small>
                     </label>
+                    <label class="verba-check-row" for="verba-show-input-original">
+                        <input type="checkbox" id="verba-show-input-original" ${settings.showInputOriginal ? 'checked' : ''}>
+                        <span>인풋 원문 함께 표시</span>
+                    </label>
+                    <div class="verba-help">영어 번역본 아래에 직접 쓴 원문을 함께 표시해요. AI에는 영어 번역본만 전송합니다. 켠 뒤 번역한 인풋부터 원문이 보관돼요.</div>
                     <details class="verba-tool-details">
                         <summary>자동번역 사용 안내</summary>
                         <div class="verba-tool-details-content">
@@ -12058,6 +12087,13 @@ function injectSettingsPanel() {
     host.append(panel);
     bindSettingsSearch(panel);
     bindAutoInputSetting(panel);
+    const showInputOriginal = panel.querySelector('#verba-show-input-original');
+    showInputOriginal?.addEventListener('change', () => {
+        settings.showInputOriginal = showInputOriginal.checked;
+        pendingInputOriginal.reset();
+        saveSettings();
+        refreshTranslationClasses();
+    });
     characterTranslationReference.bind(panel);
     bindAutoOutputSetting(panel);
     bindServerTranslationSetting(panel);
@@ -13951,6 +13987,9 @@ function setupEvents() {
     if (types.MESSAGE_SENT) {
         source.on(types.MESSAGE_SENT, translateSentInputMessage);
     }
+    if (types.USER_MESSAGE_RENDERED) {
+        source.on(types.USER_MESSAGE_RENDERED, refreshTranslationClasses);
+    }
     if (types.MESSAGE_RECEIVED) {
         source.on(types.MESSAGE_RECEIVED, payload => {
             clearTransientTranslationSelections();
@@ -13960,11 +13999,15 @@ function setupEvents() {
     if (types.CHARACTER_MESSAGE_RENDERED) {
         source.on(types.CHARACTER_MESSAGE_RENDERED, payload => handleCompletedAssistantMessage(payload));
     }
-    if (types.GENERATION_STOPPED) source.on(types.GENERATION_STOPPED, () => automaticOutputLifecycle.stop());
+    if (types.GENERATION_STOPPED) source.on(types.GENERATION_STOPPED, () => {
+        pendingInputOriginal.reset();
+        automaticOutputLifecycle.stop();
+    });
     if (types.MESSAGE_SWIPED) source.on(types.MESSAGE_SWIPED, handleSwipe);
     if (types.GENERATION_ENDED) source.on(types.GENERATION_ENDED, handleGenerationEnded);
     if (types.CHAT_CHANGED) {
         source.on(types.CHAT_CHANGED, () => {
+            pendingInputOriginal.reset();
             characterTranslationReference.refresh();
             if (fullSourceSnapshotsEnabled) {
                 lastDebugDiagnostic = null;

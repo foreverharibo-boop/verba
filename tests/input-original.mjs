@@ -136,8 +136,10 @@ test('a translated message with a Korean proper name retains the first source', 
 class Element {
     constructor() { this.children = []; this.parent = null; this.className = ''; this.content = ''; this.writes = 0; }
     get ownerDocument() { return { createElement: () => new Element() }; }
-    get textContent() { return this.children.length ? this.children.map(c => c.textContent).join('') : this.content; }
+    get textContent() { return this.content + this.children.map(c => c.textContent).join(''); }
     set textContent(value) { this.writes++; this.content = value; this.children = []; }
+    get innerHTML() { return this.html ?? this.content; }
+    set innerHTML(value) { this.writes++; this.html = value; this.content = ''; this.children = []; }
     get lastElementChild() { return this.children.at(-1); }
     get nextElementSibling() { return this.parent?.children[this.parent.children.indexOf(this) + 1]; }
     append(...children) { children.forEach(c => { c.remove(); c.parent = this; this.children.push(c); }); }
@@ -153,7 +155,7 @@ class Element {
     }
 }
 
-test('rendering is literal, display-only, idempotent, and restored after toggle/remount', () => {
+test('fallback is display-only, idempotent, and restored inside the native body after toggle/remount', () => {
     const element = new Element();
     const text = new Element(); text.className = 'mes_text'; text.textContent = translation; element.append(text);
     const message = { is_user: true, mes: translation };
@@ -162,21 +164,60 @@ test('rendering is literal, display-only, idempotent, and restored after toggle/
     const options = { prefix: 'test', enabled: true };
     const draw = () => renderInputOriginal(element, message, options);
     draw();
-    const block = text.nextElementSibling;
-    assert.equal(block.lastElementChild.textContent, source, 'HTML and macros are literal text');
-    assert.equal(element.querySelector('.mes_text').textContent, translation);
-    const writes = block.lastElementChild.writes;
+    const block = text.lastElementChild;
+    assert.equal(block.textContent, source, 'HTML and macros are literal text');
+    assert.equal(text.content, translation, 'English content is not replaced');
+    const writes = block.writes;
     for (let i = 0; i < 10; i++) draw();
-    assert.equal(block.lastElementChild.writes, writes, 'no observer feedback loop');
-    assert.equal(element.children.length, 2, 'one original block');
+    assert.equal(block.writes, writes, 'no observer feedback loop');
+    assert.equal(text.children.length, 1, 'one original block in the existing message body');
+    assert.equal(element.children.length, 1, 'no second .mes_text/editor target');
     assert.equal(JSON.stringify(message), before, 'rendering cannot mutate API text or metadata');
-    options.enabled = false; draw(); assert.equal(element.children.length, 1);
-    options.enabled = true; draw(); assert.equal(element.children.length, 2);
+    options.enabled = false; draw(); assert.equal(text.children.length, 0);
+    options.enabled = true; draw(); assert.equal(text.children.length, 1);
     const editor = new Element(); editor.className = 'edit_textarea'; element.append(editor);
     draw(); assert.equal(element.querySelector('.test-input-original'), null); editor.remove();
     message.mes = 'Edited English'; draw(); assert.equal(element.querySelector('.test-input-original'), null);
     message.mes = translation;
     renderInputOriginal(element, JSON.parse(before), options);
-    assert.equal(text.nextElementSibling.lastElementChild.textContent, source);
-    text.nextElementSibling.remove(); draw(); assert.equal(element.children.length, 2);
+    assert.equal(text.lastElementChild.textContent, source);
+    text.lastElementChild.remove(); draw(); assert.equal(text.children.length, 1);
+});
+
+
+test('native formatter output is used once without changing stored source or English payload', () => {
+    const element = new Element();
+    const text = new Element(); text.className = 'mes_text'; text.textContent = translation; element.append(text);
+    const message = { is_user: true, name: 'Vivi', mes: translation };
+    saveInputOriginal(message, source, translation);
+    const before = JSON.stringify(message);
+    let calls = 0;
+    const formatted = '<p><em>원문 서술</em></p><p><q>"원문 대사"</q></p>';
+    const options = { prefix: 'test', enabled: true, formatMessage: (raw, input) => {
+        calls++; assert.equal(raw, source); assert.equal(input, message); return formatted;
+    } };
+    for (let i = 0; i < 10; i++) renderInputOriginal(element, message, options);
+    assert.equal(calls, 1);
+    assert.equal(text.lastElementChild.innerHTML, formatted, 'only formatter output is inserted as HTML');
+    assert.equal(text.content, translation);
+    assert.equal(JSON.stringify(message), before);
+    // Native message rerenders remove the attached source; it must be restored.
+    text.lastElementChild.remove();
+    renderInputOriginal(element, message, options);
+    assert.equal(calls, 2);
+    assert.equal(text.lastElementChild.innerHTML, formatted);
+    const failed = new Element(); const failedText = new Element(); failedText.className = 'mes_text'; failed.append(failedText);
+    renderInputOriginal(failed, message, { ...options, formatMessage() { throw Error('formatter failed'); } });
+    assert.equal(failedText.lastElementChild.textContent, source, 'formatter failure falls back to literal text');
+});
+
+test('message rendering invokes the native formatter as a user message with its real index', () => {
+    const start = index.indexOf('            formatMessage: (source, inputMessage) => messageFormatting(');
+    const end = index.indexOf('            ),', start);
+    assert.ok(start >= 0 && end > start);
+    const property = index.slice(start, end + '            ),'.length);
+    let args;
+    const options = Function('messageFormatting', 'id', `return ({${property}})`)((...values) => { args = values; return '<p>native</p>'; }, 9);
+    assert.equal(options.formatMessage(source, {name:'Vivi',is_user:true}), '<p>native</p>');
+    assert.deepEqual(args, [source, 'Vivi', false, true, 9, {}, false]);
 });

@@ -29,7 +29,9 @@ export function createPendingInputOriginal() {
     };
 }
 
-export function renderInputOriginal(element, message, { prefix, enabled }) {
+const renderedOriginals = new WeakMap();
+
+export function renderInputOriginal(element, message, { prefix, enabled, formatMessage }) {
     const className = `${prefix}-input-original`;
     const existing = element.querySelector(`.${className}`);
     const record = message?.extra?.[INPUT_ORIGINAL_KEY];
@@ -42,19 +44,28 @@ export function renderInputOriginal(element, message, { prefix, enabled }) {
         existing?.remove();
         return;
     }
-    // Keep the original outside .mes_text so copy, edit, and translation tools
-    // continue to operate on the English message alone. textContent is deliberate:
-    // user-authored HTML/macros must remain literal, never executable markup.
+    // Use the existing message body so theme typography, padding and quote
+    // styles apply equally to English and the original. Do not create another
+    // .mes_text: SillyTavern would create a second editor when editing a message.
+    // Only DOM presentation changes; mes and display_text remain untouched.
     const block = existing || element.ownerDocument.createElement('div');
     if (!existing) {
         block.className = className;
-        const label = element.ownerDocument.createElement('small');
-        label.textContent = '입력 원문';
-        const body = element.ownerDocument.createElement('div');
-        block.append(label, body);
     }
-    if (block.lastElementChild.textContent !== record.source) {
-        block.lastElementChild.textContent = record.source;
+    const key = JSON.stringify([record.source, message.name, Boolean(message.is_system)]);
+    if (renderedOriginals.get(block) !== key) {
+        if (typeof formatMessage === 'function') {
+            // The caller supplies SillyTavern's native formatter, including its
+            // Markdown, user-message regex, quote markup and DOMPurify stages.
+            try {
+                block.innerHTML = String(formatMessage(record.source, message) ?? '');
+            } catch {
+                block.textContent = record.source;
+            }
+        } else {
+            block.textContent = record.source;
+        }
+        renderedOriginals.set(block, key);
     }
-    if (text.nextElementSibling !== block) text.after(block);
+    if (text.lastElementChild !== block) text.append(block);
 }

@@ -1,4 +1,4 @@
-import { createPendingInputOriginal, saveInputOriginal, renderInputOriginal } from './input-original.js';
+import { createPendingInputOriginal, saveInputOriginal, renderInputOriginal } from './input-original.js?v=2';
 import { normalizedTranslationMaxTokens } from './output-tokens.js';
 import { createSecondTranslationAttempt } from './second-translation-diagnostics.js';
 import { exportDebugText } from './debug-export.js';
@@ -82,7 +82,7 @@ import {
 } from './core.js';
 
 const EXTENSION_KEY = 'verba';
-const EXTENSION_VERSION = '0.6.146';
+const EXTENSION_VERSION = '0.6.147';
 // Browser and server must use the same isolated translation prompt pipeline.
 const SERVER_ENGINE_VERSION = '0.6.145';
 const DEVELOPER_ACCESS_CODE = '130918';
@@ -10208,6 +10208,9 @@ function refreshTranslationClasses() {
         renderInputOriginal(element, message, {
             prefix: EXTENSION_KEY,
             enabled: settings.showInputOriginal && isTranslationExtensionActive(EXTENSION_KEY),
+            formatMessage: (source, inputMessage) => messageFormatting(
+                source, String(inputMessage.name || ''), Boolean(inputMessage.is_system), true, id, {}, false,
+            ),
         });
         syncMessageTranslationButton(element, id, message);
         const record = message && currentRecord(message);

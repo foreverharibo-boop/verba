@@ -985,6 +985,12 @@ export function normalizeBilingualMappedTranslation(translation, sourceMap = [],
                 const bodyAt = text.indexOf(sourceBody, cursor);
                 if (bodyAt < 0) break;
                 const bodyEnd = bodyAt + sourceBody.length;
+                // Without a source-map boundary, require a visible opening
+                // quote. A short dialogue may also be a longer line's suffix.
+                if (bodyAt === 0 || !/["“‘「『]/u.test(text[bodyAt - 1])) {
+                    cursor = bodyEnd;
+                    continue;
+                }
                 let openAt = -1;
                 for (let index = bodyEnd; index < Math.min(text.length, bodyEnd + 12); index += 1) {
                     if (BILINGUAL_OPENERS.includes(text[index])) {
